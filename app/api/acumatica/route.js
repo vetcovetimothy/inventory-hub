@@ -13,7 +13,7 @@ const PREFIX = "/odata/VetCove";
 
 // OData view names — match whatever is configured in your Acumatica instance
 const ENDPOINTS = {
-  "po":            "PURCH%20-%20TP%20PO%20Export%20with%20Replen",
+  "po":            "PURCH - TP PO Export with Replen",
   "short-dating":  "INV%20-%20Short-Dating%20Tracker",
   "backorder":     "INV%20-%20Backorder%20Item%20Review",
 };
@@ -76,7 +76,7 @@ export async function POST(request) {
     }
 
     // Build OData URL
-    let url = `${BASE}${PREFIX}/${ENDPOINTS[type]}`;
+    let url = encodeURI(`${BASE}${PREFIX}/${ENDPOINTS[type]}`);
 
     // Call Acumatica
     const authHeader = "Basic " + Buffer.from(username + ":" + password).toString("base64");
