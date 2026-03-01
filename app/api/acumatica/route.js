@@ -91,7 +91,7 @@ export async function POST(request) {
     if (!resp.ok) {
       const text = await resp.text();
       return Response.json(
-        { error: `Acumatica returned ${resp.status}`, detail: text.slice(0, 500) },
+        { error: `Acumatica returned ${resp.status}`, detail: text.slice(0, 500), url: url },
         { status: resp.status }
       );
     }
