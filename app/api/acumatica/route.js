@@ -78,11 +78,6 @@ export async function POST(request) {
     // Build OData URL
     let url = `${BASE}${PREFIX}/${ENDPOINTS[type]}`;
 
-    // For PO fetches, filter by warehouse if provided
-    if (type === "po" && warehouse) {
-      url += `?$filter=Warehouse eq '${warehouse}'`;
-    }
-
     // Call Acumatica
     const authHeader = "Basic " + Buffer.from(username + ":" + password).toString("base64");
     const resp = await fetch(url, {
