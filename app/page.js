@@ -488,7 +488,7 @@ function WHT(props) {
         } else {
           raw = PO_DEMO[whKey] || [];
         }
-        var rows = raw.filter(function(r) { return r.SKUNDC && !EXCLUDED.some(function(ex) { return (r.VendorName || "").toLowerCase().indexOf(ex) >= 0; }); }).map(function(r) { return Object.assign({}, r, { Price: Number(r.Price) || 0, OrderQty: Number(r.OrderQty) || 0, TotalPrice: +((Number(r.Price) || 0) * (Number(r.OrderQty) || 0)).toFixed(2) }); });
+        var rows = raw.filter(function(r) { return r.SKUNDC && (r.Warehouse || "").trim() === whKey && !EXCLUDED.some(function(ex) { return (r.VendorName || "").toLowerCase().indexOf(ex) >= 0; }); }).map(function(r) { return Object.assign({}, r, { Price: Number(r.Price) || 0, OrderQty: Number(r.OrderQty) || 0, TotalPrice: +((Number(r.Price) || 0) * (Number(r.OrderQty) || 0)).toFixed(2) }); });
         var now = new Date().toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
         setData(rows); setRunBy("You"); setRunTime(now); setLoading(false); setSubPage("data"); persist(rows, false, "You", now); toast(cfg.label + ": Fetched " + rows.length + " lines");
       } catch (err) {
