@@ -14,8 +14,8 @@ const PREFIX = "/odata/VetCove";
 // OData view names — match whatever is configured in your Acumatica instance
 const ENDPOINTS = {
   "po":            "PURCH - TP PO Export with Replen",
-  "short-dating":  "INV%20-%20Short-Dating%20Tracker",
-  "backorder":     "INV%20-%20Backorder%20Item%20Review",
+  "short-dating":  "INV - Short-Dating Tracker",
+  "backorder":     "INV - Backorder Item Review",
 };
 
 // Which columns to extract for each type (keyGroup = possible OData field names)
