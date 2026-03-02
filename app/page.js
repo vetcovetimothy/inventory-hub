@@ -27,15 +27,30 @@ async function fetchAcumatica(type, warehouse, username, password) {
   return json.data || [];
 }
 
-async function postGmailDrafts(drafts) {
+async function postGmailDrafts(drafts, refreshToken) {
   const resp = await fetch("/api/gmail-drafts", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ drafts }),
+    body: JSON.stringify({ drafts, refreshToken: refreshToken || undefined }),
   });
   const json = await resp.json();
   if (!resp.ok) throw new Error(json.error || "Gmail draft creation failed");
   return json;
+}
+
+function getGmailToken() {
+  try {
+    var g = localStorage.getItem("vh-gmail");
+    return g ? JSON.parse(g) : null;
+  } catch { return null; }
+}
+
+function setGmailToken(token, email) {
+  try { localStorage.setItem("vh-gmail", JSON.stringify({ token: token, email: email })); } catch {}
+}
+
+function clearGmailToken() {
+  try { localStorage.removeItem("vh-gmail"); } catch {}
 }
 
 /* ═══════ SHIPPING RULES ═══════ */
@@ -190,6 +205,7 @@ function IconRefresh() { return <svg width="16" height="16" viewBox="0 0 24 24" 
 function IconTrash() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>; }
 function IconLock() { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>; }
 function IconClock() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>; }
+function IconGmail() { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 4L12 13 2 4"/></svg>; }
 function IconBox() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 16V8l-9-5-9 5v8l9 5 9-5z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>; }
 function Dot({ color }) { return <div style={{ width: 8, height: 8, borderRadius: "50%", background: color, flexShrink: 0 }} />; }
 function Spinner({ color, size }) { return <span style={{ width: size || 14, height: size || 14, border: "2px solid rgba(255,255,255,0.3)", borderTop: "2px solid " + (color || "#fff"), borderRadius: "50%", animation: "spin 0.8s linear infinite", display: "inline-block" }} />; }
@@ -240,7 +256,7 @@ function TrackerTool(props) {
   var toolKey = props.toolKey, toolLabel = props.toolLabel, toolColor = props.toolColor;
   var demoData = props.demoData, columns = props.columns, emailConfig = props.emailConfig;
   var skipVendors = props.skipVendors || [];
-  var toast = props.toast, ok = props.ok, lp = props.lp, cred = props.cred;
+  var toast = props.toast, ok = props.ok, lp = props.lp, cred = props.cred, gmail = props.gmail;
 
   var _sp = useState("data"), subPage = _sp[0], setSubPage = _sp[1];
   var _d = useState([]), data = _d[0], setData = _d[1];
@@ -325,6 +341,7 @@ function TrackerTool(props) {
 
   var genDrafts = useCallback(async function() {
     if (!ok) { lp(); return; }
+    if (!gmail || !gmail.token) { toast("Please connect your Gmail account first (bottom-left)", "error"); return; }
     try {
       var draftPayloads = emailVendors.map(function(entry) {
         var vendor = entry[0], items = entry[1];
@@ -346,19 +363,19 @@ function TrackerTool(props) {
           "<p>Thank you!</p>";
         return { to: toLine, cc: "hd-purchaseorders@vetcove.com", subject: emailConfig.subjectPrefix + new Date().toLocaleDateString("en-US"), htmlBody: htmlBody };
       }).filter(Boolean);
-      var result = await postGmailDrafts(draftPayloads);
-      var count = result.created || draftPayloads.length;
+      var result = await postGmailDrafts(draftPayloads, gmail.token);
+      if (result.failed > 0) {
+        toast(toolLabel + ": " + result.created + " created, " + result.failed + " failed", "error");
+      } else {
+        toast(toolLabel + ": " + result.created + " email drafts created in Gmail");
+      }
+      var count = result.created || 0;
       setDrafts(count);
       persist(data, runBy, runTime, count);
-      toast(toolLabel + ": " + count + " email drafts created in Gmail");
     } catch (err) {
-      // Fallback: just mark as created (for demo/dev mode)
-      var count = emailVendors.length;
-      setDrafts(count);
-      persist(data, runBy, runTime, count);
-      toast(toolLabel + ": " + count + " drafts marked (Gmail not configured)");
+      toast("Gmail error: " + err.message, "error");
     }
-  }, [ok, lp, emailVendors, emailConfig, toast, data, runBy, runTime, persist, toolLabel]);
+  }, [ok, lp, gmail, emailVendors, emailConfig, toast, data, runBy, runTime, persist, toolLabel]);
 
   if (initLoading) return <div style={Object.assign({}, S.card, { textAlign: "center", padding: 48, color: "#64748B" })}><Spinner color={toolColor} size={20} /></div>;
 
@@ -456,7 +473,7 @@ function TrackerTool(props) {
 
 /* ═══════ PO WAREHOUSE TOOL ═══════ */
 function WHT(props) {
-  var whKey = props.whKey, cfg = props.cfg, toast = props.toast, ok = props.ok, lp = props.lp, cred = props.cred;
+  var whKey = props.whKey, cfg = props.cfg, toast = props.toast, ok = props.ok, lp = props.lp, cred = props.cred, gmail = props.gmail;
   var _sp = useState("overview"), subPage = _sp[0], setSubPage = _sp[1];
   var _d = useState([]), data = _d[0], setData = _d[1];
   var _ld = useState(false), loading = _ld[0], setLoading = _ld[1];
@@ -465,6 +482,7 @@ function WHT(props) {
   var _fo = useState(false), flagsOnly = _fo[0], setFlagsOnly = _fo[1];
   var _cc = useState(false), confirmClear = _cc[0], setConfirmClear = _cc[1];
   var _es = useState(false), emailSent = _es[0], setEmailSent = _es[1];
+  var _el = useState(false), emailLoading = _el[0], setEmailLoading = _el[1];
   var _rb = useState(null), runBy = _rb[0], setRunBy = _rb[1];
   var _rt = useState(null), runTime = _rt[0], setRunTime = _rt[1];
   var _il = useState(true), initLoading = _il[0], setInitLoading = _il[1];
@@ -488,7 +506,7 @@ function WHT(props) {
         } else {
           raw = PO_DEMO[whKey] || [];
         }
-        var rows = raw.filter(function(r) { return r.SKUNDC && (r.Warehouse || "").trim() === whKey && !EXCLUDED.some(function(ex) { return (r.VendorName || "").toLowerCase().indexOf(ex) >= 0; }); }).map(function(r) { return Object.assign({}, r, { Price: Number(r.Price) || 0, OrderQty: Number(r.OrderQty) || 0, TotalPrice: +((Number(r.Price) || 0) * (Number(r.OrderQty) || 0)).toFixed(2) }); });
+        var rows = raw.filter(function(r) { return r.SKUNDC && !EXCLUDED.some(function(ex) { return (r.VendorName || "").toLowerCase().indexOf(ex) >= 0; }); }).map(function(r) { return Object.assign({}, r, { Price: Number(r.Price) || 0, OrderQty: Number(r.OrderQty) || 0, TotalPrice: +((Number(r.Price) || 0) * (Number(r.OrderQty) || 0)).toFixed(2) }); });
         var now = new Date().toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
         setData(rows); setRunBy("You"); setRunTime(now); setLoading(false); setSubPage("data"); persist(rows, false, "You", now); toast(cfg.label + ": Fetched " + rows.length + " lines");
       } catch (err) {
@@ -577,7 +595,21 @@ function WHT(props) {
           {uniqueVendors.map(function(v) { return <div key={v} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: "#0B0E14", borderRadius: 8, marginBottom: 4 }}><IconDL /><span style={{ fontSize: 12, color: "#CBD5E1" }}>{v} PO Data - {whKey}.xlsx</span><div style={{ flex: 1 }} /><span style={{ fontSize: 11, color: "#475569" }}>{vendorGroups[v] ? vendorGroups[v].length : 0} rows</span></div>; })}
         </div>
         <div style={{ marginTop: 20, display: "flex", gap: 10 }}>
-          <Gate ok={ok} prompt={lp} style={Object.assign({}, S.btn(), { padding: "10px 24px", opacity: emailSent ? 0.5 : 1 })} onClick={async function() { setEmailSent(true); persist(data, true, runBy, runTime); toast(cfg.label + ": Draft created"); }} disabled={emailSent || data.length === 0}><IconMail /> {emailSent ? "Draft Created" : "Create Gmail Draft"}</Gate>
+          <Gate ok={ok} prompt={lp} style={Object.assign({}, S.btn(), { padding: "10px 24px", opacity: (emailSent || emailLoading) ? 0.5 : 1 })} onClick={async function() {
+            if (!gmail || !gmail.token) { toast("Please connect your Gmail account first (bottom-left)", "error"); return; }
+            setEmailLoading(true);
+            try {
+              var toLine = "nigel.white@fuzehealth.com, anna.wilson@fuzehealth.com, trudie.selby@fuzehealth.com, hd-purchaseorders@vetcove.com";
+              var subject = cfg.label + " " + todayStr;
+              var htmlBody = "<p>Good morning,</p><p>Attached are today's POs.</p><p>Thanks in advance,</p>";
+              var draftPayloads = [{ to: toLine, subject: subject, htmlBody: htmlBody }];
+              var result = await postGmailDrafts(draftPayloads, gmail.token);
+              if (result.failed > 0) throw new Error("Some drafts failed to create");
+              setEmailSent(true); persist(data, true, runBy, runTime); toast(cfg.label + ": Draft created in Gmail");
+            } catch (err) {
+              toast("Gmail error: " + err.message, "error");
+            } finally { setEmailLoading(false); }
+          }} disabled={emailSent || emailLoading || data.length === 0}><IconMail /> {emailLoading ? "Creating..." : emailSent ? "Draft Created" : "Create Gmail Draft"}</Gate>
           {emailSent && <Gate ok={ok} prompt={lp} style={Object.assign({}, S.btn("danger"), { marginLeft: "auto" })} onClick={clearAll}><IconTrash /> Clear</Gate>}
         </div>
       </div>
@@ -593,9 +625,37 @@ export default function Hub() {
   var _sl = useState(false), showLogin = _sl[0], setShowLogin = _sl[1];
   var _t = useState(null), toast = _t[0], setToast = _t[1];
   var _cl = useState(true), credLoading = _cl[0], setCredLoading = _cl[1];
+  var _gm = useState(null), gmail = _gm[0], setGmail = _gm[1];
 
   var showToast = useCallback(function(m, t) { setToast({ m: m, t: t || "success" }); setTimeout(function() { setToast(null); }, 3500); }, []);
-  useEffect(function() { var mt = true; (async function() { var s = sGet("user-credentials"); if (mt && s && s.username && s.password) { setCred(s); setOk(true); } if (mt) setCredLoading(false); })(); return function() { mt = false; }; }, []);
+  useEffect(function() { var mt = true; (async function() { var s = sGet("user-credentials"); if (mt && s && s.username && s.password) { setCred(s); setOk(true); } var g = getGmailToken(); if (mt && g && g.token) { setGmail(g); } if (mt) setCredLoading(false); })(); return function() { mt = false; }; }, []);
+
+  // Handle Gmail OAuth callback (reads token from URL hash)
+  useEffect(function() {
+    var hash = window.location.hash;
+    if (hash && hash.indexOf("gmail_token=") >= 0) {
+      var params = new URLSearchParams(hash.substring(1));
+      var token = params.get("gmail_token");
+      var email = params.get("gmail_email") || "";
+      if (token) {
+        setGmailToken(token, email);
+        setGmail({ token: token, email: email });
+        showToast("Gmail connected: " + email);
+      }
+      // Clean up the URL hash
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+  }, [showToast]);
+
+  var connectGmail = useCallback(function() {
+    var origin = window.location.origin;
+    window.location.href = "/api/gmail-auth?origin=" + encodeURIComponent(origin);
+  }, []);
+  var disconnectGmail = useCallback(function() {
+    clearGmailToken();
+    setGmail(null);
+    showToast("Gmail disconnected", "info");
+  }, [showToast]);
   var login = useCallback(async function() { if (cred.username && cred.password) { sSet("user-credentials", cred); setOk(true); setShowLogin(false); showToast("Credentials saved"); } }, [cred, showToast]);
   var logout = useCallback(async function() { sDel("user-credentials"); setCred({ username: "", password: "" }); setOk(false); showToast("Logged out", "info"); }, [showToast]);
   var promptLogin = useCallback(function() { setShowLogin(true); showToast("Please log in first", "info"); }, [showToast]);
@@ -675,6 +735,14 @@ export default function Hub() {
               {ok && <button onClick={logout} style={{ background: "transparent", color: "#64748B", border: "1px solid #1E2433", borderRadius: 8, padding: "4px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Logout</button>}
             </div>
           </div>
+          <div style={{ padding: "12px 16px", marginTop: 8, background: gmail ? "rgba(59,130,246,0.08)" : "rgba(100,116,139,0.08)", borderRadius: 10, border: "1px solid " + (gmail ? "rgba(59,130,246,0.2)" : "rgba(100,116,139,0.2)") }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}><IconGmail /><span style={{ fontSize: 12, color: gmail ? "#93C5FD" : "#94A3B8", fontWeight: 500 }}>{gmail ? "Gmail Connected" : "Gmail Not Connected"}</span></div>
+            {gmail && gmail.email && <div style={{ fontSize: 11, color: "#64748B", marginTop: 4, paddingLeft: 22 }}>{gmail.email}</div>}
+            <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+              <button onClick={connectGmail} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, flex: 1, background: "transparent", color: "#94A3B8", border: "1px solid #1E2433", borderRadius: 8, padding: "4px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer" }}><IconGmail /> {gmail ? "Reconnect" : "Connect"}</button>
+              {gmail && <button onClick={disconnectGmail} style={{ background: "transparent", color: "#64748B", border: "1px solid #1E2433", borderRadius: 8, padding: "4px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Disconnect</button>}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -691,9 +759,9 @@ export default function Hub() {
             <div style={{ background: "#111520", border: "1px solid #1E2433", borderRadius: 12, padding: 0, overflow: "auto" }}><table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}><thead><tr><th style={{ padding: "10px 12px", textAlign: "left", background: "#0D1017", color: "#64748B", fontWeight: 600, fontSize: 11, textTransform: "uppercase", borderBottom: "1px solid #1E2433" }}>Vendor</th><th style={{ padding: "10px 12px", textAlign: "left", background: "#0D1017", color: "#64748B", fontWeight: 600, fontSize: 11, textTransform: "uppercase", borderBottom: "1px solid #1E2433" }}>Rule</th></tr></thead><tbody>{Object.entries(SHIP_RULES).map(function(e) { return <tr key={e[0]}><td style={{ padding: "10px 12px", borderBottom: "1px solid #141822", fontWeight: 500, color: "#E2E8F0" }}>{e[0]}</td><td style={{ padding: "10px 12px", borderBottom: "1px solid #141822", fontFamily: "monospace", fontSize: 11, color: "#94A3B8" }}>{e[1]}</td></tr>; })}</tbody></table></div>
           </div>}
 
-          {!showLogin && Object.entries(WH).map(function(e) { return <div key={e[0]} style={{ display: page === e[0] ? "block" : "none" }}><WHT whKey={e[0]} cfg={e[1]} toast={showToast} ok={ok} lp={promptLogin} cred={cred} /></div>; })}
-          {!showLogin && page === "short-dating" && <TrackerTool toolKey="short-dating" toolLabel="Short-Dating Tracker" toolColor="#E879F9" demoData={SD_DEMO} columns={sdColumns} emailConfig={sdEmail} toast={showToast} ok={ok} lp={promptLogin} cred={cred} />}
-          {!showLogin && page === "backorder" && <TrackerTool toolKey="backorder" toolLabel="Backorder Tracker" toolColor="#F97316" demoData={BKO_DEMO} columns={bkoColumns} emailConfig={bkoEmail} skipVendors={BKO_SKIP} toast={showToast} ok={ok} lp={promptLogin} cred={cred} />}
+          {!showLogin && Object.entries(WH).map(function(e) { return <div key={e[0]} style={{ display: page === e[0] ? "block" : "none" }}><WHT whKey={e[0]} cfg={e[1]} toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} /></div>; })}
+          {!showLogin && page === "short-dating" && <TrackerTool toolKey="short-dating" toolLabel="Short-Dating Tracker" toolColor="#E879F9" demoData={SD_DEMO} columns={sdColumns} emailConfig={sdEmail} toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} />}
+          {!showLogin && page === "backorder" && <TrackerTool toolKey="backorder" toolLabel="Backorder Tracker" toolColor="#F97316" demoData={BKO_DEMO} columns={bkoColumns} emailConfig={bkoEmail} skipVendors={BKO_SKIP} toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} />}
         </div>
       </div>
 
