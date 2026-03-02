@@ -602,7 +602,14 @@ function WHT(props) {
               var toLine = "nigel.white@fuzehealth.com, anna.wilson@fuzehealth.com, trudie.selby@fuzehealth.com, hd-purchaseorders@vetcove.com";
               var subject = cfg.label + " " + todayStr;
               var htmlBody = "<p>Good morning,</p><p>Attached are today's POs.</p><p>Thanks in advance,</p>";
-              var draftPayloads = [{ to: toLine, subject: subject, htmlBody: htmlBody }];
+              var xlsCols = ["SKU", "Description", "Qty", "Vendor", "PO #", "Reorder", "Max", "Lead", "Min", "Avail", "Price", "Total"];
+              var attachments = uniqueVendors.map(function(v) {
+                var rows = (vendorGroups[v] || []).map(function(r) {
+                  return [r.SKUNDC, r.Description, r.OrderQty, r.VendorName, r.OrderNbr, r.ReorderPoint, r.MaxQty, r.LeadTime, r.MinOrderQty, r.QtyAvailable, r.Price, r.TotalPrice];
+                });
+                return { filename: v + " PO Data - " + whKey + ".xlsx", columns: xlsCols, rows: rows };
+              });
+              var draftPayloads = [{ to: toLine, subject: subject, htmlBody: htmlBody, attachments: attachments }];
               var result = await postGmailDrafts(draftPayloads, gmail.token);
               if (result.failed > 0) throw new Error("Some drafts failed to create");
               setEmailSent(true); persist(data, true, runBy, runTime); toast(cfg.label + ": Draft created in Gmail");
