@@ -13,8 +13,8 @@ const PREFIX = process.env.ACUMATICA_ODATA_PREFIX || "/(W(89))/odata/VetCove";
 
 // OData view names — match whatever is configured in your Acumatica instance
 const ENDPOINTS = {
-  "po":            "INV%20-%20Suggested%20PO%20Review",   // adjust to your real view name
-  "po-ggm":        "PURCH%20-%20Export%20PO%20Lines%20GGM",  // GGM/GoGoMeds PO view
+  "po":            "PURCH%20-%20TP%20PO%20Export%20with%20Replen",
+  "po-ggm":        "PURCH%20-%20Export%20PO%20Lines%20GGM",
   "short-dating":  "INV%20-%20Short-Dating%20Tracker",
   "backorder":     "INV%20-%20Backorder%20Item%20Review",
 };
