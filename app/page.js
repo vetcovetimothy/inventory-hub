@@ -108,9 +108,10 @@ function evalShip(rule, total) {
 const EXCLUDED = ["truepill", "vetcove generics", "bloodworth"];
 const BKO_SKIP = ["Bloodworth Wholesale Drugs", "Elanco US Inc."];
 const WH = {
-  "TP-NY": { label: "Brooklyn", full: "Brooklyn, NY", color: "#3B82F6" },
-  "TP-OH": { label: "Ohio", full: "Ohio", color: "#10B981" },
-  "TP-CA": { label: "Hayward", full: "Hayward, CA", color: "#F59E0B" },
+  "TP-NY": { label: "Brooklyn", full: "Brooklyn, NY", color: "#3B82F6", emailTo: "nigel.white@fuzehealth.com, anna.wilson@fuzehealth.com, trudie.selby@fuzehealth.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Brooklyn " + d; } },
+  "TP-OH": { label: "Ohio", full: "Ohio", color: "#10B981", emailTo: "nigel.white@fuzehealth.com, anna.wilson@fuzehealth.com, trudie.selby@fuzehealth.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Ohio " + d; } },
+  "TP-CA": { label: "Hayward", full: "Hayward, CA", color: "#F59E0B", emailTo: "nigel.white@fuzehealth.com, anna.wilson@fuzehealth.com, trudie.selby@fuzehealth.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Hayward " + d; } },
+  "GGM-KY": { label: "GoGoMeds", full: "GoGoMeds, KY", color: "#8B5CF6", emailTo: "p.pocsatko@gogomeds.com, m.shull@gogomeds.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Weekly Replenishment Orders " + d; } },
 };
 
 /* ═══════ VENDOR CONTACTS ═══════ */
@@ -162,6 +163,11 @@ const PO_DEMO = {
     { SKUNDC: "00061-4110-01", Description: "Heartgard Plus Chewable: [Brown 51-100lbs] 6ct", OrderQty: 24, VendorName: "Boehringer Ingelheim Animal Health", OrderNbr: "PO007211", Warehouse: "TP-CA", ReorderPoint: 10, MaxQty: 36, LeadTime: 3, MinOrderQty: 12, QtyAvailable: 4, Price: 32.99, MovementClass: "" },
     { SKUNDC: "10668-1001-01", Description: "Galliprant Tablets: [60mg] 30ct Bottle", OrderQty: 6, VendorName: "Elanco US Inc.", OrderNbr: "PO007212", Warehouse: "TP-CA", ReorderPoint: 3, MaxQty: 10, LeadTime: 4, MinOrderQty: 6, QtyAvailable: 0, Price: 115.20, MovementClass: "" },
     { SKUNDC: "50383-0286-04", Description: "Adequan Canine Injectable: [100mg/mL] 5mL Vial", OrderQty: 12, VendorName: "American Regent Animal Health", OrderNbr: "PO007213", Warehouse: "TP-CA", ReorderPoint: 4, MaxQty: 12, LeadTime: 5, MinOrderQty: 6, QtyAvailable: -1, Price: 65.50, MovementClass: "sell-off item" },
+  ],
+  "GGM-KY": [
+    { SKUNDC: "54771-2320-01", Description: "Apoquel Tablets: [16mg] 100ct Bottle", OrderQty: 10, VendorName: "Zoetis US LLC", OrderNbr: "PO007220", Warehouse: "GGM-KY", ReorderPoint: 4, MaxQty: 14, LeadTime: 5, MinOrderQty: 2, QtyAvailable: 2, Price: 245.00, MovementClass: "" },
+    { SKUNDC: "00061-4110-01", Description: "Heartgard Plus Chewable: [Brown 51-100lbs] 6ct", OrderQty: 18, VendorName: "Boehringer Ingelheim Animal Health", OrderNbr: "PO007221", Warehouse: "GGM-KY", ReorderPoint: 8, MaxQty: 24, LeadTime: 3, MinOrderQty: 6, QtyAvailable: 3, Price: 32.99, MovementClass: "" },
+    { SKUNDC: "86078-0110-02", Description: "Bravecto Chewable: [1000mg] 44-88lbs 1ct", OrderQty: 20, VendorName: "Merck Animal Health", OrderNbr: "PO007222", Warehouse: "GGM-KY", ReorderPoint: 8, MaxQty: 24, LeadTime: 6, MinOrderQty: 10, QtyAvailable: 5, Price: 52.75, MovementClass: "" },
   ],
 };
 
@@ -503,7 +509,7 @@ function WHT(props) {
       try {
         var raw;
         if (cred && cred.username && cred.password) {
-          raw = await fetchAcumatica("po", whKey, cred.username, cred.password);
+          raw = await fetchAcumatica(whKey === "GGM-KY" ? "po-ggm" : "po", whKey, cred.username, cred.password);
         } else {
           raw = PO_DEMO[whKey] || [];
         }
@@ -587,8 +593,8 @@ function WHT(props) {
       {emailSent && <div style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.3)", borderRadius: 10, padding: "14px 20px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}><IconCheck /><span style={{ fontSize: 13, color: "#6EE7B7" }}><strong>Draft created!</strong></span></div>}
       <div style={S.card}>
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <div style={{ display: "flex", gap: 8 }}><span style={{ fontSize: 12, color: "#64748B", fontWeight: 500, width: 50 }}>To:</span><span style={{ fontSize: 13, color: "#E2E8F0" }}>nigel.white@fuzehealth.com, anna.wilson@fuzehealth.com, trudie.selby@fuzehealth.com, hd-purchaseorders@vetcove.com</span></div>
-          <div style={{ display: "flex", gap: 8 }}><span style={{ fontSize: 12, color: "#64748B", fontWeight: 500, width: 50 }}>Subject:</span><span style={{ fontSize: 13, color: "#F8FAFC", fontWeight: 600 }}>{cfg.label} {todayStr}</span></div>
+          <div style={{ display: "flex", gap: 8 }}><span style={{ fontSize: 12, color: "#64748B", fontWeight: 500, width: 50 }}>To:</span><span style={{ fontSize: 13, color: "#E2E8F0" }}>{cfg.emailTo}</span></div>
+          <div style={{ display: "flex", gap: 8 }}><span style={{ fontSize: 12, color: "#64748B", fontWeight: 500, width: 50 }}>Subject:</span><span style={{ fontSize: 13, color: "#F8FAFC", fontWeight: 600 }}>{cfg.subjectFn(todayStr)}</span></div>
           <div style={{ borderTop: "1px solid #1E2433", paddingTop: 16, marginTop: 4, fontSize: 13, color: "#E2E8F0", lineHeight: 1.7 }}>Good morning,<br /><br />Attached are today&apos;s POs.<br /><br />Thanks in advance,<br /><br /><span style={{ color: "#64748B", fontStyle: "italic" }}>[Vetcove Signature]</span></div>
         </div>
         <div style={{ marginTop: 20, borderTop: "1px solid #1E2433", paddingTop: 16 }}>
@@ -600,8 +606,8 @@ function WHT(props) {
             if (!gmail || !gmail.token) { toast("Please connect your Gmail account first (bottom-left)", "error"); return; }
             setEmailLoading(true);
             try {
-              var toLine = "nigel.white@fuzehealth.com, anna.wilson@fuzehealth.com, trudie.selby@fuzehealth.com, hd-purchaseorders@vetcove.com";
-              var subject = cfg.label + " " + todayStr;
+              var toLine = cfg.emailTo;
+              var subject = cfg.subjectFn(todayStr);
               var htmlBody = "<p>Good morning,</p><p>Attached are today's POs.</p><p>Thanks in advance,</p>";
               var xlsCols = ["SKU", "Description", "Qty", "Vendor", "PO #", "Reorder", "Max", "Lead", "Min", "Avail", "Price", "Total"];
               var attachments = uniqueVendors.map(function(v) {
