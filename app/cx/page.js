@@ -29,6 +29,7 @@ async function fetchAcumatica(type) {
 
 /* ═══════ ICONS ═══════ */
 function IconClock() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>; }
+function IconKey() { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>; }
 function IconBox() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 16V8l-9-5-9 5v8l9 5 9-5z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>; }
 function IconRefresh() { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>; }
 function IconTrash() { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>; }
@@ -189,8 +190,48 @@ function CXTracker(props) {
 export default function CXHub() {
   var _p = useState("short-dating"), page = _p[0], setPage = _p[1];
   var _t = useState(null), toast = _t[0], setToast = _t[1];
+  var _auth = useState(false), authed = _auth[0], setAuthed = _auth[1];
+  var _al = useState(true), authLoading = _al[0], setAuthLoading = _al[1];
+  var _ll = useState(false), loginLoading = _ll[0], setLoginLoading = _ll[1];
+  var _cred = useState({ username: "", password: "" }), cxCred = _cred[0], setCxCred = _cred[1];
+  var _err = useState(""), loginErr = _err[0], setLoginErr = _err[1];
 
   var showToast = useCallback(function(m, t) { setToast({ m: m, t: t || "success" }); setTimeout(function() { setToast(null); }, 3500); }, []);
+
+  // Check if already logged in
+  useEffect(function() {
+    var saved = sGet("cx-auth");
+    if (saved && saved.authed) setAuthed(true);
+    setAuthLoading(false);
+  }, []);
+
+  var cxLogin = useCallback(async function() {
+    setLoginErr("");
+    setLoginLoading(true);
+    try {
+      var resp = await fetch("/api/cx-auth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: cxCred.username, password: cxCred.password }),
+      });
+      var json = await resp.json();
+      if (!resp.ok) { setLoginErr(json.error || "Login failed"); return; }
+      sSet("cx-auth", { authed: true });
+      setAuthed(true);
+      showToast("Logged in");
+    } catch (err) {
+      setLoginErr("Connection error");
+    } finally {
+      setLoginLoading(false);
+    }
+  }, [cxCred, showToast]);
+
+  var cxLogout = useCallback(function() {
+    sDel("cx-auth");
+    setAuthed(false);
+    setCxCred({ username: "", password: "" });
+    showToast("Logged out", "info");
+  }, [showToast]);
 
   var sdColumns = useMemo(function() { return [
     { key: "ItemStatus", label: "Status", badgeFn: function(v) { return v.toLowerCase() === "active" ? "success" : "default"; } },
@@ -221,6 +262,25 @@ export default function CXHub() {
   var activeColor = page === "short-dating" ? "#E879F9" : "#F97316";
   var activeLabel = page === "short-dating" ? "Short-Dating Tracker" : "Backorder Tracker";
 
+  if (authLoading) return <div style={{ fontFamily: "sans-serif", background: "#0B0E14", color: "#E2E8F0", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}><Spinner color="#3B82F6" size={24} /><style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style></div>;
+
+  if (!authed) return (
+    <div style={{ fontFamily: "'DM Sans','Segoe UI',sans-serif", background: "#0B0E14", color: "#E2E8F0", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');*{box-sizing:border-box;margin:0;padding:0}@keyframes spin{to{transform:rotate(360deg)}}@keyframes slideUp{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}button:hover{filter:brightness(1.12)}input:focus{border-color:#3B82F6!important;box-shadow:0 0 0 2px rgba(59,130,246,0.15)}`}</style>
+      <div style={{ background: "#111520", border: "1px solid #1E2433", borderRadius: 16, padding: 40, width: 420, textAlign: "center" }}>
+        <div style={{ width: 64, height: 64, borderRadius: 16, background: "rgba(59,130,246,0.15)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px" }}><IconKey /></div>
+        <h1 style={{ fontSize: 24, fontWeight: 700, color: "#F8FAFC", margin: "0 0 4px" }}>Inventory Hub</h1>
+        <p style={{ fontSize: 11, color: "#64748B", fontWeight: 500, letterSpacing: "1.5px", textTransform: "uppercase", margin: "0 0 32px" }}>Customer Support</p>
+        <div style={{ textAlign: "left", display: "flex", flexDirection: "column", gap: 14 }}>
+          <div><label style={{ fontSize: 12, color: "#94A3B8", fontWeight: 500, display: "block", marginBottom: 6 }}>Username</label><input style={{ background: "#0B0E14", border: "1px solid #1E2433", borderRadius: 8, padding: "10px 14px", color: "#E2E8F0", fontSize: 14, outline: "none", width: "100%" }} value={cxCred.username} onChange={function(e) { setCxCred({ username: e.target.value, password: cxCred.password }); setLoginErr(""); }} placeholder="Username" /></div>
+          <div><label style={{ fontSize: 12, color: "#94A3B8", fontWeight: 500, display: "block", marginBottom: 6 }}>Password</label><input style={{ background: "#0B0E14", border: "1px solid #1E2433", borderRadius: 8, padding: "10px 14px", color: "#E2E8F0", fontSize: 14, outline: "none", width: "100%" }} type="password" value={cxCred.password} onChange={function(e) { setCxCred({ username: cxCred.username, password: e.target.value }); setLoginErr(""); }} placeholder={"\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"} onKeyDown={function(e) { if (e.key === "Enter") cxLogin(); }} /></div>
+          {loginErr && <div style={{ fontSize: 12, color: "#EF4444", padding: "8px 12px", background: "rgba(239,68,68,0.08)", borderRadius: 8, border: "1px solid rgba(239,68,68,0.2)" }}>{loginErr}</div>}
+          <button onClick={cxLogin} disabled={loginLoading} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", background: "#3B82F6", color: "#fff", border: "none", borderRadius: 8, padding: "12px 16px", fontSize: 14, fontWeight: 600, cursor: "pointer", marginTop: 8, opacity: loginLoading ? 0.7 : 1 }}>{loginLoading ? <><Spinner /> Signing in...</> : <><IconKey /> Sign In</>}</button>
+        </div>
+      </div>
+    </div>
+  );
+
   function SideLink(p) {
     var active = page === p.id;
     return <div onClick={function() { setPage(p.id); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 24px", fontSize: 14, cursor: "pointer", transition: "all 0.15s", fontWeight: active ? 600 : 400, color: active ? "#F8FAFC" : "#94A3B8", background: active ? p.color + "15" : "transparent", borderRight: active ? "2px solid " + p.color : "2px solid transparent" }}><Dot color={p.color} />{p.label}</div>;
@@ -243,6 +303,7 @@ export default function CXHub() {
           <div style={{ padding: "12px 16px", background: "rgba(59,130,246,0.08)", borderRadius: 10, border: "1px solid rgba(59,130,246,0.2)" }}>
             <div style={{ fontSize: 12, color: "#93C5FD", fontWeight: 500 }}>CX View</div>
             <div style={{ fontSize: 11, color: "#64748B", marginTop: 4 }}>Read-only inventory data</div>
+            <button onClick={cxLogout} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, width: "100%", background: "transparent", color: "#94A3B8", border: "1px solid #1E2433", borderRadius: 8, padding: "4px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer", marginTop: 8 }}>Logout</button>
           </div>
         </div>
       </div>
