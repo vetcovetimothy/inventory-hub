@@ -82,13 +82,26 @@ const COLUMN_MAP = {
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { type, warehouse, username, password } = body;
+    const { type, warehouse, username, password, useServiceAccount } = body;
 
     if (!type || !ENDPOINTS[type]) {
-      return Response.json({ error: "Invalid type. Use: po, short-dating, backorder" }, { status: 400 });
+      return Response.json({ error: "Invalid type. Use: po, po-ggm, short-dating, backorder" }, { status: 400 });
     }
-    if (!username || !password) {
-      return Response.json({ error: "Missing credentials" }, { status: 401 });
+
+    // Use service account credentials from env vars, or user-provided credentials
+    let authUser, authPass;
+    if (useServiceAccount) {
+      authUser = process.env.ACUMATICA_SERVICE_USER;
+      authPass = process.env.ACUMATICA_SERVICE_PASS;
+      if (!authUser || !authPass) {
+        return Response.json({ error: "Service account not configured" }, { status: 500 });
+      }
+    } else {
+      authUser = username;
+      authPass = password;
+      if (!authUser || !authPass) {
+        return Response.json({ error: "Missing credentials" }, { status: 401 });
+      }
     }
 
     // Build OData URL
@@ -100,7 +113,7 @@ export async function POST(request) {
     }
 
     // Call Acumatica
-    const authHeader = "Basic " + Buffer.from(username + ":" + password).toString("base64");
+    const authHeader = "Basic " + Buffer.from(authUser + ":" + authPass).toString("base64");
     const resp = await fetch(url, {
       method: "GET",
       headers: {
