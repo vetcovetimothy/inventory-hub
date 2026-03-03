@@ -530,6 +530,7 @@ function WHT(props) {
   var totalVal = useMemo(function() { return data.reduce(function(s, r) { return s + r.TotalPrice; }, 0); }, [data]);
   var flags = useMemo(function() { var f = { s: [], so: [], d: [] }; data.forEach(function(r, i) { var mc = (r.MovementClass || "").toLowerCase().trim(); if (mc === "short-dating") f.s.push(i); if (mc === "sell-off item") f.so.push(i); if ((r.SKUNDC || "").indexOf("DECHRA") === 0 || (r.Description || "").toLowerCase().indexOf("dechra") >= 0) f.d.push(i); }); return f; }, [data]);
   var flagCount = flags.s.length + flags.so.length + flags.d.length;
+  var emailBlocked = whKey !== "GGM-KY" && flags.s.length > 0;
   var getFlag = function(r) { var mc = (r.MovementClass || "").toLowerCase().trim(); if (mc === "short-dating") return "short"; if (mc === "sell-off item") return "selloff"; if ((r.SKUNDC || "").indexOf("DECHRA") === 0 || (r.Description || "").toLowerCase().indexOf("dechra") >= 0) return "dechra"; return null; };
   var filtered = useMemo(function() { var d = data.slice(); if (search) { var s = search.toLowerCase(); d = d.filter(function(r) { return r.SKUNDC.toLowerCase().indexOf(s) >= 0 || r.Description.toLowerCase().indexOf(s) >= 0 || r.VendorName.toLowerCase().indexOf(s) >= 0; }); } if (vendorFilter !== "all") d = d.filter(function(r) { return r.VendorName === vendorFilter; }); if (flagsOnly) { var fi = new Set(flags.s.concat(flags.so).concat(flags.d)); d = d.filter(function(r) { return fi.has(data.indexOf(r)); }); } return d; }, [data, search, vendorFilter, flagsOnly, flags]);
   var todayStr = new Date().toLocaleDateString("en-US", { month: "numeric", day: "numeric" });
@@ -539,7 +540,7 @@ function WHT(props) {
   return (<div>
     <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24, flexWrap: "wrap" }}>
       <div style={{ display: "flex", gap: 4, background: "#0B0E14", borderRadius: 10, padding: 3 }}>
-        {[{ id: "overview", lb: "Overview" }, { id: "data", lb: "PO Data", ct: data.length || null }, { id: "shipping", lb: "Shipping" }, { id: "email", lb: "Email" }].map(function(n) { return <button key={n.id} onClick={function() { setSubPage(n.id); }} style={S.pill(subPage === n.id, cfg.color)}>{n.lb}{n.ct ? <span style={{ fontSize: 10, background: subPage === n.id ? "rgba(255,255,255,0.2)" : "rgba(100,116,139,0.2)", padding: "1px 6px", borderRadius: 4 }}>{n.ct}</span> : null}</button>; })}
+        {[{ id: "overview", lb: "Overview" }, { id: "data", lb: "PO Data", ct: data.length || null }, { id: "shipping", lb: "Shipping" }, { id: "email", lb: "Email" }].map(function(n) { var blocked = n.id === "email" && emailBlocked; return <button key={n.id} onClick={function() { if (blocked) { toast("Remove all short-dated items before sending email", "error"); return; } setSubPage(n.id); }} style={Object.assign({}, S.pill(subPage === n.id, cfg.color), blocked ? { opacity: 0.4, cursor: "not-allowed" } : {})}>{blocked && <IconLock />}{n.lb}{n.ct ? <span style={{ fontSize: 10, background: subPage === n.id ? "rgba(255,255,255,0.2)" : "rgba(100,116,139,0.2)", padding: "1px 6px", borderRadius: 4 }}>{n.ct}</span> : null}</button>; })}
       </div>
       <div style={{ flex: 1 }} />
       {runTime && <span style={{ fontSize: 11, color: "#475569" }}>Last: {runTime}{runBy ? " by " + runBy : ""}</span>}
@@ -590,6 +591,7 @@ function WHT(props) {
     </div>}
 
     {subPage === "email" && <div>
+      {emailBlocked && <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 10, padding: "14px 20px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}><IconAlert /><span style={{ fontSize: 13, color: "#FCA5A5" }}><strong>{flags.s.length} short-dated item{flags.s.length > 1 ? "s" : ""}</strong> must be removed from the PO before sending.</span></div>}
       {emailSent && <div style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.3)", borderRadius: 10, padding: "14px 20px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}><IconCheck /><span style={{ fontSize: 13, color: "#6EE7B7" }}><strong>Draft created!</strong></span></div>}
       <div style={S.card}>
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -602,7 +604,8 @@ function WHT(props) {
           {uniqueVendors.map(function(v) { return <div key={v} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: "#0B0E14", borderRadius: 8, marginBottom: 4 }}><IconDL /><span style={{ fontSize: 12, color: "#CBD5E1" }}>{v} PO Data - {whKey}.xlsx</span><div style={{ flex: 1 }} /><span style={{ fontSize: 11, color: "#475569" }}>{vendorGroups[v] ? vendorGroups[v].length : 0} rows</span></div>; })}
         </div>
         <div style={{ marginTop: 20, display: "flex", gap: 10 }}>
-          <Gate ok={ok} prompt={lp} style={Object.assign({}, S.btn(), { padding: "10px 24px", opacity: (emailSent || emailLoading) ? 0.5 : 1 })} onClick={async function() {
+          <Gate ok={ok} prompt={lp} style={Object.assign({}, S.btn(), { padding: "10px 24px", opacity: (emailSent || emailLoading || emailBlocked) ? 0.5 : 1 })} onClick={async function() {
+            if (emailBlocked) { toast("Remove all short-dated items before sending email", "error"); return; }
             if (!gmail || !gmail.token) { toast("Please connect your Gmail account first (bottom-left)", "error"); return; }
             setEmailLoading(true);
             try {
@@ -623,7 +626,7 @@ function WHT(props) {
             } catch (err) {
               toast("Gmail error: " + err.message, "error");
             } finally { setEmailLoading(false); }
-          }} disabled={emailSent || emailLoading || data.length === 0}><IconMail /> {emailLoading ? "Creating..." : emailSent ? "Draft Created" : "Create Gmail Draft"}</Gate>
+          }} disabled={emailSent || emailLoading || emailBlocked || data.length === 0}><IconMail /> {emailBlocked ? "Short-Dated Items Present" : emailLoading ? "Creating..." : emailSent ? "Draft Created" : "Create Gmail Draft"}</Gate>
           {emailSent && <Gate ok={ok} prompt={lp} style={Object.assign({}, S.btn("danger"), { marginLeft: "auto" })} onClick={clearAll}><IconTrash /> Clear</Gate>}
         </div>
       </div>
