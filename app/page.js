@@ -483,6 +483,7 @@ function WHT(props) {
   var _cc = useState(false), confirmClear = _cc[0], setConfirmClear = _cc[1];
   var _es = useState(false), emailSent = _es[0], setEmailSent = _es[1];
   var _el = useState(false), emailLoading = _el[0], setEmailLoading = _el[1];
+  var _sn = useState({}), shipNotes = _sn[0], setShipNotes = _sn[1];
   var _rb = useState(null), runBy = _rb[0], setRunBy = _rb[1];
   var _rt = useState(null), runTime = _rt[0], setRunTime = _rt[1];
   var _il = useState(true), initLoading = _il[0], setInitLoading = _il[1];
@@ -491,11 +492,11 @@ function WHT(props) {
 
   useEffect(function() {
     var m = true;
-    (async function() { var s = sGet(storageKey); if (m && s && s.data && s.data.length > 0) { setData(s.data); setEmailSent(s.emailSent || false); setRunBy(s.runBy || null); setRunTime(s.runTime || null); } if (m) setInitLoading(false); })();
+    (async function() { var s = sGet(storageKey); if (m && s && s.data && s.data.length > 0) { setData(s.data); setEmailSent(s.emailSent || false); setRunBy(s.runBy || null); setRunTime(s.runTime || null); setShipNotes(s.shipNotes || {}); } if (m) setInitLoading(false); })();
     return function() { m = false; };
   }, [storageKey]);
 
-  var persist = useCallback(async function(d, es, by, time) { sSet(storageKey, { data: d, emailSent: es, runBy: by, runTime: time }); }, [storageKey]);
+  var persist = useCallback(async function(d, es, by, time, sn) { sSet(storageKey, { data: d, emailSent: es, runBy: by, runTime: time, shipNotes: sn || {} }); }, [storageKey]);
   var fetchData = useCallback(function() {
     if (!ok) { lp(); return; } setLoading(true); setEmailSent(false); setConfirmClear(false);
     (async function() {
@@ -508,14 +509,14 @@ function WHT(props) {
         }
         var rows = raw.filter(function(r) { return r.SKUNDC && !EXCLUDED.some(function(ex) { return (r.VendorName || "").toLowerCase().indexOf(ex) >= 0; }); }).map(function(r) { return Object.assign({}, r, { Price: Number(r.Price) || 0, OrderQty: Number(r.OrderQty) || 0, TotalPrice: +((Number(r.Price) || 0) * (Number(r.OrderQty) || 0)).toFixed(2) }); });
         var now = new Date().toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-        setData(rows); setRunBy("You"); setRunTime(now); setLoading(false); setSubPage("data"); persist(rows, false, "You", now); toast(cfg.label + ": Fetched " + rows.length + " lines");
+        setData(rows); setRunBy("You"); setRunTime(now); setLoading(false); setSubPage("data"); persist(rows, false, "You", now, {}); setShipNotes({}); toast(cfg.label + ": Fetched " + rows.length + " lines");
       } catch (err) {
         setLoading(false);
         toast("Error: " + err.message, "error");
       }
     })();
   }, [whKey, cred, cfg.label, toast, ok, lp, persist]);
-  var clearAll = useCallback(async function() { if (!ok) { lp(); return; } setData([]); setSearch(""); setVendorFilter("all"); setFlagsOnly(false); setEmailSent(false); setConfirmClear(false); setRunBy(null); setRunTime(null); setSubPage("overview"); sDel(storageKey); toast(cfg.label + ": Cleared"); }, [cfg.label, toast, ok, lp, storageKey]);
+  var clearAll = useCallback(async function() { if (!ok) { lp(); return; } setData([]); setSearch(""); setVendorFilter("all"); setFlagsOnly(false); setEmailSent(false); setConfirmClear(false); setRunBy(null); setRunTime(null); setSubPage("overview"); setShipNotes({}); sDel(storageKey); toast(cfg.label + ": Cleared"); }, [cfg.label, toast, ok, lp, storageKey]);
 
   var vendorGroups = useMemo(function() { var g = {}; data.forEach(function(r) { if (!g[r.VendorName]) g[r.VendorName] = []; g[r.VendorName].push(r); }); return g; }, [data]);
   var vendorTotals = useMemo(function() { var t = {}; Object.entries(vendorGroups).forEach(function(e) { t[e[0]] = e[1].reduce(function(s, r) { return s + r.TotalPrice; }, 0); }); return t; }, [vendorGroups]);
@@ -576,8 +577,8 @@ function WHT(props) {
     {subPage === "shipping" && <div>
       {data.length > 0 ? <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto" })}>
         <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
-          <thead><tr><th style={S.th}>Vendor</th><th style={S.th}>PO #</th><th style={Object.assign({}, S.th, { textAlign: "right" })}>Total</th><th style={S.th}>Shipping</th></tr></thead>
-          <tbody>{Object.keys(vendorGroups).sort().map(function(v) { var t = vendorTotals[v], rl = SHIP_RULES[v] || "", st = rl ? evalShip(rl, t) : "No Rule", isFree = st === "Free Shipping"; return <tr key={v}><td style={Object.assign({}, S.td, { fontWeight: 600, color: "#F8FAFC" })}>{v}</td><td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11 })}>{vendorGroups[v][0] && vendorGroups[v][0].OrderNbr}</td><td style={Object.assign({}, S.td, { textAlign: "right", fontWeight: 600, fontFamily: "monospace" })}>${t.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td><td style={S.td}><span style={S.badge(isFree ? "success" : "danger")}>{isFree ? <IconCheck /> : <IconAlert />}{st}</span></td></tr>; })}</tbody>
+          <thead><tr><th style={S.th}>Vendor</th><th style={Object.assign({}, S.th, { width: 140 })}>PO #</th><th style={Object.assign({}, S.th, { textAlign: "right" })}>Total</th><th style={S.th}>Shipping</th><th style={Object.assign({}, S.th, { width: 200 })}>Price Check Notes</th></tr></thead>
+          <tbody>{Object.keys(vendorGroups).sort().map(function(v) { var t = vendorTotals[v], rl = SHIP_RULES[v] || "", st = rl ? evalShip(rl, t) : "No Rule", isFree = st === "Free Shipping"; var sn = shipNotes[v] || {}; return <tr key={v}><td style={Object.assign({}, S.td, { fontWeight: 600, color: "#F8FAFC" })}>{v}</td><td style={S.td}><input style={Object.assign({}, S.inp, { padding: "4px 8px", fontSize: 11, fontFamily: "monospace" })} placeholder="Paste PO #" value={sn.po || ""} onChange={function(e) { var updated = Object.assign({}, shipNotes); updated[v] = Object.assign({}, sn, { po: e.target.value }); setShipNotes(updated); persist(data, emailSent, runBy, runTime, updated); }} /></td><td style={Object.assign({}, S.td, { textAlign: "right", fontWeight: 600, fontFamily: "monospace" })}>${t.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td><td style={S.td}><span style={S.badge(isFree ? "success" : "danger")}>{isFree ? <IconCheck /> : <IconAlert />}{st}</span></td><td style={S.td}><input style={Object.assign({}, S.inp, { padding: "4px 8px", fontSize: 11 })} placeholder="Notes..." value={sn.notes || ""} onChange={function(e) { var updated = Object.assign({}, shipNotes); updated[v] = Object.assign({}, sn, { notes: e.target.value }); setShipNotes(updated); persist(data, emailSent, runBy, runTime, updated); }} /></td></tr>; })}</tbody>
         </table>
       </div> : <div style={Object.assign({}, S.card, { textAlign: "center", padding: 48, color: "#475569" })}>Run fetch first.</div>}
     </div>}
@@ -612,7 +613,7 @@ function WHT(props) {
               var draftPayloads = [{ to: toLine, subject: subject, htmlBody: htmlBody, attachments: attachments }];
               var result = await postGmailDrafts(draftPayloads, gmail.token);
               if (result.failed > 0) throw new Error("Some drafts failed to create");
-              setEmailSent(true); persist(data, true, runBy, runTime); toast(cfg.label + ": Draft created in Gmail");
+              setEmailSent(true); persist(data, true, runBy, runTime, shipNotes); toast(cfg.label + ": Draft created in Gmail");
             } catch (err) {
               toast("Gmail error: " + err.message, "error");
             } finally { setEmailLoading(false); }
