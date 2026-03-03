@@ -714,6 +714,23 @@ export default function Hub() {
 
   if (credLoading) return <div style={{ fontFamily: "sans-serif", background: "#0B0E14", color: "#E2E8F0", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}><Spinner color="#3B82F6" size={24} /><style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style></div>;
 
+  if (!ok) return (
+    <div style={{ fontFamily: "'DM Sans','Segoe UI',sans-serif", background: "#0B0E14", color: "#E2E8F0", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');*{box-sizing:border-box;margin:0;padding:0}@keyframes spin{to{transform:rotate(360deg)}}@keyframes slideUp{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}button:hover{filter:brightness(1.12)}input:focus{border-color:#3B82F6!important;box-shadow:0 0 0 2px rgba(59,130,246,0.15)}`}</style>
+      <div style={{ background: "#111520", border: "1px solid #1E2433", borderRadius: 16, padding: 40, width: 420, textAlign: "center" }}>
+        <div style={{ width: 64, height: 64, borderRadius: 16, background: "rgba(59,130,246,0.15)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px" }}><IconKey /></div>
+        <h1 style={{ fontSize: 24, fontWeight: 700, color: "#F8FAFC", margin: "0 0 4px" }}>Inventory Hub</h1>
+        <p style={{ fontSize: 11, color: "#64748B", fontWeight: 500, letterSpacing: "1.5px", textTransform: "uppercase", margin: "0 0 32px" }}>Vetcove Tools</p>
+        <div style={{ textAlign: "left", display: "flex", flexDirection: "column", gap: 14 }}>
+          <div><label style={{ fontSize: 12, color: "#94A3B8", fontWeight: 500, display: "block", marginBottom: 6 }}>Acumatica Username</label><input style={{ background: "#0B0E14", border: "1px solid #1E2433", borderRadius: 8, padding: "10px 14px", color: "#E2E8F0", fontSize: 14, outline: "none", width: "100%" }} value={cred.username} onChange={function(e) { setCred({ username: e.target.value, password: cred.password }); }} placeholder="your.username" /></div>
+          <div><label style={{ fontSize: 12, color: "#94A3B8", fontWeight: 500, display: "block", marginBottom: 6 }}>Acumatica Password</label><input style={{ background: "#0B0E14", border: "1px solid #1E2433", borderRadius: 8, padding: "10px 14px", color: "#E2E8F0", fontSize: 14, outline: "none", width: "100%" }} type="password" value={cred.password} onChange={function(e) { setCred({ username: cred.username, password: e.target.value }); }} placeholder={"\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"} onKeyDown={function(e) { if (e.key === "Enter") login(); }} /></div>
+          <button onClick={login} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", background: "#3B82F6", color: "#fff", border: "none", borderRadius: 8, padding: "12px 16px", fontSize: 14, fontWeight: 600, cursor: "pointer", marginTop: 8 }}><IconKey /> Sign In</button>
+        </div>
+      </div>
+      {toast && <div style={{ position: "fixed", bottom: 24, right: 24, padding: "12px 20px", borderRadius: 10, fontSize: 13, fontWeight: 500, zIndex: 999, background: toast.t === "success" ? "#065F46" : "#1E293B", color: "#F8FAFC", border: "1px solid " + (toast.t === "success" ? "#10B981" : "#334155"), boxShadow: "0 8px 32px rgba(0,0,0,0.4)", animation: "slideUp 0.3s ease" }}>{toast.m}</div>}
+    </div>
+  );
+
   var isWH = page in WH;
   var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : "#3B82F6";
   var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : showLogin ? "Login" : "Shipping Rules";
