@@ -829,7 +829,7 @@ function POImportTool({ toast }) {
                         <td style={Object.assign({}, tdStyle, { fontFamily: "monospace", color: "#94A3B8" })}>{r.alternateId}</td>
                         <td style={Object.assign({}, tdStyle, { color: "#CBD5E1" })}>{r.drugName}</td>
                         <td style={Object.assign({}, tdStyle, { fontWeight: 700, color: info?.uom_code ? TOOL_COLOR : "#475569" })}>{info?.uom_code || (info === null ? "Not found" : "—")}</td>
-                        <td style={Object.assign({}, tdStyle, { color: "#94A3B8", fontSize: 11 })}>{info?.package_descriptions?.join(" | ") || "—"}</td>
+                        <td style={Object.assign({}, tdStyle, { color: "#94A3B8", fontSize: 11 })}>{info?.package_descriptions?.join(" | ") || (info?._debug ? <span style={{fontSize:10,color:"#475569"}}>raw: {info._debug.rawPackageData || "null"}</span> : "—")}</td>
                         <td style={Object.assign({}, tdStyle, { color: "#94A3B8" })}>{info?.dosage_form || "—"}</td>
                         <td style={Object.assign({}, tdStyle, { color: "#94A3B8" })}>{info?.route || "—"}</td>
                         <td style={tdStyle}>{info?.link ? <a href={info.link} target="_blank" rel="noreferrer" style={{ color: TOOL_COLOR, fontSize: 11 }}>View ↗</a> : "—"}</td>
