@@ -131,6 +131,7 @@ async function fetchDailyMedUOM(ndc, drugName, apiKey) {
               role: "user",
               content: `Convert this pharmaceutical package description into a short UOM code using these rules:
 - Bottles of tablets or capsules: "BT" + count (e.g. "Bottles of 500 tablets" → "BT500", "120 capsules" → "BT120")
+- Blister packs / unit-dose packs / cards: "BLPK" + count (e.g. "30 in 1 BLISTER PACK" → "BLPK30")
 - Liquid bottles (solutions, suspensions, syrups): "BT" + volume (e.g. "1 bottle of 100mL" → "BT100ML")
 - Vials: "VL" + volume (e.g. "5mL vial" → "VL5ML")
 - Tubes: "TB" + volume
@@ -179,9 +180,12 @@ NDC: ${ndc}
 
 Rules for UOM code:
 - Bottles of tablets or capsules: "BT" + count (e.g. BT500, BT120, BT100)
-- Liquid bottles: "BT" + volume (e.g. BT100ML, BT473ML)  
+- Blister packs / unit-dose packs / cards / blisters: "BLPK" + count (e.g. BLPK30, BLPK100)
+- Liquid bottles: "BT" + volume (e.g. BT100ML, BT473ML)
 - Vials: "VL" + volume (e.g. VL5ML, VL10ML)
 - Tubes: "TB" + size
+
+IMPORTANT: If the drug is commonly packaged in blister packs or unit-dose packaging (e.g. many brand-name tablets, some generics, unit-dose hospital packs), use BLPK not BT. When in doubt about whether it is a bottle or blister pack, use your pharmaceutical knowledge of how that specific NDC/drug is typically packaged.
 
 Reply with a JSON object only: {"uom_code": "BT500", "package_description": "Bottles of 500 tablets", "confidence": "high/medium/low"}
 No other text.`
