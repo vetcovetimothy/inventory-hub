@@ -213,6 +213,8 @@ function IconLock() { return <svg width="14" height="14" viewBox="0 0 24 24" fil
 function IconClock() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>; }
 function IconGmail() { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 4L12 13 2 4"/></svg>; }
 function IconBox() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 16V8l-9-5-9 5v8l9 5 9-5z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>; }
+function IconUpload() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0018 9h-1.26A8 8 0 103 16.3"/></svg>; }
+function IconCSV() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>; }
 function Dot({ color }) { return <div style={{ width: 8, height: 8, borderRadius: "50%", background: color, flexShrink: 0 }} />; }
 function Spinner({ color, size }) { return <span style={{ width: size || 14, height: size || 14, border: "2px solid rgba(255,255,255,0.3)", borderTop: "2px solid " + (color || "#fff"), borderRadius: "50%", animation: "spin 0.8s linear infinite", display: "inline-block" }} />; }
 
@@ -634,6 +636,212 @@ function WHT(props) {
   </div>);
 }
 
+/* ═══════ PO IMPORT TOOL ═══════ */
+function POImportTool({ toast }) {
+  var TOOL_COLOR = "#06B6D4";
+  var _vendor = useState("other"), vendor = _vendor[0], setVendor = _vendor[1];
+  var _pdfs = useState([]), pdfs = _pdfs[0], setPdfs = _pdfs[1];
+  var _screenshot = useState(null), screenshot = _screenshot[0], setScreenshot = _screenshot[1];
+  var _loading = useState(false), loading = _loading[0], setLoading = _loading[1];
+  var _rows = useState([]), rows = _rows[0], setRows = _rows[1];
+  var _uomMap = useState({}), uomMap = _uomMap[0], setUomMap = _uomMap[1];
+  var _error = useState(null), error = _error[0], setError = _error[1];
+  var _uomOpen = useState(false), uomOpen = _uomOpen[0], setUomOpen = _uomOpen[1];
+
+  function fileToBase64(file) {
+    return new Promise(function(resolve, reject) {
+      var r = new FileReader();
+      r.onload = function() { resolve(r.result.split(",")[1]); };
+      r.onerror = reject;
+      r.readAsDataURL(file);
+    });
+  }
+
+  async function handlePdfChange(e) {
+    var files = Array.from(e.target.files);
+    var converted = await Promise.all(files.map(async function(f) {
+      return { data: await fileToBase64(f), name: f.name };
+    }));
+    setPdfs(converted);
+  }
+
+  async function handleScreenshotChange(e) {
+    var file = e.target.files[0];
+    if (!file) return;
+    setScreenshot(await fileToBase64(file));
+  }
+
+  async function handleParse() {
+    if (pdfs.length === 0) { toast("Please upload at least one PDF", "error"); return; }
+    if (vendor === "mckesson" && !screenshot) { toast("McKesson requires a screenshot", "error"); return; }
+    setLoading(true); setError(null); setRows([]);
+    try {
+      var resp = await fetch("/api/po-import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pdfs, screenshot, vendor }),
+      });
+      var json = await resp.json();
+      if (!resp.ok) { setError(json.error || "Unknown error"); toast("Parse failed", "error"); return; }
+      setRows(json.rows || []);
+      setUomMap(json.uomMap || {});
+      toast("Parsed " + (json.rows || []).length + " line items");
+    } catch (err) {
+      setError(err.message);
+      toast("Parse failed", "error");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function downloadCSV() {
+    var header = "Inventory ID,Warehouse,Order Qty.,Unit Cost,Alternate ID\r\n";
+    var lines = rows.map(function(r) {
+      return [r.inventoryId, r.warehouse, r.orderQty, r.unitCost, r.alternateId]
+        .map(function(v) { return "\"" + String(v == null ? "" : v).replace(/"/g, "\"\"") + "\""; })
+        .join(",");
+    });
+    var csv = header + lines.join("\r\n");
+    var blob = new Blob([csv], { type: "text/csv" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url; a.download = "acumatica_po_import.csv"; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  var inputStyle = { background: "#0B0E14", border: "1px solid #1E2433", borderRadius: 8, padding: "8px 12px", color: "#E2E8F0", fontSize: 13, outline: "none", width: "100%", cursor: "pointer" };
+  var labelStyle = { fontSize: 12, color: "#94A3B8", fontWeight: 500, display: "block", marginBottom: 6 };
+  var cardStyle = { background: "#111520", border: "1px solid #1E2433", borderRadius: 12, padding: 20, marginBottom: 16 };
+  var thStyle = { padding: "10px 12px", textAlign: "left", background: "#0D1017", color: "#64748B", fontWeight: 600, fontSize: 11, textTransform: "uppercase", borderBottom: "1px solid #1E2433", whiteSpace: "nowrap" };
+  var tdStyle = { padding: "10px 12px", borderBottom: "1px solid #141822", color: "#E2E8F0", fontSize: 13 };
+
+  return (
+    <div>
+      <p style={{ color: "#64748B", fontSize: 13, marginBottom: 20 }}>Upload vendor PO documents to generate an Acumatica-ready CSV. DailyMed UOM info shown as reference only.</p>
+
+      {/* Vendor selector */}
+      <div style={cardStyle}>
+        <div style={{ marginBottom: 16 }}>
+          <label style={labelStyle}>Vendor Type</label>
+          <div style={{ display: "flex", gap: 10 }}>
+            {[["other", "Keysource / Anda / Bloodworth"], ["mckesson", "McKesson"]].map(function(v) {
+              return <button key={v[0]} onClick={function() { setVendor(v[0]); setScreenshot(null); setPdfs([]); setRows([]); }}
+                style={{ padding: "8px 18px", borderRadius: 8, border: "1px solid " + (vendor === v[0] ? TOOL_COLOR : "#1E2433"), background: vendor === v[0] ? TOOL_COLOR + "20" : "transparent", color: vendor === v[0] ? TOOL_COLOR : "#94A3B8", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>{v[1]}</button>;
+            })}
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: vendor === "mckesson" ? "1fr 1fr" : "1fr", gap: 16 }}>
+          <div>
+            <label style={labelStyle}>PO PDF{vendor === "mckesson" ? "" : "s"} <span style={{ color: "#475569", fontWeight: 400 }}>(one or more)</span></label>
+            <input type="file" accept=".pdf" multiple onChange={handlePdfChange} style={inputStyle} />
+            {pdfs.length > 0 && <p style={{ color: "#10B981", fontSize: 11, marginTop: 6 }}>✓ {pdfs.length} PDF{pdfs.length > 1 ? "s" : ""} loaded: {pdfs.map(p => p.name).join(", ")}</p>}
+          </div>
+          {vendor === "mckesson" && (
+            <div>
+              <label style={labelStyle}>McKesson Portal Screenshot <span style={{ color: "#EF4444", fontWeight: 400 }}>(required — final authority)</span></label>
+              <input type="file" accept="image/*" onChange={handleScreenshotChange} style={inputStyle} />
+              {screenshot && <p style={{ color: "#10B981", fontSize: 11, marginTop: 6 }}>✓ Screenshot loaded</p>}
+            </div>
+          )}
+        </div>
+
+        <div style={{ marginTop: 16, display: "flex", gap: 10, alignItems: "center" }}>
+          <button onClick={handleParse} disabled={loading || pdfs.length === 0}
+            style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 20px", borderRadius: 8, border: "none", background: loading || pdfs.length === 0 ? "#1E2433" : TOOL_COLOR, color: loading || pdfs.length === 0 ? "#475569" : "#0B0E14", fontSize: 13, fontWeight: 700, cursor: loading || pdfs.length === 0 ? "not-allowed" : "pointer" }}>
+            {loading ? <Spinner color="#0B0E14" size={14} /> : <IconUpload />}
+            {loading ? "Parsing..." : "Parse Documents"}
+          </button>
+          {vendor === "mckesson" && <span style={{ fontSize: 12, color: "#64748B" }}>Screenshot items take priority over PDF</span>}
+        </div>
+      </div>
+
+      {error && <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 10, padding: "12px 16px", marginBottom: 16, color: "#FCA5A5", fontSize: 13 }}>Error: {error}</div>}
+
+      {rows.length > 0 && (
+        <div>
+          {/* Results table */}
+          <div style={Object.assign({}, cardStyle, { padding: 0, overflow: "auto" })}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", borderBottom: "1px solid #1E2433" }}>
+              <span style={{ fontSize: 14, fontWeight: 600, color: "#F8FAFC" }}>Preview — {rows.length} Line Items</span>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={function() { setUomOpen(!uomOpen); }}
+                  style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 14px", borderRadius: 8, border: "1px solid #1E2433", background: uomOpen ? TOOL_COLOR + "20" : "transparent", color: uomOpen ? TOOL_COLOR : "#94A3B8", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                  💊 DailyMed UOM Info
+                </button>
+                <button onClick={downloadCSV}
+                  style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 14px", borderRadius: 8, border: "none", background: TOOL_COLOR, color: "#0B0E14", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                  <IconCSV /> Download CSV
+                </button>
+              </div>
+            </div>
+            <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
+              <thead>
+                <tr>
+                  <th style={thStyle}>Drug Name</th>
+                  <th style={thStyle}>Inventory ID</th>
+                  <th style={thStyle}>Warehouse</th>
+                  <th style={thStyle}>Order Qty.</th>
+                  <th style={thStyle}>Unit Cost</th>
+                  <th style={thStyle}>NDC (Alternate ID)</th>
+                  {vendor === "mckesson" && <th style={thStyle}>MCK Item #</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(function(r, i) {
+                  return (
+                    <tr key={i}>
+                      <td style={Object.assign({}, tdStyle, { color: "#CBD5E1", maxWidth: 260, wordBreak: "break-word" })}>{r.drugName}</td>
+                      <td style={Object.assign({}, tdStyle, { fontFamily: "monospace", color: r.inventoryId ? "#34D399" : "#475569" })}>{r.inventoryId || <span style={{ fontStyle: "italic" }}>—</span>}</td>
+                      <td style={tdStyle}>{r.warehouse ? <span style={{ background: (r.warehouse === "TP-NY" ? "#3B82F6" : r.warehouse === "TP-OH" ? "#10B981" : "#F59E0B") + "20", color: r.warehouse === "TP-NY" ? "#93C5FD" : r.warehouse === "TP-OH" ? "#6EE7B7" : "#FCD34D", padding: "2px 8px", borderRadius: 5, fontWeight: 600, fontSize: 11 }}>{r.warehouse}</span> : <span style={{ color: "#475569" }}>—</span>}</td>
+                      <td style={Object.assign({}, tdStyle, { textAlign: "right", fontWeight: 600 })}>{r.orderQty}</td>
+                      <td style={Object.assign({}, tdStyle, { textAlign: "right", color: "#34D399", fontWeight: 600 })}>${typeof r.unitCost === "number" ? r.unitCost.toFixed(4) : r.unitCost}</td>
+                      <td style={Object.assign({}, tdStyle, { fontFamily: "monospace", color: "#94A3B8" })}>{r.alternateId}</td>
+                      {vendor === "mckesson" && <td style={Object.assign({}, tdStyle, { color: "#64748B" })}>{r.mckItemId}</td>}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* DailyMed UOM panel */}
+          {uomOpen && (
+            <div style={cardStyle}>
+              <h3 style={{ fontSize: 14, fontWeight: 600, color: "#F8FAFC", marginBottom: 14 }}>💊 DailyMed UOM Reference <span style={{ fontSize: 11, color: "#475569", fontWeight: 400 }}>(not included in CSV)</span></h3>
+              <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
+                <thead>
+                  <tr>
+                    <th style={thStyle}>NDC</th>
+                    <th style={thStyle}>Drug Name</th>
+                    <th style={thStyle}>Dosage Form</th>
+                    <th style={thStyle}>Route</th>
+                    <th style={thStyle}>DailyMed</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.filter(r => r.alternateId).map(function(r, i) {
+                    var info = uomMap[r.alternateId];
+                    return (
+                      <tr key={i}>
+                        <td style={Object.assign({}, tdStyle, { fontFamily: "monospace", color: "#94A3B8" })}>{r.alternateId}</td>
+                        <td style={Object.assign({}, tdStyle, { color: "#CBD5E1" })}>{r.drugName}</td>
+                        <td style={Object.assign({}, tdStyle, { color: info?.dosage_form ? "#34D399" : "#475569" })}>{info?.dosage_form || (info === null ? "Not found" : "—")}</td>
+                        <td style={Object.assign({}, tdStyle, { color: "#94A3B8" })}>{info?.route || "—"}</td>
+                        <td style={tdStyle}>{info?.link ? <a href={info.link} target="_blank" rel="noreferrer" style={{ color: TOOL_COLOR, fontSize: 11 }}>View ↗</a> : "—"}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ═══════ MAIN HUB ═══════ */
 export default function Hub() {
   var _p = useState("TP-NY"), page = _p[0], setPage = _p[1];
@@ -735,8 +943,8 @@ export default function Hub() {
   );
 
   var isWH = page in WH;
-  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : "#3B82F6";
-  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : showLogin ? "Login" : "Shipping Rules";
+  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "po-import" ? "#06B6D4" : "#3B82F6";
+  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "po-import" ? "PO Import → CSV" : showLogin ? "Login" : "Shipping Rules";
 
   function SideLink(p) {
     var active = page === p.id && !showLogin;
@@ -754,6 +962,7 @@ export default function Hub() {
         </div>
         <div style={{ padding: "0 12px", marginBottom: 4 }}><div style={{ fontSize: 10, fontWeight: 600, color: "#475569", textTransform: "uppercase", letterSpacing: "1px", padding: "8px 12px" }}>PO Tools</div></div>
         {Object.entries(WH).map(function(e) { return <SideLink key={e[0]} id={e[0]} label={e[1].full} color={e[1].color} />; })}
+        <SideLink id="po-import" label="PO Import → CSV" color="#06B6D4" />
         <div style={{ padding: "12px 12px 4px", marginTop: 4, borderTop: "1px solid #1E2433" }}><div style={{ fontSize: 10, fontWeight: 600, color: "#475569", textTransform: "uppercase", letterSpacing: "1px", padding: "8px 12px" }}>Inventory Tools</div></div>
         <SideLink id="short-dating" label="Short-Dating" color="#E879F9" />
         <SideLink id="backorder" label="Backorders" color="#F97316" />
@@ -796,6 +1005,7 @@ export default function Hub() {
           {!showLogin && Object.entries(WH).map(function(e) { return <div key={e[0]} style={{ display: page === e[0] ? "block" : "none" }}><WHT whKey={e[0]} cfg={e[1]} toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} /></div>; })}
           {!showLogin && page === "short-dating" && <TrackerTool toolKey="short-dating" toolLabel="Short-Dating Tracker" toolColor="#E879F9" demoData={SD_DEMO} columns={sdColumns} emailConfig={sdEmail} toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} />}
           {!showLogin && page === "backorder" && <TrackerTool toolKey="backorder" toolLabel="Backorder Tracker" toolColor="#F97316" demoData={BKO_DEMO} columns={bkoColumns} emailConfig={bkoEmail} skipVendors={BKO_SKIP} toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} />}
+          {!showLogin && page === "po-import" && <POImportTool toast={showToast} />}
         </div>
       </div>
 
