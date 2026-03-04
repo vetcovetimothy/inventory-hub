@@ -540,7 +540,7 @@ function WHT(props) {
   return (<div>
     <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24, flexWrap: "wrap" }}>
       <div style={{ display: "flex", gap: 4, background: "#0B0E14", borderRadius: 10, padding: 3 }}>
-        {[{ id: "overview", lb: "Overview" }, { id: "data", lb: "PO Data", ct: data.length || null }, { id: "shipping", lb: "Shipping" }, { id: "email", lb: "Email" }].map(function(n) { var blocked = n.id === "email" && emailBlocked; return <button key={n.id} onClick={function() { if (blocked) { toast("Remove all short-dated items before sending email", "error"); return; } setSubPage(n.id); }} style={Object.assign({}, S.pill(subPage === n.id, cfg.color), blocked ? { opacity: 0.4, cursor: "not-allowed" } : {})}>{blocked && <IconLock />}{n.lb}{n.ct ? <span style={{ fontSize: 10, background: subPage === n.id ? "rgba(255,255,255,0.2)" : "rgba(100,116,139,0.2)", padding: "1px 6px", borderRadius: 4 }}>{n.ct}</span> : null}</button>; })}
+        {[{ id: "overview", lb: "Overview" }, { id: "data", lb: "PO Data", ct: data.length || null }, { id: "shipping", lb: "Shipping" }, { id: "email", lb: "Email" }].map(function(n) { return <button key={n.id} onClick={function() { setSubPage(n.id); }} style={S.pill(subPage === n.id, cfg.color)}>{n.lb}{n.ct ? <span style={{ fontSize: 10, background: subPage === n.id ? "rgba(255,255,255,0.2)" : "rgba(100,116,139,0.2)", padding: "1px 6px", borderRadius: 4 }}>{n.ct}</span> : null}</button>; })}
       </div>
       <div style={{ flex: 1 }} />
       {runTime && <span style={{ fontSize: 11, color: "#475569" }}>Last: {runTime}{runBy ? " by " + runBy : ""}</span>}
@@ -626,7 +626,7 @@ function WHT(props) {
             } catch (err) {
               toast("Gmail error: " + err.message, "error");
             } finally { setEmailLoading(false); }
-          }} disabled={emailSent || emailLoading || emailBlocked || data.length === 0}><IconMail /> {emailBlocked ? "Short-Dated Items Present" : emailLoading ? "Creating..." : emailSent ? "Draft Created" : "Create Gmail Draft"}</Gate>
+          }} disabled={emailSent || emailLoading || emailBlocked || data.length === 0}><IconMail /> {emailBlocked ? flags.s.length + " Short-Dated Item" + (flags.s.length > 1 ? "s" : "") + " Present" : emailLoading ? "Creating..." : emailSent ? "Draft Created" : "Create Gmail Draft"}</Gate>
           {emailSent && <Gate ok={ok} prompt={lp} style={Object.assign({}, S.btn("danger"), { marginLeft: "auto" })} onClick={clearAll}><IconTrash /> Clear</Gate>}
         </div>
       </div>
