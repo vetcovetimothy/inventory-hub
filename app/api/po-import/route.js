@@ -185,7 +185,14 @@ Rules for UOM code:
 - Vials: "VL" + volume (e.g. VL5ML, VL10ML)
 - Tubes: "TB" + size
 
-IMPORTANT: If the drug is commonly packaged in blister packs or unit-dose packaging (e.g. many brand-name tablets, some generics, unit-dose hospital packs), use BLPK not BT. When in doubt about whether it is a bottle or blister pack, use your pharmaceutical knowledge of how that specific NDC/drug is typically packaged.
+CRITICAL blister pack examples (always use BLPK for these):
+- Cyclosporine Modified capsules → BLPK (e.g. BLPK30)
+- Tacrolimus capsules → BLPK
+- Most immunosuppressant capsules → BLPK
+- Unit-dose or individually sealed capsules/tablets → BLPK
+- Brand-name drugs often packaged in blister cards → BLPK
+
+Use your specific pharmaceutical knowledge of how this exact drug/NDC is packaged. Do NOT default to BT if the drug is known to come in blister packs.
 
 Reply with a JSON object only: {"uom_code": "BT500", "package_description": "Bottles of 500 tablets", "confidence": "high/medium/low"}
 No other text.`
