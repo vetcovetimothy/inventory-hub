@@ -90,15 +90,12 @@ async function fetchDailyMedUOM(ndc, drugName, apiKey) {
         const pkgData = await r3.json();
         rawPackageData = pkgData;
         const items = pkgData?.data || [];
-        // DailyMed packaging API uses "package_description" field
-        // Each item may also have nested "packages" array
         const extractDescriptions = (arr) => {
           const results = [];
           for (const item of arr) {
             if (item.package_description) results.push(item.package_description);
             else if (item.description) results.push(item.description);
             else if (item.packageDescription) results.push(item.packageDescription);
-            // recurse into nested packages
             if (item.packages && Array.isArray(item.packages)) {
               results.push(...extractDescriptions(item.packages));
             }
@@ -106,16 +103,58 @@ async function fetchDailyMedUOM(ndc, drugName, apiKey) {
           return results;
         };
         packageDescriptions = extractDescriptions(items).filter(s => s && s.length > 2);
-        
-        // Fallback: if still empty, stringify each item and look for bottle/vial/tablet patterns
+
+        // Try to find the specific package matching our NDC
+        const findMatchForNdc = (arr, targetNdc) => {
+          const normalize = s => s.replace(/[^0-9]/g, "");
+          const target = normalize(targetNdc);
+          for (const item of arr) {
+            const code = normalize(item.ndc || item.item_code || item.ndc_code || "");
+            if (code && code === target) {
+              return item.package_description || item.description || null;
+            }
+            if (item.packages) {
+              const nested = findMatchForNdc(item.packages, targetNdc);
+              if (nested) return nested;
+            }
+          }
+          return null;
+        };
+        const specificMatch = findMatchForNdc(items, ndc);
+        if (specificMatch) packageDescriptions = [specificMatch];
         if (packageDescriptions.length === 0 && items.length > 0) {
           const raw = JSON.stringify(items);
-          const matches = raw.match(/\d+\s+in\s+\d+\s+[A-Z]+[^"\\]*/gi) || 
+          const matches = raw.match(/\d+\s+in\s+\d+\s+[A-Z]+[^"\\]*/gi) ||
                           raw.match(/[A-Z]+\s+of\s+\d+\s+[a-zA-Z]+/gi) || [];
           packageDescriptions = [...new Set(matches)].slice(0, 4);
         }
       }
     } catch (e) { /* skip */ }
+
+    // Fallback: scrape DailyMed HTML page for "How Supplied" packaging text
+    if (packageDescriptions.length === 0) {
+      try {
+        const htmlResp = await fetch(
+          `https://dailymed.nlm.nih.gov/dailymed/drugInfo.cfm?setid=${setid}`,
+          { headers: { "Accept": "text/html", "User-Agent": "Mozilla/5.0 (compatible)" }, signal: AbortSignal.timeout(8000) }
+        );
+        if (htmlResp.ok) {
+          const html = await htmlResp.text();
+          const patterns = [
+            /packages? of \d+[^<\n.()]{0,80}/gi,
+            /bottles? of \d+[^<\n.()]{0,80}/gi,
+            /\d+\s*(?:unit[- ]dose|blister|capsules?|tablets?|vials?)[^<\n.()]{0,60}/gi,
+          ];
+          const found = new Set();
+          for (const pattern of patterns) {
+            (html.match(pattern) || []).slice(0, 4).forEach(m =>
+              found.add(m.replace(/<[^>]+>/g, "").trim())
+            );
+          }
+          packageDescriptions = Array.from(found).slice(0, 5);
+        }
+      } catch { /* skip */ }
+    }
 
     // Use AI to generate UOM code from package descriptions
     let uomCode = null;
@@ -131,7 +170,8 @@ async function fetchDailyMedUOM(ndc, drugName, apiKey) {
               role: "user",
               content: `Convert this pharmaceutical package description into a short UOM code using these rules:
 - Bottles of tablets or capsules: "BT" + count (e.g. "Bottles of 500 tablets" → "BT500", "120 capsules" → "BT120")
-- Blister packs / unit-dose packs / cards: "BLPK" + count (e.g. "30 in 1 BLISTER PACK" → "BLPK30")
+- Blister packs / unit-dose packs / cards: "BLPK" + count (e.g. "30 in 1 BLISTER PACK" → "BLPK30", "Packages of 30 unit-dose blisters" → "BLPK30")
+- Any phrase containing "blister", "unit-dose", "unit dose", "blister card" → always BLPK
 - Liquid bottles (solutions, suspensions, syrups): "BT" + volume (e.g. "1 bottle of 100mL" → "BT100ML")
 - Vials: "VL" + volume (e.g. "5mL vial" → "VL5ML")
 - Tubes: "TB" + volume
