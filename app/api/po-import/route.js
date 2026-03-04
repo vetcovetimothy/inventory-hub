@@ -155,7 +155,52 @@ Reply with ONLY the short UOM code, nothing else.`
       package_descriptions: packageDescriptions,
       uom_code: uomCode,
       link: `https://dailymed.nlm.nih.gov/dailymed/drugInfo.cfm?setid=${setid}`,
-      _debug: { setid, rawPackageData: rawPackageData ? JSON.stringify(rawPackageData).slice(0, 500) : null }
+      source: "dailymed",
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function inferUOMFromAI(ndc, drugName, apiKey) {
+  try {
+    const aiResp = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 80,
+        messages: [{
+          role: "user",
+          content: `You are a pharmaceutical packaging expert. Based on your knowledge of this drug, what is the standard retail package size/UOM?
+
+Drug: ${drugName}
+NDC: ${ndc}
+
+Rules for UOM code:
+- Bottles of tablets or capsules: "BT" + count (e.g. BT500, BT120, BT100)
+- Liquid bottles: "BT" + volume (e.g. BT100ML, BT473ML)  
+- Vials: "VL" + volume (e.g. VL5ML, VL10ML)
+- Tubes: "TB" + size
+
+Reply with a JSON object only: {"uom_code": "BT500", "package_description": "Bottles of 500 tablets", "confidence": "high/medium/low"}
+No other text.`
+        }]
+      })
+    });
+    if (!aiResp.ok) return null;
+    const data = await aiResp.json();
+    const text = data.content?.find(b => b.type === "text")?.text?.trim();
+    if (!text) return null;
+    const clean = text.replace(/```json\n?|```\n?/g, "").trim();
+    const parsed = JSON.parse(clean);
+    return {
+      dosage_form: null,
+      route: null,
+      package_descriptions: [parsed.package_description || ""],
+      uom_code: parsed.uom_code || null,
+      link: null,
+      source: `ai-inferred (${parsed.confidence || "unknown"} confidence)`,
     };
   } catch {
     return null;
@@ -307,7 +352,10 @@ Return ONLY a valid JSON array with no other text, markdown, or explanation:
     await Promise.all(
       uniqueNdcs.map(async ndc => {
         const drugName = rows.find(r => r.alternateId === ndc)?.drugName || "";
-        const info = await fetchDailyMedUOM(ndc, drugName, apiKey);
+        let info = await fetchDailyMedUOM(ndc, drugName, apiKey);
+        if (!info || (!info.uom_code && !info.package_descriptions?.length)) {
+          info = await inferUOMFromAI(ndc, drugName, apiKey);
+        }
         uomMap[ndc] = info;
       })
     );
