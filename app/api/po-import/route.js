@@ -15,17 +15,36 @@ function mapWarehouse(storeName) {
   return "";
 }
 
+function ndcVariants(ndc) {
+  // Generate all plausible NDC formatting variants to handle leading zero differences
+  const parts = ndc.split("-");
+  if (parts.length !== 3) return [ndc];
+  const [a, b, c] = parts;
+  const variants = new Set();
+  // Try padding each segment to standard lengths and stripping leading zeros
+  const aPads = [a, a.replace(/^0+/, "") || "0", a.padStart(5, "0"), a.padStart(4, "0")];
+  const bPads = [b, b.replace(/^0+/, "") || "0", b.padStart(4, "0"), b.padStart(3, "0")];
+  const cPads = [c, c.replace(/^0+/, "") || "0", c.padStart(2, "0"), c.padStart(1, "0")];
+  for (const av of aPads) for (const bv of bPads) for (const cv of cPads) {
+    variants.add(`${av}-${bv}-${cv}`);
+  }
+  return Array.from(variants);
+}
+
 async function fetchDailyMedUOM(ndc) {
   try {
-    const clean = ndc.replace(/-/g, "").replace(/\s/g, "");
-    const r1 = await fetch(
-      `https://dailymed.nlm.nih.gov/dailymed/services/v2/ndcs.json?ndc=${ndc}&pagesize=1`,
-      { headers: { Accept: "application/json" } }
-    );
-    if (!r1.ok) return null;
-    const d1 = await r1.json();
-    const items = d1?.data;
-    if (!items || items.length === 0) return null;
+    const variants = ndcVariants(ndc);
+    let items = null;
+    for (const variant of variants) {
+      const r1 = await fetch(
+        `https://dailymed.nlm.nih.gov/dailymed/services/v2/ndcs.json?ndc=${variant}&pagesize=1`,
+        { headers: { Accept: "application/json" } }
+      );
+      if (!r1.ok) continue;
+      const d1 = await r1.json();
+      if (d1?.data?.length > 0) { items = d1.data; break; }
+    }
+    if (!items) return null;
     const setid = items[0].setid;
     if (!setid) return null;
     const r2 = await fetch(
