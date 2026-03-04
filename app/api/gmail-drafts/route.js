@@ -1,36 +1,39 @@
 /**
  * POST /api/gmail-drafts
  *
- * Creates Gmail drafts for vendor emails.
- * Uses OAuth2 refresh token to authenticate with Gmail API.
+ * Creates Gmail drafts for vendor emails with optional xlsx attachments.
+ * Accepts a per-user refresh token in the request body, or falls back to
+ * the server-wide GOOGLE_REFRESH_TOKEN env var.
  *
  * Body: {
+ *   refreshToken: "user's refresh token" (optional),
  *   drafts: [
- *     { to: "email@vendor.com", cc: "team@vetcove.com", subject: "...", htmlBody: "..." }
+ *     {
+ *       to: "email@vendor.com",
+ *       cc: "team@vetcove.com",
+ *       subject: "...",
+ *       htmlBody: "...",
+ *       attachments: [
+ *         { filename: "Vendor PO Data.xlsx", columns: ["SKU","Desc",...], rows: [[...], ...] }
+ *       ]
+ *     }
  *   ]
  * }
- *
- * SETUP:
- * 1. Go to https://console.cloud.google.com
- * 2. Create a project (or use existing)
- * 3. Enable Gmail API
- * 4. Create OAuth 2.0 credentials (Web application)
- * 5. Run the one-time auth flow (see /api/gmail-auth and /api/gmail-callback)
- * 6. Save the refresh token in GOOGLE_REFRESH_TOKEN env var
  */
+
+import * as XLSX from "xlsx";
 
 const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
-const REFRESH_TOKEN = process.env.GOOGLE_REFRESH_TOKEN;
 
-async function getAccessToken() {
+async function getAccessToken(refreshToken) {
   const resp = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
       client_id: CLIENT_ID,
       client_secret: CLIENT_SECRET,
-      refresh_token: REFRESH_TOKEN,
+      refresh_token: refreshToken,
       grant_type: "refresh_token",
     }),
   });
@@ -44,43 +47,59 @@ async function getAccessToken() {
   return data.access_token;
 }
 
-function buildMimeMessage({ to, cc, subject, htmlBody }) {
+function generateXlsx(columns, rows) {
+  const wsData = [columns, ...rows];
+  const ws = XLSX.utils.aoa_to_sheet(wsData);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "PO Data");
+  const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+  return Buffer.from(buf).toString("base64");
+}
+
+function buildMimeMessage({ to, cc, subject, htmlBody, attachments }) {
   const boundary = "boundary_" + Date.now();
   const lines = [
     `To: ${to}`,
     cc ? `Cc: ${cc}` : null,
     `Subject: ${subject}`,
     "MIME-Version: 1.0",
-    `Content-Type: multipart/alternative; boundary="${boundary}"`,
-    "",
-    `--${boundary}`,
-    "Content-Type: text/plain; charset=UTF-8",
-    "",
-    htmlToPlainText(htmlBody),
+    `Content-Type: multipart/mixed; boundary="${boundary}"`,
     "",
     `--${boundary}`,
     "Content-Type: text/html; charset=UTF-8",
     "",
     htmlBody,
-    "",
-    `--${boundary}--`,
   ].filter(l => l !== null);
 
-  return lines.join("\r\n");
-}
+  // Add attachments
+  if (attachments && attachments.length > 0) {
+    for (const att of attachments) {
+      let base64Data;
+      if (att.columns && att.rows) {
+        base64Data = generateXlsx(att.columns, att.rows);
+      } else if (att.base64) {
+        base64Data = att.base64;
+      } else {
+        continue;
+      }
+      lines.push("");
+      lines.push(`--${boundary}`);
+      lines.push(`Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`);
+      lines.push(`Content-Disposition: attachment; filename="${att.filename || "data.xlsx"}"`);
+      lines.push("Content-Transfer-Encoding: base64");
+      lines.push("");
+      // Split base64 into 76-char lines per MIME spec
+      const b64 = base64Data;
+      for (let i = 0; i < b64.length; i += 76) {
+        lines.push(b64.slice(i, i + 76));
+      }
+    }
+  }
 
-function htmlToPlainText(html) {
-  return html
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/(p|div|tr)>/gi, "\n")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+  lines.push("");
+  lines.push(`--${boundary}--`);
+
+  return lines.join("\r\n");
 }
 
 function base64url(str) {
@@ -93,21 +112,30 @@ function base64url(str) {
 
 export async function POST(request) {
   try {
-    if (!CLIENT_ID || !CLIENT_SECRET || !REFRESH_TOKEN) {
+    const body = await request.json();
+    const { drafts, refreshToken: userToken } = body;
+
+    const refreshToken = userToken || process.env.GOOGLE_REFRESH_TOKEN;
+
+    if (!CLIENT_ID || !CLIENT_SECRET) {
       return Response.json(
-        { error: "Gmail not configured. Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REFRESH_TOKEN in your environment variables." },
+        { error: "Gmail not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in your environment variables." },
         { status: 500 }
       );
     }
 
-    const body = await request.json();
-    const { drafts } = body;
+    if (!refreshToken) {
+      return Response.json(
+        { error: "No Gmail account connected. Please connect your Gmail account first." },
+        { status: 401 }
+      );
+    }
 
     if (!drafts || !Array.isArray(drafts) || drafts.length === 0) {
       return Response.json({ error: "No drafts provided" }, { status: 400 });
     }
 
-    const accessToken = await getAccessToken();
+    const accessToken = await getAccessToken(refreshToken);
     const results = [];
 
     for (const draft of drafts) {

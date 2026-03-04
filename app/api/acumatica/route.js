@@ -8,14 +8,15 @@
  * Body: { type: "po" | "short-dating" | "backorder", warehouse?: string, username: string, password: string }
  */
 
-const BASE = "https://vetcove.acumatica.com";
-const PREFIX = "/odata/VetCove";
+const BASE = process.env.ACUMATICA_BASE_URL || "https://vetcove.acumatica.com";
+const PREFIX = process.env.ACUMATICA_ODATA_PREFIX || "/(W(89))/odata/VetCove";
 
 // OData view names — match whatever is configured in your Acumatica instance
 const ENDPOINTS = {
-  "po":            "PURCH - TP PO Export with Replen",
-  "short-dating":  "INV - Short-Dating Tracker",
-  "backorder":     "INV - Backorder Item Review",
+  "po":            "PURCH%20-%20TP%20PO%20Export%20with%20Replen",
+  "po-ggm":        "PURCH%20-%20Export%20PO%20Lines%20GGM",
+  "short-dating":  "INV%20-%20Short-Dating%20Tracker",
+  "backorder":     "INV%20-%20Backorder%20Item%20Review",
 };
 
 // Which columns to extract for each type (keyGroup = possible OData field names)
@@ -29,11 +30,26 @@ const COLUMN_MAP = {
     { label: "Warehouse",     keys: ["Warehouse", "WarehouseID"] },
     { label: "ReorderPoint",  keys: ["ReorderPoint", "ReorderPt"] },
     { label: "MaxQty",        keys: ["MaxQty"] },
-    { label: "LeadTime",      keys: ["LeadTime", "LeadTimeDays"] },
+    { label: "LeadTime",      keys: ["LeadTime", "LeadTimeDays", "VendorLeadTimeDays"] },
     { label: "MinOrderQty",   keys: ["MinOrderQty"] },
     { label: "QtyAvailable",  keys: ["QtyAvailable", "QtyAvail"] },
     { label: "Price",         keys: ["Price", "UnitCost", "LastCost"] },
     { label: "MovementClass", keys: ["MovementClass", "MovementClassDescr"] },
+  ],
+  "po-ggm": [
+    { label: "SKUNDC",        keys: ["SKUNDC", "SkuNDC", "SKU_NDC", "InventoryID", "InventoryCd", "InventoryCD"] },
+    { label: "Description",   keys: ["Description", "Descr", "ItemDescription", "TranDesc", "InventoryDescription", "LineDescription"] },
+    { label: "OrderQty",      keys: ["OrderQty", "Order Qty", "Qty", "Quantity"] },
+    { label: "VendorName",    keys: ["VendorName", "Vendor", "Vendor Name"] },
+    { label: "OrderNbr",      keys: ["OrderNbr", "Order Nbr.", "OrderNbr."] },
+    { label: "Warehouse",     keys: ["Warehouse", "WarehouseID", "WarehouseId"] },
+    { label: "ReorderPoint",  keys: ["ReorderPoint"] },
+    { label: "MaxQty",        keys: ["MaxQty"] },
+    { label: "LeadTime",      keys: ["VendorLeadTimeDays", "LeadTime", "LeadTimeDays"] },
+    { label: "MinOrderQty",   keys: ["MinOrderQty"] },
+    { label: "QtyAvailable",  keys: ["QtyAvailable", "QtyAvail"] },
+    { label: "Price",         keys: ["Price", "UnitCost", "LastCost"] },
+    { label: "MovementClass", keys: ["MovementClass", "Movement Class"] },
   ],
   "short-dating": [
     { label: "ItemStatus",      keys: ["ItemStatus", "Status"] },
@@ -66,20 +82,38 @@ const COLUMN_MAP = {
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { type, warehouse, username, password } = body;
+    const { type, warehouse, username, password, useServiceAccount } = body;
 
     if (!type || !ENDPOINTS[type]) {
-      return Response.json({ error: "Invalid type. Use: po, short-dating, backorder" }, { status: 400 });
+      return Response.json({ error: "Invalid type. Use: po, po-ggm, short-dating, backorder" }, { status: 400 });
     }
-    if (!username || !password) {
-      return Response.json({ error: "Missing credentials" }, { status: 401 });
+
+    // Use service account credentials from env vars, or user-provided credentials
+    let authUser, authPass;
+    if (useServiceAccount) {
+      authUser = process.env.ACUMATICA_SERVICE_USER;
+      authPass = process.env.ACUMATICA_SERVICE_PASS;
+      if (!authUser || !authPass) {
+        return Response.json({ error: "Service account not configured" }, { status: 500 });
+      }
+    } else {
+      authUser = username;
+      authPass = password;
+      if (!authUser || !authPass) {
+        return Response.json({ error: "Missing credentials" }, { status: 401 });
+      }
     }
 
     // Build OData URL
-    let url = encodeURI(`${BASE}${PREFIX}/${ENDPOINTS[type]}`);
+    let url = `${BASE}${PREFIX}/${ENDPOINTS[type]}`;
+
+    // For PO fetches, filter by warehouse if provided
+    if ((type === "po" || type === "po-ggm") && warehouse) {
+      url += `?$filter=Warehouse eq '${warehouse}'`;
+    }
 
     // Call Acumatica
-    const authHeader = "Basic " + Buffer.from(username + ":" + password).toString("base64");
+    const authHeader = "Basic " + Buffer.from(authUser + ":" + authPass).toString("base64");
     const resp = await fetch(url, {
       method: "GET",
       headers: {
@@ -91,7 +125,7 @@ export async function POST(request) {
     if (!resp.ok) {
       const text = await resp.text();
       return Response.json(
-        { error: `Acumatica returned ${resp.status}`, detail: text.slice(0, 500), url: url },
+        { error: `Acumatica returned ${resp.status}`, detail: text.slice(0, 500) },
         { status: resp.status }
       );
     }
