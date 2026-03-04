@@ -80,25 +80,42 @@ async function fetchDailyMedUOM(ndc, drugName, apiKey) {
 
     // Fetch packaging info
     let packageDescriptions = [];
+    let rawPackageData = null;
     try {
       const r3 = await fetch(
         `https://dailymed.nlm.nih.gov/dailymed/services/v2/spls/${setid}/packaging.json`,
-        { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(5000) }
+        { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(8000) }
       );
       if (r3.ok) {
         const pkgData = await r3.json();
-        // DailyMed packaging can be nested — flatten all description fields
-        const flatten = (obj) => {
-          if (!obj) return [];
-          if (typeof obj === "string") return [obj];
-          if (Array.isArray(obj)) return obj.flatMap(flatten);
-          return Object.values(obj).flatMap(flatten);
+        rawPackageData = pkgData;
+        const items = pkgData?.data || [];
+        // DailyMed packaging API uses "package_description" field
+        // Each item may also have nested "packages" array
+        const extractDescriptions = (arr) => {
+          const results = [];
+          for (const item of arr) {
+            if (item.package_description) results.push(item.package_description);
+            else if (item.description) results.push(item.description);
+            else if (item.packageDescription) results.push(item.packageDescription);
+            // recurse into nested packages
+            if (item.packages && Array.isArray(item.packages)) {
+              results.push(...extractDescriptions(item.packages));
+            }
+          }
+          return results;
         };
-        packageDescriptions = flatten(pkgData?.data)
-          .filter(s => typeof s === "string" && s.length > 3 && /\d/.test(s))
-          .slice(0, 4);
+        packageDescriptions = extractDescriptions(items).filter(s => s && s.length > 2);
+        
+        // Fallback: if still empty, stringify each item and look for bottle/vial/tablet patterns
+        if (packageDescriptions.length === 0 && items.length > 0) {
+          const raw = JSON.stringify(items);
+          const matches = raw.match(/\d+\s+in\s+\d+\s+[A-Z]+[^"\\]*/gi) || 
+                          raw.match(/[A-Z]+\s+of\s+\d+\s+[a-zA-Z]+/gi) || [];
+          packageDescriptions = [...new Set(matches)].slice(0, 4);
+        }
       }
-    } catch { /* skip */ }
+    } catch (e) { /* skip */ }
 
     // Use AI to generate UOM code from package descriptions
     let uomCode = null;
@@ -138,6 +155,7 @@ Reply with ONLY the short UOM code, nothing else.`
       package_descriptions: packageDescriptions,
       uom_code: uomCode,
       link: `https://dailymed.nlm.nih.gov/dailymed/drugInfo.cfm?setid=${setid}`,
+      _debug: { setid, rawPackageData: rawPackageData ? JSON.stringify(rawPackageData).slice(0, 500) : null }
     };
   } catch {
     return null;
