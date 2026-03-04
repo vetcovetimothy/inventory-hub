@@ -962,6 +962,7 @@ export default function Hub() {
         </div>
         <div style={{ padding: "0 12px", marginBottom: 4 }}><div style={{ fontSize: 10, fontWeight: 600, color: "#475569", textTransform: "uppercase", letterSpacing: "1px", padding: "8px 12px" }}>PO Tools</div></div>
         {Object.entries(WH).map(function(e) { return <SideLink key={e[0]} id={e[0]} label={e[1].full} color={e[1].color} />; })}
+        <div style={{ padding: "12px 12px 4px", marginTop: 4, borderTop: "1px solid #1E2433" }}><div style={{ fontSize: 10, fontWeight: 600, color: "#475569", textTransform: "uppercase", letterSpacing: "1px", padding: "8px 12px" }}>Generic PO Tools</div></div>
         <SideLink id="po-import" label="PO Import → CSV" color="#06B6D4" />
         <div style={{ padding: "12px 12px 4px", marginTop: 4, borderTop: "1px solid #1E2433" }}><div style={{ fontSize: 10, fontWeight: 600, color: "#475569", textTransform: "uppercase", letterSpacing: "1px", padding: "8px 12px" }}>Inventory Tools</div></div>
         <SideLink id="short-dating" label="Short-Dating" color="#E879F9" />
