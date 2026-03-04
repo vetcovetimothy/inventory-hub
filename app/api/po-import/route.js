@@ -29,44 +29,78 @@ function ndcVariants(ndc) {
   return Array.from(variants);
 }
 
-async function fetchDailyMedUOM(ndc, apiKey) {
+async function fetchDailyMedUOM(ndc, drugName, apiKey) {
   try {
     const variants = ndcVariants(ndc);
-    let matchedItem = null;
+    // Also try 11-digit no-dash formats
+    const noDashVariants = variants.map(v => v.replace(/-/g, ""));
+    const allVariants = [...variants, ...noDashVariants];
 
-    for (const variant of variants) {
-      const r1 = await fetch(
-        `https://dailymed.nlm.nih.gov/dailymed/services/v2/ndcs.json?ndc=${variant}&pagesize=5`,
-        { headers: { Accept: "application/json" } }
-      );
-      if (!r1.ok) continue;
-      const d1 = await r1.json();
-      if (d1?.data?.length > 0) { matchedItem = d1.data[0]; break; }
+    let setid = null;
+
+    // Try NDC lookup with all variants
+    for (const variant of allVariants) {
+      try {
+        const r1 = await fetch(
+          `https://dailymed.nlm.nih.gov/dailymed/services/v2/ndcs.json?ndc=${variant}&pagesize=5`,
+          { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(5000) }
+        );
+        if (!r1.ok) continue;
+        const d1 = await r1.json();
+        if (d1?.data?.length > 0) { setid = d1.data[0].setid; break; }
+      } catch { continue; }
     }
 
-    if (!matchedItem) return null;
-    const setid = matchedItem.setid;
+    // Fallback: search by drug name if NDC lookup failed
+    if (!setid && drugName) {
+      try {
+        const searchName = drugName.replace(/[^a-zA-Z0-9 ]/g, "").split(" ").slice(0, 3).join("+");
+        const r = await fetch(
+          `https://dailymed.nlm.nih.gov/dailymed/services/v2/spls.json?drug_name=${searchName}&pagesize=3`,
+          { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(5000) }
+        );
+        if (r.ok) {
+          const d = await r.json();
+          if (d?.data?.length > 0) setid = d.data[0].setid;
+        }
+      } catch { /* skip */ }
+    }
+
     if (!setid) return null;
 
-    // Fetch full SPL for dosage form + route
-    const r2 = await fetch(
-      `https://dailymed.nlm.nih.gov/dailymed/services/v2/spls/${setid}.json`,
-      { headers: { Accept: "application/json" } }
-    );
-    const splData = r2.ok ? (await r2.json())?.data : null;
+    // Fetch SPL for dosage form + route
+    let splData = null;
+    try {
+      const r2 = await fetch(
+        `https://dailymed.nlm.nih.gov/dailymed/services/v2/spls/${setid}.json`,
+        { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(5000) }
+      );
+      if (r2.ok) splData = (await r2.json())?.data;
+    } catch { /* skip */ }
 
-    // Fetch packaging info — this has "Bottles of 500 tablets" etc
-    const r3 = await fetch(
-      `https://dailymed.nlm.nih.gov/dailymed/services/v2/spls/${setid}/packaging.json`,
-      { headers: { Accept: "application/json" } }
-    );
+    // Fetch packaging info
     let packageDescriptions = [];
-    if (r3.ok) {
-      const pkgData = await r3.json();
-      packageDescriptions = (pkgData?.data || []).map(p => p.description || p.packaging_description || JSON.stringify(p)).filter(Boolean);
-    }
+    try {
+      const r3 = await fetch(
+        `https://dailymed.nlm.nih.gov/dailymed/services/v2/spls/${setid}/packaging.json`,
+        { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(5000) }
+      );
+      if (r3.ok) {
+        const pkgData = await r3.json();
+        // DailyMed packaging can be nested — flatten all description fields
+        const flatten = (obj) => {
+          if (!obj) return [];
+          if (typeof obj === "string") return [obj];
+          if (Array.isArray(obj)) return obj.flatMap(flatten);
+          return Object.values(obj).flatMap(flatten);
+        };
+        packageDescriptions = flatten(pkgData?.data)
+          .filter(s => typeof s === "string" && s.length > 3 && /\d/.test(s))
+          .slice(0, 4);
+      }
+    } catch { /* skip */ }
 
-    // Use AI to interpret package description into a short UOM code
+    // Use AI to generate UOM code from package descriptions
     let uomCode = null;
     if (packageDescriptions.length > 0 && apiKey) {
       try {
@@ -80,13 +114,12 @@ async function fetchDailyMedUOM(ndc, apiKey) {
               role: "user",
               content: `Convert this pharmaceutical package description into a short UOM code using these rules:
 - Bottles of tablets or capsules: "BT" + count (e.g. "Bottles of 500 tablets" → "BT500", "120 capsules" → "BT120")
-- Liquid bottles (solutions, suspensions, syrups): just "BT" with volume if available (e.g. "1 bottle of 100mL" → "BT100ML", generic liquid bottle → "BT")
+- Liquid bottles (solutions, suspensions, syrups): "BT" + volume (e.g. "1 bottle of 100mL" → "BT100ML")
 - Vials: "VL" + volume (e.g. "5mL vial" → "VL5ML")
 - Tubes: "TB" + volume
-- Patches: "PATCH" + count
-- If unclear, use your best judgment following the same pattern.
+- If unclear, use best judgment.
 
-Package descriptions: ${packageDescriptions.slice(0, 3).join(" | ")}
+Package descriptions: ${packageDescriptions.join(" | ")}
 
 Reply with ONLY the short UOM code, nothing else.`
             }]
@@ -96,13 +129,13 @@ Reply with ONLY the short UOM code, nothing else.`
           const aiData = await aiResp.json();
           uomCode = aiData.content?.find(b => b.type === "text")?.text?.trim() || null;
         }
-      } catch { /* silently skip if AI call fails */ }
+      } catch { /* skip */ }
     }
 
     return {
       dosage_form: splData?.dosage_form || null,
       route: splData?.route || null,
-      package_descriptions: packageDescriptions.slice(0, 3),
+      package_descriptions: packageDescriptions,
       uom_code: uomCode,
       link: `https://dailymed.nlm.nih.gov/dailymed/drugInfo.cfm?setid=${setid}`,
     };
@@ -255,7 +288,8 @@ Return ONLY a valid JSON array with no other text, markdown, or explanation:
     const uomMap = {};
     await Promise.all(
       uniqueNdcs.map(async ndc => {
-        const info = await fetchDailyMedUOM(ndc, apiKey);
+        const drugName = rows.find(r => r.alternateId === ndc)?.drugName || "";
+        const info = await fetchDailyMedUOM(ndc, drugName, apiKey);
         uomMap[ndc] = info;
       })
     );
