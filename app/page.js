@@ -775,29 +775,29 @@ function POImportTool({ toast }) {
                 </button>
               </div>
             </div>
-            <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
+            <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12, tableLayout: "fixed" }}>
               <thead>
                 <tr>
-                  <th style={thStyle}>Drug Name</th>
-                  <th style={thStyle}>Inventory ID</th>
-                  <th style={thStyle}>Warehouse</th>
-                  <th style={thStyle}>Order Qty.</th>
-                  <th style={thStyle}>Unit Cost</th>
-                  <th style={thStyle}>NDC (Alternate ID)</th>
-                  {vendor === "mckesson" && <th style={thStyle}>MCK Item #</th>}
+                  <th style={Object.assign({}, thStyle, { width: "28%" })}>Drug Name</th>
+                  <th style={Object.assign({}, thStyle, { width: "12%", textAlign: "center" })}>Inventory ID</th>
+                  <th style={Object.assign({}, thStyle, { width: "10%", textAlign: "center" })}>Warehouse</th>
+                  <th style={Object.assign({}, thStyle, { width: "10%", textAlign: "center" })}>Order Qty.</th>
+                  <th style={Object.assign({}, thStyle, { width: "12%", textAlign: "center" })}>Unit Cost</th>
+                  <th style={Object.assign({}, thStyle, { width: "16%", textAlign: "center" })}>NDC (Alternate ID)</th>
+                  {vendor === "mckesson" && <th style={Object.assign({}, thStyle, { width: "12%", textAlign: "center" })}>MCK Item #</th>}
                 </tr>
               </thead>
               <tbody>
                 {rows.map(function(r, i) {
                   return (
                     <tr key={i}>
-                      <td style={Object.assign({}, tdStyle, { color: "#CBD5E1", maxWidth: 260, wordBreak: "break-word" })}>{r.drugName}</td>
-                      <td style={Object.assign({}, tdStyle, { fontFamily: "monospace", color: r.inventoryId ? "#34D399" : "#475569" })}>{r.inventoryId || <span style={{ fontStyle: "italic" }}>—</span>}</td>
-                      <td style={tdStyle}>{r.warehouse ? <span style={{ background: (r.warehouse === "TP-NY" ? "#3B82F6" : r.warehouse === "TP-OH" ? "#10B981" : "#F59E0B") + "20", color: r.warehouse === "TP-NY" ? "#93C5FD" : r.warehouse === "TP-OH" ? "#6EE7B7" : "#FCD34D", padding: "2px 8px", borderRadius: 5, fontWeight: 600, fontSize: 11 }}>{r.warehouse}</span> : <span style={{ color: "#475569" }}>—</span>}</td>
-                      <td style={Object.assign({}, tdStyle, { textAlign: "right", fontWeight: 600 })}>{r.orderQty}</td>
-                      <td style={Object.assign({}, tdStyle, { textAlign: "right", color: "#34D399", fontWeight: 600 })}>${typeof r.unitCost === "number" ? r.unitCost.toFixed(4) : r.unitCost}</td>
-                      <td style={Object.assign({}, tdStyle, { fontFamily: "monospace", color: "#94A3B8" })}>{r.alternateId}</td>
-                      {vendor === "mckesson" && <td style={Object.assign({}, tdStyle, { color: "#64748B" })}>{r.mckItemId}</td>}
+                      <td style={Object.assign({}, tdStyle, { color: "#CBD5E1", wordBreak: "break-word" })}>{r.drugName}</td>
+                      <td style={Object.assign({}, tdStyle, { fontFamily: "monospace", color: r.inventoryId ? "#34D399" : "#475569", textAlign: "center" })}>{r.inventoryId || <span style={{ fontStyle: "italic" }}>—</span>}</td>
+                      <td style={Object.assign({}, tdStyle, { textAlign: "center" })}>{r.warehouse ? <span style={{ background: (r.warehouse === "TP-NY" ? "#3B82F6" : r.warehouse === "TP-OH" ? "#10B981" : "#F59E0B") + "20", color: r.warehouse === "TP-NY" ? "#93C5FD" : r.warehouse === "TP-OH" ? "#6EE7B7" : "#FCD34D", padding: "2px 8px", borderRadius: 5, fontWeight: 600, fontSize: 11 }}>{r.warehouse}</span> : <span style={{ color: "#475569" }}>—</span>}</td>
+                      <td style={Object.assign({}, tdStyle, { textAlign: "center", fontWeight: 600 })}>{r.orderQty}</td>
+                      <td style={Object.assign({}, tdStyle, { textAlign: "center", color: "#34D399", fontWeight: 600 })}>${typeof r.unitCost === "number" ? r.unitCost.toFixed(4) : r.unitCost}</td>
+                      <td style={Object.assign({}, tdStyle, { fontFamily: "monospace", color: "#94A3B8", textAlign: "center" })}>{r.alternateId}</td>
+                      {vendor === "mckesson" && <td style={Object.assign({}, tdStyle, { color: "#64748B", textAlign: "center" })}>{r.mckItemId}</td>}
                     </tr>
                   );
                 })}
@@ -814,6 +814,8 @@ function POImportTool({ toast }) {
                   <tr>
                     <th style={thStyle}>NDC</th>
                     <th style={thStyle}>Drug Name</th>
+                    <th style={thStyle}>UOM Code</th>
+                    <th style={thStyle}>Package Description</th>
                     <th style={thStyle}>Dosage Form</th>
                     <th style={thStyle}>Route</th>
                     <th style={thStyle}>DailyMed</th>
@@ -826,7 +828,9 @@ function POImportTool({ toast }) {
                       <tr key={i}>
                         <td style={Object.assign({}, tdStyle, { fontFamily: "monospace", color: "#94A3B8" })}>{r.alternateId}</td>
                         <td style={Object.assign({}, tdStyle, { color: "#CBD5E1" })}>{r.drugName}</td>
-                        <td style={Object.assign({}, tdStyle, { color: info?.dosage_form ? "#34D399" : "#475569" })}>{info?.dosage_form || (info === null ? "Not found" : "—")}</td>
+                        <td style={Object.assign({}, tdStyle, { fontWeight: 700, color: info?.uom_code ? TOOL_COLOR : "#475569" })}>{info?.uom_code || (info === null ? "Not found" : "—")}</td>
+                        <td style={Object.assign({}, tdStyle, { color: "#94A3B8", fontSize: 11 })}>{info?.package_descriptions?.join(" | ") || "—"}</td>
+                        <td style={Object.assign({}, tdStyle, { color: "#94A3B8" })}>{info?.dosage_form || "—"}</td>
                         <td style={Object.assign({}, tdStyle, { color: "#94A3B8" })}>{info?.route || "—"}</td>
                         <td style={tdStyle}>{info?.link ? <a href={info.link} target="_blank" rel="noreferrer" style={{ color: TOOL_COLOR, fontSize: 11 }}>View ↗</a> : "—"}</td>
                       </tr>
