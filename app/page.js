@@ -1,5 +1,5 @@
 "use client";
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 
 /* ═══════ STORAGE (localStorage) ═══════ */
 function sGet(k) {
@@ -640,6 +640,8 @@ function WHT(props) {
 function POImportTool({ toast }) {
   var TOOL_COLOR = "#06B6D4";
   var _vendor = useState("other"), vendor = _vendor[0], setVendor = _vendor[1];
+  var pdfInputRef = useRef(null);
+  var screenshotInputRef = useRef(null);
   var _pdfs = useState([]), pdfs = _pdfs[0], setPdfs = _pdfs[1];
   var _screenshot = useState(null), screenshot = _screenshot[0], setScreenshot = _screenshot[1];
   var _loading = useState(false), loading = _loading[0], setLoading = _loading[1];
@@ -725,7 +727,7 @@ function POImportTool({ toast }) {
           <label style={labelStyle}>Vendor Type</label>
           <div style={{ display: "flex", gap: 10 }}>
             {[["other", "Keysource / Anda / Bloodworth"], ["mckesson", "McKesson"]].map(function(v) {
-              return <button key={v[0]} onClick={function() { setVendor(v[0]); setScreenshot(null); setPdfs([]); setRows([]); }}
+              return <button key={v[0]} onClick={function() { setVendor(v[0]); setScreenshot(null); setPdfs([]); setRows([]); setUomMap({}); setError(null); if (pdfInputRef.current) pdfInputRef.current.value = ""; if (screenshotInputRef.current) screenshotInputRef.current.value = ""; }}
                 style={{ padding: "8px 18px", borderRadius: 8, border: "1px solid " + (vendor === v[0] ? TOOL_COLOR : "#1E2433"), background: vendor === v[0] ? TOOL_COLOR + "20" : "transparent", color: vendor === v[0] ? TOOL_COLOR : "#94A3B8", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>{v[1]}</button>;
             })}
           </div>
@@ -734,13 +736,13 @@ function POImportTool({ toast }) {
         <div style={{ display: "grid", gridTemplateColumns: vendor === "mckesson" ? "1fr 1fr" : "1fr", gap: 16 }}>
           <div>
             <label style={labelStyle}>PO PDF{vendor === "mckesson" ? "" : "s"} <span style={{ color: "#475569", fontWeight: 400 }}>(one or more)</span></label>
-            <input type="file" accept=".pdf" multiple onChange={handlePdfChange} style={inputStyle} />
+            <input ref={pdfInputRef} type="file" accept=".pdf" multiple onChange={handlePdfChange} style={inputStyle} />
             {pdfs.length > 0 && <p style={{ color: "#10B981", fontSize: 11, marginTop: 6 }}>✓ {pdfs.length} PDF{pdfs.length > 1 ? "s" : ""} loaded: {pdfs.map(p => p.name).join(", ")}</p>}
           </div>
           {vendor === "mckesson" && (
             <div>
               <label style={labelStyle}>McKesson Portal Screenshot <span style={{ color: "#EF4444", fontWeight: 400 }}>(required — final authority)</span></label>
-              <input type="file" accept="image/*" onChange={handleScreenshotChange} style={inputStyle} />
+              <input ref={screenshotInputRef} type="file" accept="image/*" onChange={handleScreenshotChange} style={inputStyle} />
               {screenshot && <p style={{ color: "#10B981", fontSize: 11, marginTop: 6 }}>✓ Screenshot loaded</p>}
             </div>
           )}
