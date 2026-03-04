@@ -16,12 +16,10 @@ function mapWarehouse(storeName) {
 }
 
 function ndcVariants(ndc) {
-  // Generate all plausible NDC formatting variants to handle leading zero differences
   const parts = ndc.split("-");
   if (parts.length !== 3) return [ndc];
   const [a, b, c] = parts;
   const variants = new Set();
-  // Try padding each segment to standard lengths and stripping leading zeros
   const aPads = [a, a.replace(/^0+/, "") || "0", a.padStart(5, "0"), a.padStart(4, "0")];
   const bPads = [b, b.replace(/^0+/, "") || "0", b.padStart(4, "0"), b.padStart(3, "0")];
   const cPads = [c, c.replace(/^0+/, "") || "0", c.padStart(2, "0"), c.padStart(1, "0")];
@@ -31,36 +29,81 @@ function ndcVariants(ndc) {
   return Array.from(variants);
 }
 
-async function fetchDailyMedUOM(ndc) {
+async function fetchDailyMedUOM(ndc, apiKey) {
   try {
     const variants = ndcVariants(ndc);
-    let items = null;
+    let matchedItem = null;
+
     for (const variant of variants) {
       const r1 = await fetch(
-        `https://dailymed.nlm.nih.gov/dailymed/services/v2/ndcs.json?ndc=${variant}&pagesize=1`,
+        `https://dailymed.nlm.nih.gov/dailymed/services/v2/ndcs.json?ndc=${variant}&pagesize=5`,
         { headers: { Accept: "application/json" } }
       );
       if (!r1.ok) continue;
       const d1 = await r1.json();
-      if (d1?.data?.length > 0) { items = d1.data; break; }
+      if (d1?.data?.length > 0) { matchedItem = d1.data[0]; break; }
     }
-    if (!items) return null;
-    const setid = items[0].setid;
+
+    if (!matchedItem) return null;
+    const setid = matchedItem.setid;
     if (!setid) return null;
+
+    // Fetch full SPL for dosage form + route
     const r2 = await fetch(
       `https://dailymed.nlm.nih.gov/dailymed/services/v2/spls/${setid}.json`,
       { headers: { Accept: "application/json" } }
     );
-    if (!r2.ok) return null;
-    const d2 = await r2.json();
-    const spl = d2?.data;
-    if (!spl) return null;
+    const splData = r2.ok ? (await r2.json())?.data : null;
+
+    // Fetch packaging info — this has "Bottles of 500 tablets" etc
+    const r3 = await fetch(
+      `https://dailymed.nlm.nih.gov/dailymed/services/v2/spls/${setid}/packaging.json`,
+      { headers: { Accept: "application/json" } }
+    );
+    let packageDescriptions = [];
+    if (r3.ok) {
+      const pkgData = await r3.json();
+      packageDescriptions = (pkgData?.data || []).map(p => p.description || p.packaging_description || JSON.stringify(p)).filter(Boolean);
+    }
+
+    // Use AI to interpret package description into a short UOM code
+    let uomCode = null;
+    if (packageDescriptions.length > 0 && apiKey) {
+      try {
+        const aiResp = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+          body: JSON.stringify({
+            model: "claude-haiku-4-5-20251001",
+            max_tokens: 50,
+            messages: [{
+              role: "user",
+              content: `Convert this pharmaceutical package description into a short UOM code using these rules:
+- Bottles of tablets or capsules: "BT" + count (e.g. "Bottles of 500 tablets" → "BT500", "120 capsules" → "BT120")
+- Liquid bottles (solutions, suspensions, syrups): just "BT" with volume if available (e.g. "1 bottle of 100mL" → "BT100ML", generic liquid bottle → "BT")
+- Vials: "VL" + volume (e.g. "5mL vial" → "VL5ML")
+- Tubes: "TB" + volume
+- Patches: "PATCH" + count
+- If unclear, use your best judgment following the same pattern.
+
+Package descriptions: ${packageDescriptions.slice(0, 3).join(" | ")}
+
+Reply with ONLY the short UOM code, nothing else.`
+            }]
+          })
+        });
+        if (aiResp.ok) {
+          const aiData = await aiResp.json();
+          uomCode = aiData.content?.find(b => b.type === "text")?.text?.trim() || null;
+        }
+      } catch { /* silently skip if AI call fails */ }
+    }
+
     return {
-      title: spl.title || null,
-      dosage_form: spl.dosage_form || null,
-      route: spl.route || null,
-      product_type: items[0].product_type || null,
-      setid,
+      dosage_form: splData?.dosage_form || null,
+      route: splData?.route || null,
+      package_descriptions: packageDescriptions.slice(0, 3),
+      uom_code: uomCode,
       link: `https://dailymed.nlm.nih.gov/dailymed/drugInfo.cfm?setid=${setid}`,
     };
   } catch {
@@ -212,7 +255,7 @@ Return ONLY a valid JSON array with no other text, markdown, or explanation:
     const uomMap = {};
     await Promise.all(
       uniqueNdcs.map(async ndc => {
-        const info = await fetchDailyMedUOM(ndc);
+        const info = await fetchDailyMedUOM(ndc, apiKey);
         uomMap[ndc] = info;
       })
     );
