@@ -645,12 +645,10 @@ function normalizeNdc(ndc) {
 function ndcVariants(ndc) {
   var parts = (ndc || "").split("-");
   if (parts.length !== 3) return [ndc];
-  var a = parts[0], b = parts[1], c = parts[2];
-  var v = {};
+  var a = parts[0], b = parts[1], c = parts[2], v = {};
   v[ndc] = 1;
   v[a.padStart(5, "0") + "-" + b.padStart(4, "0") + "-" + c.padStart(2, "0")] = 1;
   v[(a.replace(/^0+/, "") || "0") + "-" + (b.replace(/^0+/, "") || "0") + "-" + (c.replace(/^0+/, "") || "0")] = 1;
-  v[a.padStart(4, "0") + "-" + b.padStart(4, "0") + "-" + c.padStart(2, "0")] = 1;
   return Object.keys(v);
 }
 
@@ -662,11 +660,11 @@ function POImportTool(props) {
 
   var _vendor = useState("other"), vendor = _vendor[0], setVendor = _vendor[1];
   var _pdfs = useState([]), pdfs = _pdfs[0], setPdfs = _pdfs[1];
-  var _screenshot = useState(null), screenshot = _screenshot[0], setScreenshot = _screenshot[1];
   var _screenshotUrl = useState(null), screenshotUrl = _screenshotUrl[0], setScreenshotUrl = _screenshotUrl[1];
-  var _pastedText = useState(""), pastedText = _pastedText[0], setPastedText = _pastedText[1];
+  var _mckPaste = useState(""), mckPaste = _mckPaste[0], setMckPaste = _mckPaste[1];
   var _loading = useState(false), loading = _loading[0], setLoading = _loading[1];
   var _results = useState([]), results = _results[0], setResults = _results[1];
+  var _mckWarnings = useState([]), mckWarnings = _mckWarnings[0], setMckWarnings = _mckWarnings[1];
   var _error = useState(null), error = _error[0], setError = _error[1];
   var _ndcMap = useState(null), ndcMap = _ndcMap[0], setNdcMap = _ndcMap[1];
   var _ndcLoading = useState(false), ndcLoading = _ndcLoading[0], setNdcLoading = _ndcLoading[1];
@@ -686,10 +684,9 @@ function POImportTool(props) {
     setPdfs(converted);
   }
 
-  async function handleScreenshotChange(e) {
+  function handleScreenshotChange(e) {
     var file = e.target.files[0];
     if (!file) return;
-    setScreenshot(await fileToBase64(file));
     setScreenshotUrl(URL.createObjectURL(file));
   }
 
@@ -708,14 +705,13 @@ function POImportTool(props) {
       var data = json.data || [];
       var map = {};
       data.forEach(function(row) {
-        var altId = row.AlternateID || "";
-        var invId = row.InventoryID || "";
+        var altId = (row.AlternateID || "").trim();
+        var invId = (row.InventoryID || "").trim();
         var desc = row.Description || "";
         if (!altId) return;
-        // Store under multiple normalized formats
         var variants = ndcVariants(altId);
-        variants.forEach(function(v) { map[v] = { inventoryId: invId, description: desc, rawNdc: altId }; });
-        map[normalizeNdc(altId)] = { inventoryId: invId, description: desc, rawNdc: altId };
+        variants.forEach(function(v) { map[v] = { inventoryId: invId, description: desc }; });
+        map[normalizeNdc(altId)] = { inventoryId: invId, description: desc };
       });
       setNdcMap(map);
       toast("Loaded " + data.length + " NDC records from Acumatica");
@@ -726,55 +722,100 @@ function POImportTool(props) {
     } finally { setNdcLoading(false); }
   }, [cred, toast]);
 
+  function lookupNdc(ndc, map) {
+    if (!map) return null;
+    var norm = normalizeNdc(ndc);
+    if (map[norm]) return map[norm];
+    if (map[ndc]) return map[ndc];
+    var vars = ndcVariants(ndc);
+    for (var k = 0; k < vars.length; k++) { if (map[vars[k]]) return map[vars[k]]; }
+    return null;
+  }
+
+  // Parse McKesson pasted text for vendor item numbers
+  function parseMckPaste(text) {
+    if (!text || !text.trim()) return [];
+    var lines = text.split("\n").map(function(l) { return l.trim(); }).filter(function(l) { return l.length > 0; });
+    var items = [];
+    for (var i = 0; i < lines.length; i++) {
+      // Look for 7-digit MCK item numbers
+      var match = lines[i].match(/\b(\d{7})\b/);
+      if (match) items.push(match[1]);
+    }
+    return items;
+  }
+
   async function handleValidate() {
-    if (pdfs.length === 0 && !pastedText.trim()) { toast("Upload a PDF or paste data", "error"); return; }
+    if (pdfs.length === 0) { toast("Upload at least one PDF", "error"); return; }
     if (!ok) { lp(); return; }
-    setLoading(true); setError(null); setResults([]);
+    setLoading(true); setError(null); setResults([]); setMckWarnings([]);
     try {
-      // Step 1: Parse PDFs
+      // Step 1: Parse PDFs via server
       var parseResp = await fetch("/api/po-import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pdfs: pdfs, pastedText: pastedText }),
+        body: JSON.stringify({ pdfs: pdfs }),
       });
       var parseJson = await parseResp.json();
       if (!parseResp.ok) throw new Error(parseJson.error || "Parse failed");
       var pdfItems = parseJson.items || [];
-      if (pdfItems.length === 0) throw new Error("No NDCs found in the documents");
+      if (pdfItems.length === 0) throw new Error("No items found in the documents. Make sure the PDFs contain NDC numbers.");
 
-      // Step 2: Fetch NDC map from Acumatica (if not already loaded)
+      // Step 2: Fetch NDC map from Acumatica
       var map = ndcMap;
       if (!map) {
         map = await fetchNdcMap();
-        if (!map) throw new Error("Could not fetch NDC data from Acumatica");
+        if (!map) throw new Error("Could not fetch NDC data from Acumatica. Check your login.");
       }
 
-      // Step 3: Match NDCs
+      // Step 3: Match each item's NDC against OData
       var matched = pdfItems.map(function(item) {
-        var normalized = normalizeNdc(item.ndc);
-        var match = map[normalized] || map[item.ndc] || null;
-        // Try additional variants
-        if (!match) {
-          var vars = ndcVariants(item.ndc);
-          for (var k = 0; k < vars.length; k++) { if (map[vars[k]]) { match = map[vars[k]]; break; } }
-        }
+        var match = lookupNdc(item.ndc, map);
         return {
           ndc: item.ndc,
           drugName: item.drugName,
           qty: item.qty,
-          unitPrice: item.unitPrice,
           totalPrice: item.totalPrice,
+          unitPrice: item.unitPrice,
           warehouse: item.warehouse,
+          vendorSource: item.vendorSource,
+          vendorItemNum: item.vendorItemNum,
+          poNumber: item.poNumber,
+          sourceFile: item.sourceFile,
           inventoryId: match ? match.inventoryId : null,
           acumaticaDesc: match ? match.description : null,
-          found: !!match,
-          source: item.source,
+          ndcFound: !!match,
         };
       });
 
+      // Step 4: McKesson screenshot cross-reference
+      var warnings = [];
+      if (vendor === "mckesson" && mckPaste.trim()) {
+        var screenshotItemNums = parseMckPaste(mckPaste);
+        var mckItems = matched.filter(function(r) { return r.vendorSource === "McKesson"; });
+        var pdfItemNums = mckItems.map(function(r) { return r.vendorItemNum; }).filter(Boolean);
+
+        // Items in PDF but NOT in screenshot
+        var inPdfOnly = mckItems.filter(function(r) {
+          return r.vendorItemNum && screenshotItemNums.indexOf(r.vendorItemNum) < 0;
+        });
+        inPdfOnly.forEach(function(item) {
+          warnings.push({ type: "pdf-only", msg: item.drugName + " (MCK#" + item.vendorItemNum + ") is in the PDF but NOT in the screenshot", item: item });
+        });
+
+        // Items in screenshot but NOT in PDF
+        var inScreenshotOnly = screenshotItemNums.filter(function(num) {
+          return pdfItemNums.indexOf(num) < 0;
+        });
+        inScreenshotOnly.forEach(function(num) {
+          warnings.push({ type: "screenshot-only", msg: "MCK Item #" + num + " is in the screenshot but NOT in the PDF", item: null });
+        });
+      }
+
       setResults(matched);
-      var foundCount = matched.filter(function(r) { return r.found; }).length;
-      toast("Validated " + matched.length + " NDCs: " + foundCount + " matched, " + (matched.length - foundCount) + " not found");
+      setMckWarnings(warnings);
+      var foundCount = matched.filter(function(r) { return r.ndcFound; }).length;
+      toast("Validated " + matched.length + " items: " + foundCount + " matched in OData, " + (matched.length - foundCount) + " not found");
     } catch (err) {
       setError(err.message);
       toast("Validation failed: " + err.message, "error");
@@ -782,9 +823,9 @@ function POImportTool(props) {
   }
 
   function downloadCSV() {
-    var header = "Inventory ID,NDC,Description (Acumatica),Drug Name (PO),Warehouse,Qty,Unit Price,Status\r\n";
+    var header = "Status,NDC,GEN Inventory ID,Description (Acumatica),Drug Name (PO),Vendor,Warehouse,PO#,Qty,Unit Cost,Total Price,Vendor Item#,Source File\r\n";
     var lines = results.map(function(r) {
-      return [r.inventoryId || "", r.ndc, r.acumaticaDesc || "", r.drugName, r.warehouse, r.qty || "", r.unitPrice ? r.unitPrice.toFixed(4) : "", r.found ? "MATCHED" : "NOT FOUND"]
+      return [r.ndcFound ? "MATCHED" : "NOT FOUND", r.ndc, r.inventoryId || "", r.acumaticaDesc || "", r.drugName, r.vendorSource, r.warehouse, r.poNumber, r.qty || "", r.unitPrice || "", r.totalPrice || "", r.vendorItemNum || "", r.sourceFile || ""]
         .map(function(v) { return "\"" + String(v == null ? "" : v).replace(/"/g, "\"\"") + "\""; }).join(",");
     });
     var csv = header + lines.join("\r\n");
@@ -796,18 +837,18 @@ function POImportTool(props) {
   }
 
   function reset() {
-    setPdfs([]); setScreenshot(null); setScreenshotUrl(null); setPastedText(""); setResults([]); setError(null);
+    setPdfs([]); setScreenshotUrl(null); setMckPaste(""); setResults([]); setMckWarnings([]); setError(null);
     if (pdfInputRef.current) pdfInputRef.current.value = "";
     if (screenshotInputRef.current) screenshotInputRef.current.value = "";
   }
 
   var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
-  var foundCount = results.filter(function(r) { return r.found; }).length;
+  var foundCount = results.filter(function(r) { return r.ndcFound; }).length;
   var notFoundCount = results.length - foundCount;
 
   return (
     <div>
-      <p style={{ color: "#64748B", fontSize: 13, marginBottom: 20 }}>Upload vendor PO PDFs to extract NDCs, then validate against Acumatica <strong>Generic Current NDCs</strong> to find GEN- Inventory IDs.</p>
+      <p style={{ color: "#64748B", fontSize: 13, marginBottom: 20 }}>Upload vendor PO PDFs to extract NDCs, then validate against Acumatica <strong>Generic Current NDCs</strong> OData to find GEN- Inventory IDs.</p>
 
       <div style={S.card}>
         <div style={{ marginBottom: 16 }}>
@@ -827,25 +868,24 @@ function POImportTool(props) {
             {pdfs.length > 0 && <p style={{ color: "#10B981", fontSize: 11, marginTop: 6 }}>{"\u2713"} {pdfs.length} PDF{pdfs.length > 1 ? "s" : ""}: {pdfs.map(function(p) { return p.name; }).join(", ")}</p>}
           </div>
           {vendor === "mckesson" && <div>
-            <div style={{ fontSize: 12, color: "#94A3B8", fontWeight: 500, marginBottom: 6 }}>McKesson Portal Screenshot <span style={{ color: "#475569", fontWeight: 400 }}>(for verification)</span></div>
+            <div style={{ fontSize: 12, color: "#94A3B8", fontWeight: 500, marginBottom: 6 }}>McKesson Portal Screenshot <span style={{ color: "#475569", fontWeight: 400 }}>(visual reference)</span></div>
             <input ref={screenshotInputRef} type="file" accept="image/*" onChange={handleScreenshotChange} style={Object.assign({}, S.inp, { cursor: "pointer" })} />
-            {screenshot && <p style={{ color: "#10B981", fontSize: 11, marginTop: 6 }}>{"\u2713"} Screenshot loaded</p>}
           </div>}
         </div>
 
         {vendor === "mckesson" && <div style={{ marginTop: 16 }}>
-          <div style={{ fontSize: 12, color: "#94A3B8", fontWeight: 500, marginBottom: 6 }}>Paste McKesson Portal Data <span style={{ color: "#475569", fontWeight: 400 }}>(copy table from portal — optional, for cross-referencing)</span></div>
-          <textarea value={pastedText} onChange={function(e) { setPastedText(e.target.value); }} placeholder="Paste McKesson portal table data here (tab-separated)..." rows={4} style={Object.assign({}, S.inp, { resize: "vertical", fontFamily: "monospace", fontSize: 11 })} />
+          <div style={{ fontSize: 12, color: "#94A3B8", fontWeight: 500, marginBottom: 6 }}>Paste McKesson Item Numbers <span style={{ color: "#475569", fontWeight: 400 }}>(from portal — one per line or paste entire table to cross-reference)</span></div>
+          <textarea value={mckPaste} onChange={function(e) { setMckPaste(e.target.value); }} placeholder={"Paste McKesson portal data here for cross-referencing...\nExample: paste the MCK ITEM # column or the whole table"} rows={4} style={Object.assign({}, S.inp, { resize: "vertical", fontFamily: "monospace", fontSize: 11 })} />
         </div>}
 
-        <div style={{ marginTop: 16, display: "flex", gap: 10, alignItems: "center" }}>
-          <button onClick={handleValidate} disabled={loading || (pdfs.length === 0 && !pastedText.trim())}
-            style={Object.assign({}, S.btn(), { padding: "10px 20px", opacity: (loading || (pdfs.length === 0 && !pastedText.trim())) ? 0.5 : 1 })}>
+        <div style={{ marginTop: 16, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <button onClick={handleValidate} disabled={loading || pdfs.length === 0}
+            style={Object.assign({}, S.btn(), { padding: "10px 20px", opacity: (loading || pdfs.length === 0) ? 0.5 : 1 })}>
             {loading ? <><Spinner /> Parsing & Validating...</> : <><IconUpload /> Parse & Validate NDCs</>}
           </button>
           <button onClick={function() { setNdcMap(null); fetchNdcMap(); }} disabled={ndcLoading || !ok}
             style={Object.assign({}, S.btn("ghost"), { padding: "10px 16px", opacity: (!ok || ndcLoading) ? 0.5 : 1 })}>
-            {ndcLoading ? <><Spinner /> Loading...</> : <><IconRefresh /> {ndcMap ? "Refresh NDC Map" : "Load NDC Map"}</>}
+            {ndcLoading ? <><Spinner /> Loading...</> : <><IconRefresh /> {ndcMap ? "Refresh NDC Map" : "Pre-load NDC Map"}</>}
           </button>
           {ndcMap && <span style={{ fontSize: 11, color: "#10B981" }}>{"\u2713"} NDC map loaded</span>}
         </div>
@@ -860,37 +900,59 @@ function POImportTool(props) {
         </div>
       </div>}
 
+      {mckWarnings.length > 0 && <div style={{ marginBottom: 16 }}>
+        {mckWarnings.map(function(w, i) {
+          var isPdfOnly = w.type === "pdf-only";
+          return <div key={i} style={{ background: isPdfOnly ? "rgba(245,158,11,0.08)" : "rgba(139,92,246,0.08)", border: "1px solid " + (isPdfOnly ? "rgba(245,158,11,0.3)" : "rgba(139,92,246,0.3)"), borderRadius: 10, padding: "10px 16px", marginBottom: 8, display: "flex", alignItems: "center", gap: 10 }}>
+            <IconAlert />
+            <span style={{ fontSize: 13, color: isPdfOnly ? "#FCD34D" : "#C4B5FD" }}>{w.msg}</span>
+          </div>;
+        })}
+      </div>}
+
       {results.length > 0 && <div>
         <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
-          <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#64748B", textTransform: "uppercase", fontWeight: 600 }}>Total NDCs</div><div style={{ fontSize: 24, fontWeight: 700, color: "#F8FAFC", marginTop: 4 }}>{results.length}</div></div>
-          <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#64748B", textTransform: "uppercase", fontWeight: 600 }}>Matched</div><div style={{ fontSize: 24, fontWeight: 700, color: "#10B981", marginTop: 4 }}>{foundCount}</div></div>
-          <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#64748B", textTransform: "uppercase", fontWeight: 600 }}>Not Found</div><div style={{ fontSize: 24, fontWeight: 700, color: notFoundCount > 0 ? "#EF4444" : "#10B981", marginTop: 4 }}>{notFoundCount}</div></div>
+          <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#64748B", textTransform: "uppercase", fontWeight: 600 }}>Total Items</div><div style={{ fontSize: 24, fontWeight: 700, color: "#F8FAFC", marginTop: 4 }}>{results.length}</div></div>
+          <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#64748B", textTransform: "uppercase", fontWeight: 600 }}>In OData</div><div style={{ fontSize: 24, fontWeight: 700, color: "#10B981", marginTop: 4 }}>{foundCount}</div></div>
+          <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#64748B", textTransform: "uppercase", fontWeight: 600 }}>Not in OData</div><div style={{ fontSize: 24, fontWeight: 700, color: notFoundCount > 0 ? "#EF4444" : "#10B981", marginTop: 4 }}>{notFoundCount}</div></div>
+          {mckWarnings.length > 0 && <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#64748B", textTransform: "uppercase", fontWeight: 600 }}>MCK Warnings</div><div style={{ fontSize: 24, fontWeight: 700, color: "#F59E0B", marginTop: 4 }}>{mckWarnings.length}</div></div>}
         </div>
 
         <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto" })}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", borderBottom: "1px solid #1E2433" }}>
             <span style={{ fontSize: 14, fontWeight: 600, color: "#F8FAFC" }}>NDC Validation Results</span>
-            <button onClick={downloadCSV} style={Object.assign({}, S.btn(), { padding: "6px 14px", fontSize: 12 })}><IconCSV /> Download CSV</button>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={reset} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}><IconTrash /> Clear</button>
+              <button onClick={downloadCSV} style={Object.assign({}, S.btn(), { padding: "6px 14px", fontSize: 12 })}><IconCSV /> Download CSV</button>
+            </div>
           </div>
           <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
             <thead><tr>
-              <th style={S.th}>Status</th>
+              <th style={S.th}>OData Status</th>
               <th style={S.th}>NDC</th>
               <th style={S.th}>GEN- Inventory ID</th>
               <th style={S.th}>Description (Acumatica)</th>
               <th style={S.th}>Drug Name (PO)</th>
+              <th style={S.th}>Vendor</th>
               <th style={Object.assign({}, S.th, { textAlign: "center" })}>Qty</th>
-              <th style={Object.assign({}, S.th, { textAlign: "right" })}>Unit Price</th>
+              <th style={Object.assign({}, S.th, { textAlign: "right" })}>Unit Cost</th>
+              <th style={Object.assign({}, S.th, { textAlign: "right" })}>Total</th>
+              {vendor === "mckesson" && <th style={S.th}>MCK Item #</th>}
+              <th style={S.th}>Source</th>
             </tr></thead>
             <tbody>{results.map(function(r, i) {
-              return <tr key={i} style={{ background: r.found ? "transparent" : "rgba(239,68,68,0.04)" }}>
-                <td style={S.td}><span style={S.badge(r.found ? "success" : "danger")}>{r.found ? <><IconCheck /> Match</> : <><IconAlert /> Missing</>}</span></td>
+              return <tr key={i} style={{ background: r.ndcFound ? "transparent" : "rgba(239,68,68,0.04)" }}>
+                <td style={S.td}><span style={S.badge(r.ndcFound ? "success" : "danger")}>{r.ndcFound ? <><IconCheck /> Match</> : <><IconAlert /> Missing</>}</span></td>
                 <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, color: "#94A3B8" })}>{r.ndc}</td>
                 <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontWeight: 600, color: r.inventoryId ? "#34D399" : "#475569" })}>{r.inventoryId || "\u2014"}</td>
-                <td style={Object.assign({}, S.td, { color: "#CBD5E1", maxWidth: 250, wordBreak: "break-word" })}>{r.acumaticaDesc || "\u2014"}</td>
-                <td style={Object.assign({}, S.td, { color: "#94A3B8", maxWidth: 220, wordBreak: "break-word" })}>{r.drugName || "\u2014"}</td>
+                <td style={Object.assign({}, S.td, { color: "#CBD5E1", maxWidth: 220, wordBreak: "break-word" })}>{r.acumaticaDesc || "\u2014"}</td>
+                <td style={Object.assign({}, S.td, { color: "#94A3B8", maxWidth: 200, wordBreak: "break-word" })}>{r.drugName || "\u2014"}</td>
+                <td style={Object.assign({}, S.td, { fontSize: 11 })}>{r.vendorSource || "\u2014"}</td>
                 <td style={Object.assign({}, S.td, { textAlign: "center", fontWeight: 600 })}>{r.qty || "\u2014"}</td>
-                <td style={Object.assign({}, S.td, { textAlign: "right", color: "#34D399", fontWeight: 600 })}>{r.unitPrice ? "$" + r.unitPrice.toFixed(4) : "\u2014"}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right", color: "#34D399", fontWeight: 600 })}>{r.unitPrice ? "$" + r.unitPrice.toFixed(2) : "\u2014"}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right", fontFamily: "monospace" })}>{r.totalPrice ? "$" + r.totalPrice.toLocaleString(undefined, { minimumFractionDigits: 2 }) : "\u2014"}</td>
+                {vendor === "mckesson" && <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, color: "#64748B" })}>{r.vendorItemNum || "\u2014"}</td>}
+                <td style={Object.assign({}, S.td, { fontSize: 10, color: "#475569" })}>{(r.sourceFile || "").split("/").pop()}</td>
               </tr>;
             })}</tbody>
           </table>
