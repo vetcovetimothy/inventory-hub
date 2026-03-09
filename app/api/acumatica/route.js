@@ -15,6 +15,7 @@ const PREFIX = process.env.ACUMATICA_ODATA_PREFIX || "/(W(89))/odata/VetCove";
 const ENDPOINTS = {
   "po":            "PURCH%20-%20TP%20PO%20Export%20with%20Replen",
   "po-ggm":        "PURCH%20-%20Export%20PO%20Lines%20GGM",
+  "ndc-lookup":    "PURCH%20-%20Generic%20Current%20NDCs",
   "short-dating":  "INV%20-%20Short-Dating%20Tracker",
   "backorder":     "INV%20-%20Backorder%20Item%20Review",
 };
@@ -51,6 +52,11 @@ const COLUMN_MAP = {
     { label: "Price",         keys: ["Price", "UnitCost", "LastCost"] },
     { label: "MovementClass", keys: ["MovementClass", "Movement Class"] },
   ],
+  "ndc-lookup": [
+    { label: "InventoryID",   keys: ["InventoryID", "InventoryId", "InventoryCd", "InventoryCD"] },
+    { label: "AlternateID",   keys: ["AlternateID", "AlternateId", "NDC", "Ndc", "SKUNDC", "SkuNDC", "UsrSKUNDC", "SKU_NDC"] },
+    { label: "Description",   keys: ["Description", "Descr", "ItemDescription"] },
+  ],
   "short-dating": [
     { label: "ItemStatus",      keys: ["ItemStatus", "Status"] },
     { label: "MovementClass",   keys: ["MovementClass"] },
@@ -85,7 +91,7 @@ export async function POST(request) {
     const { type, warehouse, username, password, useServiceAccount } = body;
 
     if (!type || !ENDPOINTS[type]) {
-      return Response.json({ error: "Invalid type. Use: po, po-ggm, short-dating, backorder" }, { status: 400 });
+      return Response.json({ error: "Invalid type. Use: po, po-ggm, ndc-lookup, short-dating, backorder" }, { status: 400 });
     }
 
     // Use service account credentials from env vars, or user-provided credentials
