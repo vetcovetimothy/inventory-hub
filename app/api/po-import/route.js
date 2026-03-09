@@ -1,147 +1,204 @@
 /**
  * POST /api/po-import
  *
- * Parses PO PDFs to extract NDCs and line item data.
- * No AI/Claude API — pure PDF text extraction + regex parsing.
+ * Parses PO PDFs (Keysource/Anda/Bloodworth/McKesson) to extract line items.
+ * Uses pdfjs-dist for text extraction — no AI.
  *
- * Body: { pdfs: [{ data: base64, name: string }], pastedText?: string }
- * Returns: { items: [{ ndc, drugName, qty, unitPrice, totalPrice, warehouse, rawLine, source }], warehouse, count }
+ * Body: { pdfs: [{ data: base64, name: string }] }
+ * Returns: { items: [...], warehouse, vendorSource, poNumber, count }
  */
 
 export const maxDuration = 60;
 
-const WAREHOUSE_MAP = { hayward: "TP-CA", brooklyn: "TP-NY", "seven hills": "TP-OH", ohio: "TP-OH" };
-
-function detectWarehouse(text) {
-  var lower = text.toLowerCase();
-  for (var key in WAREHOUSE_MAP) { if (lower.includes(key)) return WAREHOUSE_MAP[key]; }
-  return "";
+async function extractTextFromPdf(base64Data) {
+  const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.js");
+  const buffer = Buffer.from(base64Data, "base64");
+  const data = new Uint8Array(buffer);
+  const doc = await pdfjsLib.getDocument({ data, verbosity: 0 }).promise;
+  let text = "";
+  for (let i = 1; i <= doc.numPages; i++) {
+    const page = await doc.getPage(i);
+    const content = await page.getTextContent();
+    text += content.items.map((item) => item.str).join("\n") + "\n";
+  }
+  return text;
 }
 
-var NDC_REGEX = /\b(\d{4,5}-\d{3,4}-\d{1,2})\b/g;
-var PRICE_REGEX = /\$?\d{1,6}\.\d{2,4}/g;
+function parsePO(text) {
+  const lines = text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
 
-function parsePdfText(text, fileName) {
-  var lines = text.split("\n").map(function(l) { return l.trim(); }).filter(function(l) { return l.length > 0; });
-  var headerText = lines.slice(0, 30).join(" ");
-  var warehouse = detectWarehouse(headerText);
-  var items = [];
-  var seenNdcs = {};
-
-  for (var i = 0; i < lines.length; i++) {
-    var line = lines[i];
-    var ndcMatches = line.match(NDC_REGEX);
-    if (!ndcMatches) continue;
-
-    for (var j = 0; j < ndcMatches.length; j++) {
-      var ndc = ndcMatches[j].trim();
-      if (seenNdcs[ndc]) continue;
-      seenNdcs[ndc] = true;
-
-      var prevLine = i > 0 ? lines[i - 1] : "";
-      var beforeNdc = (line.split(ndc)[0] || "").replace(NDC_REGEX, "").replace(PRICE_REGEX, "").replace(/\b\d{1,3}\b/g, "").replace(/[|$]/g, "").replace(/\s+/g, " ").trim();
-      var afterNdc = (line.split(ndc)[1] || "").replace(NDC_REGEX, "").replace(PRICE_REGEX, "").replace(/\b\d{1,3}\b/g, "").replace(/[|$]/g, "").replace(/\s+/g, " ").trim();
-      var drugName = (beforeNdc && beforeNdc.length >= 4) ? beforeNdc : (afterNdc && afterNdc.length >= 4) ? afterNdc : prevLine.replace(NDC_REGEX, "").replace(PRICE_REGEX, "").replace(/\b\d{1,3}\b/g, "").replace(/\s+/g, " ").trim();
-
-      var prices = (line.match(PRICE_REGEX) || []).map(function(p) { return parseFloat(p.replace("$", "")); });
-      var numLine = line.replace(NDC_REGEX, "").replace(PRICE_REGEX, "");
-      var qtyNums = [];
-      var qm;
-      var qr = /\b(\d{1,4})\b/g;
-      while ((qm = qr.exec(numLine)) !== null) { var n = parseInt(qm[1]); if (n > 0 && n < 10000) qtyNums.push(n); }
-
-      items.push({
-        ndc: ndc,
-        drugName: drugName || "",
-        qty: qtyNums.length > 0 ? qtyNums[0] : null,
-        unitPrice: prices.length > 0 ? prices[0] : null,
-        totalPrice: prices.length > 1 ? prices[prices.length - 1] : null,
-        warehouse: warehouse,
-        rawLine: line,
-        source: fileName || "pdf",
-      });
-    }
+  // Detect warehouse and vendor from header
+  let warehouse = "",
+    vendorSource = "",
+    poNumber = "",
+    storeName = "";
+  for (let i = 0; i < Math.min(lines.length, 25); i++) {
+    const lower = lines[i].toLowerCase();
+    if (lower.includes("hayward")) warehouse = "TP-CA";
+    if (lower.includes("brooklyn")) warehouse = "TP-NY";
+    if (lower.includes("seven hills") || lower.includes("ohio"))
+      warehouse = "TP-OH";
+    if (lower.includes("mckesson") && !vendorSource) vendorSource = "McKesson";
+    if (lower.includes("keysource")) vendorSource = "Keysource";
+    if (lower.includes("anda")) vendorSource = "Anda";
+    if (lower.includes("bloodworth")) vendorSource = "Bloodworth";
+    const poMatch = lines[i].match(/^PO#:\s*(\d+)/);
+    if (poMatch) poNumber = poMatch[1];
+    const storeMatch = lines[i].match(/^Store Name:\s*(.+)/);
+    if (storeMatch) storeName = storeMatch[1].trim();
   }
 
-  return { items: items, warehouse: warehouse };
-}
+  const NDC_REGEX = /^\d{4,5}-\d{3,4}-\d{1,2}$/;
 
-function parsePastedText(text) {
-  var lines = text.split("\n").map(function(l) { return l.trim(); }).filter(function(l) { return l.length > 0; });
-  var items = [];
-  var seenNdcs = {};
-
-  for (var i = 0; i < lines.length; i++) {
-    var line = lines[i];
-    var ndcMatches = line.match(NDC_REGEX);
-    if (!ndcMatches) continue;
-
-    for (var j = 0; j < ndcMatches.length; j++) {
-      var ndc = ndcMatches[j].trim();
-      if (seenNdcs[ndc]) continue;
-      seenNdcs[ndc] = true;
-
-      var cleanLine = line.replace(NDC_REGEX, "").replace(PRICE_REGEX, "").replace(/\b\d{1,3}\b/g, "").replace(/\s+/g, " ").trim();
-      var prices = (line.match(PRICE_REGEX) || []).map(function(p) { return parseFloat(p.replace("$", "")); });
-
-      items.push({
-        ndc: ndc,
-        drugName: cleanLine.slice(0, 120) || "",
-        qty: null,
-        unitPrice: prices.length > 0 ? prices[0] : null,
-        totalPrice: prices.length > 1 ? prices[prices.length - 1] : null,
-        warehouse: "",
-        rawLine: line,
-        source: "pasted",
-      });
-    }
+  // Find all NDC line positions
+  const ndcPositions = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (NDC_REGEX.test(lines[i])) ndcPositions.push(i);
   }
 
-  return items;
+  // Noise patterns to skip when looking for drug names
+  const isNoise = (s) => {
+    const l = s.toLowerCase();
+    return (
+      l.includes("vetcove") ||
+      l.includes("amount:") ||
+      l.includes("invoice") ||
+      l.includes("store name") ||
+      l.includes("original po") ||
+      l.includes("create date") ||
+      /^po#/i.test(l) ||
+      l === "non edi)" ||
+      l === "edi)" ||
+      l === "0" ||
+      l === "non" ||
+      /^\d{5,7}$/.test(s) ||
+      /^\$[\d,.]+$/.test(s) ||
+      l === "drug name" ||
+      l === "ndc" ||
+      l === "number" ||
+      l === "of pkg" ||
+      l === "total" ||
+      l === "price" ||
+      l === "unit price" ||
+      l === "vendor name" ||
+      l === "received" ||
+      l === "qty" ||
+      l === "vendor" ||
+      l === "item #"
+    );
+  };
+
+  const items = [];
+
+  for (let n = 0; n < ndcPositions.length; n++) {
+    const ndcIdx = ndcPositions[n];
+    const ndc = lines[ndcIdx];
+
+    // Look BACKWARDS for drug name
+    const drugParts = [];
+    const prevBoundary = n > 0 ? ndcPositions[n - 1] : -1;
+    for (let j = ndcIdx - 1; j > prevBoundary; j--) {
+      const l = lines[j];
+      if (isNoise(l)) continue;
+      if (/^\d+\.?\d*$/.test(l.replace(/[$,]/g, ""))) continue;
+      drugParts.unshift(l);
+      if (drugParts.length >= 3) break;
+    }
+    const drugName = drugParts.join(" ").trim();
+
+    // Look FORWARDS for numeric values
+    const nextBoundary =
+      n < ndcPositions.length - 1 ? ndcPositions[n + 1] : lines.length;
+    const nums = [];
+    for (let j = ndcIdx + 1; j < nextBoundary; j++) {
+      const val = lines[j].replace(/[$,]/g, "");
+      if (/^\d+\.?\d*$/.test(val)) {
+        nums.push(parseFloat(val));
+      }
+    }
+
+    // nums pattern: [numPkg, totalPrice, unitPricePerUnit, 0(recvQty), vendorItemNum]
+    const qty = nums.length >= 1 ? Math.round(nums[0]) : null;
+    const totalPrice = nums.length >= 2 ? nums[1] : null;
+    const unitPricePdf = nums.length >= 3 ? nums[2] : null;
+    let vendorItemNum = null;
+    if (nums.length >= 5) vendorItemNum = String(Math.round(nums[4]));
+    else if (nums.length >= 4) vendorItemNum = String(Math.round(nums[3]));
+
+    // Compute real unit cost = totalPrice / qty
+    const computedUnitCost =
+      qty && totalPrice && qty > 0
+        ? Math.round((totalPrice / qty) * 10000) / 10000
+        : unitPricePdf;
+
+    items.push({
+      ndc,
+      drugName,
+      qty,
+      totalPrice,
+      unitPrice: computedUnitCost,
+      warehouse,
+      vendorSource,
+      vendorItemNum,
+      poNumber,
+      storeName,
+    });
+  }
+
+  return { items, warehouse, vendorSource, poNumber, storeName };
 }
 
 export async function POST(req) {
   try {
-    var body = await req.json();
-    var pdfs = body.pdfs;
-    var pastedText = body.pastedText;
+    const body = await req.json();
+    const { pdfs } = body;
 
-    if ((!pdfs || pdfs.length === 0) && !pastedText) {
-      return Response.json({ error: "No PDFs or pasted text provided" }, { status: 400 });
+    if (!pdfs || pdfs.length === 0) {
+      return Response.json({ error: "No PDFs provided" }, { status: 400 });
     }
 
-    var allItems = [];
-    var warehouse = "";
+    const allItems = [];
+    let warehouse = "",
+      vendorSource = "",
+      poNumber = "",
+      storeName = "";
 
-    if (pdfs && pdfs.length > 0) {
-      var pdfParse = (await import("pdf-parse")).default;
-      for (var i = 0; i < pdfs.length; i++) {
-        try {
-          var buffer = Buffer.from(pdfs[i].data, "base64");
-          var data = await pdfParse(buffer);
-          var result = parsePdfText(data.text, pdfs[i].name);
-          if (result.warehouse && !warehouse) warehouse = result.warehouse;
-          allItems = allItems.concat(result.items);
-        } catch (err) {
-          console.error("Failed to parse PDF:", pdfs[i].name, err.message);
-        }
+    for (const pdfFile of pdfs) {
+      try {
+        const text = await extractTextFromPdf(pdfFile.data);
+        const result = parsePO(text);
+        if (result.warehouse && !warehouse) warehouse = result.warehouse;
+        if (result.vendorSource && !vendorSource)
+          vendorSource = result.vendorSource;
+        if (result.poNumber && !poNumber) poNumber = result.poNumber;
+        if (result.storeName && !storeName) storeName = result.storeName;
+
+        // Tag each item with source file
+        result.items.forEach((item) => {
+          item.sourceFile = pdfFile.name;
+        });
+        allItems.push(...result.items);
+      } catch (err) {
+        console.error("Failed to parse PDF:", pdfFile.name, err.message);
       }
     }
 
-    if (pastedText && pastedText.trim()) {
-      allItems = allItems.concat(parsePastedText(pastedText));
-    }
-
-    var seen = {};
-    var uniqueItems = allItems.filter(function(item) {
-      if (seen[item.ndc]) return false;
-      seen[item.ndc] = true;
-      return true;
+    return Response.json({
+      items: allItems,
+      warehouse,
+      vendorSource,
+      poNumber,
+      storeName,
+      count: allItems.length,
     });
-
-    return Response.json({ items: uniqueItems, warehouse: warehouse, count: uniqueItems.length });
   } catch (err) {
     console.error("PO Import error:", err);
-    return Response.json({ error: err.message || "Parse error" }, { status: 500 });
+    return Response.json(
+      { error: err.message || "Parse error" },
+      { status: 500 }
+    );
   }
 }
