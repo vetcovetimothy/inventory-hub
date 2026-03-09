@@ -1,418 +1,147 @@
+/**
+ * POST /api/po-import
+ *
+ * Parses PO PDFs to extract NDCs and line item data.
+ * No AI/Claude API — pure PDF text extraction + regex parsing.
+ *
+ * Body: { pdfs: [{ data: base64, name: string }], pastedText?: string }
+ * Returns: { items: [{ ndc, drugName, qty, unitPrice, totalPrice, warehouse, rawLine, source }], warehouse, count }
+ */
+
 export const maxDuration = 60;
 
-const WAREHOUSE_MAP = {
-  hayward: "TP-CA",
-  brooklyn: "TP-NY",
-  "seven hills": "TP-OH",
-};
+const WAREHOUSE_MAP = { hayward: "TP-CA", brooklyn: "TP-NY", "seven hills": "TP-OH", ohio: "TP-OH" };
 
-function mapWarehouse(storeName) {
-  if (!storeName) return "";
-  const lower = storeName.toLowerCase();
-  for (const [key, val] of Object.entries(WAREHOUSE_MAP)) {
-    if (lower.includes(key)) return val;
-  }
+function detectWarehouse(text) {
+  var lower = text.toLowerCase();
+  for (var key in WAREHOUSE_MAP) { if (lower.includes(key)) return WAREHOUSE_MAP[key]; }
   return "";
 }
 
-function ndcVariants(ndc) {
-  const parts = ndc.split("-");
-  if (parts.length !== 3) return [ndc];
-  const [a, b, c] = parts;
-  const variants = new Set();
-  const aPads = [a, a.replace(/^0+/, "") || "0", a.padStart(5, "0"), a.padStart(4, "0")];
-  const bPads = [b, b.replace(/^0+/, "") || "0", b.padStart(4, "0"), b.padStart(3, "0")];
-  const cPads = [c, c.replace(/^0+/, "") || "0", c.padStart(2, "0"), c.padStart(1, "0")];
-  for (const av of aPads) for (const bv of bPads) for (const cv of cPads) {
-    variants.add(`${av}-${bv}-${cv}`);
+var NDC_REGEX = /\b(\d{4,5}-\d{3,4}-\d{1,2})\b/g;
+var PRICE_REGEX = /\$?\d{1,6}\.\d{2,4}/g;
+
+function parsePdfText(text, fileName) {
+  var lines = text.split("\n").map(function(l) { return l.trim(); }).filter(function(l) { return l.length > 0; });
+  var headerText = lines.slice(0, 30).join(" ");
+  var warehouse = detectWarehouse(headerText);
+  var items = [];
+  var seenNdcs = {};
+
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+    var ndcMatches = line.match(NDC_REGEX);
+    if (!ndcMatches) continue;
+
+    for (var j = 0; j < ndcMatches.length; j++) {
+      var ndc = ndcMatches[j].trim();
+      if (seenNdcs[ndc]) continue;
+      seenNdcs[ndc] = true;
+
+      var prevLine = i > 0 ? lines[i - 1] : "";
+      var beforeNdc = (line.split(ndc)[0] || "").replace(NDC_REGEX, "").replace(PRICE_REGEX, "").replace(/\b\d{1,3}\b/g, "").replace(/[|$]/g, "").replace(/\s+/g, " ").trim();
+      var afterNdc = (line.split(ndc)[1] || "").replace(NDC_REGEX, "").replace(PRICE_REGEX, "").replace(/\b\d{1,3}\b/g, "").replace(/[|$]/g, "").replace(/\s+/g, " ").trim();
+      var drugName = (beforeNdc && beforeNdc.length >= 4) ? beforeNdc : (afterNdc && afterNdc.length >= 4) ? afterNdc : prevLine.replace(NDC_REGEX, "").replace(PRICE_REGEX, "").replace(/\b\d{1,3}\b/g, "").replace(/\s+/g, " ").trim();
+
+      var prices = (line.match(PRICE_REGEX) || []).map(function(p) { return parseFloat(p.replace("$", "")); });
+      var numLine = line.replace(NDC_REGEX, "").replace(PRICE_REGEX, "");
+      var qtyNums = [];
+      var qm;
+      var qr = /\b(\d{1,4})\b/g;
+      while ((qm = qr.exec(numLine)) !== null) { var n = parseInt(qm[1]); if (n > 0 && n < 10000) qtyNums.push(n); }
+
+      items.push({
+        ndc: ndc,
+        drugName: drugName || "",
+        qty: qtyNums.length > 0 ? qtyNums[0] : null,
+        unitPrice: prices.length > 0 ? prices[0] : null,
+        totalPrice: prices.length > 1 ? prices[prices.length - 1] : null,
+        warehouse: warehouse,
+        rawLine: line,
+        source: fileName || "pdf",
+      });
+    }
   }
-  return Array.from(variants);
+
+  return { items: items, warehouse: warehouse };
 }
 
-async function fetchDailyMedUOM(ndc, drugName, apiKey) {
-  try {
-    const variants = ndcVariants(ndc);
-    // Also try 11-digit no-dash formats
-    const noDashVariants = variants.map(v => v.replace(/-/g, ""));
-    const allVariants = [...variants, ...noDashVariants];
+function parsePastedText(text) {
+  var lines = text.split("\n").map(function(l) { return l.trim(); }).filter(function(l) { return l.length > 0; });
+  var items = [];
+  var seenNdcs = {};
 
-    let setid = null;
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+    var ndcMatches = line.match(NDC_REGEX);
+    if (!ndcMatches) continue;
 
-    // Try NDC lookup with all variants
-    for (const variant of allVariants) {
-      try {
-        const r1 = await fetch(
-          `https://dailymed.nlm.nih.gov/dailymed/services/v2/ndcs.json?ndc=${variant}&pagesize=5`,
-          { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(5000) }
-        );
-        if (!r1.ok) continue;
-        const d1 = await r1.json();
-        if (d1?.data?.length > 0) { setid = d1.data[0].setid; break; }
-      } catch { continue; }
+    for (var j = 0; j < ndcMatches.length; j++) {
+      var ndc = ndcMatches[j].trim();
+      if (seenNdcs[ndc]) continue;
+      seenNdcs[ndc] = true;
+
+      var cleanLine = line.replace(NDC_REGEX, "").replace(PRICE_REGEX, "").replace(/\b\d{1,3}\b/g, "").replace(/\s+/g, " ").trim();
+      var prices = (line.match(PRICE_REGEX) || []).map(function(p) { return parseFloat(p.replace("$", "")); });
+
+      items.push({
+        ndc: ndc,
+        drugName: cleanLine.slice(0, 120) || "",
+        qty: null,
+        unitPrice: prices.length > 0 ? prices[0] : null,
+        totalPrice: prices.length > 1 ? prices[prices.length - 1] : null,
+        warehouse: "",
+        rawLine: line,
+        source: "pasted",
+      });
     }
-
-    // Fallback: search by drug name if NDC lookup failed
-    if (!setid && drugName) {
-      try {
-        const searchName = drugName.replace(/[^a-zA-Z0-9 ]/g, "").split(" ").slice(0, 3).join("+");
-        const r = await fetch(
-          `https://dailymed.nlm.nih.gov/dailymed/services/v2/spls.json?drug_name=${searchName}&pagesize=3`,
-          { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(5000) }
-        );
-        if (r.ok) {
-          const d = await r.json();
-          if (d?.data?.length > 0) setid = d.data[0].setid;
-        }
-      } catch { /* skip */ }
-    }
-
-    if (!setid) return null;
-
-    // Fetch SPL for dosage form + route
-    let splData = null;
-    try {
-      const r2 = await fetch(
-        `https://dailymed.nlm.nih.gov/dailymed/services/v2/spls/${setid}.json`,
-        { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(5000) }
-      );
-      if (r2.ok) splData = (await r2.json())?.data;
-    } catch { /* skip */ }
-
-    // Fetch packaging info
-    let packageDescriptions = [];
-    let rawPackageData = null;
-    try {
-      const r3 = await fetch(
-        `https://dailymed.nlm.nih.gov/dailymed/services/v2/spls/${setid}/packaging.json`,
-        { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(8000) }
-      );
-      if (r3.ok) {
-        const pkgData = await r3.json();
-        rawPackageData = pkgData;
-        const items = pkgData?.data || [];
-        const extractDescriptions = (arr) => {
-          const results = [];
-          for (const item of arr) {
-            if (item.package_description) results.push(item.package_description);
-            else if (item.description) results.push(item.description);
-            else if (item.packageDescription) results.push(item.packageDescription);
-            if (item.packages && Array.isArray(item.packages)) {
-              results.push(...extractDescriptions(item.packages));
-            }
-          }
-          return results;
-        };
-        packageDescriptions = extractDescriptions(items).filter(s => s && s.length > 2);
-
-        // Try to find the specific package matching our NDC
-        const findMatchForNdc = (arr, targetNdc) => {
-          const normalize = s => s.replace(/[^0-9]/g, "");
-          const target = normalize(targetNdc);
-          for (const item of arr) {
-            const code = normalize(item.ndc || item.item_code || item.ndc_code || "");
-            if (code && code === target) {
-              return item.package_description || item.description || null;
-            }
-            if (item.packages) {
-              const nested = findMatchForNdc(item.packages, targetNdc);
-              if (nested) return nested;
-            }
-          }
-          return null;
-        };
-        const specificMatch = findMatchForNdc(items, ndc);
-        if (specificMatch) packageDescriptions = [specificMatch];
-        if (packageDescriptions.length === 0 && items.length > 0) {
-          const raw = JSON.stringify(items);
-          const matches = raw.match(/\d+\s+in\s+\d+\s+[A-Z]+[^"\\]*/gi) ||
-                          raw.match(/[A-Z]+\s+of\s+\d+\s+[a-zA-Z]+/gi) || [];
-          packageDescriptions = [...new Set(matches)].slice(0, 4);
-        }
-      }
-    } catch (e) { /* skip */ }
-
-    // Fallback: scrape DailyMed HTML page for "How Supplied" packaging text
-    if (packageDescriptions.length === 0) {
-      try {
-        const htmlResp = await fetch(
-          `https://dailymed.nlm.nih.gov/dailymed/drugInfo.cfm?setid=${setid}`,
-          { headers: { "Accept": "text/html", "User-Agent": "Mozilla/5.0 (compatible)" }, signal: AbortSignal.timeout(8000) }
-        );
-        if (htmlResp.ok) {
-          const html = await htmlResp.text();
-          const patterns = [
-            /packages? of \d+[^<\n.()]{0,80}/gi,
-            /bottles? of \d+[^<\n.()]{0,80}/gi,
-            /\d+\s*(?:unit[- ]dose|blister|capsules?|tablets?|vials?)[^<\n.()]{0,60}/gi,
-          ];
-          const found = new Set();
-          for (const pattern of patterns) {
-            (html.match(pattern) || []).slice(0, 4).forEach(m =>
-              found.add(m.replace(/<[^>]+>/g, "").trim())
-            );
-          }
-          packageDescriptions = Array.from(found).slice(0, 5);
-        }
-      } catch { /* skip */ }
-    }
-
-    // Use AI to generate UOM code from package descriptions
-    let uomCode = null;
-    if (packageDescriptions.length > 0 && apiKey) {
-      try {
-        const aiResp = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-          body: JSON.stringify({
-            model: "claude-haiku-4-5-20251001",
-            max_tokens: 50,
-            messages: [{
-              role: "user",
-              content: `Convert this pharmaceutical package description into a short UOM code using these rules:
-- Bottles of tablets or capsules: "BT" + count (e.g. "Bottles of 500 tablets" → "BT500", "120 capsules" → "BT120")
-- Blister packs / unit-dose packs / cards: "BLPK" + count (e.g. "30 in 1 BLISTER PACK" → "BLPK30", "Packages of 30 unit-dose blisters" → "BLPK30")
-- Any phrase containing "blister", "unit-dose", "unit dose", "blister card" → always BLPK
-- Liquid bottles (solutions, suspensions, syrups): "BT" + volume (e.g. "1 bottle of 100mL" → "BT100ML")
-- Vials: "VL" + volume (e.g. "5mL vial" → "VL5ML")
-- Tubes: "TB" + volume
-- If unclear, use best judgment.
-
-Package descriptions: ${packageDescriptions.join(" | ")}
-
-Reply with ONLY the short UOM code, nothing else.`
-            }]
-          })
-        });
-        if (aiResp.ok) {
-          const aiData = await aiResp.json();
-          uomCode = aiData.content?.find(b => b.type === "text")?.text?.trim() || null;
-        }
-      } catch { /* skip */ }
-    }
-
-    return {
-      dosage_form: splData?.dosage_form || null,
-      route: splData?.route || null,
-      package_descriptions: packageDescriptions,
-      uom_code: uomCode,
-      link: `https://dailymed.nlm.nih.gov/dailymed/drugInfo.cfm?setid=${setid}`,
-      source: "dailymed",
-    };
-  } catch {
-    return null;
   }
-}
 
-async function inferUOMFromAI(ndc, drugName, apiKey) {
-  try {
-    const aiResp = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 80,
-        messages: [{
-          role: "user",
-          content: `You are a pharmaceutical packaging expert. Based on your knowledge of this drug, what is the standard retail package size/UOM?
-
-Drug: ${drugName}
-NDC: ${ndc}
-
-Rules for UOM code:
-- Bottles of tablets or capsules: "BT" + count (e.g. BT500, BT120, BT100)
-- Blister packs / unit-dose packs / cards / blisters: "BLPK" + count (e.g. BLPK30, BLPK100)
-- Liquid bottles: "BT" + volume (e.g. BT100ML, BT473ML)
-- Vials: "VL" + volume (e.g. VL5ML, VL10ML)
-- Tubes: "TB" + size
-
-CRITICAL blister pack examples (always use BLPK for these):
-- Cyclosporine Modified capsules → BLPK (e.g. BLPK30)
-- Tacrolimus capsules → BLPK
-- Most immunosuppressant capsules → BLPK
-- Unit-dose or individually sealed capsules/tablets → BLPK
-- Brand-name drugs often packaged in blister cards → BLPK
-
-Use your specific pharmaceutical knowledge of how this exact drug/NDC is packaged. Do NOT default to BT if the drug is known to come in blister packs.
-
-Reply with a JSON object only: {"uom_code": "BT500", "package_description": "Bottles of 500 tablets", "confidence": "high/medium/low"}
-No other text.`
-        }]
-      })
-    });
-    if (!aiResp.ok) return null;
-    const data = await aiResp.json();
-    const text = data.content?.find(b => b.type === "text")?.text?.trim();
-    if (!text) return null;
-    const clean = text.replace(/```json\n?|```\n?/g, "").trim();
-    const parsed = JSON.parse(clean);
-    return {
-      dosage_form: null,
-      route: null,
-      package_descriptions: [parsed.package_description || ""],
-      uom_code: parsed.uom_code || null,
-      link: null,
-      source: `ai-inferred (${parsed.confidence || "unknown"} confidence)`,
-    };
-  } catch {
-    return null;
-  }
+  return items;
 }
 
 export async function POST(req) {
   try {
-    const body = await req.json();
-    const { pdfs, screenshot, vendor } = body;
-    // pdfs: [{ data: base64string, name: string }]
-    // screenshot: base64string | null  (McKesson portal screenshot)
-    // vendor: "mckesson" | "other"
+    var body = await req.json();
+    var pdfs = body.pdfs;
+    var pastedText = body.pastedText;
 
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) {
-      return Response.json({ error: "ANTHROPIC_API_KEY not set" }, { status: 500 });
+    if ((!pdfs || pdfs.length === 0) && !pastedText) {
+      return Response.json({ error: "No PDFs or pasted text provided" }, { status: 400 });
     }
 
-    // Build Claude message content
-    const content = [];
+    var allItems = [];
+    var warehouse = "";
 
-    for (const pdf of (pdfs || [])) {
-      content.push({
-        type: "document",
-        source: { type: "base64", media_type: "application/pdf", data: pdf.data },
-      });
-    }
-
-    if (screenshot) {
-      content.push({
-        type: "image",
-        source: { type: "base64", media_type: screenshot.startsWith("/9j/") ? "image/jpeg" : "image/png", data: screenshot },
-      });
-    }
-
-    let prompt;
-    if (vendor === "mckesson") {
-      prompt = `You are parsing a McKesson pharmacy purchase order. You have been given one or more PDF documents and a screenshot of the McKesson ordering portal.
-
-The PDF contains drug information: Drug Name, NDC number, and Inventory ID (GEN-XXXXX format, if the warehouse manager included it).
-The SCREENSHOT of the McKesson portal shows the actual order: columns include MCK ITEM #, DESCRIPTION, ORD QTY (quantity ordered), and EST. NET PRICE (unit cost per package).
-
-CRITICAL RULES:
-1. The screenshot is the FINAL authority. Only include items visible in the screenshot.
-2. Items in the PDF but NOT in the screenshot must be EXCLUDED.
-3. Match PDF items to screenshot items by drug name or MCK ITEM # when possible.
-4. For each screenshot item, use the PDF to fill in NDC and Inventory ID if available.
-5. Use ORD QTY from the screenshot as orderQty.
-6. Use EST. NET PRICE from the screenshot as unitCost (numeric value only, no $ sign).
-7. Extract the store name from the PDF header (e.g. "Vetcove - Hayward").
-
-Return ONLY a valid JSON array with no other text, markdown, or explanation:
-[
-  {
-    "inventoryId": "GEN-XXXXX or null",
-    "ndc": "XX-XXXX-XXXX or null",
-    "drugName": "drug name from screenshot",
-    "orderQty": 50,
-    "unitCost": 2.73,
-    "mckItemId": "1568989",
-    "storeName": "Vetcove - Hayward"
-  }
-]`;
-    } else {
-      prompt = `You are parsing a pharmacy purchase order PDF from a vendor (Keysource, Anda, or Bloodworth).
-
-Extract every line item from the PDF. For each drug, extract:
-- inventoryId: The Inventory ID in GEN-XXXXX format if present, otherwise null
-- ndc: The NDC number exactly as shown (e.g. "27808-0264-02")
-- drugName: The drug/product name as listed
-- numberOfPkg: The "Number of Pkg" or quantity ordered (integer)
-- totalPrice: The total price for this line item (numeric, no $ sign)
-- storeName: The store name from the PDF header (e.g. "Vetcove - Hayward")
-
-IMPORTANT: unitCost will be calculated as totalPrice / numberOfPkg — do NOT calculate it yourself, just provide totalPrice and numberOfPkg accurately.
-
-Return ONLY a valid JSON array with no other text, markdown, or explanation:
-[
-  {
-    "inventoryId": null,
-    "ndc": "27808-0264-02",
-    "drugName": "levETIRAcetam 500MG Oral Tablet",
-    "numberOfPkg": 12,
-    "totalPrice": 236.52,
-    "storeName": "Vetcove - Hayward"
-  }
-]`;
-    }
-
-    content.push({ type: "text", text: prompt });
-
-    const claudeResp = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 2000,
-        messages: [{ role: "user", content }],
-      }),
-    });
-
-    if (!claudeResp.ok) {
-      const err = await claudeResp.text();
-      return Response.json({ error: "Claude API error: " + err }, { status: 500 });
-    }
-
-    const claudeData = await claudeResp.json();
-    const rawText = claudeData.content?.find(b => b.type === "text")?.text || "[]";
-
-    let parsed;
-    try {
-      const clean = rawText.replace(/```json\n?|```\n?/g, "").trim();
-      parsed = JSON.parse(clean);
-    } catch {
-      return Response.json({ error: "Failed to parse Claude response", raw: rawText }, { status: 500 });
-    }
-
-    // Build final rows
-    const rows = parsed.map(item => {
-      const warehouse = mapWarehouse(item.storeName || "");
-      let unitCost;
-      if (vendor === "mckesson") {
-        unitCost = typeof item.unitCost === "number" ? item.unitCost : parseFloat(item.unitCost) || 0;
-      } else {
-        const total = typeof item.totalPrice === "number" ? item.totalPrice : parseFloat(item.totalPrice) || 0;
-        const qty = typeof item.numberOfPkg === "number" ? item.numberOfPkg : parseInt(item.numberOfPkg) || 1;
-        unitCost = qty > 0 ? Math.round((total / qty) * 10000) / 10000 : 0;
-      }
-      return {
-        inventoryId: item.inventoryId || "",
-        warehouse,
-        orderQty: vendor === "mckesson" ? (item.orderQty || 0) : (item.numberOfPkg || 0),
-        unitCost,
-        alternateId: item.ndc || "",
-        drugName: item.drugName || "",
-        storeName: item.storeName || "",
-        mckItemId: item.mckItemId || "",
-      };
-    });
-
-    // Fetch DailyMed UOM for each unique NDC
-    const uniqueNdcs = [...new Set(rows.map(r => r.alternateId).filter(Boolean))];
-    const uomMap = {};
-    await Promise.all(
-      uniqueNdcs.map(async ndc => {
-        const drugName = rows.find(r => r.alternateId === ndc)?.drugName || "";
-        let info = await fetchDailyMedUOM(ndc, drugName, apiKey);
-        if (!info || (!info.uom_code && !info.package_descriptions?.length)) {
-          info = await inferUOMFromAI(ndc, drugName, apiKey);
+    if (pdfs && pdfs.length > 0) {
+      var pdfParse = (await import("pdf-parse")).default;
+      for (var i = 0; i < pdfs.length; i++) {
+        try {
+          var buffer = Buffer.from(pdfs[i].data, "base64");
+          var data = await pdfParse(buffer);
+          var result = parsePdfText(data.text, pdfs[i].name);
+          if (result.warehouse && !warehouse) warehouse = result.warehouse;
+          allItems = allItems.concat(result.items);
+        } catch (err) {
+          console.error("Failed to parse PDF:", pdfs[i].name, err.message);
         }
-        uomMap[ndc] = info;
-      })
-    );
+      }
+    }
 
-    return Response.json({ rows, uomMap });
+    if (pastedText && pastedText.trim()) {
+      allItems = allItems.concat(parsePastedText(pastedText));
+    }
+
+    var seen = {};
+    var uniqueItems = allItems.filter(function(item) {
+      if (seen[item.ndc]) return false;
+      seen[item.ndc] = true;
+      return true;
+    });
+
+    return Response.json({ items: uniqueItems, warehouse: warehouse, count: uniqueItems.length });
   } catch (err) {
-    return Response.json({ error: err.message || "Unexpected error" }, { status: 500 });
+    console.error("PO Import error:", err);
+    return Response.json({ error: err.message || "Parse error" }, { status: 500 });
   }
 }
