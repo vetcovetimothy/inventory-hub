@@ -11,10 +11,13 @@
 export const maxDuration = 60;
 
 async function extractTextFromPdf(base64Data) {
-  const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.js");
+  const pdfjsMod = await import("pdfjs-dist/legacy/build/pdf.js");
+  const pdfjsLib = pdfjsMod.default || pdfjsMod;
+  const getDoc = pdfjsLib.getDocument || pdfjsMod.getDocument;
+  if (!getDoc) throw new Error("pdfjs-dist getDocument not found");
   const buffer = Buffer.from(base64Data, "base64");
   const data = new Uint8Array(buffer);
-  const doc = await pdfjsLib.getDocument({ data, verbosity: 0 }).promise;
+  const doc = await getDoc({ data, verbosity: 0 }).promise;
   let text = "";
   for (let i = 1; i <= doc.numPages; i++) {
     const page = await doc.getPage(i);
@@ -182,7 +185,11 @@ export async function POST(req) {
         });
         allItems.push(...result.items);
       } catch (err) {
-        console.error("Failed to parse PDF:", pdfFile.name, err.message);
+        console.error("Failed to parse PDF:", pdfFile.name, err.message, err.stack);
+        // Return the error to the client instead of silently skipping
+        if (allItems.length === 0) {
+          return Response.json({ error: "PDF parse failed: " + err.message, items: [], count: 0 }, { status: 500 });
+        }
       }
     }
 
