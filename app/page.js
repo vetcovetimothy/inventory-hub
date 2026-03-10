@@ -663,7 +663,7 @@ function POImportTool(props) {
   var _pdfs = useState([]), pdfs = _pdfs[0], setPdfs = _pdfs[1];
   var _mckPaste = useState(""), mckPaste = _mckPaste[0], setMckPaste = _mckPaste[1];
   var _mckParsed = useState(null), mckParsed = _mckParsed[0], setMckParsed = _mckParsed[1];
-  var _screenshotUrl = useState(null), screenshotUrl = _screenshotUrl[0], setScreenshotUrl = _screenshotUrl[1];
+  var _screenshotUrls = useState([]), screenshotUrls = _screenshotUrls[0], setScreenshotUrls = _screenshotUrls[1];
   var _ocrLoading = useState(false), ocrLoading = _ocrLoading[0], setOcrLoading = _ocrLoading[1];
   var _ocrStatus = useState(""), ocrStatus = _ocrStatus[0], setOcrStatus = _ocrStatus[1];
   var _ocrRaw = useState(""), ocrRaw = _ocrRaw[0], setOcrRaw = _ocrRaw[1];
@@ -754,18 +754,16 @@ function POImportTool(props) {
   }
 
   async function handleScreenshotUpload(e) {
-    var file = e.target.files[0];
-    if (!file) return;
-    var url = URL.createObjectURL(file);
-    setScreenshotUrl(url);
+    var files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    var urls = files.map(function(f) { return URL.createObjectURL(f); });
+    setScreenshotUrls(urls);
     setOcrLoading(true);
-    setOcrStatus("Preprocessing image...");
+    setOcrStatus("Preprocessing images...");
     setOcrRaw("");
     setMckParsed(null);
     try {
-      var processedUrl = await preprocessImageForOcr(url);
       var Tesseract = await loadTesseract();
-      setOcrStatus("Loading OCR engine...");
       var worker = await Tesseract.createWorker({
         logger: function(m) {
           if (m.status === "recognizing text") setOcrStatus("Reading text... " + Math.round((m.progress || 0) * 100) + "%");
@@ -774,24 +772,30 @@ function POImportTool(props) {
       });
       await worker.loadLanguage("eng");
       await worker.initialize("eng");
-      await worker.setParameters({ tessedit_pageseg_mode: "6" }); // PSM 6 = assume uniform block of text
-      setOcrStatus("Reading screenshot...");
-      var result = await worker.recognize(processedUrl);
+      await worker.setParameters({ tessedit_pageseg_mode: "6" });
+      var allOcrText = "";
+      var allNdcs = {};
+      for (var fi = 0; fi < urls.length; fi++) {
+        setOcrStatus("Processing screenshot " + (fi + 1) + " of " + urls.length + "...");
+        var processedUrl = await preprocessImageForOcr(urls[fi]);
+        var result = await worker.recognize(processedUrl);
+        var ocrText = result.data.text;
+        allOcrText += (fi > 0 ? "\n--- Screenshot " + (fi + 1) + " ---\n" : "") + ocrText;
+        var ndcs = extractNdcsFromOcrText(ocrText);
+        ndcs.forEach(function(n) { allNdcs[n] = true; });
+      }
       await worker.terminate();
-      var ocrText = result.data.text;
-      setOcrRaw(ocrText);
-      var ndcs = extractNdcsFromOcrText(ocrText);
-      setOcrFoundNdcs(ndcs);
+      setOcrRaw(allOcrText);
+      var ocrNdcList = Object.keys(allNdcs);
+      setOcrFoundNdcs(ocrNdcList);
       // Merge with any manual NDCs already in paste box
       var manualNdcs = extractNdcsFromOcrText(mckPaste);
-      var allNdcs = {};
-      ndcs.forEach(function(n) { allNdcs[n] = true; });
       manualNdcs.forEach(function(n) { allNdcs[n] = true; });
       var combined = Object.keys(allNdcs);
       if (combined.length > 0) {
         var items = combined.map(function(ndc) { return { ndc: ndc, description: "", qty: null, mckItemNum: "" }; });
         setMckParsed(items);
-        toast("Screenshot OCR found " + ndcs.length + " NDCs" + (manualNdcs.length > 0 ? " + " + manualNdcs.length + " manual" : ""));
+        toast("OCR found " + ocrNdcList.length + " NDCs from " + urls.length + " screenshot" + (urls.length > 1 ? "s" : "") + (manualNdcs.length > 0 ? " + " + manualNdcs.length + " manual" : ""));
       } else {
         setMckParsed(null);
         toast("OCR could not find NDCs. You can also paste them manually below.", "error");
@@ -975,7 +979,7 @@ function POImportTool(props) {
   }
 
   function reset() {
-    setPdfs([]); setMckPaste(""); setMckParsed(null); setScreenshotUrl(null); setOcrRaw(""); setShowRawOcr(false); setOcrFoundNdcs(null); setScreenshotQtys({}); setResults([]); setMckWarnings([]); setError(null);
+    setPdfs([]); setMckPaste(""); setMckParsed(null); setScreenshotUrls([]); setOcrRaw(""); setShowRawOcr(false); setOcrFoundNdcs(null); setScreenshotQtys({}); setResults([]); setMckWarnings([]); setError(null);
     if (pdfInputRef.current) pdfInputRef.current.value = "";
     if (screenshotInputRef.current) screenshotInputRef.current.value = "";
   }
@@ -1007,11 +1011,11 @@ function POImportTool(props) {
             {pdfs.length > 0 && <p style={{ color: "#059669", fontSize: 11, marginTop: 6 }}>{"\u2713"} {pdfs.length} PDF{pdfs.length > 1 ? "s" : ""}: {pdfs.map(function(p) { return p.name; }).join(", ")}</p>}
           </div>
           {vendor === "mckesson" && <div>
-            <div style={{ fontSize: 12, color: "#8A8279", fontWeight: 500, marginBottom: 6 }}>McKesson Portal Screenshot</div>
-            <input ref={screenshotInputRef} type="file" accept="image/*" onChange={handleScreenshotUpload} style={Object.assign({}, S.inp, { cursor: "pointer" })} />
+            <div style={{ fontSize: 12, color: "#8A8279", fontWeight: 500, marginBottom: 6 }}>McKesson Portal Screenshot(s)</div>
+            <input ref={screenshotInputRef} type="file" accept="image/*" multiple onChange={handleScreenshotUpload} style={Object.assign({}, S.inp, { cursor: "pointer" })} />
             {ocrLoading && <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}><Spinner color={TOOL_COLOR} size={14} /><span style={{ fontSize: 12, color: TOOL_COLOR }}>{ocrStatus || "Processing..."}</span></div>}
             {mckParsed && !ocrLoading && <p style={{ color: "#059669", fontSize: 11, marginTop: 6 }}>{"\u2713"} Found {mckParsed.length} NDCs</p>}
-            {screenshotUrl && !ocrLoading && !mckParsed && <p style={{ color: "#D97706", fontSize: 11, marginTop: 6 }}>{"\u26A0"} OCR could not find NDCs — type them manually below</p>}
+            {screenshotUrls.length > 0 && !ocrLoading && !mckParsed && <p style={{ color: "#D97706", fontSize: 11, marginTop: 6 }}>{"\u26A0"} OCR could not find NDCs — type them manually below</p>}
             <div style={{ marginTop: 10, fontSize: 11, color: "#A69E95" }}>Add any missing NDCs below (one per line — will be merged with OCR results):</div>
             <textarea value={mckPaste} onChange={handleMckManualPaste} placeholder={"67877019710\n29300041001\n53746075101\n..."} rows={3} style={Object.assign({}, S.inp, { resize: "vertical", fontFamily: "monospace", fontSize: 12, marginTop: 4 })} />
           </div>}
@@ -1043,11 +1047,12 @@ function POImportTool(props) {
 
       {error && <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 10, padding: "12px 16px", marginBottom: 16, color: "#DC2626", fontSize: 13 }}>Error: {error}</div>}
 
-      {screenshotUrl && vendor === "mckesson" && <div style={S.card}>
-        <div style={{ fontSize: 14, fontWeight: 600, color: "#2C2825", marginBottom: 12 }}>McKesson Portal Screenshot</div>
-        <div style={{ border: "1px solid #E8E4DE", borderRadius: 8, overflow: "hidden", maxHeight: 400, overflowY: "auto" }}>
-          <img src={screenshotUrl} alt="McKesson screenshot" style={{ width: "100%", display: "block" }} />
-        </div>
+      {screenshotUrls.length > 0 && vendor === "mckesson" && <div style={S.card}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: "#2C2825", marginBottom: 12 }}>McKesson Portal Screenshot{screenshotUrls.length > 1 ? "s (" + screenshotUrls.length + ")" : ""}</div>
+        {screenshotUrls.map(function(url, idx) { return <div key={idx} style={{ border: "1px solid #E8E4DE", borderRadius: 8, overflow: "hidden", maxHeight: 400, overflowY: "auto", marginBottom: screenshotUrls.length > 1 ? 12 : 0 }}>
+          {screenshotUrls.length > 1 && <div style={{ padding: "6px 12px", background: "#F5F3EF", fontSize: 12, color: "#8A8279" }}>Screenshot {idx + 1}</div>}
+          <img src={url} alt={"McKesson screenshot " + (idx + 1)} style={{ width: "100%", display: "block" }} />
+        </div>; })}
       </div>}
 
       {mckWarnings.length > 0 && <div style={{ marginBottom: 16 }}>
