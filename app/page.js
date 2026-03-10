@@ -708,10 +708,11 @@ function POImportTool(props) {
         var altId = (row.AlternateID || "").trim();
         var invId = (row.InventoryID || "").trim();
         var desc = row.Description || "";
+        var uom = row.UOM || "";
         if (!altId) return;
         var variants = ndcVariants(altId);
-        variants.forEach(function(v) { map[v] = { inventoryId: invId, description: desc }; });
-        map[normalizeNdc(altId)] = { inventoryId: invId, description: desc };
+        variants.forEach(function(v) { map[v] = { inventoryId: invId, description: desc, uom: uom }; });
+        map[normalizeNdc(altId)] = { inventoryId: invId, description: desc, uom: uom };
       });
       setNdcMap(map);
       toast("Loaded " + data.length + " NDC records from Acumatica");
@@ -785,6 +786,7 @@ function POImportTool(props) {
           sourceFile: item.sourceFile,
           inventoryId: match ? match.inventoryId : null,
           acumaticaDesc: match ? match.description : null,
+          uom: match ? match.uom : null,
           ndcFound: !!match,
         };
       });
@@ -824,9 +826,10 @@ function POImportTool(props) {
   }
 
   function downloadCSV() {
-    var header = "Status,NDC,GEN Inventory ID,Description (Acumatica),Drug Name (PO),Vendor,Warehouse,PO#,Qty,Unit Cost,Total Price,Vendor Item#,Source File\r\n";
+    var header = "Status,Inventory ID,Warehouse,Description (Acumatica),UOM,Drug Name (PO),Alternate ID,Vendor,Order Qty.,Unit Cost,Ext. Cost,PO#,Source File\r\n";
     var lines = results.map(function(r) {
-      return [r.ndcFound ? "MATCHED" : "NOT FOUND", r.ndc, r.inventoryId || "", r.acumaticaDesc || "", r.drugName, r.vendorSource, r.warehouse, r.poNumber, r.qty || "", r.unitPrice || "", r.totalPrice || "", r.vendorItemNum || "", r.sourceFile || ""]
+      var extCost = (r.qty && r.unitPrice) ? (r.qty * r.unitPrice).toFixed(2) : (r.totalPrice || "");
+      return [r.ndcFound ? "MATCHED" : "NOT FOUND", r.inventoryId || "", r.warehouse, r.acumaticaDesc || "", r.uom || "", r.drugName, r.ndc, r.vendorSource, r.qty || "", r.unitPrice ? r.unitPrice.toFixed(4) : "", extCost, r.poNumber, r.sourceFile || ""]
         .map(function(v) { return "\"" + String(v == null ? "" : v).replace(/"/g, "\"\"") + "\""; }).join(",");
     });
     var csv = header + lines.join("\r\n");
@@ -933,25 +936,28 @@ function POImportTool(props) {
               <th style={S.th}>NDC</th>
               <th style={S.th}>GEN- Inventory ID</th>
               <th style={S.th}>Description (Acumatica)</th>
+              <th style={S.th}>UOM</th>
               <th style={S.th}>Drug Name (PO)</th>
               <th style={S.th}>Vendor</th>
               <th style={Object.assign({}, S.th, { textAlign: "center" })}>Qty</th>
               <th style={Object.assign({}, S.th, { textAlign: "right" })}>Unit Cost</th>
-              <th style={Object.assign({}, S.th, { textAlign: "right" })}>Total</th>
+              <th style={Object.assign({}, S.th, { textAlign: "right" })}>Ext. Cost</th>
               {vendor === "mckesson" && <th style={S.th}>MCK Item #</th>}
               <th style={S.th}>Source</th>
             </tr></thead>
             <tbody>{results.map(function(r, i) {
+              var extCost = (r.qty && r.unitPrice) ? (r.qty * r.unitPrice) : r.totalPrice;
               return <tr key={i} style={{ background: r.ndcFound ? "transparent" : "rgba(239,68,68,0.04)" }}>
                 <td style={S.td}><span style={S.badge(r.ndcFound ? "success" : "danger")}>{r.ndcFound ? <><IconCheck /> Match</> : <><IconAlert /> Missing</>}</span></td>
                 <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, color: "#94A3B8" })}>{r.ndc}</td>
                 <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontWeight: 600, color: r.inventoryId ? "#34D399" : "#475569" })}>{r.inventoryId || "\u2014"}</td>
                 <td style={Object.assign({}, S.td, { color: "#CBD5E1", maxWidth: 220, wordBreak: "break-word" })}>{r.acumaticaDesc || "\u2014"}</td>
+                <td style={Object.assign({}, S.td, { fontWeight: 600, color: r.uom ? "#06B6D4" : "#475569" })}>{r.uom || "\u2014"}</td>
                 <td style={Object.assign({}, S.td, { color: "#94A3B8", maxWidth: 200, wordBreak: "break-word" })}>{r.drugName || "\u2014"}</td>
                 <td style={Object.assign({}, S.td, { fontSize: 11 })}>{r.vendorSource || "\u2014"}</td>
                 <td style={Object.assign({}, S.td, { textAlign: "center", fontWeight: 600 })}>{r.qty || "\u2014"}</td>
                 <td style={Object.assign({}, S.td, { textAlign: "right", color: "#34D399", fontWeight: 600 })}>{r.unitPrice ? "$" + r.unitPrice.toFixed(2) : "\u2014"}</td>
-                <td style={Object.assign({}, S.td, { textAlign: "right", fontFamily: "monospace" })}>{r.totalPrice ? "$" + r.totalPrice.toLocaleString(undefined, { minimumFractionDigits: 2 }) : "\u2014"}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right", fontFamily: "monospace" })}>{extCost ? "$" + extCost.toLocaleString(undefined, { minimumFractionDigits: 2 }) : "\u2014"}</td>
                 {vendor === "mckesson" && <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, color: "#64748B" })}>{r.vendorItemNum || "\u2014"}</td>}
                 <td style={Object.assign({}, S.td, { fontSize: 10, color: "#475569" })}>{(r.sourceFile || "").split("/").pop()}</td>
               </tr>;
