@@ -758,8 +758,9 @@ function POImportTool(props) {
       });
       var parseJson = await parseResp.json();
       if (!parseResp.ok) throw new Error(parseJson.error || "Parse failed");
+      if (parseJson.error) throw new Error(parseJson.error);
       var pdfItems = parseJson.items || [];
-      if (pdfItems.length === 0) throw new Error("No items found in the documents. Make sure the PDFs contain NDC numbers.");
+      if (pdfItems.length === 0) throw new Error("No items found. The PDF parser returned 0 NDCs. Check that your PDFs have the standard PO format.");
 
       // Step 2: Fetch NDC map from Acumatica
       var map = ndcMap;
