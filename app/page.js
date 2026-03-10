@@ -1064,7 +1064,8 @@ function POImportTool(props) {
           var textColor = isPdfOnly ? "#D97706" : isQtyMismatch ? "#DC2626" : "#7C3AED";
           return <div key={i} style={{ background: bgColor, border: "1px solid " + borderColor, borderRadius: 10, padding: "10px 16px", marginBottom: 8, display: "flex", alignItems: "center", gap: 10 }}>
             <IconAlert />
-            <span style={{ fontSize: 13, color: textColor }}>{w.msg}</span>
+            <span style={{ fontSize: 13, color: textColor, flex: 1 }}>{w.msg}</span>
+            <button onClick={function() { setMckWarnings(function(prev) { return prev.filter(function(_, idx) { return idx !== i; }); }); }} style={{ background: "transparent", border: "1px solid " + borderColor, borderRadius: 6, padding: "3px 8px", fontSize: 11, color: textColor, cursor: "pointer", flexShrink: 0 }}>Dismiss</button>
           </div>;
         })}
       </div>}
