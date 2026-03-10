@@ -114,7 +114,7 @@ export async function POST(request) {
     // Build OData URL
     let url = `${BASE}${PREFIX}/${ENDPOINTS[type]}`;
 
-    // For PO fetches, filter by warehouse if provided
+    // For PO fetches, filter by warehouse in OData
     if ((type === "po" || type === "po-ggm") && warehouse) {
       url += `?$filter=Warehouse eq '${warehouse}'`;
     }
@@ -146,7 +146,35 @@ export async function POST(request) {
     }
 
     const json = await resp.json();
-    const rawRows = json.value || [];
+    let rawRows = json.value || [];
+
+    // For PO fetches, filter to today's date only and exclude certain vendors
+    if ((type === "po" || type === "po-ggm") && rawRows.length > 0) {
+      // Get today in US Eastern time (Acumatica's likely timezone)
+      const nowET = new Date(new Date().toLocaleString("en-US", { timeZone: "America/New_York" }));
+      const todayStr = nowET.getFullYear() + "-" + String(nowET.getMonth() + 1).padStart(2, "0") + "-" + String(nowET.getDate()).padStart(2, "0");
+
+      const dateKeys = ["Date", "OrderDate", "TranDate", "DocumentDate", "DocDate"];
+      const vendorKeys = ["VendorName", "Vendor", "Vendor Name"];
+
+      rawRows = rawRows.filter(row => {
+        // Find and check date value
+        let dateVal = null;
+        for (const k of dateKeys) { if (row[k] != null) { dateVal = row[k]; break; } }
+        if (dateVal) {
+          // Acumatica dates come as ISO strings like "2026-03-10T00:00:00" or "2026-03-10"
+          const dateStr = String(dateVal).slice(0, 10); // get YYYY-MM-DD part
+          if (dateStr !== todayStr) return false;
+        }
+
+        // Exclude certain vendors
+        let vendorName = "";
+        for (const k of vendorKeys) { if (row[k]) { vendorName = String(row[k]).toLowerCase(); break; } }
+        if (vendorName.includes("truepill") || vendorName.includes("vetcove generics") || vendorName.includes("bloodworth")) return false;
+
+        return true;
+      });
+    }
 
     if (rawRows.length === 0) {
       return Response.json({ data: [], count: 0 });
