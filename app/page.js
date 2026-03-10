@@ -109,8 +109,8 @@ const EXCLUDED = ["truepill", "vetcove generics", "bloodworth"];
 const BKO_SKIP = ["Bloodworth Wholesale Drugs", "Elanco US Inc."];
 const WH = {
   "TP-NY": { label: "Brooklyn", full: "Brooklyn, NY", color: "#3B82F6", emailTo: "nigel.white@fuzehealth.com, anna.wilson@fuzehealth.com, trudie.selby@fuzehealth.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Brooklyn " + d; } },
-  "TP-OH": { label: "Ohio", full: "Ohio", color: "#10B981", emailTo: "nigel.white@fuzehealth.com, anna.wilson@fuzehealth.com, trudie.selby@fuzehealth.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Ohio " + d; } },
-  "TP-CA": { label: "Hayward", full: "Hayward, CA", color: "#F59E0B", emailTo: "nigel.white@fuzehealth.com, anna.wilson@fuzehealth.com, trudie.selby@fuzehealth.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Hayward " + d; } },
+  "TP-OH": { label: "Ohio", full: "Ohio", color: "#059669", emailTo: "nigel.white@fuzehealth.com, anna.wilson@fuzehealth.com, trudie.selby@fuzehealth.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Ohio " + d; } },
+  "TP-CA": { label: "Hayward", full: "Hayward, CA", color: "#D97706", emailTo: "nigel.white@fuzehealth.com, anna.wilson@fuzehealth.com, trudie.selby@fuzehealth.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Hayward " + d; } },
   "GGM-KY": { label: "GoGoMeds", full: "GoGoMeds, KY", color: "#8B5CF6", emailTo: "p.pocsatko@gogomeds.com, m.shull@gogomeds.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Weekly Replenishment Orders " + d; } },
 };
 
@@ -221,26 +221,26 @@ function Spinner({ color, size }) { return <span style={{ width: size || 14, hei
 /* ═══════ STYLES ═══════ */
 function makeStyles(accent) {
   return {
-    card: { background: "#111520", border: "1px solid #1E2433", borderRadius: 12, padding: 24, marginBottom: 20 },
-    statCard: { background: "#111520", border: "1px solid #1E2433", borderRadius: 12, padding: "20px 24px", flex: 1, minWidth: 160, position: "relative", overflow: "hidden" },
+    card: { background: "#FFFFFF", border: "1px solid #E8E4DE", borderRadius: 16, padding: 24, marginBottom: 20, boxShadow: "0 1px 4px rgba(44,40,37,0.05)" },
+    statCard: { background: "#FFFFFF", border: "1px solid #E8E4DE", borderRadius: 16, padding: "20px 24px", flex: 1, minWidth: 160, position: "relative", overflow: "hidden", boxShadow: "0 1px 4px rgba(44,40,37,0.05)" },
     btn: function(v) {
-      var base = { display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 8, border: "none", fontSize: 13, fontWeight: 600, cursor: "pointer", transition: "all 0.15s" };
-      if (v === "danger") return Object.assign({}, base, { background: "#EF4444", color: "#fff" });
-      if (v === "ghost") return Object.assign({}, base, { background: "transparent", color: "#94A3B8", border: "1px solid #1E2433" });
+      var base = { display: "inline-flex", alignItems: "center", gap: 6, padding: "10px 18px", borderRadius: 10, border: "none", fontSize: 14, fontWeight: 600, cursor: "pointer", transition: "all 0.15s" };
+      if (v === "danger") return Object.assign({}, base, { background: "#DC2626", color: "#fff" });
+      if (v === "ghost") return Object.assign({}, base, { background: "transparent", color: "#8A8279", border: "1px solid #E8E4DE" });
       return Object.assign({}, base, { background: accent, color: "#fff" });
     },
-    inp: { background: "#0B0E14", border: "1px solid #1E2433", borderRadius: 8, padding: "8px 12px", color: "#E2E8F0", fontSize: 13, outline: "none", width: "100%" },
-    sel: { background: "#0B0E14", border: "1px solid #1E2433", borderRadius: 8, padding: "8px 12px", color: "#E2E8F0", fontSize: 13, outline: "none" },
-    th: { padding: "10px 12px", textAlign: "left", background: "#0D1017", color: "#64748B", fontWeight: 600, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: "1px solid #1E2433", position: "sticky", top: 0, zIndex: 2 },
-    td: { padding: "10px 12px", borderBottom: "1px solid #141822", color: "#CBD5E1" },
+    inp: { background: "#F8F6F3", border: "1px solid #E8E4DE", borderRadius: 10, padding: "10px 14px", color: "#2C2825", fontSize: 14, outline: "none", width: "100%" },
+    sel: { background: "#F8F6F3", border: "1px solid #E8E4DE", borderRadius: 10, padding: "10px 14px", color: "#2C2825", fontSize: 14, outline: "none" },
+    th: { padding: "14px 14px", textAlign: "left", background: "#F5F3EF", color: "#9A928A", fontWeight: 600, fontSize: 13, textTransform: "uppercase", letterSpacing: "0.3px", borderBottom: "2px solid #E8E4DE", position: "sticky", top: 0, zIndex: 2 },
+    td: { padding: "14px 14px", borderBottom: "1px solid #F0EDE8", color: "#4A4541", fontSize: 14 },
     badge: function(t) {
-      var base = { display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600 };
-      var colors = { success: ["rgba(16,185,129,0.15)", "#10B981"], danger: ["rgba(239,68,68,0.15)", "#EF4444"], warning: ["rgba(245,158,11,0.15)", "#F59E0B"], purple: ["rgba(139,92,246,0.15)", "#A78BFA"], blue: ["rgba(59,130,246,0.15)", "#60A5FA"] };
-      var c = colors[t] || ["rgba(100,116,139,0.15)", "#94A3B8"];
+      var base = { display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 20, fontSize: 12, fontWeight: 600 };
+      var colors = { success: ["#ECFDF5", "#059669"], danger: ["#FEF2F2", "#DC2626"], warning: ["#FFFBEB", "#D97706"], purple: ["#F5F3FF", "#7C3AED"], blue: ["#EFF6FF", "#2563EB"] };
+      var c = colors[t] || ["#F5F3EF", "#8A8279"];
       return Object.assign({}, base, { background: c[0], color: c[1] });
     },
     pill: function(active, col) {
-      return { padding: "7px 16px", borderRadius: 8, fontSize: 13, fontWeight: 600, border: "none", cursor: "pointer", transition: "all 0.15s", display: "flex", alignItems: "center", gap: 6, background: active ? (col || accent) : "transparent", color: active ? "#fff" : "#64748B" };
+      return { padding: "10px 20px", borderRadius: 10, fontSize: 15, fontWeight: 600, border: "none", cursor: "pointer", transition: "all 0.15s", display: "flex", alignItems: "center", gap: 6, background: active ? (col || accent) : "transparent", color: active ? "#fff" : "#9A928A" };
     },
   };
 }
@@ -253,7 +253,7 @@ function Gate({ ok, prompt, children, style, onClick, disabled }) {
 function CopyCell({ text, toast, color, accentColor }) {
   return (
     <div title={text} onClick={function() { navigator.clipboard.writeText(text); toast("Copied"); }}
-      style={{ cursor: "pointer", padding: "2px 6px", borderRadius: 4, userSelect: "all", wordBreak: "break-word", lineHeight: 1.4, color: color || "#CBD5E1" }}>
+      style={{ cursor: "pointer", padding: "2px 6px", borderRadius: 4, userSelect: "all", wordBreak: "break-word", lineHeight: 1.4, color: color || "#5C5651" }}>
       {text}
     </div>
   );
@@ -385,7 +385,7 @@ function TrackerTool(props) {
     }
   }, [ok, lp, gmail, emailVendors, emailConfig, toast, data, runBy, runTime, persist, toolLabel]);
 
-  if (initLoading) return <div style={Object.assign({}, S.card, { textAlign: "center", padding: 48, color: "#64748B" })}><Spinner color={toolColor} size={20} /></div>;
+  if (initLoading) return <div style={Object.assign({}, S.card, { textAlign: "center", padding: 48, color: "#8A8279" })}><Spinner color={toolColor} size={20} /></div>;
 
   var ToolIcon = toolKey === "backorder" ? IconBox : IconClock;
   var dataLabel = toolKey === "backorder" ? "Backorder Data" : "Short Data";
@@ -393,31 +393,31 @@ function TrackerTool(props) {
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24, flexWrap: "wrap" }}>
-        <div style={{ display: "flex", gap: 4, background: "#0B0E14", borderRadius: 10, padding: 3 }}>
+        <div style={{ display: "flex", gap: 4, background: "#FAFAF8", borderRadius: 10, padding: 3 }}>
           <button onClick={function() { setSubPage("data"); }} style={S.pill(subPage === "data", toolColor)}>{dataLabel}{data.length > 0 && <span style={{ fontSize: 10, background: subPage === "data" ? "rgba(255,255,255,0.2)" : "rgba(100,116,139,0.2)", padding: "1px 6px", borderRadius: 4 }}>{data.length}</span>}</button>
           <button onClick={function() { if (!ok) { lp(); return; } setSubPage("emails"); }} style={Object.assign({}, S.pill(subPage === "emails", toolColor), !ok ? { opacity: 0.5 } : {})}>{!ok && <IconLock />} Email Drafts</button>
           <button onClick={function() { if (!ok) { lp(); return; } setSubPage("contacts"); }} style={Object.assign({}, S.pill(subPage === "contacts", toolColor), !ok ? { opacity: 0.5 } : {})}>{!ok && <IconLock />} Vendor Contacts</button>
         </div>
         <div style={{ flex: 1 }} />
-        {runTime && <span style={{ fontSize: 11, color: "#475569" }}>Last: {runTime}{runBy ? " by " + runBy : ""}</span>}
+        {runTime && <span style={{ fontSize: 11, color: "#A69E95" }}>Last: {runTime}{runBy ? " by " + runBy : ""}</span>}
         {data.length > 0 && <span style={S.badge(drafts > 0 ? "success" : "default")}>{drafts > 0 ? <><IconCheck /> {drafts} drafts</> : data.length + " items"}</span>}
         {data.length > 0 && (confirmClear
-          ? <div style={{ display: "flex", gap: 8, alignItems: "center" }}><span style={{ fontSize: 12, color: "#FCA5A5" }}>Clear?</span><button onClick={clearAll} style={Object.assign({}, S.btn("danger"), { padding: "6px 14px", fontSize: 12 })}>Yes</button><button onClick={function() { setConfirmClear(false); }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}>No</button></div>
-          : <button onClick={function() { setConfirmClear(true); }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12, color: "#64748B" })}><IconTrash /> Clear</button>
+          ? <div style={{ display: "flex", gap: 8, alignItems: "center" }}><span style={{ fontSize: 12, color: "#DC2626" }}>Clear?</span><button onClick={clearAll} style={Object.assign({}, S.btn("danger"), { padding: "6px 14px", fontSize: 12 })}>Yes</button><button onClick={function() { setConfirmClear(false); }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}>No</button></div>
+          : <button onClick={function() { setConfirmClear(true); }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12, color: "#8A8279" })}><IconTrash /> Clear</button>
         )}
       </div>
 
       {subPage === "data" && <div>
         <div style={Object.assign({}, S.card, { display: "flex", alignItems: "center", gap: 16, padding: "16px 24px" })}>
           <div style={{ width: 40, height: 40, borderRadius: 10, background: toolColor + "20", display: "flex", alignItems: "center", justifyContent: "center", color: toolColor }}><ToolIcon /></div>
-          <div style={{ flex: 1 }}><div style={{ fontSize: 16, fontWeight: 700, color: "#F8FAFC" }}>{toolLabel}</div><div style={{ fontSize: 12, color: "#64748B" }}>{data.length > 0 ? data.length + " items across " + uniqueVendors.length + " vendors" : "No data synced"}</div></div>
+          <div style={{ flex: 1 }}><div style={{ fontSize: 16, fontWeight: 700, color: "#2C2825" }}>{toolLabel}</div><div style={{ fontSize: 12, color: "#8A8279" }}>{data.length > 0 ? data.length + " items across " + uniqueVendors.length + " vendors" : "No data synced"}</div></div>
           <button style={Object.assign({}, S.btn(), { padding: "10px 24px" })} onClick={syncData} disabled={loading}>{loading ? <><Spinner /> Syncing...</> : <><IconRefresh /> {data.length > 0 ? "Re-sync" : "Sync Data"}</>}</button>
         </div>
         {data.length > 0 && <>
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
             <input style={Object.assign({}, S.inp, { maxWidth: 260 })} placeholder="Search..." value={search} onChange={function(e) { setSearch(e.target.value); }} />
             <select style={S.sel} value={vendorFilter} onChange={function(e) { setVendorFilter(e.target.value); }}><option value="all">All Vendors</option>{uniqueVendors.map(function(v) { return <option key={v} value={v}>{v}</option>; })}</select>
-            <div style={{ flex: 1 }} /><span style={{ fontSize: 12, color: "#64748B" }}>{filtered.length}/{data.length}</span>
+            <div style={{ flex: 1 }} /><span style={{ fontSize: 12, color: "#8A8279" }}>{filtered.length}/{data.length}</span>
           </div>
           <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto", maxHeight: 500 })}>
             <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
@@ -430,20 +430,20 @@ function TrackerTool(props) {
                   var vs = String(val);
                   if (col.copyable) return <td key={col.key} style={Object.assign({}, S.td, { maxWidth: 280 })}><CopyCell text={vs} toast={toast} accentColor={toolColor} /></td>;
                   if (col.badgeFn) return <td key={col.key} style={S.td}><span style={S.badge(col.badgeFn(vs))}>{vs}</span></td>;
-                  return <td key={col.key} style={Object.assign({}, S.td, col.mono ? { fontFamily: "monospace", fontSize: 11 } : {}, col.align === "right" ? { textAlign: "right" } : {}, col.bold ? { fontWeight: 600 } : {}, col.highlightColor ? { color: col.highlightColor } : {})}>{vs}</td>;
+                  return <td key={col.key} style={Object.assign({}, S.td, col.align === "right" ? { textAlign: "right" } : {}, col.highlightColor ? { color: col.highlightColor } : {})}>{vs}</td>;
                 })}</tr>;
               })}</tbody>
             </table>
           </div>
         </>}
-        {data.length === 0 && !loading && <div style={Object.assign({}, S.card, { textAlign: "center", padding: 60, color: "#475569" })}><ToolIcon /><p style={{ marginTop: 12, fontSize: 14 }}>Click <strong>Sync Data</strong> to pull {toolLabel.toLowerCase()} from Acumatica.</p></div>}
+        {data.length === 0 && !loading && <div style={Object.assign({}, S.card, { textAlign: "center", padding: 60, color: "#A69E95" })}><ToolIcon /><p style={{ marginTop: 12, fontSize: 14 }}>Click <strong>Sync Data</strong> to pull {toolLabel.toLowerCase()} from Acumatica.</p></div>}
       </div>}
 
       {subPage === "emails" && <div>
-        <h3 style={{ fontSize: 16, fontWeight: 700, color: "#F8FAFC", margin: "0 0 4px" }}>{emailConfig.title}</h3>
-        <p style={{ color: "#64748B", fontSize: 12, margin: "0 0 16px" }}>{emailConfig.subtitle}</p>
-        {skipVendors.length > 0 && <div style={{ background: "rgba(100,116,139,0.06)", border: "1px solid #1E2433", borderRadius: 8, padding: "10px 16px", marginBottom: 16, fontSize: 12, color: "#64748B" }}>Skipped: {skipVendors.join(", ")}</div>}
-        {drafts > 0 && <div style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.3)", borderRadius: 10, padding: "14px 20px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}><IconCheck /><span style={{ fontSize: 13, color: "#6EE7B7" }}><strong>{drafts} draft(s) created!</strong></span></div>}
+        <h3 style={{ fontSize: 16, fontWeight: 700, color: "#2C2825", margin: "0 0 4px" }}>{emailConfig.title}</h3>
+        <p style={{ color: "#8A8279", fontSize: 12, margin: "0 0 16px" }}>{emailConfig.subtitle}</p>
+        {skipVendors.length > 0 && <div style={{ background: "rgba(100,116,139,0.06)", border: "1px solid #E8E4DE", borderRadius: 8, padding: "10px 16px", marginBottom: 16, fontSize: 12, color: "#8A8279" }}>Skipped: {skipVendors.join(", ")}</div>}
+        {drafts > 0 && <div style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.3)", borderRadius: 10, padding: "14px 20px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}><IconCheck /><span style={{ fontSize: 13, color: "#059669" }}><strong>{drafts} draft(s) created!</strong></span></div>}
         {data.length > 0 ? <>
           {emailVendors.map(function(entry) {
             var vendor = entry[0], items = entry[1];
@@ -451,7 +451,7 @@ function TrackerTool(props) {
             var toLine = emailConfig.buildTo(email);
             return <div key={vendor} style={S.card}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
-                <div><div style={{ fontSize: 14, fontWeight: 600, color: "#F8FAFC" }}>{vendor}</div><div style={{ fontSize: 11, color: "#64748B", marginTop: 2 }}>{items.length} items &middot; To: {toLine || "No email on file"}</div></div>
+                <div><div style={{ fontSize: 14, fontWeight: 600, color: "#2C2825" }}>{vendor}</div><div style={{ fontSize: 11, color: "#8A8279", marginTop: 2 }}>{items.length} items &middot; To: {toLine || "No email on file"}</div></div>
                 <span style={S.badge("purple")}>{items.length}</span>
               </div>
               <div style={{ overflow: "auto", maxHeight: 200 }}>
@@ -463,15 +463,15 @@ function TrackerTool(props) {
             </div>;
           })}
           <Gate ok={ok} prompt={lp} style={Object.assign({}, S.btn(), { padding: "10px 24px", opacity: drafts > 0 ? 0.5 : 1 })} onClick={genDrafts} disabled={drafts > 0}><IconMail /> {drafts > 0 ? drafts + " Drafts Created" : "Generate " + emailVendors.length + " Email Drafts"}</Gate>
-        </> : <div style={Object.assign({}, S.card, { textAlign: "center", padding: 48, color: "#475569" })}>Sync data first.</div>}
+        </> : <div style={Object.assign({}, S.card, { textAlign: "center", padding: 48, color: "#A69E95" })}>Sync data first.</div>}
       </div>}
 
       {subPage === "contacts" && <div>
-        <h3 style={{ fontSize: 16, fontWeight: 700, color: "#F8FAFC", margin: "0 0 16px" }}>Vendor Contacts</h3>
+        <h3 style={{ fontSize: 16, fontWeight: 700, color: "#2C2825", margin: "0 0 16px" }}>Vendor Contacts</h3>
         <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto" })}>
           <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
             <thead><tr><th style={S.th}>Vendor</th><th style={S.th}>Email(s)</th></tr></thead>
-            <tbody>{Object.entries(CONTACTS).filter(function(e) { return e[1]; }).sort(function(a, b) { return a[0].localeCompare(b[0]); }).map(function(e) { return <tr key={e[0]}><td style={Object.assign({}, S.td, { fontWeight: 500, color: "#E2E8F0" })}>{e[0]}</td><td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, color: "#94A3B8" })}>{e[1]}</td></tr>; })}</tbody>
+            <tbody>{Object.entries(CONTACTS).filter(function(e) { return e[1]; }).sort(function(a, b) { return a[0].localeCompare(b[0]); }).map(function(e) { return <tr key={e[0]}><td style={Object.assign({}, S.td, { fontWeight: 500, color: "#4A4541" })}>{e[0]}</td><td style={Object.assign({}, S.td, { fontSize: 14, color: "#8A8279" })}>{e[1]}</td></tr>; })}</tbody>
           </table>
         </div>
       </div>}
@@ -534,76 +534,76 @@ function WHT(props) {
   var flagCount = flags.s.length + flags.so.length;
   var emailBlocked = whKey !== "GGM-KY" && (flags.s.length > 0 || flags.so.length > 0);
   var getFlag = function(r) { var mc = (r.MovementClass || "").toLowerCase().trim(); if (mc === "short-dating") return "short"; if (mc === "sell-off item") return "selloff"; return null; };
-  var filtered = useMemo(function() { var d = data.slice(); if (search) { var s = search.toLowerCase(); d = d.filter(function(r) { return r.SKUNDC.toLowerCase().indexOf(s) >= 0 || r.Description.toLowerCase().indexOf(s) >= 0 || r.VendorName.toLowerCase().indexOf(s) >= 0; }); } if (vendorFilter !== "all") d = d.filter(function(r) { return r.VendorName === vendorFilter; }); if (flagsOnly) { var fi = new Set(flags.s.concat(flags.so)); d = d.filter(function(r) { return fi.has(data.indexOf(r)); }); } return d; }, [data, search, vendorFilter, flagsOnly, flags]);
+  var filtered = useMemo(function() { var d = data.slice(); if (search) { var s = search.toLowerCase(); d = d.filter(function(r) { return r.SKUNDC.toLowerCase().indexOf(s) >= 0 || r.Description.toLowerCase().indexOf(s) >= 0 || r.VendorName.toLowerCase().indexOf(s) >= 0; }); } if (vendorFilter !== "all") d = d.filter(function(r) { return r.VendorName === vendorFilter; }); if (flagsOnly) { var fi = new Set(flags.s.concat(flags.so)); d = d.filter(function(r) { return fi.has(data.indexOf(r)); }); } d.sort(function(a, b) { var fa = getFlag(a) ? 0 : 1; var fb = getFlag(b) ? 0 : 1; return fa - fb; }); return d; }, [data, search, vendorFilter, flagsOnly, flags]);
   var todayStr = new Date().toLocaleDateString("en-US", { month: "numeric", day: "numeric" });
 
-  if (initLoading) return <div style={Object.assign({}, S.card, { textAlign: "center", padding: 48, color: "#64748B" })}><Spinner color={cfg.color} size={20} /></div>;
+  if (initLoading) return <div style={Object.assign({}, S.card, { textAlign: "center", padding: 48, color: "#8A8279" })}><Spinner color={cfg.color} size={20} /></div>;
 
   return (<div>
     <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24, flexWrap: "wrap" }}>
-      <div style={{ display: "flex", gap: 4, background: "#0B0E14", borderRadius: 10, padding: 3 }}>
+      <div style={{ display: "flex", gap: 4, background: "#FAFAF8", borderRadius: 10, padding: 3 }}>
         {[{ id: "overview", lb: "Overview" }, { id: "data", lb: "PO Data", ct: data.length || null }, { id: "shipping", lb: "Shipping" }, { id: "email", lb: "Email" }].map(function(n) { return <button key={n.id} onClick={function() { setSubPage(n.id); }} style={S.pill(subPage === n.id, cfg.color)}>{n.lb}{n.ct ? <span style={{ fontSize: 10, background: subPage === n.id ? "rgba(255,255,255,0.2)" : "rgba(100,116,139,0.2)", padding: "1px 6px", borderRadius: 4 }}>{n.ct}</span> : null}</button>; })}
       </div>
       <div style={{ flex: 1 }} />
-      {runTime && <span style={{ fontSize: 11, color: "#475569" }}>Last: {runTime}{runBy ? " by " + runBy : ""}</span>}
+      {runTime && <span style={{ fontSize: 11, color: "#A69E95" }}>Last: {runTime}{runBy ? " by " + runBy : ""}</span>}
       {data.length > 0 && <span style={S.badge(emailSent ? "success" : "default")}>{emailSent ? <><IconCheck /> Sent</> : data.length + " lines"}</span>}
-      {data.length > 0 && (confirmClear ? <div style={{ display: "flex", gap: 8, alignItems: "center" }}><span style={{ fontSize: 12, color: "#FCA5A5" }}>Clear?</span><button onClick={clearAll} style={Object.assign({}, S.btn("danger"), { padding: "6px 14px", fontSize: 12 })}>Yes</button><button onClick={function() { setConfirmClear(false); }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}>No</button></div> : <Gate ok={ok} prompt={lp} onClick={function() { setConfirmClear(true); }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12, color: "#64748B" })}><IconTrash /> Clear</Gate>)}
+      {data.length > 0 && (confirmClear ? <div style={{ display: "flex", gap: 8, alignItems: "center" }}><span style={{ fontSize: 12, color: "#DC2626" }}>Clear?</span><button onClick={clearAll} style={Object.assign({}, S.btn("danger"), { padding: "6px 14px", fontSize: 12 })}>Yes</button><button onClick={function() { setConfirmClear(false); }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}>No</button></div> : <Gate ok={ok} prompt={lp} onClick={function() { setConfirmClear(true); }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12, color: "#8A8279" })}><IconTrash /> Clear</Gate>)}
     </div>
 
     {subPage === "overview" && <div>
       <div style={Object.assign({}, S.card, { display: "flex", alignItems: "center", gap: 16, padding: "16px 24px" })}>
         <div style={{ width: 40, height: 40, borderRadius: 10, background: cfg.color + "20", display: "flex", alignItems: "center", justifyContent: "center", color: cfg.color }}><IconWH /></div>
-        <div style={{ flex: 1 }}><div style={{ fontSize: 16, fontWeight: 700, color: "#F8FAFC" }}>{cfg.full}</div><div style={{ fontSize: 12, color: "#64748B" }}>{data.length > 0 ? data.length + " lines · " + uniqueVendors.length + " vendors · $" + totalVal.toLocaleString(undefined, { minimumFractionDigits: 2 }) : "No data loaded"}</div></div>
+        <div style={{ flex: 1 }}><div style={{ fontSize: 16, fontWeight: 700, color: "#2C2825" }}>{cfg.full}</div><div style={{ fontSize: 12, color: "#8A8279" }}>{data.length > 0 ? data.length + " lines · " + uniqueVendors.length + " vendors · $" + totalVal.toLocaleString(undefined, { minimumFractionDigits: 2 }) : "No data loaded"}</div></div>
         <Gate ok={ok} prompt={lp} style={Object.assign({}, S.btn(), { padding: "10px 24px" })} onClick={fetchData} disabled={loading}>{loading ? <><Spinner /> Fetching...</> : <><IconRefresh /> {data.length > 0 ? "Re-fetch" : "Run PO Fetch"}</>}</Gate>
       </div>
       {data.length > 0 && <>
         <div style={{ display: "flex", gap: 16, marginBottom: 20, flexWrap: "wrap" }}>
-          {[{ l: "Lines", v: data.length, c: cfg.color }, { l: "Vendors", v: uniqueVendors.length, c: "#10B981" }, { l: "Value", v: "$" + totalVal.toLocaleString(undefined, { minimumFractionDigits: 2 }), c: "#F59E0B" }, { l: "Flags", v: flagCount || "Clear", c: flagCount ? "#EF4444" : "#10B981" }].map(function(s) { return <div key={s.l} style={S.statCard}><div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: s.c }} /><div style={{ fontSize: 12, color: "#64748B", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>{s.l}</div><div style={{ fontSize: 28, fontWeight: 700, color: s.l === "Flags" ? s.c : "#F8FAFC", marginTop: 4 }}>{s.v}</div></div>; })}
+          {[{ l: "Lines", v: data.length, c: cfg.color }, { l: "Vendors", v: uniqueVendors.length, c: "#059669" }, { l: "Value", v: "$" + totalVal.toLocaleString(undefined, { minimumFractionDigits: 2 }), c: "#D97706" }, { l: "Flags", v: flagCount || "Clear", c: flagCount ? "#DC2626" : "#059669" }].map(function(s) { return <div key={s.l} style={S.statCard}><div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: s.c }} /><div style={{ fontSize: 12, color: "#8A8279", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>{s.l}</div><div style={{ fontSize: 28, fontWeight: 700, color: s.l === "Flags" ? s.c : "#2C2825", marginTop: 4 }}>{s.v}</div></div>; })}
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(280px,1fr))", gap: 12 }}>
-          {Object.entries(vendorGroups).sort(function(a, b) { return a[0].localeCompare(b[0]); }).map(function(e) { var v = e[0], rs = e[1], t = vendorTotals[v], rl = SHIP_RULES[v], st = rl ? evalShip(rl, t) : "No Rule", isFree = st === "Free Shipping"; return <div key={v} style={Object.assign({}, S.card, { padding: "16px 20px", marginBottom: 0 })}><div style={{ display: "flex", justifyContent: "space-between" }}><div><div style={{ fontSize: 13, fontWeight: 600, color: "#F8FAFC" }}>{v}</div><div style={{ fontSize: 11, color: "#64748B", marginTop: 2 }}>{rs.length} lines · {rs[0] && rs[0].OrderNbr}</div></div><div style={{ fontSize: 15, fontWeight: 700, color: "#F8FAFC" }}>${t.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div></div><div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 6 }}><IconTruck /><span style={S.badge(isFree ? "success" : "danger")}>{isFree ? <IconCheck /> : <IconAlert />}{st}</span></div></div>; })}
+          {Object.entries(vendorGroups).sort(function(a, b) { return a[0].localeCompare(b[0]); }).map(function(e) { var v = e[0], rs = e[1], t = vendorTotals[v], rl = SHIP_RULES[v], st = rl ? evalShip(rl, t) : "No Rule", isFree = st === "Free Shipping"; return <div key={v} style={Object.assign({}, S.card, { padding: "16px 20px", marginBottom: 0 })}><div style={{ display: "flex", justifyContent: "space-between" }}><div><div style={{ fontSize: 13, fontWeight: 600, color: "#2C2825" }}>{v}</div><div style={{ fontSize: 11, color: "#8A8279", marginTop: 2 }}>{rs.length} lines · {rs[0] && rs[0].OrderNbr}</div></div><div style={{ fontSize: 15, fontWeight: 700, color: "#2C2825" }}>${t.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div></div><div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 6 }}><IconTruck /><span style={S.badge(isFree ? "success" : "danger")}>{isFree ? <IconCheck /> : <IconAlert />}{st}</span></div></div>; })}
         </div>
       </>}
-      {data.length === 0 && !loading && <div style={Object.assign({}, S.card, { textAlign: "center", padding: 60, color: "#475569" })}><IconWH /><p style={{ marginTop: 12, fontSize: 14 }}>Click <strong>Run PO Fetch</strong> to load data for {cfg.full}.</p></div>}
+      {data.length === 0 && !loading && <div style={Object.assign({}, S.card, { textAlign: "center", padding: 60, color: "#A69E95" })}><IconWH /><p style={{ marginTop: 12, fontSize: 14 }}>Click <strong>Run PO Fetch</strong> to load data for {cfg.full}.</p></div>}
     </div>}
 
     {subPage === "data" && <div>
-      {flagCount > 0 && <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 10, padding: "14px 20px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}><IconAlert /><span style={{ fontSize: 13, color: "#FCA5A5" }}><strong>Flagged:</strong>{flags.s.length > 0 && " " + flags.s.length + " Short-Dating"}{flags.so.length > 0 && " " + flags.so.length + " Sell-Off"}</span></div>}
+      {flagCount > 0 && <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 10, padding: "14px 20px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}><IconAlert /><span style={{ fontSize: 13, color: "#DC2626" }}><strong>Flagged:</strong>{flags.s.length > 0 && " " + flags.s.length + " Short-Dating"}{flags.so.length > 0 && " " + flags.so.length + " Sell-Off"}</span></div>}
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
         <input style={Object.assign({}, S.inp, { maxWidth: 260 })} placeholder="Search..." value={search} onChange={function(e) { setSearch(e.target.value); }} />
         <select style={S.sel} value={vendorFilter} onChange={function(e) { setVendorFilter(e.target.value); }}><option value="all">All Vendors</option>{uniqueVendors.map(function(v) { return <option key={v} value={v}>{v}</option>; })}</select>
         <button style={S.btn(flagsOnly ? "danger" : "ghost")} onClick={function() { setFlagsOnly(!flagsOnly); }}><IconFilter /> {flagsOnly ? "Flags" : "Filter Flags"}</button>
-        <div style={{ flex: 1 }} /><span style={{ fontSize: 12, color: "#64748B" }}>{filtered.length}/{data.length}</span>
+        <div style={{ flex: 1 }} /><span style={{ fontSize: 12, color: "#8A8279" }}>{filtered.length}/{data.length}</span>
       </div>
       {data.length > 0 ? <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto", maxHeight: 500 })}>
         <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
           <thead><tr>{["SKU", "Description", "Qty", "Vendor", "PO #", "Reorder", "Max", "Lead", "Min", "Avail", "Price", "Total", "Flag"].map(function(h) { return <th key={h} style={S.th}>{h}</th>; })}</tr></thead>
-          <tbody>{filtered.map(function(r, i) { var f = getFlag(r); var bg = f === "short" ? "rgba(239,68,68,0.06)" : f === "selloff" ? "rgba(245,158,11,0.06)" : "transparent"; var tc = f === "short" ? "#FCA5A5" : f === "selloff" ? "#FCD34D" : "#CBD5E1"; return <tr key={i} style={{ background: bg }}><td style={Object.assign({}, S.td, { color: tc, fontFamily: "monospace", fontSize: 11 })}>{r.SKUNDC}</td><td style={Object.assign({}, S.td, { color: tc, maxWidth: 280 })}><CopyCell text={r.Description} toast={toast} color={tc} accentColor={cfg.color} /></td><td style={Object.assign({}, S.td, { color: tc, fontWeight: 600 })}>{r.OrderQty}</td><td style={Object.assign({}, S.td, { color: tc, fontSize: 11 })}>{r.VendorName}</td><td style={Object.assign({}, S.td, { color: tc, fontFamily: "monospace", fontSize: 11 })}>{r.OrderNbr}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{r.ReorderPoint}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{r.MaxQty}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{r.LeadTime}d</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{r.MinOrderQty}</td><td style={Object.assign({}, S.td, { color: r.QtyAvailable < 0 ? "#EF4444" : tc, fontWeight: r.QtyAvailable < 0 ? 700 : 400, textAlign: "right" })}>{r.QtyAvailable}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>${r.Price.toFixed(2)}</td><td style={Object.assign({}, S.td, { color: "#F8FAFC", fontWeight: 600, textAlign: "right" })}>${r.TotalPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td><td style={S.td}>{f ? <span style={S.badge(f === "short" ? "danger" : "warning")}>{f === "short" ? "Short" : "Sell-Off"}</span> : "\u2014"}</td></tr>; })}</tbody>
+          <tbody>{filtered.map(function(r, i) { var f = getFlag(r); var bg = f === "short" ? "rgba(220,38,38,0.04)" : f === "selloff" ? "rgba(217,119,6,0.04)" : "transparent"; var tc = f === "short" ? "#DC2626" : f === "selloff" ? "#D97706" : "#4A4541"; return <tr key={i} style={{ background: bg }}><td style={Object.assign({}, S.td, { color: tc })}>{r.SKUNDC}</td><td style={Object.assign({}, S.td, { color: tc, maxWidth: 280 })}><CopyCell text={r.Description} toast={toast} color={tc} accentColor={cfg.color} /></td><td style={Object.assign({}, S.td, { color: tc })}>{r.OrderQty}</td><td style={Object.assign({}, S.td, { color: tc })}>{r.VendorName}</td><td style={Object.assign({}, S.td, { color: tc })}>{r.OrderNbr}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{r.ReorderPoint}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{r.MaxQty}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{r.LeadTime}d</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{r.MinOrderQty}</td><td style={Object.assign({}, S.td, { color: r.QtyAvailable < 0 ? "#DC2626" : tc, textAlign: "right" })}>{r.QtyAvailable}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>${r.Price.toFixed(2)}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>${r.TotalPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td><td style={S.td}>{f ? <span style={S.badge(f === "short" ? "danger" : "warning")}>{f === "short" ? "Short" : "Sell-Off"}</span> : "\u2014"}</td></tr>; })}</tbody>
         </table>
-      </div> : <div style={Object.assign({}, S.card, { textAlign: "center", padding: 48, color: "#475569" })}>Run fetch first.</div>}
+      </div> : <div style={Object.assign({}, S.card, { textAlign: "center", padding: 48, color: "#A69E95" })}>Run fetch first.</div>}
     </div>}
 
     {subPage === "shipping" && <div>
       {data.length > 0 ? <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto" })}>
         <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
           <thead><tr><th style={S.th}>Vendor</th><th style={Object.assign({}, S.th, { width: 140 })}>PO #</th><th style={Object.assign({}, S.th, { textAlign: "right" })}>Total</th><th style={S.th}>Shipping</th><th style={Object.assign({}, S.th, { width: 200 })}>Price Check Notes</th></tr></thead>
-          <tbody>{Object.keys(vendorGroups).sort().map(function(v) { var t = vendorTotals[v], rl = SHIP_RULES[v] || "", st = rl ? evalShip(rl, t) : "No Rule", isFree = st === "Free Shipping"; var sn = shipNotes[v] || {}; return <tr key={v}><td style={Object.assign({}, S.td, { fontWeight: 600, color: "#F8FAFC" })}>{v}</td><td style={S.td}><input style={Object.assign({}, S.inp, { padding: "4px 8px", fontSize: 11, fontFamily: "monospace" })} placeholder="Paste PO #" value={sn.po || ""} onChange={function(e) { var updated = Object.assign({}, shipNotes); updated[v] = Object.assign({}, sn, { po: e.target.value }); setShipNotes(updated); persist(data, emailSent, runBy, runTime, updated); }} /></td><td style={Object.assign({}, S.td, { textAlign: "right", fontWeight: 600, fontFamily: "monospace" })}>${t.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td><td style={S.td}><span style={S.badge(isFree ? "success" : "danger")}>{isFree ? <IconCheck /> : <IconAlert />}{st}</span></td><td style={S.td}><input style={Object.assign({}, S.inp, { padding: "4px 8px", fontSize: 11 })} placeholder="Notes..." value={sn.notes || ""} onChange={function(e) { var updated = Object.assign({}, shipNotes); updated[v] = Object.assign({}, sn, { notes: e.target.value }); setShipNotes(updated); persist(data, emailSent, runBy, runTime, updated); }} /></td></tr>; })}</tbody>
+          <tbody>{Object.keys(vendorGroups).sort().map(function(v) { var t = vendorTotals[v], rl = SHIP_RULES[v] || "", st = rl ? evalShip(rl, t) : "No Rule", isFree = st === "Free Shipping"; var sn = shipNotes[v] || {}; return <tr key={v}><td style={Object.assign({}, S.td, { color: "#2C2825" })}>{v}</td><td style={S.td}><input style={Object.assign({}, S.inp, { padding: "6px 10px" })} placeholder="Paste PO #" value={sn.po || ""} onChange={function(e) { var updated = Object.assign({}, shipNotes); updated[v] = Object.assign({}, sn, { po: e.target.value }); setShipNotes(updated); persist(data, emailSent, runBy, runTime, updated); }} /></td><td style={Object.assign({}, S.td, { textAlign: "right" })}>${t.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td><td style={S.td}><span style={S.badge(isFree ? "success" : "danger")}>{isFree ? <IconCheck /> : <IconAlert />}{st}</span></td><td style={S.td}><input style={Object.assign({}, S.inp, { padding: "6px 10px" })} placeholder="Notes..." value={sn.notes || ""} onChange={function(e) { var updated = Object.assign({}, shipNotes); updated[v] = Object.assign({}, sn, { notes: e.target.value }); setShipNotes(updated); persist(data, emailSent, runBy, runTime, updated); }} /></td></tr>; })}</tbody>
         </table>
-      </div> : <div style={Object.assign({}, S.card, { textAlign: "center", padding: 48, color: "#475569" })}>Run fetch first.</div>}
+      </div> : <div style={Object.assign({}, S.card, { textAlign: "center", padding: 48, color: "#A69E95" })}>Run fetch first.</div>}
     </div>}
 
     {subPage === "email" && <div>
-      {emailBlocked && <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 10, padding: "14px 20px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}><IconAlert /><span style={{ fontSize: 13, color: "#FCA5A5" }}><strong>{flagCount} flagged item{flagCount > 1 ? "s" : ""}</strong>{flags.s.length > 0 ? " (" + flags.s.length + " short-dating)" : ""}{flags.so.length > 0 ? " (" + flags.so.length + " sell-off)" : ""} must be removed from the PO before sending.</span></div>}
-      {emailSent && <div style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.3)", borderRadius: 10, padding: "14px 20px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}><IconCheck /><span style={{ fontSize: 13, color: "#6EE7B7" }}><strong>Draft created!</strong></span></div>}
+      {emailBlocked && <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 10, padding: "14px 20px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}><IconAlert /><span style={{ fontSize: 13, color: "#DC2626" }}><strong>{flagCount} flagged item{flagCount > 1 ? "s" : ""}</strong>{flags.s.length > 0 ? " (" + flags.s.length + " short-dating)" : ""}{flags.so.length > 0 ? " (" + flags.so.length + " sell-off)" : ""} must be removed from the PO before sending.</span></div>}
+      {emailSent && <div style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.3)", borderRadius: 10, padding: "14px 20px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}><IconCheck /><span style={{ fontSize: 13, color: "#059669" }}><strong>Draft created!</strong></span></div>}
       <div style={S.card}>
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <div style={{ display: "flex", gap: 8 }}><span style={{ fontSize: 12, color: "#64748B", fontWeight: 500, width: 50 }}>To:</span><span style={{ fontSize: 13, color: "#E2E8F0" }}>{cfg.emailTo}</span></div>
-          <div style={{ display: "flex", gap: 8 }}><span style={{ fontSize: 12, color: "#64748B", fontWeight: 500, width: 50 }}>Subject:</span><span style={{ fontSize: 13, color: "#F8FAFC", fontWeight: 600 }}>{cfg.subjectFn(todayStr)}</span></div>
-          <div style={{ borderTop: "1px solid #1E2433", paddingTop: 16, marginTop: 4, fontSize: 13, color: "#E2E8F0", lineHeight: 1.7 }}>Good morning,<br /><br />Attached are today&apos;s POs.<br /><br />Thanks in advance,<br /><br /><span style={{ color: "#64748B", fontStyle: "italic" }}>[Vetcove Signature]</span></div>
+          <div style={{ display: "flex", gap: 8 }}><span style={{ fontSize: 12, color: "#8A8279", fontWeight: 500, width: 50 }}>To:</span><span style={{ fontSize: 13, color: "#4A4541" }}>{cfg.emailTo}</span></div>
+          <div style={{ display: "flex", gap: 8 }}><span style={{ fontSize: 12, color: "#8A8279", fontWeight: 500, width: 50 }}>Subject:</span><span style={{ fontSize: 13, color: "#2C2825", fontWeight: 600 }}>{cfg.subjectFn(todayStr)}</span></div>
+          <div style={{ borderTop: "1px solid #E8E4DE", paddingTop: 16, marginTop: 4, fontSize: 13, color: "#4A4541", lineHeight: 1.7 }}>Good morning,<br /><br />Attached are today&apos;s POs.<br /><br />Thanks in advance,<br /><br /><span style={{ color: "#8A8279", fontStyle: "italic" }}>[Vetcove Signature]</span></div>
         </div>
-        <div style={{ marginTop: 20, borderTop: "1px solid #1E2433", paddingTop: 16 }}>
-          <div style={{ fontSize: 12, color: "#64748B", fontWeight: 500, marginBottom: 10, textTransform: "uppercase" }}>Attachments ({uniqueVendors.length})</div>
-          {uniqueVendors.map(function(v) { return <div key={v} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: "#0B0E14", borderRadius: 8, marginBottom: 4 }}><IconDL /><span style={{ fontSize: 12, color: "#CBD5E1" }}>{v} PO Data - {whKey}.xlsx</span><div style={{ flex: 1 }} /><span style={{ fontSize: 11, color: "#475569" }}>{vendorGroups[v] ? vendorGroups[v].length : 0} rows</span></div>; })}
+        <div style={{ marginTop: 20, borderTop: "1px solid #E8E4DE", paddingTop: 16 }}>
+          <div style={{ fontSize: 12, color: "#8A8279", fontWeight: 500, marginBottom: 10, textTransform: "uppercase" }}>Attachments ({uniqueVendors.length})</div>
+          {uniqueVendors.map(function(v) { return <div key={v} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: "#FAFAF8", borderRadius: 8, marginBottom: 4 }}><IconDL /><span style={{ fontSize: 12, color: "#5C5651" }}>{v} PO Data - {whKey}.xlsx</span><div style={{ flex: 1 }} /><span style={{ fontSize: 11, color: "#A69E95" }}>{vendorGroups[v] ? vendorGroups[v].length : 0} rows</span></div>; })}
         </div>
         <div style={{ marginTop: 20, display: "flex", gap: 10 }}>
           <Gate ok={ok} prompt={lp} style={Object.assign({}, S.btn(), { padding: "10px 24px", opacity: (emailSent || emailLoading || emailBlocked) ? 0.5 : 1 })} onClick={async function() {
@@ -985,45 +985,45 @@ function POImportTool(props) {
 
   return (
     <div>
-      <p style={{ color: "#64748B", fontSize: 13, marginBottom: 20 }}>Upload vendor PO PDFs to extract NDCs, then validate against Acumatica <strong>Generic Current NDCs</strong> OData to find GEN- Inventory IDs.</p>
+      <p style={{ color: "#8A8279", fontSize: 13, marginBottom: 20 }}>Upload vendor PO PDFs to extract NDCs, then validate against Acumatica <strong>Generic Current NDCs</strong> OData to find GEN- Inventory IDs.</p>
 
       <div style={S.card}>
         <div style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 12, color: "#94A3B8", fontWeight: 500, marginBottom: 8 }}>Vendor Type</div>
+          <div style={{ fontSize: 12, color: "#8A8279", fontWeight: 500, marginBottom: 8 }}>Vendor Type</div>
           <div style={{ display: "flex", gap: 10 }}>
             {[["other", "Keysource / Anda / Bloodworth"], ["mckesson", "McKesson"]].map(function(v) {
               return <button key={v[0]} onClick={function() { setVendor(v[0]); reset(); }}
-                style={{ padding: "8px 18px", borderRadius: 8, border: "1px solid " + (vendor === v[0] ? TOOL_COLOR : "#1E2433"), background: vendor === v[0] ? TOOL_COLOR + "20" : "transparent", color: vendor === v[0] ? TOOL_COLOR : "#94A3B8", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>{v[1]}</button>;
+                style={{ padding: "8px 18px", borderRadius: 8, border: "1px solid " + (vendor === v[0] ? TOOL_COLOR : "#E8E4DE"), background: vendor === v[0] ? TOOL_COLOR + "20" : "transparent", color: vendor === v[0] ? TOOL_COLOR : "#8A8279", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>{v[1]}</button>;
             })}
           </div>
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: vendor === "mckesson" ? "1fr 1fr" : "1fr", gap: 16 }}>
           <div>
-            <div style={{ fontSize: 12, color: "#94A3B8", fontWeight: 500, marginBottom: 6 }}>PO PDF(s)</div>
+            <div style={{ fontSize: 12, color: "#8A8279", fontWeight: 500, marginBottom: 6 }}>PO PDF(s)</div>
             <input ref={pdfInputRef} type="file" accept=".pdf" multiple onChange={handlePdfChange} style={Object.assign({}, S.inp, { cursor: "pointer" })} />
-            {pdfs.length > 0 && <p style={{ color: "#10B981", fontSize: 11, marginTop: 6 }}>{"\u2713"} {pdfs.length} PDF{pdfs.length > 1 ? "s" : ""}: {pdfs.map(function(p) { return p.name; }).join(", ")}</p>}
+            {pdfs.length > 0 && <p style={{ color: "#059669", fontSize: 11, marginTop: 6 }}>{"\u2713"} {pdfs.length} PDF{pdfs.length > 1 ? "s" : ""}: {pdfs.map(function(p) { return p.name; }).join(", ")}</p>}
           </div>
           {vendor === "mckesson" && <div>
-            <div style={{ fontSize: 12, color: "#94A3B8", fontWeight: 500, marginBottom: 6 }}>McKesson Portal Screenshot</div>
+            <div style={{ fontSize: 12, color: "#8A8279", fontWeight: 500, marginBottom: 6 }}>McKesson Portal Screenshot</div>
             <input ref={screenshotInputRef} type="file" accept="image/*" onChange={handleScreenshotUpload} style={Object.assign({}, S.inp, { cursor: "pointer" })} />
             {ocrLoading && <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}><Spinner color={TOOL_COLOR} size={14} /><span style={{ fontSize: 12, color: TOOL_COLOR }}>{ocrStatus || "Processing..."}</span></div>}
-            {mckParsed && !ocrLoading && <p style={{ color: "#10B981", fontSize: 11, marginTop: 6 }}>{"\u2713"} Found {mckParsed.length} NDCs</p>}
-            {screenshotUrl && !ocrLoading && !mckParsed && <p style={{ color: "#F59E0B", fontSize: 11, marginTop: 6 }}>{"\u26A0"} OCR could not find NDCs — type them manually below</p>}
-            <div style={{ marginTop: 10, fontSize: 11, color: "#475569" }}>Add any missing NDCs below (one per line — will be merged with OCR results):</div>
-            <textarea value={mckPaste} onChange={handleMckManualPaste} placeholder={"67877019710\n29300041001\n53746075101\n..."} rows={3} style={Object.assign({}, S.inp, { resize: "vertical", fontFamily: "monospace", fontSize: 10, marginTop: 4 })} />
+            {mckParsed && !ocrLoading && <p style={{ color: "#059669", fontSize: 11, marginTop: 6 }}>{"\u2713"} Found {mckParsed.length} NDCs</p>}
+            {screenshotUrl && !ocrLoading && !mckParsed && <p style={{ color: "#D97706", fontSize: 11, marginTop: 6 }}>{"\u26A0"} OCR could not find NDCs — type them manually below</p>}
+            <div style={{ marginTop: 10, fontSize: 11, color: "#A69E95" }}>Add any missing NDCs below (one per line — will be merged with OCR results):</div>
+            <textarea value={mckPaste} onChange={handleMckManualPaste} placeholder={"67877019710\n29300041001\n53746075101\n..."} rows={3} style={Object.assign({}, S.inp, { resize: "vertical", fontFamily: "monospace", fontSize: 12, marginTop: 4 })} />
           </div>}
         </div>
 
-        {vendor === "mckesson" && mckParsed && mckParsed.length > 0 && <div style={{ marginTop: 16, background: "#0B0E14", border: "1px solid #1E2433", borderRadius: 8, padding: "10px 14px" }}>
+        {vendor === "mckesson" && mckParsed && mckParsed.length > 0 && <div style={{ marginTop: 16, background: "#FAFAF8", border: "1px solid #E8E4DE", borderRadius: 8, padding: "10px 14px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-            <div style={{ fontSize: 11, color: "#64748B", fontWeight: 600, textTransform: "uppercase" }}>Portal NDCs ({mckParsed.length})</div>
-            {ocrRaw && <button onClick={function() { setShowRawOcr(!showRawOcr); }} style={{ background: "transparent", border: "1px solid #1E2433", borderRadius: 6, padding: "2px 8px", fontSize: 10, color: "#64748B", cursor: "pointer" }}>{showRawOcr ? "Hide" : "Show"} Raw OCR</button>}
+            <div style={{ fontSize: 11, color: "#8A8279", fontWeight: 600, textTransform: "uppercase" }}>Portal NDCs ({mckParsed.length})</div>
+            {ocrRaw && <button onClick={function() { setShowRawOcr(!showRawOcr); }} style={{ background: "transparent", border: "1px solid #E8E4DE", borderRadius: 6, padding: "2px 8px", fontSize: 10, color: "#8A8279", cursor: "pointer" }}>{showRawOcr ? "Hide" : "Show"} Raw OCR</button>}
           </div>
-          <div style={{ maxHeight: 80, overflow: "auto", fontSize: 11, fontFamily: "monospace", color: "#94A3B8" }}>
+          <div style={{ maxHeight: 80, overflow: "auto", fontSize: 13, fontFamily: "monospace", color: "#8A8279" }}>
             {mckParsed.map(function(pi, idx) { return <div key={idx}>{pi.ndc}</div>; })}
           </div>
-          {showRawOcr && <div style={{ maxHeight: 200, overflow: "auto", fontSize: 9, fontFamily: "monospace", color: "#475569", background: "#080A0F", borderRadius: 6, padding: 8, marginTop: 8, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{ocrRaw}</div>}
+          {showRawOcr && <div style={{ maxHeight: 200, overflow: "auto", fontSize: 11, fontFamily: "monospace", color: "#A69E95", background: "#F0EDE8", borderRadius: 6, padding: 8, marginTop: 8, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{ocrRaw}</div>}
         </div>}
 
         <div style={{ marginTop: 16, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
@@ -1035,15 +1035,15 @@ function POImportTool(props) {
             style={Object.assign({}, S.btn("ghost"), { padding: "10px 16px", opacity: (!ok || ndcLoading) ? 0.5 : 1 })}>
             {ndcLoading ? <><Spinner /> Loading...</> : <><IconRefresh /> {ndcMap ? "Refresh NDC Map" : "Pre-load NDC Map"}</>}
           </button>
-          {ndcMap && <span style={{ fontSize: 11, color: "#10B981" }}>{"\u2713"} NDC map loaded</span>}
+          {ndcMap && <span style={{ fontSize: 11, color: "#059669" }}>{"\u2713"} NDC map loaded</span>}
         </div>
       </div>
 
-      {error && <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 10, padding: "12px 16px", marginBottom: 16, color: "#FCA5A5", fontSize: 13 }}>Error: {error}</div>}
+      {error && <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 10, padding: "12px 16px", marginBottom: 16, color: "#DC2626", fontSize: 13 }}>Error: {error}</div>}
 
       {screenshotUrl && vendor === "mckesson" && <div style={S.card}>
-        <div style={{ fontSize: 14, fontWeight: 600, color: "#F8FAFC", marginBottom: 12 }}>McKesson Portal Screenshot</div>
-        <div style={{ border: "1px solid #1E2433", borderRadius: 8, overflow: "hidden", maxHeight: 400, overflowY: "auto" }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: "#2C2825", marginBottom: 12 }}>McKesson Portal Screenshot</div>
+        <div style={{ border: "1px solid #E8E4DE", borderRadius: 8, overflow: "hidden", maxHeight: 400, overflowY: "auto" }}>
           <img src={screenshotUrl} alt="McKesson screenshot" style={{ width: "100%", display: "block" }} />
         </div>
       </div>}
@@ -1054,7 +1054,7 @@ function POImportTool(props) {
           var isQtyMismatch = w.type === "qty-mismatch";
           var bgColor = isPdfOnly ? "rgba(245,158,11,0.08)" : isQtyMismatch ? "rgba(239,68,68,0.08)" : "rgba(139,92,246,0.08)";
           var borderColor = isPdfOnly ? "rgba(245,158,11,0.3)" : isQtyMismatch ? "rgba(239,68,68,0.3)" : "rgba(139,92,246,0.3)";
-          var textColor = isPdfOnly ? "#FCD34D" : isQtyMismatch ? "#FCA5A5" : "#C4B5FD";
+          var textColor = isPdfOnly ? "#D97706" : isQtyMismatch ? "#DC2626" : "#7C3AED";
           return <div key={i} style={{ background: bgColor, border: "1px solid " + borderColor, borderRadius: 10, padding: "10px 16px", marginBottom: 8, display: "flex", alignItems: "center", gap: 10 }}>
             <IconAlert />
             <span style={{ fontSize: 13, color: textColor }}>{w.msg}</span>
@@ -1064,16 +1064,16 @@ function POImportTool(props) {
 
       {results.length > 0 && <div>
         <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
-          <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#64748B", textTransform: "uppercase", fontWeight: 600 }}>Total Items</div><div style={{ fontSize: 24, fontWeight: 700, color: "#F8FAFC", marginTop: 4 }}>{results.length}</div></div>
-          <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#64748B", textTransform: "uppercase", fontWeight: 600 }}>In OData</div><div style={{ fontSize: 24, fontWeight: 700, color: "#10B981", marginTop: 4 }}>{foundCount}</div></div>
-          <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#64748B", textTransform: "uppercase", fontWeight: 600 }}>Not in OData</div><div style={{ fontSize: 24, fontWeight: 700, color: notFoundCount > 0 ? "#EF4444" : "#10B981", marginTop: 4 }}>{notFoundCount}</div></div>
-          {vendor === "mckesson" && <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#64748B", textTransform: "uppercase", fontWeight: 600 }}>Qty Edited</div><div style={{ fontSize: 24, fontWeight: 700, color: qtyMismatchCount > 0 ? "#F59E0B" : "#10B981", marginTop: 4 }}>{qtyMismatchCount}</div></div>}
-          {mckWarnings.length > 0 && <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#64748B", textTransform: "uppercase", fontWeight: 600 }}>MCK Warnings</div><div style={{ fontSize: 24, fontWeight: 700, color: "#F59E0B", marginTop: 4 }}>{mckWarnings.length}</div></div>}
+          <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#8A8279", textTransform: "uppercase", fontWeight: 600 }}>Total Items</div><div style={{ fontSize: 24, fontWeight: 700, color: "#2C2825", marginTop: 4 }}>{results.length}</div></div>
+          <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#8A8279", textTransform: "uppercase", fontWeight: 600 }}>In OData</div><div style={{ fontSize: 24, fontWeight: 700, color: "#059669", marginTop: 4 }}>{foundCount}</div></div>
+          <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#8A8279", textTransform: "uppercase", fontWeight: 600 }}>Not in OData</div><div style={{ fontSize: 24, fontWeight: 700, color: notFoundCount > 0 ? "#DC2626" : "#059669", marginTop: 4 }}>{notFoundCount}</div></div>
+          {vendor === "mckesson" && <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#8A8279", textTransform: "uppercase", fontWeight: 600 }}>Qty Edited</div><div style={{ fontSize: 24, fontWeight: 700, color: qtyMismatchCount > 0 ? "#D97706" : "#059669", marginTop: 4 }}>{qtyMismatchCount}</div></div>}
+          {mckWarnings.length > 0 && <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#8A8279", textTransform: "uppercase", fontWeight: 600 }}>MCK Warnings</div><div style={{ fontSize: 24, fontWeight: 700, color: "#D97706", marginTop: 4 }}>{mckWarnings.length}</div></div>}
         </div>
 
         <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto" })}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", borderBottom: "1px solid #1E2433" }}>
-            <span style={{ fontSize: 14, fontWeight: 600, color: "#F8FAFC" }}>NDC Validation Results</span>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", borderBottom: "1px solid #E8E4DE" }}>
+            <span style={{ fontSize: 14, fontWeight: 600, color: "#2C2825" }}>NDC Validation Results</span>
             <div style={{ display: "flex", gap: 8 }}>
               <button onClick={reset} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}><IconTrash /> Clear</button>
               <button onClick={downloadCSV} style={Object.assign({}, S.btn(), { padding: "6px 14px", fontSize: 12 })}><IconCSV /> Download CSV</button>
@@ -1100,17 +1100,17 @@ function POImportTool(props) {
               var extCost = (editedQty && r.unitPrice) ? (editedQty * r.unitPrice) : r.totalPrice;
               return <tr key={i} style={{ background: qtyChanged ? "rgba(245,158,11,0.06)" : (r.ndcFound ? "transparent" : "rgba(239,68,68,0.04)") }}>
                 <td style={S.td}><span style={S.badge(r.ndcFound ? "success" : "danger")}>{r.ndcFound ? <><IconCheck /> Match</> : <><IconAlert /> Missing</>}</span></td>
-                <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, color: "#94A3B8" })}>{r.ndc}</td>
-                <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontWeight: 600, color: r.inventoryId ? "#34D399" : "#475569" })}>{r.inventoryId || "\u2014"}</td>
-                <td style={Object.assign({}, S.td, { color: "#CBD5E1", maxWidth: 220, wordBreak: "break-word" })}>{r.acumaticaDesc || "\u2014"}</td>
-                <td style={Object.assign({}, S.td, { fontWeight: 600, color: r.uom ? "#06B6D4" : "#475569" })}>{r.uom || "\u2014"}</td>
-                <td style={Object.assign({}, S.td, { color: "#94A3B8", maxWidth: 200, wordBreak: "break-word" })}>{r.drugName || "\u2014"}</td>
-                <td style={Object.assign({}, S.td, { fontSize: 11 })}>{r.vendorSource || "\u2014"}</td>
-                <td style={Object.assign({}, S.td, { textAlign: "center" })}><input style={Object.assign({}, S.inp, { width: 60, padding: "4px 6px", fontSize: 12, textAlign: "center", fontWeight: 600, color: qtyChanged ? "#F59E0B" : "#E2E8F0", background: qtyChanged ? "rgba(245,158,11,0.1)" : "#0B0E14" })} type="number" value={screenshotQtys[r.ndc] != null ? screenshotQtys[r.ndc] : (r.qty || "")} onChange={function(e) { var updated = Object.assign({}, screenshotQtys); updated[r.ndc] = e.target.value; setScreenshotQtys(updated); }} /></td>
-                <td style={Object.assign({}, S.td, { textAlign: "right", color: "#34D399", fontWeight: 600 })}>{r.unitPrice ? "$" + r.unitPrice.toFixed(2) : "\u2014"}</td>
-                <td style={Object.assign({}, S.td, { textAlign: "right", fontFamily: "monospace" })}>{extCost ? "$" + extCost.toLocaleString(undefined, { minimumFractionDigits: 2 }) : "\u2014"}</td>
-                {vendor === "mckesson" && <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, color: "#64748B" })}>{r.vendorItemNum || "\u2014"}</td>}
-                <td style={Object.assign({}, S.td, { fontSize: 10, color: "#475569" })}>{(r.sourceFile || "").split("/").pop()}</td>
+                <td style={S.td}>{r.ndc}</td>
+                <td style={Object.assign({}, S.td, { color: r.inventoryId ? "#059669" : "#A69E95" })}>{r.inventoryId || "\u2014"}</td>
+                <td style={Object.assign({}, S.td, { maxWidth: 220, wordBreak: "break-word" })}>{r.acumaticaDesc || "\u2014"}</td>
+                <td style={Object.assign({}, S.td, { color: r.uom ? "#06B6D4" : "#A69E95" })}>{r.uom || "\u2014"}</td>
+                <td style={Object.assign({}, S.td, { color: "#8A8279", maxWidth: 200, wordBreak: "break-word" })}>{r.drugName || "\u2014"}</td>
+                <td style={S.td}>{r.vendorSource || "\u2014"}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "center" })}><input style={Object.assign({}, S.inp, { width: 70, padding: "6px 8px", textAlign: "center", color: qtyChanged ? "#D97706" : "#4A4541", background: qtyChanged ? "rgba(245,158,11,0.1)" : "#FAFAF8" })} type="number" value={screenshotQtys[r.ndc] != null ? screenshotQtys[r.ndc] : (r.qty || "")} onChange={function(e) { var updated = Object.assign({}, screenshotQtys); updated[r.ndc] = e.target.value; setScreenshotQtys(updated); }} /></td>
+                <td style={Object.assign({}, S.td, { textAlign: "right", color: "#059669" })}>{r.unitPrice ? "$" + r.unitPrice.toFixed(2) : "\u2014"}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right" })}>{extCost ? "$" + extCost.toLocaleString(undefined, { minimumFractionDigits: 2 }) : "\u2014"}</td>
+                {vendor === "mckesson" && <td style={S.td}>{r.vendorItemNum || "\u2014"}</td>}
+                <td style={Object.assign({}, S.td, { color: "#A69E95" })}>{(r.sourceFile || "").split("/").pop()}</td>
               </tr>;
             })}</tbody>
           </table>
@@ -1169,7 +1169,7 @@ export default function Hub() {
     { key: "VendorName", label: "Vendor" },
     { key: "InventoryID", label: "Inv. ID", mono: true },
     { key: "SKUNDC", label: "SKU/NDC", mono: true },
-    { key: "BestKnownDating", label: "Best Dating", highlightColor: "#FCD34D", bold: true },
+    { key: "BestKnownDating", label: "Best Dating", highlightColor: "#D97706", bold: true },
     { key: "QtyOnHand", label: "Qty", align: "right" },
     { key: "BaseUnit", label: "Unit" },
     { key: "OpenQty", label: "Open", align: "right" },
@@ -1179,7 +1179,7 @@ export default function Hub() {
   var sdEmail = useMemo(function() { return {
     title: "Generate Email Drafts", subtitle: "One draft per vendor \u2014 asking about better dating availability.", subjectPrefix: "Short-Dating Items \u2013 ",
     buildTo: function(e) { return ["hd-purchaseorders@vetcove.com", e].filter(Boolean).join(", "); },
-    tableCols: [{ key: "#", label: "#" }, { key: "Description", label: "Product" }, { key: "InventoryID", label: "Inventory ID" }, { key: "SKUNDC", label: "TruePill SKU" }, { key: "BestKnownDating", label: "Best Known Dating", highlightColor: "#FCD34D" }],
+    tableCols: [{ key: "#", label: "#" }, { key: "Description", label: "Product" }, { key: "InventoryID", label: "Inventory ID" }, { key: "SKUNDC", label: "TruePill SKU" }, { key: "BestKnownDating", label: "Best Known Dating", highlightColor: "#D97706" }],
   }; }, []);
 
   var bkoColumns = useMemo(function() { return [
@@ -1192,31 +1192,31 @@ export default function Hub() {
     { key: "BaseUnit", label: "Unit" },
     { key: "QtyOnHand", label: "On Hand", align: "right" },
     { key: "OpenQty", label: "Open Qty", align: "right", bold: true },
-    { key: "RecoveryDate", label: "Recovery Date", highlightColor: "#60A5FA", bold: true },
+    { key: "RecoveryDate", label: "Recovery Date", highlightColor: "#3B82F6", bold: true },
   ]; }, []);
 
   var bkoEmail = useMemo(function() { return {
     title: "Generate Backorder Emails", subtitle: "One draft per vendor \u2014 asking for recovery ETA updates. CC: hd-purchaseorders@vetcove.com", subjectPrefix: "Backorder Item Status \u2013 ",
     buildTo: function(e) { return e || ""; },
-    tableCols: [{ key: "#", label: "#" }, { key: "Description", label: "Product Description" }, { key: "InventoryID", label: "Inventory ID (Mfr No.)" }, { key: "RecoveryDate", label: "Recovery Date", highlightColor: "#60A5FA" }],
+    tableCols: [{ key: "#", label: "#" }, { key: "Description", label: "Product Description" }, { key: "InventoryID", label: "Inventory ID (Mfr No.)" }, { key: "RecoveryDate", label: "Recovery Date", highlightColor: "#3B82F6" }],
   }; }, []);
 
-  if (credLoading) return <div style={{ fontFamily: "sans-serif", background: "#0B0E14", color: "#E2E8F0", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}><Spinner color="#3B82F6" size={24} /><style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style></div>;
+  if (credLoading) return <div style={{ fontFamily: "sans-serif", background: "#FAFAF8", color: "#4A4541", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}><Spinner color="#3B82F6" size={24} /><style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style></div>;
 
   if (!ok) return (
-    <div style={{ fontFamily: "'DM Sans','Segoe UI',sans-serif", background: "#0B0E14", color: "#E2E8F0", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');*{box-sizing:border-box;margin:0;padding:0}@keyframes spin{to{transform:rotate(360deg)}}@keyframes slideUp{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}button:hover{filter:brightness(1.12)}input:focus{border-color:#3B82F6!important;box-shadow:0 0 0 2px rgba(59,130,246,0.15)}`}</style>
-      <div style={{ background: "#111520", border: "1px solid #1E2433", borderRadius: 16, padding: 40, width: 420, textAlign: "center" }}>
+    <div style={{ fontFamily: "'Varela Round',sans-serif", background: "#FAFAF8", color: "#4A4541", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Varela+Round&display=swap');*{box-sizing:border-box;margin:0;padding:0}@keyframes spin{to{transform:rotate(360deg)}}@keyframes slideUp{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}button:hover{filter:brightness(1.12)}input:focus{border-color:#3B82F6!important;box-shadow:0 0 0 2px rgba(59,130,246,0.15)}`}</style>
+      <div style={{ background: "#FFFFFF", border: "1px solid #E8E4DE", borderRadius: 16, padding: 40, width: 420, textAlign: "center" }}>
         <div style={{ width: 64, height: 64, borderRadius: 16, background: "rgba(59,130,246,0.15)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px" }}><IconKey /></div>
-        <h1 style={{ fontSize: 24, fontWeight: 700, color: "#F8FAFC", margin: "0 0 4px" }}>Inventory Hub</h1>
-        <p style={{ fontSize: 11, color: "#64748B", fontWeight: 500, letterSpacing: "1.5px", textTransform: "uppercase", margin: "0 0 32px" }}>Vetcove Tools</p>
+        <h1 style={{ fontSize: 24, fontWeight: 700, color: "#2C2825", margin: "0 0 4px" }}>Inventory Hub</h1>
+        <p style={{ fontSize: 11, color: "#8A8279", fontWeight: 500, letterSpacing: "1.5px", textTransform: "uppercase", margin: "0 0 32px" }}>Vetcove Tools</p>
         <div style={{ textAlign: "left", display: "flex", flexDirection: "column", gap: 14 }}>
-          <div><label style={{ fontSize: 12, color: "#94A3B8", fontWeight: 500, display: "block", marginBottom: 6 }}>Acumatica Username</label><input style={{ background: "#0B0E14", border: "1px solid #1E2433", borderRadius: 8, padding: "10px 14px", color: "#E2E8F0", fontSize: 14, outline: "none", width: "100%" }} value={cred.username} onChange={function(e) { setCred({ username: e.target.value, password: cred.password }); }} placeholder="your.username" /></div>
-          <div><label style={{ fontSize: 12, color: "#94A3B8", fontWeight: 500, display: "block", marginBottom: 6 }}>Acumatica Password</label><input style={{ background: "#0B0E14", border: "1px solid #1E2433", borderRadius: 8, padding: "10px 14px", color: "#E2E8F0", fontSize: 14, outline: "none", width: "100%" }} type="password" value={cred.password} onChange={function(e) { setCred({ username: cred.username, password: e.target.value }); }} placeholder={"\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"} onKeyDown={function(e) { if (e.key === "Enter") login(); }} /></div>
+          <div><label style={{ fontSize: 12, color: "#8A8279", fontWeight: 500, display: "block", marginBottom: 6 }}>Acumatica Username</label><input style={{ background: "#FAFAF8", border: "1px solid #E8E4DE", borderRadius: 8, padding: "10px 14px", color: "#4A4541", fontSize: 14, outline: "none", width: "100%" }} value={cred.username} onChange={function(e) { setCred({ username: e.target.value, password: cred.password }); }} placeholder="your.username" /></div>
+          <div><label style={{ fontSize: 12, color: "#8A8279", fontWeight: 500, display: "block", marginBottom: 6 }}>Acumatica Password</label><input style={{ background: "#FAFAF8", border: "1px solid #E8E4DE", borderRadius: 8, padding: "10px 14px", color: "#4A4541", fontSize: 14, outline: "none", width: "100%" }} type="password" value={cred.password} onChange={function(e) { setCred({ username: cred.username, password: e.target.value }); }} placeholder={"\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"} onKeyDown={function(e) { if (e.key === "Enter") login(); }} /></div>
           <button onClick={login} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", background: "#3B82F6", color: "#fff", border: "none", borderRadius: 8, padding: "12px 16px", fontSize: 14, fontWeight: 600, cursor: "pointer", marginTop: 8 }}><IconKey /> Sign In</button>
         </div>
       </div>
-      {toast && <div style={{ position: "fixed", bottom: 24, right: 24, padding: "12px 20px", borderRadius: 10, fontSize: 13, fontWeight: 500, zIndex: 999, background: toast.t === "success" ? "#065F46" : "#1E293B", color: "#F8FAFC", border: "1px solid " + (toast.t === "success" ? "#10B981" : "#334155"), boxShadow: "0 8px 32px rgba(0,0,0,0.4)", animation: "slideUp 0.3s ease" }}>{toast.m}</div>}
+      {toast && <div style={{ position: "fixed", bottom: 24, right: 24, padding: "12px 20px", borderRadius: 10, fontSize: 13, fontWeight: 500, zIndex: 999, background: toast.t === "success" ? "#059669" : toast.t === "error" ? "#DC2626" : "#FFFFFF", color: toast.t === "success" || toast.t === "error" ? "#fff" : "#2C2825", border: "1px solid " + (toast.t === "success" ? "#059669" : toast.t === "error" ? "#DC2626" : "#E8E4DE"), boxShadow: "0 4px 20px rgba(44,40,37,0.12)", animation: "slideUp 0.3s ease" }}>{toast.m}</div>}
     </div>
   );
 
@@ -1226,59 +1226,59 @@ export default function Hub() {
 
   function SideLink(p) {
     var active = page === p.id && !showLogin;
-    return <div onClick={function() { setPage(p.id); setShowLogin(false); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 24px", fontSize: 14, cursor: "pointer", transition: "all 0.15s", fontWeight: active ? 600 : 400, color: active ? "#F8FAFC" : "#94A3B8", background: active ? p.color + "15" : "transparent", borderRight: active ? "2px solid " + p.color : "2px solid transparent" }}><Dot color={p.color} />{p.label}</div>;
+    return <div onClick={function() { setPage(p.id); setShowLogin(false); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 24px", fontSize: 14, cursor: "pointer", transition: "all 0.15s", fontWeight: active ? 600 : 400, color: active ? "#2C2825" : "#8A8279", background: active ? p.color + "15" : "transparent", borderRight: active ? "2px solid " + p.color : "2px solid transparent" }}><Dot color={p.color} />{p.label}</div>;
   }
 
   return (
-    <div style={{ fontFamily: "'DM Sans','Segoe UI',sans-serif", background: "#0B0E14", color: "#E2E8F0", minHeight: "100vh", display: "flex" }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');*{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:#0B0E14}::-webkit-scrollbar-thumb{background:#1E2433;border-radius:3px}@keyframes spin{to{transform:rotate(360deg)}}@keyframes slideUp{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}button:hover{filter:brightness(1.12)}input:focus,select:focus{border-color:#3B82F6!important;box-shadow:0 0 0 2px rgba(59,130,246,0.15)}tr:hover td{background:rgba(59,130,246,0.04)}`}</style>
+    <div style={{ fontFamily: "'Varela Round',sans-serif", background: "#FAFAF8", color: "#4A4541", minHeight: "100vh", display: "flex" }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Varela+Round&display=swap');*{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:#FAFAF8}::-webkit-scrollbar-thumb{background:#E8E4DE;border-radius:3px}@keyframes spin{to{transform:rotate(360deg)}}@keyframes slideUp{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}button:hover{filter:brightness(1.12)}input:focus,select:focus{border-color:#3B82F6!important;box-shadow:0 0 0 2px rgba(59,130,246,0.15)}tr:hover td{background:rgba(59,130,246,0.04)}`}</style>
 
-      <div style={{ width: 240, background: "#111520", borderRight: "1px solid #1E2433", display: "flex", flexDirection: "column", padding: "20px 0", flexShrink: 0 }}>
-        <div style={{ padding: "0 24px 24px", borderBottom: "1px solid #1E2433", marginBottom: 12 }}>
-          <p style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-0.5px", color: "#F8FAFC", margin: 0 }}>Inventory Hub</p>
-          <p style={{ fontSize: 11, color: "#64748B", fontWeight: 500, letterSpacing: "1.5px", textTransform: "uppercase", marginTop: 4 }}>Vetcove Tools</p>
+      <div style={{ width: 240, background: "#FFFFFF", borderRight: "1px solid #E8E4DE", display: "flex", flexDirection: "column", padding: "20px 0", flexShrink: 0 }}>
+        <div style={{ padding: "0 24px 24px", borderBottom: "1px solid #E8E4DE", marginBottom: 12 }}>
+          <p style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-0.5px", color: "#2C2825", margin: 0 }}>Inventory Hub</p>
+          <p style={{ fontSize: 11, color: "#8A8279", fontWeight: 500, letterSpacing: "1.5px", textTransform: "uppercase", marginTop: 4 }}>Vetcove Tools</p>
         </div>
-        <div style={{ padding: "0 12px", marginBottom: 4 }}><div style={{ fontSize: 10, fontWeight: 600, color: "#475569", textTransform: "uppercase", letterSpacing: "1px", padding: "8px 12px" }}>PO Tools</div></div>
+        <div style={{ padding: "0 12px", marginBottom: 4 }}><div style={{ fontSize: 10, fontWeight: 600, color: "#A69E95", textTransform: "uppercase", letterSpacing: "1px", padding: "8px 12px" }}>PO Tools</div></div>
         {Object.entries(WH).map(function(e) { return <SideLink key={e[0]} id={e[0]} label={e[1].full} color={e[1].color} />; })}
-        <div style={{ padding: "12px 12px 4px", marginTop: 4, borderTop: "1px solid #1E2433" }}><div style={{ fontSize: 10, fontWeight: 600, color: "#475569", textTransform: "uppercase", letterSpacing: "1px", padding: "8px 12px" }}>Generic PO Tools</div></div>
+        <div style={{ padding: "12px 12px 4px", marginTop: 4, borderTop: "1px solid #E8E4DE" }}><div style={{ fontSize: 10, fontWeight: 600, color: "#A69E95", textTransform: "uppercase", letterSpacing: "1px", padding: "8px 12px" }}>Generic PO Tools</div></div>
         <SideLink id="po-import" label="PO NDC Validator" color="#06B6D4" />
-        <div style={{ padding: "12px 12px 4px", marginTop: 4, borderTop: "1px solid #1E2433" }}><div style={{ fontSize: 10, fontWeight: 600, color: "#475569", textTransform: "uppercase", letterSpacing: "1px", padding: "8px 12px" }}>Inventory Tools</div></div>
+        <div style={{ padding: "12px 12px 4px", marginTop: 4, borderTop: "1px solid #E8E4DE" }}><div style={{ fontSize: 10, fontWeight: 600, color: "#A69E95", textTransform: "uppercase", letterSpacing: "1px", padding: "8px 12px" }}>Inventory Tools</div></div>
         <SideLink id="short-dating" label="Short-Dating" color="#E879F9" />
         <SideLink id="backorder" label="Backorders" color="#F97316" />
-        <div style={{ padding: "12px 12px 4px", marginTop: 4, borderTop: "1px solid #1E2433" }}><div style={{ fontSize: 10, fontWeight: 600, color: "#475569", textTransform: "uppercase", letterSpacing: "1px", padding: "8px 12px" }}>Settings</div></div>
-        <div onClick={function() { setPage("rules"); setShowLogin(false); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 24px", fontSize: 14, cursor: "pointer", fontWeight: page === "rules" && !showLogin ? 600 : 400, color: page === "rules" && !showLogin ? "#F8FAFC" : "#94A3B8", background: page === "rules" && !showLogin ? "rgba(59,130,246,0.1)" : "transparent", borderRight: page === "rules" && !showLogin ? "2px solid #3B82F6" : "2px solid transparent" }}><IconTruck /> Shipping Rules</div>
+        <div style={{ padding: "12px 12px 4px", marginTop: 4, borderTop: "1px solid #E8E4DE" }}><div style={{ fontSize: 10, fontWeight: 600, color: "#A69E95", textTransform: "uppercase", letterSpacing: "1px", padding: "8px 12px" }}>Settings</div></div>
+        <div onClick={function() { setPage("rules"); setShowLogin(false); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 24px", fontSize: 14, cursor: "pointer", fontWeight: page === "rules" && !showLogin ? 600 : 400, color: page === "rules" && !showLogin ? "#2C2825" : "#8A8279", background: page === "rules" && !showLogin ? "rgba(59,130,246,0.1)" : "transparent", borderRight: page === "rules" && !showLogin ? "2px solid #3B82F6" : "2px solid transparent" }}><IconTruck /> Shipping Rules</div>
         <div style={{ flex: 1 }} />
         <div style={{ padding: "0 16px" }}>
           <div style={{ padding: "12px 16px", background: ok ? "rgba(16,185,129,0.08)" : "rgba(239,68,68,0.08)", borderRadius: 10, border: "1px solid " + (ok ? "rgba(16,185,129,0.2)" : "rgba(239,68,68,0.2)") }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}><Dot color={ok ? "#10B981" : "#EF4444"} /><span style={{ fontSize: 12, color: ok ? "#6EE7B7" : "#FCA5A5", fontWeight: 500 }}>{ok ? "Connected" : "Not Connected"}</span></div>
-            {ok && cred.username && <div style={{ fontSize: 11, color: "#64748B", marginTop: 4, paddingLeft: 16 }}>{cred.username}</div>}
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}><Dot color={ok ? "#059669" : "#DC2626"} /><span style={{ fontSize: 12, color: ok ? "#059669" : "#DC2626", fontWeight: 500 }}>{ok ? "Connected" : "Not Connected"}</span></div>
+            {ok && cred.username && <div style={{ fontSize: 11, color: "#8A8279", marginTop: 4, paddingLeft: 16 }}>{cred.username}</div>}
             <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-              <button onClick={function() { setShowLogin(true); }} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, flex: 1, background: "transparent", color: "#94A3B8", border: "1px solid #1E2433", borderRadius: 8, padding: "4px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer" }}><IconKey /> {ok ? "Update" : "Login"}</button>
-              {ok && <button onClick={logout} style={{ background: "transparent", color: "#64748B", border: "1px solid #1E2433", borderRadius: 8, padding: "4px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Logout</button>}
+              <button onClick={function() { setShowLogin(true); }} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, flex: 1, background: "transparent", color: "#8A8279", border: "1px solid #E8E4DE", borderRadius: 8, padding: "4px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer" }}><IconKey /> {ok ? "Update" : "Login"}</button>
+              {ok && <button onClick={logout} style={{ background: "transparent", color: "#8A8279", border: "1px solid #E8E4DE", borderRadius: 8, padding: "4px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Logout</button>}
             </div>
           </div>
           <div style={{ padding: "12px 16px", marginTop: 8, background: gmail ? "rgba(59,130,246,0.08)" : "rgba(100,116,139,0.08)", borderRadius: 10, border: "1px solid " + (gmail ? "rgba(59,130,246,0.2)" : "rgba(100,116,139,0.2)") }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}><IconGmail /><span style={{ fontSize: 12, color: gmail ? "#93C5FD" : "#94A3B8", fontWeight: 500 }}>{gmail ? "Gmail Connected" : "Gmail Not Connected"}</span></div>
-            {gmail && gmail.email && <div style={{ fontSize: 11, color: "#64748B", marginTop: 4, paddingLeft: 22 }}>{gmail.email}</div>}
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}><IconGmail /><span style={{ fontSize: 12, color: gmail ? "#2563EB" : "#8A8279", fontWeight: 500 }}>{gmail ? "Gmail Connected" : "Gmail Not Connected"}</span></div>
+            {gmail && gmail.email && <div style={{ fontSize: 11, color: "#8A8279", marginTop: 4, paddingLeft: 22 }}>{gmail.email}</div>}
             <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-              <button onClick={connectGmail} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, flex: 1, background: "transparent", color: "#94A3B8", border: "1px solid #1E2433", borderRadius: 8, padding: "4px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer" }}><IconGmail /> {gmail ? "Reconnect" : "Connect"}</button>
-              {gmail && <button onClick={disconnectGmail} style={{ background: "transparent", color: "#64748B", border: "1px solid #1E2433", borderRadius: 8, padding: "4px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Disconnect</button>}
+              <button onClick={connectGmail} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, flex: 1, background: "transparent", color: "#8A8279", border: "1px solid #E8E4DE", borderRadius: 8, padding: "4px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer" }}><IconGmail /> {gmail ? "Reconnect" : "Connect"}</button>
+              {gmail && <button onClick={disconnectGmail} style={{ background: "transparent", color: "#8A8279", border: "1px solid #E8E4DE", borderRadius: 8, padding: "4px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Disconnect</button>}
             </div>
           </div>
         </div>
       </div>
 
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "auto" }}>
-        <div style={{ padding: "16px 32px", borderBottom: "1px solid #1E2433", display: "flex", alignItems: "center", justifyContent: "space-between", background: "#0D1017" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>{!showLogin && <Dot color={activeColor} />}<span style={{ fontSize: 18, fontWeight: 600, color: "#F8FAFC" }}>{showLogin ? "Acumatica Login" : activeLabel}</span>{isWH && !showLogin && <span style={{ fontSize: 12, background: activeColor + "20", color: activeColor, padding: "3px 10px", borderRadius: 6, fontWeight: 600 }}>{page}</span>}</div>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>{!ok && !showLogin && <span style={{ fontSize: 12, color: "#FCA5A5", display: "flex", alignItems: "center", gap: 4 }}><IconLock /> View only</span>}<span style={{ fontSize: 12, color: "#64748B" }}>{new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</span></div>
+        <div style={{ padding: "16px 32px", borderBottom: "1px solid #E8E4DE", display: "flex", alignItems: "center", justifyContent: "space-between", background: "#F5F3EF" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>{!showLogin && <Dot color={activeColor} />}<span style={{ fontSize: 18, fontWeight: 600, color: "#2C2825" }}>{showLogin ? "Acumatica Login" : activeLabel}</span>{isWH && !showLogin && <span style={{ fontSize: 12, background: activeColor + "20", color: activeColor, padding: "3px 10px", borderRadius: 6, fontWeight: 600 }}>{page}</span>}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>{!ok && !showLogin && <span style={{ fontSize: 12, color: "#DC2626", display: "flex", alignItems: "center", gap: 4 }}><IconLock /> View only</span>}<span style={{ fontSize: 12, color: "#8A8279" }}>{new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</span></div>
         </div>
         <div style={{ padding: 32, flex: 1 }}>
-          {showLogin && <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 400 }}><div style={{ background: "#111520", border: "1px solid #1E2433", borderRadius: 12, padding: 32, width: 400, textAlign: "center" }}><div style={{ width: 56, height: 56, borderRadius: 14, background: "rgba(59,130,246,0.15)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}><IconKey /></div><h2 style={{ fontSize: 20, fontWeight: 700, color: "#F8FAFC", margin: "0 0 4px" }}>Acumatica Login</h2><p style={{ color: "#475569", fontSize: 11, margin: "0 0 24px" }}>Shared across all tools</p><div style={{ textAlign: "left", display: "flex", flexDirection: "column", gap: 12 }}><div><label style={{ fontSize: 12, color: "#94A3B8", fontWeight: 500, display: "block", marginBottom: 4 }}>Username</label><input style={{ background: "#0B0E14", border: "1px solid #1E2433", borderRadius: 8, padding: "8px 12px", color: "#E2E8F0", fontSize: 13, outline: "none", width: "100%" }} value={cred.username} onChange={function(e) { setCred({ username: e.target.value, password: cred.password }); }} placeholder="your.username" /></div><div><label style={{ fontSize: 12, color: "#94A3B8", fontWeight: 500, display: "block", marginBottom: 4 }}>Password</label><input style={{ background: "#0B0E14", border: "1px solid #1E2433", borderRadius: 8, padding: "8px 12px", color: "#E2E8F0", fontSize: 13, outline: "none", width: "100%" }} type="password" value={cred.password} onChange={function(e) { setCred({ username: cred.username, password: e.target.value }); }} placeholder="\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" /></div><button onClick={login} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, width: "100%", background: "#3B82F6", color: "#fff", border: "none", borderRadius: 8, padding: "10px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer", marginTop: 8 }}>Connect</button></div></div></div>}
+          {showLogin && <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 400 }}><div style={{ background: "#FFFFFF", border: "1px solid #E8E4DE", borderRadius: 12, padding: 32, width: 400, textAlign: "center" }}><div style={{ width: 56, height: 56, borderRadius: 14, background: "rgba(59,130,246,0.15)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}><IconKey /></div><h2 style={{ fontSize: 20, fontWeight: 700, color: "#2C2825", margin: "0 0 4px" }}>Acumatica Login</h2><p style={{ color: "#A69E95", fontSize: 11, margin: "0 0 24px" }}>Shared across all tools</p><div style={{ textAlign: "left", display: "flex", flexDirection: "column", gap: 12 }}><div><label style={{ fontSize: 12, color: "#8A8279", fontWeight: 500, display: "block", marginBottom: 4 }}>Username</label><input style={{ background: "#FAFAF8", border: "1px solid #E8E4DE", borderRadius: 8, padding: "8px 12px", color: "#4A4541", fontSize: 13, outline: "none", width: "100%" }} value={cred.username} onChange={function(e) { setCred({ username: e.target.value, password: cred.password }); }} placeholder="your.username" /></div><div><label style={{ fontSize: 12, color: "#8A8279", fontWeight: 500, display: "block", marginBottom: 4 }}>Password</label><input style={{ background: "#FAFAF8", border: "1px solid #E8E4DE", borderRadius: 8, padding: "8px 12px", color: "#4A4541", fontSize: 13, outline: "none", width: "100%" }} type="password" value={cred.password} onChange={function(e) { setCred({ username: cred.username, password: e.target.value }); }} placeholder="\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" /></div><button onClick={login} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, width: "100%", background: "#3B82F6", color: "#fff", border: "none", borderRadius: 8, padding: "10px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer", marginTop: 8 }}>Connect</button></div></div></div>}
 
           {page === "rules" && !showLogin && <div>
-            <p style={{ color: "#64748B", fontSize: 13, marginBottom: 16 }}>Vendor shipping rules for PO warehouses.</p>
-            <div style={{ background: "#111520", border: "1px solid #1E2433", borderRadius: 12, padding: 0, overflow: "auto" }}><table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}><thead><tr><th style={{ padding: "10px 12px", textAlign: "left", background: "#0D1017", color: "#64748B", fontWeight: 600, fontSize: 11, textTransform: "uppercase", borderBottom: "1px solid #1E2433" }}>Vendor</th><th style={{ padding: "10px 12px", textAlign: "left", background: "#0D1017", color: "#64748B", fontWeight: 600, fontSize: 11, textTransform: "uppercase", borderBottom: "1px solid #1E2433" }}>Rule</th></tr></thead><tbody>{Object.entries(SHIP_RULES).map(function(e) { return <tr key={e[0]}><td style={{ padding: "10px 12px", borderBottom: "1px solid #141822", fontWeight: 500, color: "#E2E8F0" }}>{e[0]}</td><td style={{ padding: "10px 12px", borderBottom: "1px solid #141822", fontFamily: "monospace", fontSize: 11, color: "#94A3B8" }}>{e[1]}</td></tr>; })}</tbody></table></div>
+            <p style={{ color: "#8A8279", fontSize: 13, marginBottom: 16 }}>Vendor shipping rules for PO warehouses.</p>
+            <div style={{ background: "#FFFFFF", border: "1px solid #E8E4DE", borderRadius: 12, padding: 0, overflow: "auto" }}><table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}><thead><tr><th style={{ padding: "10px 12px", textAlign: "left", background: "#F5F3EF", color: "#8A8279", fontWeight: 600, fontSize: 11, textTransform: "uppercase", borderBottom: "1px solid #E8E4DE" }}>Vendor</th><th style={{ padding: "10px 12px", textAlign: "left", background: "#F5F3EF", color: "#8A8279", fontWeight: 600, fontSize: 11, textTransform: "uppercase", borderBottom: "1px solid #E8E4DE" }}>Rule</th></tr></thead><tbody>{Object.entries(SHIP_RULES).map(function(e) { return <tr key={e[0]}><td style={{ padding: "10px 12px", borderBottom: "1px solid #F0EDE8", fontWeight: 500, color: "#4A4541" }}>{e[0]}</td><td style={{ padding: "10px 12px", borderBottom: "1px solid #F0EDE8", fontSize: 14, color: "#8A8279" }}>{e[1]}</td></tr>; })}</tbody></table></div>
           </div>}
 
           {!showLogin && Object.entries(WH).map(function(e) { return <div key={e[0]} style={{ display: page === e[0] ? "block" : "none" }}><WHT whKey={e[0]} cfg={e[1]} toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} /></div>; })}
@@ -1288,7 +1288,7 @@ export default function Hub() {
         </div>
       </div>
 
-      {toast && <div style={{ position: "fixed", bottom: 24, right: 24, padding: "12px 20px", borderRadius: 10, fontSize: 13, fontWeight: 500, zIndex: 999, background: toast.t === "success" ? "#065F46" : "#1E293B", color: "#F8FAFC", border: "1px solid " + (toast.t === "success" ? "#10B981" : "#334155"), boxShadow: "0 8px 32px rgba(0,0,0,0.4)", animation: "slideUp 0.3s ease" }}>{toast.m}</div>}
+      {toast && <div style={{ position: "fixed", bottom: 24, right: 24, padding: "12px 20px", borderRadius: 10, fontSize: 13, fontWeight: 500, zIndex: 999, background: toast.t === "success" ? "#059669" : toast.t === "error" ? "#DC2626" : "#FFFFFF", color: toast.t === "success" || toast.t === "error" ? "#fff" : "#2C2825", border: "1px solid " + (toast.t === "success" ? "#059669" : toast.t === "error" ? "#DC2626" : "#E8E4DE"), boxShadow: "0 4px 20px rgba(44,40,37,0.12)", animation: "slideUp 0.3s ease" }}>{toast.m}</div>}
     </div>
   );
 }
