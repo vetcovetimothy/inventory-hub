@@ -54,7 +54,7 @@ function clearGmailToken() {
 }
 
 /* ═══════ SHIPPING RULES ═══════ */
-const SHIP_RULES = {
+const DEFAULT_SHIP_RULES = {
   "American Regent Animal Health": "message:Free Shipping",
   "Boehringer Ingelheim Animal Health": "message:Free Shipping",
   "Ceva Animal Health": "message:Free Shipping",
@@ -483,7 +483,7 @@ function TrackerTool(props) {
 
 /* ═══════ PO WAREHOUSE TOOL ═══════ */
 function WHT(props) {
-  var whKey = props.whKey, cfg = props.cfg, toast = props.toast, ok = props.ok, lp = props.lp, cred = props.cred, gmail = props.gmail;
+  var whKey = props.whKey, cfg = props.cfg, toast = props.toast, ok = props.ok, lp = props.lp, cred = props.cred, gmail = props.gmail, SHIP_RULES = props.shipRules || {};
   var _sp = useState("overview"), subPage = _sp[0], setSubPage = _sp[1];
   var _d = useState([]), data = _d[0], setData = _d[1];
   var _ld = useState(false), loading = _ld[0], setLoading = _ld[1];
@@ -1137,6 +1137,8 @@ export default function Hub() {
   var _t = useState(null), toast = _t[0], setToast = _t[1];
   var _cl = useState(true), credLoading = _cl[0], setCredLoading = _cl[1];
   var _gm = useState(null), gmail = _gm[0], setGmail = _gm[1];
+  var _sr = useState(function() { var saved = sGet("shipping-rules-v2"); return saved || Object.assign({}, DEFAULT_SHIP_RULES); }), shipRules = _sr[0], setShipRules = _sr[1];
+  function updateShipRules(newRules) { setShipRules(newRules); sSet("shipping-rules-v2", newRules); }
 
   var showToast = useCallback(function(m, t) { setToast({ m: m, t: t || "success" }); setTimeout(function() { setToast(null); }, 3500); }, []);
   useEffect(function() { var mt = true; (async function() { var s = sGet("user-credentials"); if (mt && s && s.username && s.password) { setCred(s); setOk(true); } var g = getGmailToken(); if (mt && g && g.token) { setGmail(g); } if (mt) setCredLoading(false); })(); return function() { mt = false; }; }, []);
@@ -1285,11 +1287,45 @@ export default function Hub() {
           {showLogin && <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 400 }}><div style={{ background: "#FFFFFF", border: "1px solid #E8E4DE", borderRadius: 12, padding: 32, width: 400, textAlign: "center" }}><div style={{ width: 56, height: 56, borderRadius: 14, background: "rgba(59,130,246,0.15)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}><IconKey /></div><h2 style={{ fontSize: 20, fontWeight: 700, color: "#2C2825", margin: "0 0 4px" }}>Acumatica Login</h2><p style={{ color: "#A69E95", fontSize: 11, margin: "0 0 24px" }}>Shared across all tools</p><div style={{ textAlign: "left", display: "flex", flexDirection: "column", gap: 12 }}><div><label style={{ fontSize: 12, color: "#8A8279", fontWeight: 500, display: "block", marginBottom: 4 }}>Username</label><input style={{ background: "#FAFAF8", border: "1px solid #E8E4DE", borderRadius: 8, padding: "8px 12px", color: "#4A4541", fontSize: 13, outline: "none", width: "100%" }} value={cred.username} onChange={function(e) { setCred({ username: e.target.value, password: cred.password }); }} placeholder="your.username" /></div><div><label style={{ fontSize: 12, color: "#8A8279", fontWeight: 500, display: "block", marginBottom: 4 }}>Password</label><input style={{ background: "#FAFAF8", border: "1px solid #E8E4DE", borderRadius: 8, padding: "8px 12px", color: "#4A4541", fontSize: 13, outline: "none", width: "100%" }} type="password" value={cred.password} onChange={function(e) { setCred({ username: cred.username, password: e.target.value }); }} placeholder="\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" /></div><button onClick={login} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, width: "100%", background: "#3B82F6", color: "#fff", border: "none", borderRadius: 8, padding: "10px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer", marginTop: 8 }}>Connect</button></div></div></div>}
 
           {page === "rules" && !showLogin && <div>
-            <p style={{ color: "#8A8279", fontSize: 13, marginBottom: 16 }}>Vendor shipping rules for PO warehouses.</p>
-            <div style={{ background: "#FFFFFF", border: "1px solid #E8E4DE", borderRadius: 12, padding: 0, overflow: "auto" }}><table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}><thead><tr><th style={{ padding: "10px 12px", textAlign: "left", background: "#F5F3EF", color: "#8A8279", fontWeight: 600, fontSize: 11, textTransform: "uppercase", borderBottom: "1px solid #E8E4DE" }}>Vendor</th><th style={{ padding: "10px 12px", textAlign: "left", background: "#F5F3EF", color: "#8A8279", fontWeight: 600, fontSize: 11, textTransform: "uppercase", borderBottom: "1px solid #E8E4DE" }}>Rule</th></tr></thead><tbody>{Object.entries(SHIP_RULES).map(function(e) { return <tr key={e[0]}><td style={{ padding: "10px 12px", borderBottom: "1px solid #F0EDE8", fontWeight: 500, color: "#4A4541" }}>{e[0]}</td><td style={{ padding: "10px 12px", borderBottom: "1px solid #F0EDE8", fontSize: 14, color: "#8A8279" }}>{e[1]}</td></tr>; })}</tbody></table></div>
+            <p style={{ color: "#8A8279", fontSize: 13, marginBottom: 16 }}>Vendor shipping rules for PO warehouses. Rules are saved to your browser.</p>
+            <div style={{ background: "#FFFFFF", border: "1px solid #E8E4DE", borderRadius: 12, overflow: "auto", marginBottom: 16 }}>
+              <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
+                <thead><tr>
+                  <th style={{ padding: "12px 14px", textAlign: "left", background: "#F5F3EF", color: "#9A928A", fontWeight: 600, fontSize: 13, textTransform: "uppercase", borderBottom: "2px solid #E8E4DE" }}>Vendor</th>
+                  <th style={{ padding: "12px 14px", textAlign: "left", background: "#F5F3EF", color: "#9A928A", fontWeight: 600, fontSize: 13, textTransform: "uppercase", borderBottom: "2px solid #E8E4DE" }}>Rule</th>
+                  <th style={{ padding: "12px 14px", textAlign: "center", background: "#F5F3EF", color: "#9A928A", fontWeight: 600, fontSize: 13, textTransform: "uppercase", borderBottom: "2px solid #E8E4DE", width: 60 }}></th>
+                </tr></thead>
+                <tbody>{Object.entries(shipRules).sort(function(a, b) { return a[0].localeCompare(b[0]); }).map(function(e) {
+                  return <tr key={e[0]}>
+                    <td style={{ padding: "10px 14px", borderBottom: "1px solid #F0EDE8", color: "#4A4541", fontSize: 14 }}>{e[0]}</td>
+                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8" }}>
+                      <input style={{ background: "#F8F6F3", border: "1px solid #E8E4DE", borderRadius: 8, padding: "8px 12px", color: "#4A4541", fontSize: 13, outline: "none", width: "100%", fontFamily: "'Varela Round', sans-serif" }} value={e[1]} onChange={function(ev) { var updated = Object.assign({}, shipRules); updated[e[0]] = ev.target.value; updateShipRules(updated); }} />
+                    </td>
+                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textAlign: "center" }}>
+                      <button onClick={function() { var updated = Object.assign({}, shipRules); delete updated[e[0]]; updateShipRules(updated); showToast("Removed " + e[0]); }} style={{ background: "transparent", border: "1px solid #E8E4DE", borderRadius: 6, padding: "4px 8px", fontSize: 11, color: "#DC2626", cursor: "pointer" }}>{"\u2715"}</button>
+                    </td>
+                  </tr>;
+                })}</tbody>
+              </table>
+            </div>
+            <div style={{ background: "#FFFFFF", border: "1px solid #E8E4DE", borderRadius: 12, padding: 20, display: "flex", gap: 12, alignItems: "flex-end" }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: 12, color: "#8A8279", fontWeight: 500, display: "block", marginBottom: 4 }}>Vendor Name</label>
+                <input id="new-vendor-name" style={{ background: "#F8F6F3", border: "1px solid #E8E4DE", borderRadius: 8, padding: "8px 12px", color: "#4A4541", fontSize: 14, outline: "none", width: "100%", fontFamily: "'Varela Round', sans-serif" }} placeholder="e.g. Zoetis US LLC" />
+              </div>
+              <div style={{ flex: 2 }}>
+                <label style={{ fontSize: 12, color: "#8A8279", fontWeight: 500, display: "block", marginBottom: 4 }}>Rule</label>
+                <input id="new-vendor-rule" style={{ background: "#F8F6F3", border: "1px solid #E8E4DE", borderRadius: 8, padding: "8px 12px", color: "#4A4541", fontSize: 14, outline: "none", width: "100%", fontFamily: "'Varela Round', sans-serif" }} placeholder="e.g. min:5000; message:Free Shipping; else:Not Free Shipping" />
+              </div>
+              <button onClick={function() { var nameEl = document.getElementById("new-vendor-name"); var ruleEl = document.getElementById("new-vendor-rule"); var name = (nameEl.value || "").trim(); var rule = (ruleEl.value || "").trim(); if (!name) { showToast("Enter a vendor name", "error"); return; } if (!rule) { showToast("Enter a rule", "error"); return; } var updated = Object.assign({}, shipRules); updated[name] = rule; updateShipRules(updated); nameEl.value = ""; ruleEl.value = ""; showToast("Added " + name); }} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "10px 18px", borderRadius: 10, border: "none", fontSize: 14, fontWeight: 600, cursor: "pointer", background: "#3B82F6", color: "#fff", flexShrink: 0 }}>+ Add</button>
+            </div>
+            <div style={{ marginTop: 16, display: "flex", gap: 10 }}>
+              <button onClick={function() { updateShipRules(Object.assign({}, DEFAULT_SHIP_RULES)); showToast("Reset to defaults"); }} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 8, border: "1px solid #E8E4DE", fontSize: 13, fontWeight: 600, cursor: "pointer", background: "transparent", color: "#8A8279" }}>Reset to Defaults</button>
+              <span style={{ fontSize: 12, color: "#B5AEA5", alignSelf: "center" }}>{Object.keys(shipRules).length} vendors</span>
+            </div>
           </div>}
 
-          {!showLogin && Object.entries(WH).map(function(e) { return <div key={e[0]} style={{ display: page === e[0] ? "block" : "none" }}><WHT whKey={e[0]} cfg={e[1]} toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} /></div>; })}
+          {!showLogin && Object.entries(WH).map(function(e) { return <div key={e[0]} style={{ display: page === e[0] ? "block" : "none" }}><WHT whKey={e[0]} cfg={e[1]} toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} shipRules={shipRules} /></div>; })}
           {!showLogin && page === "short-dating" && <TrackerTool toolKey="short-dating" toolLabel="Short-Dating Tracker" toolColor="#E879F9" demoData={SD_DEMO} columns={sdColumns} emailConfig={sdEmail} toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} />}
           {!showLogin && page === "backorder" && <TrackerTool toolKey="backorder" toolLabel="Backorder Tracker" toolColor="#F97316" demoData={BKO_DEMO} columns={bkoColumns} emailConfig={bkoEmail} skipVendors={BKO_SKIP} toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} />}
           {!showLogin && page === "po-import" && <POImportTool toast={showToast} cred={cred} ok={ok} lp={promptLogin} />}
