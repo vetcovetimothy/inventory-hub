@@ -255,7 +255,7 @@ function CopyCell({ text, toast, color, accentColor }) {
   return (
     <div title={"Click to copy: " + text} onClick={function() { navigator.clipboard.writeText(text); setCopied(true); toast("Copied: " + text.slice(0, 40)); setTimeout(function() { setCopied(false); }, 1500); }}
       style={{ cursor: "pointer", padding: "6px 10px", borderRadius: 8, wordBreak: "break-word", lineHeight: 1.4, color: color || "#4A4541", display: "flex", alignItems: "flex-start", gap: 6, background: copied ? "#ECFDF5" : "#F8F6F3", border: "1px solid " + (copied ? "#059669" : "#E8E4DE"), transition: "all 0.2s" }}>
-      <span style={{ flex: 1, fontSize: 14 }}>{text}</span>
+      <span style={{ flex: 1, fontSize: 12 }}>{text}</span>
       <span style={{ flexShrink: 0, marginTop: 2, color: copied ? "#059669" : "#B5AEA5", transition: "all 0.2s" }}>{copied ? <IconCheck /> : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>}</span>
     </div>
   );
@@ -421,7 +421,7 @@ function TrackerTool(props) {
             <select style={S.sel} value={vendorFilter} onChange={function(e) { setVendorFilter(e.target.value); }}><option value="all">All Vendors</option>{uniqueVendors.map(function(v) { return <option key={v} value={v}>{v}</option>; })}</select>
             <div style={{ flex: 1 }} /><span style={{ fontSize: 12, color: "#8A8279" }}>{filtered.length}/{data.length}</span>
           </div>
-          <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto", maxHeight: 500 })}>
+          <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto" })}>
             <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
               <thead><tr>{columns.map(function(c) { return <th key={c.key} style={Object.assign({}, S.th, c.align === "right" ? { textAlign: "right" } : {})}>{c.label}</th>; })}</tr></thead>
               <tbody>{filtered.map(function(row, idx) {
@@ -577,7 +577,7 @@ function WHT(props) {
         <button style={S.btn(flagsOnly ? "danger" : "ghost")} onClick={function() { setFlagsOnly(!flagsOnly); }}><IconFilter /> {flagsOnly ? "Flags" : "Filter Flags"}</button>
         <div style={{ flex: 1 }} /><span style={{ fontSize: 12, color: "#8A8279" }}>{filtered.length}/{data.length}</span>
       </div>
-      {data.length > 0 ? <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto", maxHeight: 500 })}>
+      {data.length > 0 ? <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto" })}>
         <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
           <thead><tr>{["SKU", "Description", "Qty", "Vendor", "PO #", "Reorder", "Max", "Lead", "Min", "Avail", "Price", "Total", "Flag"].map(function(h) { return <th key={h} style={S.th}>{h}</th>; })}</tr></thead>
           <tbody>{filtered.map(function(r, i) { var f = getFlag(r); var bg = f === "short" ? "rgba(220,38,38,0.04)" : f === "selloff" ? "rgba(217,119,6,0.04)" : "transparent"; var tc = f === "short" ? "#DC2626" : f === "selloff" ? "#D97706" : "#4A4541"; return <tr key={i} style={{ background: bg }}><td style={Object.assign({}, S.td, { color: tc })}>{r.SKUNDC}</td><td style={Object.assign({}, S.td, { color: tc, maxWidth: 280 })}><CopyCell text={r.Description} toast={toast} color={tc} accentColor={cfg.color} /></td><td style={Object.assign({}, S.td, { color: tc })}>{r.OrderQty}</td><td style={Object.assign({}, S.td, { color: tc })}>{r.VendorName}</td><td style={Object.assign({}, S.td, { color: tc })}>{r.OrderNbr}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{r.ReorderPoint}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{r.MaxQty}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{r.LeadTime}d</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{r.MinOrderQty}</td><td style={Object.assign({}, S.td, { color: r.QtyAvailable < 0 ? "#DC2626" : tc, textAlign: "right" })}>{r.QtyAvailable}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>${r.Price.toFixed(2)}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>${r.TotalPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td><td style={S.td}>{f ? <span style={S.badge(f === "short" ? "danger" : "warning")}>{f === "short" ? "Short" : "Sell-Off"}</span> : "\u2014"}</td></tr>; })}</tbody>
