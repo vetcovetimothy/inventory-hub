@@ -498,15 +498,57 @@ function WHT(props) {
   var _rt = useState(null), runTime = _rt[0], setRunTime = _rt[1];
   var _il = useState(true), initLoading = _il[0], setInitLoading = _il[1];
   var S = useMemo(function() { return makeStyles(cfg.color); }, [cfg.color]);
-  var storageKey = "wh-data-" + whKey;
+  var kvKey = "po:" + whKey;
 
+  // Load from KV on mount
   useEffect(function() {
     var m = true;
-    (async function() { var s = sGet(storageKey); if (m && s && s.data && s.data.length > 0) { setData(s.data); setEmailSent(s.emailSent || false); setRunBy(s.runBy || null); setRunTime(s.runTime || null); setShipNotes(s.shipNotes || {}); } if (m) setInitLoading(false); })();
+    (async function() {
+      try {
+        var resp = await fetch("/api/kv?key=" + encodeURIComponent(kvKey));
+        var json = await resp.json();
+        if (m && json.data && json.data.data && json.data.data.length > 0) {
+          setData(json.data.data); setEmailSent(json.data.emailSent || false); setRunBy(json.data.runBy || null); setRunTime(json.data.runTime || null); setShipNotes(json.data.shipNotes || {});
+        }
+      } catch (e) {
+        // Fallback to localStorage
+        var s = sGet("wh-data-" + whKey);
+        if (m && s && s.data && s.data.length > 0) { setData(s.data); setEmailSent(s.emailSent || false); setRunBy(s.runBy || null); setRunTime(s.runTime || null); setShipNotes(s.shipNotes || {}); }
+      }
+      if (m) setInitLoading(false);
+    })();
     return function() { m = false; };
-  }, [storageKey]);
+  }, [kvKey]);
 
-  var persist = useCallback(async function(d, es, by, time, sn) { sSet(storageKey, { data: d, emailSent: es, runBy: by, runTime: time, shipNotes: sn || {} }); }, [storageKey]);
+  // Poll KV every 8 seconds for changes from other users
+  useEffect(function() {
+    var m = true;
+    var poll = setInterval(async function() {
+      try {
+        var resp = await fetch("/api/kv?key=" + encodeURIComponent(kvKey));
+        var json = await resp.json();
+        if (!m || !json.data) return;
+        var remote = json.data;
+        // Only update if remote is newer (different runTime)
+        if (remote.runTime && remote.runTime !== runTime) {
+          setData(remote.data || []); setEmailSent(remote.emailSent || false); setRunBy(remote.runBy || null); setRunTime(remote.runTime || null); setShipNotes(remote.shipNotes || {});
+        } else if (remote.shipNotes && JSON.stringify(remote.shipNotes) !== JSON.stringify(shipNotes)) {
+          setShipNotes(remote.shipNotes);
+        } else if (remote.emailSent !== emailSent) {
+          setEmailSent(remote.emailSent || false);
+        }
+      } catch (e) {}
+    }, 8000);
+    return function() { m = false; clearInterval(poll); };
+  }, [kvKey, runTime, shipNotes, emailSent]);
+
+  var persist = useCallback(async function(d, es, by, time, sn) {
+    var payload = { data: d, emailSent: es, runBy: by, runTime: time, shipNotes: sn || {} };
+    // Save to localStorage as cache
+    sSet("wh-data-" + whKey, payload);
+    // Save to KV for sharing
+    try { await fetch("/api/kv", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: kvKey, value: payload }) }); } catch (e) {}
+  }, [kvKey, whKey]);
   var fetchData = useCallback(function() {
     if (!ok) { lp(); return; } setLoading(true); setEmailSent(false); setConfirmClear(false);
     (async function() {
@@ -519,14 +561,15 @@ function WHT(props) {
         }
         var rows = raw.filter(function(r) { return r.SKUNDC && (r.Warehouse || "").trim() === whKey && !EXCLUDED.some(function(ex) { return (r.VendorName || "").toLowerCase().indexOf(ex) >= 0; }); }).map(function(r) { return Object.assign({}, r, { Price: Number(r.Price) || 0, OrderQty: Number(r.OrderQty) || 0, TotalPrice: +((Number(r.Price) || 0) * (Number(r.OrderQty) || 0)).toFixed(2) }); });
         var now = new Date().toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-        setData(rows); setRunBy("You"); setRunTime(now); setLoading(false); setSubPage("data"); persist(rows, false, "You", now, {}); setShipNotes({}); toast(cfg.label + ": Fetched " + rows.length + " lines");
+        var who = cred && cred.username ? cred.username : "You";
+        setData(rows); setRunBy(who); setRunTime(now); setLoading(false); setSubPage("data"); persist(rows, false, who, now, {}); setShipNotes({}); toast(cfg.label + ": Fetched " + rows.length + " lines");
       } catch (err) {
         setLoading(false);
         toast("Error: " + err.message, "error");
       }
     })();
   }, [whKey, cred, cfg.label, toast, ok, lp, persist]);
-  var clearAll = useCallback(async function() { if (!ok) { lp(); return; } setData([]); setSearch(""); setVendorFilter("all"); setFlagsOnly(false); setEmailSent(false); setConfirmClear(false); setRunBy(null); setRunTime(null); setSubPage("overview"); setShipNotes({}); sDel(storageKey); toast(cfg.label + ": Cleared"); }, [cfg.label, toast, ok, lp, storageKey]);
+  var clearAll = useCallback(async function() { if (!ok) { lp(); return; } setData([]); setSearch(""); setVendorFilter("all"); setFlagsOnly(false); setEmailSent(false); setConfirmClear(false); setRunBy(null); setRunTime(null); setSubPage("overview"); setShipNotes({}); sDel("wh-data-" + whKey); try { await fetch("/api/kv", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: kvKey, value: {} }) }); } catch (e) {} toast(cfg.label + ": Cleared"); }, [cfg.label, toast, ok, lp, kvKey, whKey]);
 
   var vendorGroups = useMemo(function() { var g = {}; data.forEach(function(r) { if (!g[r.VendorName]) g[r.VendorName] = []; g[r.VendorName].push(r); }); return g; }, [data]);
   var vendorTotals = useMemo(function() { var t = {}; Object.entries(vendorGroups).forEach(function(e) { t[e[0]] = e[1].reduce(function(s, r) { return s + r.TotalPrice; }, 0); }); return t; }, [vendorGroups]);
