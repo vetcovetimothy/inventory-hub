@@ -666,6 +666,7 @@ function POImportTool(props) {
   var _ocrStatus = useState(""), ocrStatus = _ocrStatus[0], setOcrStatus = _ocrStatus[1];
   var _ocrRaw = useState(""), ocrRaw = _ocrRaw[0], setOcrRaw = _ocrRaw[1];
   var _showRawOcr = useState(false), showRawOcr = _showRawOcr[0], setShowRawOcr = _showRawOcr[1];
+  var _ocrFoundNdcs = useState(null), ocrFoundNdcs = _ocrFoundNdcs[0], setOcrFoundNdcs = _ocrFoundNdcs[1];
   var screenshotInputRef = useRef(null);
   var _loading = useState(false), loading = _loading[0], setLoading = _loading[1];
   var _results = useState([]), results = _results[0], setResults = _results[1];
@@ -777,11 +778,17 @@ function POImportTool(props) {
       var ocrText = result.data.text;
       setOcrRaw(ocrText);
       var ndcs = extractNdcsFromOcrText(ocrText);
-      if (ndcs.length > 0) {
-        // Build parsed items with just NDCs from OCR
-        var items = ndcs.map(function(ndc) { return { ndc: ndc, description: "", qty: null, mckItemNum: "" }; });
+      setOcrFoundNdcs(ndcs);
+      // Merge with any manual NDCs already in paste box
+      var manualNdcs = extractNdcsFromOcrText(mckPaste);
+      var allNdcs = {};
+      ndcs.forEach(function(n) { allNdcs[n] = true; });
+      manualNdcs.forEach(function(n) { allNdcs[n] = true; });
+      var combined = Object.keys(allNdcs);
+      if (combined.length > 0) {
+        var items = combined.map(function(ndc) { return { ndc: ndc, description: "", qty: null, mckItemNum: "" }; });
         setMckParsed(items);
-        toast("Screenshot OCR found " + ndcs.length + " NDCs");
+        toast("Screenshot OCR found " + ndcs.length + " NDCs" + (manualNdcs.length > 0 ? " + " + manualNdcs.length + " manual" : ""));
       } else {
         setMckParsed(null);
         toast("OCR could not find NDCs. You can also paste them manually below.", "error");
@@ -797,10 +804,17 @@ function POImportTool(props) {
   function handleMckManualPaste(e) {
     var text = e.target.value;
     setMckPaste(text);
-    if (!text.trim()) { setMckParsed(null); return; }
-    var ndcs = extractNdcsFromOcrText(text);
-    if (ndcs.length > 0) {
-      setMckParsed(ndcs.map(function(ndc) { return { ndc: ndc, description: "", qty: null, mckItemNum: "" }; }));
+    // Merge manual NDCs with any OCR-found NDCs
+    var manualNdcs = extractNdcsFromOcrText(text);
+    // Get existing OCR NDCs (stored separately)
+    var ocrNdcList = (ocrFoundNdcs || []).slice();
+    // Combine and deduplicate
+    var allNdcs = {};
+    ocrNdcList.forEach(function(n) { allNdcs[n] = true; });
+    manualNdcs.forEach(function(n) { allNdcs[n] = true; });
+    var combined = Object.keys(allNdcs);
+    if (combined.length > 0) {
+      setMckParsed(combined.map(function(ndc) { return { ndc: ndc, description: "", qty: null, mckItemNum: "" }; }));
     } else {
       setMckParsed(null);
     }
@@ -957,7 +971,7 @@ function POImportTool(props) {
   }
 
   function reset() {
-    setPdfs([]); setMckPaste(""); setMckParsed(null); setScreenshotUrl(null); setOcrRaw(""); setShowRawOcr(false); setResults([]); setMckWarnings([]); setError(null);
+    setPdfs([]); setMckPaste(""); setMckParsed(null); setScreenshotUrl(null); setOcrRaw(""); setShowRawOcr(false); setOcrFoundNdcs(null); setResults([]); setMckWarnings([]); setError(null);
     if (pdfInputRef.current) pdfInputRef.current.value = "";
     if (screenshotInputRef.current) screenshotInputRef.current.value = "";
   }
@@ -992,8 +1006,8 @@ function POImportTool(props) {
             <input ref={screenshotInputRef} type="file" accept="image/*" onChange={handleScreenshotUpload} style={Object.assign({}, S.inp, { cursor: "pointer" })} />
             {ocrLoading && <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}><Spinner color={TOOL_COLOR} size={14} /><span style={{ fontSize: 12, color: TOOL_COLOR }}>{ocrStatus || "Processing..."}</span></div>}
             {mckParsed && !ocrLoading && <p style={{ color: "#10B981", fontSize: 11, marginTop: 6 }}>{"\u2713"} Found {mckParsed.length} NDCs</p>}
-            {screenshotUrl && !ocrLoading && !mckParsed && <p style={{ color: "#F59E0B", fontSize: 11, marginTop: 6 }}>{"\u26A0"} OCR could not find NDCs — paste them manually below</p>}
-            <div style={{ marginTop: 10, fontSize: 11, color: "#475569" }}>Or paste NDCs manually (one per line, with or without dashes):</div>
+            {screenshotUrl && !ocrLoading && !mckParsed && <p style={{ color: "#F59E0B", fontSize: 11, marginTop: 6 }}>{"\u26A0"} OCR could not find NDCs — type them manually below</p>}
+            <div style={{ marginTop: 10, fontSize: 11, color: "#475569" }}>Add any missing NDCs below (one per line — will be merged with OCR results):</div>
             <textarea value={mckPaste} onChange={handleMckManualPaste} placeholder={"67877019710\n29300041001\n53746075101\n..."} rows={3} style={Object.assign({}, S.inp, { resize: "vertical", fontFamily: "monospace", fontSize: 10, marginTop: 4 })} />
           </div>}
         </div>
