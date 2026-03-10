@@ -56,6 +56,7 @@ const COLUMN_MAP = {
     { label: "InventoryID",   keys: ["InventoryID", "InventoryId", "InventoryCd", "InventoryCD"] },
     { label: "AlternateID",   keys: ["AlternateID", "AlternateId", "NDC", "Ndc", "SKUNDC", "SkuNDC", "UsrSKUNDC", "SKU_NDC"] },
     { label: "Description",   keys: ["Description", "Descr", "ItemDescription"] },
+    { label: "UOM",           keys: ["UOM", "Uom", "BaseUnit", "BaseUOM"] },
   ],
   "short-dating": [
     { label: "ItemStatus",      keys: ["ItemStatus", "Status"] },
