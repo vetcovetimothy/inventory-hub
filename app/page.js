@@ -697,20 +697,19 @@ function POImportTool(props) {
     return new Promise(function(resolve) {
       var img = new Image();
       img.onload = function() {
-        var scale = 3; // upscale 3x for better OCR
+        var scale = 2; // 2x is optimal based on testing
         var canvas = document.createElement("canvas");
         canvas.width = img.width * scale;
         canvas.height = img.height * scale;
         var ctx = canvas.getContext("2d");
-        // Draw scaled up
-        ctx.imageSmoothingEnabled = false;
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        // Get pixel data and convert to high-contrast black/white
         var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         var data = imageData.data;
         for (var i = 0; i < data.length; i += 4) {
           var gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-          var bw = gray < 140 ? 0 : 255; // threshold: dark text becomes black, everything else white
+          var bw = gray < 128 ? 0 : 255; // threshold 128 — tested to find all 16 NDCs
           data[i] = bw; data[i + 1] = bw; data[i + 2] = bw; data[i + 3] = 255;
         }
         ctx.putImageData(imageData, 0, 0);
@@ -771,7 +770,7 @@ function POImportTool(props) {
       });
       await worker.loadLanguage("eng");
       await worker.initialize("eng");
-      await worker.setParameters({ tessedit_char_whitelist: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz.-$/@ ,()#\n\t" });
+      await worker.setParameters({ tessedit_pageseg_mode: "6" }); // PSM 6 = assume uniform block of text
       setOcrStatus("Reading screenshot...");
       var result = await worker.recognize(processedUrl);
       await worker.terminate();
