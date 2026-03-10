@@ -661,7 +661,9 @@ function POImportTool(props) {
   var _vendor = useState("other"), vendor = _vendor[0], setVendor = _vendor[1];
   var _pdfs = useState([]), pdfs = _pdfs[0], setPdfs = _pdfs[1];
   var _screenshotUrl = useState(null), screenshotUrl = _screenshotUrl[0], setScreenshotUrl = _screenshotUrl[1];
-  var _mckPaste = useState(""), mckPaste = _mckPaste[0], setMckPaste = _mckPaste[1];
+  var _ocrData = useState(null), ocrData = _ocrData[0], setOcrData = _ocrData[1];
+  var _ocrLoading = useState(false), ocrLoading = _ocrLoading[0], setOcrLoading = _ocrLoading[1];
+  var _ocrStatus = useState(""), ocrStatus = _ocrStatus[0], setOcrStatus = _ocrStatus[1];
   var _loading = useState(false), loading = _loading[0], setLoading = _loading[1];
   var _results = useState([]), results = _results[0], setResults = _results[1];
   var _mckWarnings = useState([]), mckWarnings = _mckWarnings[0], setMckWarnings = _mckWarnings[1];
@@ -684,10 +686,83 @@ function POImportTool(props) {
     setPdfs(converted);
   }
 
-  function handleScreenshotChange(e) {
+  async function loadTesseract() {
+    if (typeof window !== "undefined" && window.Tesseract) return window.Tesseract;
+    return new Promise(function(resolve, reject) {
+      var script = document.createElement("script");
+      script.src = "https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.1/tesseract.min.js";
+      script.onload = function() { resolve(window.Tesseract); };
+      script.onerror = function() { reject(new Error("Failed to load Tesseract.js")); };
+      document.head.appendChild(script);
+    });
+  }
+
+  function parseMckOcrText(text) {
+    // Parse OCR text to find rows with MCK ITEM #, NDC, QTY, PRICE
+    var lines = text.split("\n").map(function(l) { return l.trim(); }).filter(function(l) { return l.length > 3; });
+    var items = [];
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      // Look for 7-digit MCK item numbers
+      var mckMatch = line.match(/\b(\d{7})\b/);
+      if (!mckMatch) continue;
+      var mckNum = mckMatch[1];
+      // Skip if it looks like a header or non-item line
+      if (line.toLowerCase().includes("mck item") || line.toLowerCase().includes("account")) continue;
+      // Try to find NDC pattern on this line
+      var ndcMatch = line.match(/(\d{4,5}-?\d{3,4}-?\d{1,2}|\d{10,11})/);
+      var ndc = ndcMatch ? ndcMatch[1] : "";
+      // Try to find quantities — look for standalone numbers
+      var allNums = [];
+      var numRe = /\b(\d{1,5})\b/g;
+      var nm;
+      var cleanLine = line.replace(/\d{7}/, "").replace(/\d{10,11}/, ""); // remove MCK# and NDC
+      while ((nm = numRe.exec(cleanLine)) !== null) { var n = parseInt(nm[1]); if (n > 0 && n < 100000) allNums.push(n); }
+      // Try to find prices — $X.XX or X.XXXX patterns
+      var prices = [];
+      var priceRe = /\$?([\d,]+\.\d{2,4})/g;
+      var pm;
+      while ((pm = priceRe.exec(line)) !== null) { prices.push(parseFloat(pm[1].replace(",", ""))); }
+      // Try to extract description text
+      var desc = line.replace(/\b\d{7}\b/, "").replace(/\d{10,11}/, "").replace(/\$?[\d,.]+/g, "").replace(/\s+/g, " ").trim();
+      items.push({
+        mckItemNum: mckNum,
+        ndc: ndc,
+        description: desc.slice(0, 80),
+        qty: allNums.length > 0 ? allNums[allNums.length - 1] : null,
+        prices: prices,
+      });
+    }
+    return items;
+  }
+
+  async function handleScreenshotChange(e) {
     var file = e.target.files[0];
     if (!file) return;
-    setScreenshotUrl(URL.createObjectURL(file));
+    var url = URL.createObjectURL(file);
+    setScreenshotUrl(url);
+    setOcrData(null);
+    setOcrLoading(true);
+    setOcrStatus("Loading OCR engine...");
+    try {
+      var Tesseract = await loadTesseract();
+      setOcrStatus("Reading screenshot (this may take 15-30 seconds)...");
+      var worker = await Tesseract.createWorker("eng", 1, { logger: function(m) { if (m.status === "recognizing text") setOcrStatus("Recognizing text... " + Math.round((m.progress || 0) * 100) + "%"); } });
+      var result = await worker.recognize(url);
+      await worker.terminate();
+      var ocrText = result.data.text;
+      var parsed = parseMckOcrText(ocrText);
+      setOcrData({ text: ocrText, items: parsed });
+      setOcrStatus("");
+      if (parsed.length > 0) {
+        toast("Screenshot OCR complete: found " + parsed.length + " McKesson items");
+      } else {
+        toast("OCR complete but no MCK items detected. The screenshot may be low quality.", "error");
+      }
+    } catch (err) {
+      setOcrStatus("");
+      toast("OCR failed: " + err.message, "error");
+    } finally { setOcrLoading(false); }
   }
 
   // Fetch NDC → GEN- map from Acumatica
@@ -733,13 +808,12 @@ function POImportTool(props) {
     return null;
   }
 
-  // Parse McKesson pasted text for vendor item numbers
+  // Parse McKesson pasted text for vendor item numbers (fallback)
   function parseMckPaste(text) {
     if (!text || !text.trim()) return [];
     var lines = text.split("\n").map(function(l) { return l.trim(); }).filter(function(l) { return l.length > 0; });
     var items = [];
     for (var i = 0; i < lines.length; i++) {
-      // Look for 7-digit MCK item numbers
       var match = lines[i].match(/\b(\d{7})\b/);
       if (match) items.push(match[1]);
     }
@@ -791,10 +865,10 @@ function POImportTool(props) {
         };
       });
 
-      // Step 4: McKesson screenshot cross-reference
+      // Step 4: McKesson screenshot cross-reference (using OCR data)
       var warnings = [];
-      if (vendor === "mckesson" && mckPaste.trim()) {
-        var screenshotItemNums = parseMckPaste(mckPaste);
+      if (vendor === "mckesson" && ocrData && ocrData.items && ocrData.items.length > 0) {
+        var screenshotItemNums = ocrData.items.map(function(item) { return item.mckItemNum; });
         var mckItems = matched.filter(function(r) { return r.vendorSource === "McKesson"; });
         var pdfItemNums = mckItems.map(function(r) { return r.vendorItemNum; }).filter(Boolean);
 
@@ -803,7 +877,7 @@ function POImportTool(props) {
           return r.vendorItemNum && screenshotItemNums.indexOf(r.vendorItemNum) < 0;
         });
         inPdfOnly.forEach(function(item) {
-          warnings.push({ type: "pdf-only", msg: item.drugName + " (MCK#" + item.vendorItemNum + ") is in the PDF but NOT in the screenshot", item: item });
+          warnings.push({ type: "pdf-only", msg: item.drugName + " (MCK#" + item.vendorItemNum + ") is in the PDF but NOT on the McKesson portal screenshot", item: item });
         });
 
         // Items in screenshot but NOT in PDF
@@ -811,7 +885,17 @@ function POImportTool(props) {
           return pdfItemNums.indexOf(num) < 0;
         });
         inScreenshotOnly.forEach(function(num) {
-          warnings.push({ type: "screenshot-only", msg: "MCK Item #" + num + " is in the screenshot but NOT in the PDF", item: null });
+          var ocrItem = ocrData.items.find(function(oi) { return oi.mckItemNum === num; });
+          var desc = ocrItem && ocrItem.description ? " — " + ocrItem.description : "";
+          warnings.push({ type: "screenshot-only", msg: "MCK#" + num + desc + " is on the McKesson portal but NOT in the PDF", item: null });
+        });
+
+        // Quantity mismatches
+        mckItems.forEach(function(pdfItem) {
+          var ocrMatch = ocrData.items.find(function(oi) { return oi.mckItemNum === pdfItem.vendorItemNum; });
+          if (ocrMatch && ocrMatch.qty && pdfItem.qty && ocrMatch.qty !== pdfItem.qty) {
+            warnings.push({ type: "qty-mismatch", msg: pdfItem.drugName + " (MCK#" + pdfItem.vendorItemNum + "): PDF says qty " + pdfItem.qty + " but screenshot shows " + ocrMatch.qty, item: pdfItem });
+          }
         });
       }
 
@@ -841,7 +925,7 @@ function POImportTool(props) {
   }
 
   function reset() {
-    setPdfs([]); setScreenshotUrl(null); setMckPaste(""); setResults([]); setMckWarnings([]); setError(null);
+    setPdfs([]); setScreenshotUrl(null); setOcrData(null); setOcrStatus(""); setResults([]); setMckWarnings([]); setError(null);
     if (pdfInputRef.current) pdfInputRef.current.value = "";
     if (screenshotInputRef.current) screenshotInputRef.current.value = "";
   }
@@ -872,14 +956,19 @@ function POImportTool(props) {
             {pdfs.length > 0 && <p style={{ color: "#10B981", fontSize: 11, marginTop: 6 }}>{"\u2713"} {pdfs.length} PDF{pdfs.length > 1 ? "s" : ""}: {pdfs.map(function(p) { return p.name; }).join(", ")}</p>}
           </div>
           {vendor === "mckesson" && <div>
-            <div style={{ fontSize: 12, color: "#94A3B8", fontWeight: 500, marginBottom: 6 }}>McKesson Portal Screenshot <span style={{ color: "#475569", fontWeight: 400 }}>(visual reference)</span></div>
+            <div style={{ fontSize: 12, color: "#94A3B8", fontWeight: 500, marginBottom: 6 }}>McKesson Portal Screenshot <span style={{ color: "#475569", fontWeight: 400 }}>(auto-reads items via OCR)</span></div>
             <input ref={screenshotInputRef} type="file" accept="image/*" onChange={handleScreenshotChange} style={Object.assign({}, S.inp, { cursor: "pointer" })} />
+            {ocrLoading && <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}><Spinner color={TOOL_COLOR} size={14} /><span style={{ fontSize: 12, color: TOOL_COLOR }}>{ocrStatus || "Processing..."}</span></div>}
+            {ocrData && ocrData.items.length > 0 && <p style={{ color: "#10B981", fontSize: 11, marginTop: 6 }}>{"\u2713"} OCR detected {ocrData.items.length} McKesson items from screenshot</p>}
+            {ocrData && ocrData.items.length === 0 && <p style={{ color: "#F59E0B", fontSize: 11, marginTop: 6 }}>{"\u26A0"} OCR ran but found 0 items — try a clearer screenshot</p>}
           </div>}
         </div>
 
-        {vendor === "mckesson" && <div style={{ marginTop: 16 }}>
-          <div style={{ fontSize: 12, color: "#94A3B8", fontWeight: 500, marginBottom: 6 }}>Paste McKesson Item Numbers <span style={{ color: "#475569", fontWeight: 400 }}>(from portal — one per line or paste entire table to cross-reference)</span></div>
-          <textarea value={mckPaste} onChange={function(e) { setMckPaste(e.target.value); }} placeholder={"Paste McKesson portal data here for cross-referencing...\nExample: paste the MCK ITEM # column or the whole table"} rows={4} style={Object.assign({}, S.inp, { resize: "vertical", fontFamily: "monospace", fontSize: 11 })} />
+        {vendor === "mckesson" && ocrData && ocrData.items.length > 0 && <div style={{ marginTop: 16, background: "#0B0E14", border: "1px solid #1E2433", borderRadius: 8, padding: "10px 14px" }}>
+          <div style={{ fontSize: 11, color: "#64748B", fontWeight: 600, textTransform: "uppercase", marginBottom: 6 }}>Screenshot Items Detected ({ocrData.items.length})</div>
+          <div style={{ maxHeight: 100, overflow: "auto", fontSize: 11, fontFamily: "monospace", color: "#94A3B8" }}>
+            {ocrData.items.map(function(oi, idx) { return <div key={idx}>MCK#{oi.mckItemNum}{oi.description ? " — " + oi.description : ""}{oi.qty ? " | Qty: " + oi.qty : ""}</div>; })}
+          </div>
         </div>}
 
         <div style={{ marginTop: 16, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
@@ -907,9 +996,13 @@ function POImportTool(props) {
       {mckWarnings.length > 0 && <div style={{ marginBottom: 16 }}>
         {mckWarnings.map(function(w, i) {
           var isPdfOnly = w.type === "pdf-only";
-          return <div key={i} style={{ background: isPdfOnly ? "rgba(245,158,11,0.08)" : "rgba(139,92,246,0.08)", border: "1px solid " + (isPdfOnly ? "rgba(245,158,11,0.3)" : "rgba(139,92,246,0.3)"), borderRadius: 10, padding: "10px 16px", marginBottom: 8, display: "flex", alignItems: "center", gap: 10 }}>
+          var isQtyMismatch = w.type === "qty-mismatch";
+          var bgColor = isPdfOnly ? "rgba(245,158,11,0.08)" : isQtyMismatch ? "rgba(239,68,68,0.08)" : "rgba(139,92,246,0.08)";
+          var borderColor = isPdfOnly ? "rgba(245,158,11,0.3)" : isQtyMismatch ? "rgba(239,68,68,0.3)" : "rgba(139,92,246,0.3)";
+          var textColor = isPdfOnly ? "#FCD34D" : isQtyMismatch ? "#FCA5A5" : "#C4B5FD";
+          return <div key={i} style={{ background: bgColor, border: "1px solid " + borderColor, borderRadius: 10, padding: "10px 16px", marginBottom: 8, display: "flex", alignItems: "center", gap: 10 }}>
             <IconAlert />
-            <span style={{ fontSize: 13, color: isPdfOnly ? "#FCD34D" : "#C4B5FD" }}>{w.msg}</span>
+            <span style={{ fontSize: 13, color: textColor }}>{w.msg}</span>
           </div>;
         })}
       </div>}
