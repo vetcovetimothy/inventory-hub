@@ -656,15 +656,17 @@ function POImportTool(props) {
   var toast = props.toast, cred = props.cred, ok = props.ok, lp = props.lp;
   var TOOL_COLOR = "#06B6D4";
   var pdfInputRef = useRef(null);
-  var screenshotInputRef = useRef(null);
 
   var _vendor = useState("other"), vendor = _vendor[0], setVendor = _vendor[1];
   var _pdfs = useState([]), pdfs = _pdfs[0], setPdfs = _pdfs[1];
+  var _mckPaste = useState(""), mckPaste = _mckPaste[0], setMckPaste = _mckPaste[1];
+  var _mckParsed = useState(null), mckParsed = _mckParsed[0], setMckParsed = _mckParsed[1];
   var _screenshotUrl = useState(null), screenshotUrl = _screenshotUrl[0], setScreenshotUrl = _screenshotUrl[1];
-  var _ocrData = useState(null), ocrData = _ocrData[0], setOcrData = _ocrData[1];
   var _ocrLoading = useState(false), ocrLoading = _ocrLoading[0], setOcrLoading = _ocrLoading[1];
   var _ocrStatus = useState(""), ocrStatus = _ocrStatus[0], setOcrStatus = _ocrStatus[1];
+  var _ocrRaw = useState(""), ocrRaw = _ocrRaw[0], setOcrRaw = _ocrRaw[1];
   var _showRawOcr = useState(false), showRawOcr = _showRawOcr[0], setShowRawOcr = _showRawOcr[1];
+  var screenshotInputRef = useRef(null);
   var _loading = useState(false), loading = _loading[0], setLoading = _loading[1];
   var _results = useState([]), results = _results[0], setResults = _results[1];
   var _mckWarnings = useState([]), mckWarnings = _mckWarnings[0], setMckWarnings = _mckWarnings[1];
@@ -687,6 +689,37 @@ function POImportTool(props) {
     setPdfs(converted);
   }
 
+  function normalizeNdcForCompare(ndc) {
+    return (ndc || "").replace(/-/g, "").replace(/\s/g, "");
+  }
+
+  function preprocessImageForOcr(imgUrl) {
+    return new Promise(function(resolve) {
+      var img = new Image();
+      img.onload = function() {
+        var scale = 3; // upscale 3x for better OCR
+        var canvas = document.createElement("canvas");
+        canvas.width = img.width * scale;
+        canvas.height = img.height * scale;
+        var ctx = canvas.getContext("2d");
+        // Draw scaled up
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        // Get pixel data and convert to high-contrast black/white
+        var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        var data = imageData.data;
+        for (var i = 0; i < data.length; i += 4) {
+          var gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+          var bw = gray < 140 ? 0 : 255; // threshold: dark text becomes black, everything else white
+          data[i] = bw; data[i + 1] = bw; data[i + 2] = bw; data[i + 3] = 255;
+        }
+        ctx.putImageData(imageData, 0, 0);
+        resolve(canvas.toDataURL("image/png"));
+      };
+      img.src = imgUrl;
+    });
+  }
+
   async function loadTesseract() {
     if (typeof window !== "undefined" && window.Tesseract) return window.Tesseract;
     return new Promise(function(resolve, reject) {
@@ -698,82 +731,82 @@ function POImportTool(props) {
     });
   }
 
-  function parseMckOcrText(text) {
-    // Parse OCR text — find any 7-digit numbers (MCK ITEM #s)
-    // OCR on complex tables can be messy, so be very lenient
-    var allMckNums = [];
+  function extractNdcsFromOcrText(text) {
+    var ndcs = [];
     var seen = {};
-    // Find ALL 7-digit numbers in the entire text
-    var re7 = /\b(\d{7})\b/g;
+    // Find 11-digit NDCs (no dashes — McKesson portal format)
+    var re11 = /\b(\d{11})\b/g;
     var m;
-    while ((m = re7.exec(text)) !== null) {
-      var num = m[1];
-      // Skip common non-MCK patterns (like 8160 repeated, dates, etc)
-      if (num.startsWith("0000") || seen[num]) continue;
-      seen[num] = true;
-      allMckNums.push(num);
+    while ((m = re11.exec(text)) !== null) {
+      var n = m[1];
+      if (!seen[n]) { seen[n] = true; ndcs.push(n); }
     }
-    // Also try to find items line by line for descriptions
-    var lines = text.split("\n").map(function(l) { return l.trim(); }).filter(function(l) { return l.length > 3; });
-    var items = [];
-    var usedNums = {};
-    for (var i = 0; i < lines.length; i++) {
-      var line = lines[i];
-      var mckMatch = line.match(/\b(\d{7})\b/);
-      if (!mckMatch) continue;
-      var mckNum = mckMatch[1];
-      if (mckNum.startsWith("0000") || usedNums[mckNum]) continue;
-      if (line.toLowerCase().includes("mck item") || line.toLowerCase().includes("account") || line.toLowerCase().includes("page")) continue;
-      usedNums[mckNum] = true;
-      // Extract description — letters/spaces near the MCK#
-      var desc = line.replace(/\b\d{5,}\b/g, "").replace(/\$?[\d,.]+/g, "").replace(/[|]/g, "").replace(/\s+/g, " ").trim();
-      // Extract all numbers for qty/price guessing
-      var nums = [];
-      var numRe = /\b(\d{1,5})\b/g;
-      var nm;
-      var cl = line.replace(/\b\d{7}\b/, "").replace(/\b\d{10,11}\b/, "");
-      while ((nm = numRe.exec(cl)) !== null) { var n = parseInt(nm[1]); if (n > 0 && n < 50000) nums.push(n); }
-      items.push({ mckItemNum: mckNum, description: desc.slice(0, 80), qty: null, nums: nums });
+    // Also find dashed NDCs
+    var reDash = /\b(\d{4,5}-\d{3,4}-\d{1,2})\b/g;
+    while ((m = reDash.exec(text)) !== null) {
+      var norm = m[1].replace(/-/g, "");
+      if (!seen[norm]) { seen[norm] = true; ndcs.push(norm); }
     }
-    // If line-by-line found fewer than allMckNums, add remaining as items with no description
-    allMckNums.forEach(function(num) {
-      if (!usedNums[num]) { items.push({ mckItemNum: num, description: "", qty: null, nums: [] }); }
-    });
-    return items;
+    return ndcs;
   }
 
-  async function handleScreenshotChange(e) {
+  async function handleScreenshotUpload(e) {
     var file = e.target.files[0];
     if (!file) return;
     var url = URL.createObjectURL(file);
     setScreenshotUrl(url);
-    setOcrData(null);
     setOcrLoading(true);
-    setOcrStatus("Loading OCR engine...");
+    setOcrStatus("Preprocessing image...");
+    setOcrRaw("");
+    setMckParsed(null);
     try {
+      var processedUrl = await preprocessImageForOcr(url);
       var Tesseract = await loadTesseract();
-      setOcrStatus("Initializing OCR worker...");
-      var worker = await Tesseract.createWorker({ logger: function(m) { if (m.status === "recognizing text") setOcrStatus("Recognizing text... " + Math.round((m.progress || 0) * 100) + "%"); } });
+      setOcrStatus("Loading OCR engine...");
+      var worker = await Tesseract.createWorker({
+        logger: function(m) {
+          if (m.status === "recognizing text") setOcrStatus("Reading text... " + Math.round((m.progress || 0) * 100) + "%");
+          if (m.status === "loading language traineddata") setOcrStatus("Loading language data...");
+        }
+      });
       await worker.loadLanguage("eng");
       await worker.initialize("eng");
+      await worker.setParameters({ tessedit_char_whitelist: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz.-$/@ ,()#\n\t" });
       setOcrStatus("Reading screenshot...");
-      var result = await worker.recognize(url);
+      var result = await worker.recognize(processedUrl);
       await worker.terminate();
       var ocrText = result.data.text;
-      var parsed = parseMckOcrText(ocrText);
-      setOcrData({ text: ocrText, items: parsed });
-      setOcrStatus("");
-      if (parsed.length > 0) {
-        toast("Screenshot OCR complete: found " + parsed.length + " McKesson items");
+      setOcrRaw(ocrText);
+      var ndcs = extractNdcsFromOcrText(ocrText);
+      if (ndcs.length > 0) {
+        // Build parsed items with just NDCs from OCR
+        var items = ndcs.map(function(ndc) { return { ndc: ndc, description: "", qty: null, mckItemNum: "" }; });
+        setMckParsed(items);
+        toast("Screenshot OCR found " + ndcs.length + " NDCs");
       } else {
-        toast("OCR could not detect MCK item numbers. Check the raw OCR text below.", "error");
+        setMckParsed(null);
+        toast("OCR could not find NDCs. You can also paste them manually below.", "error");
       }
     } catch (err) {
+      toast("OCR error: " + err.message, "error");
+    } finally {
+      setOcrLoading(false);
       setOcrStatus("");
-      toast("OCR failed: " + err.message, "error");
-      console.error("OCR error:", err);
-    } finally { setOcrLoading(false); }
+    }
   }
+
+  function handleMckManualPaste(e) {
+    var text = e.target.value;
+    setMckPaste(text);
+    if (!text.trim()) { setMckParsed(null); return; }
+    var ndcs = extractNdcsFromOcrText(text);
+    if (ndcs.length > 0) {
+      setMckParsed(ndcs.map(function(ndc) { return { ndc: ndc, description: "", qty: null, mckItemNum: "" }; }));
+    } else {
+      setMckParsed(null);
+    }
+  }
+
 
   // Fetch NDC → GEN- map from Acumatica
   var fetchNdcMap = useCallback(async function() {
@@ -818,17 +851,6 @@ function POImportTool(props) {
     return null;
   }
 
-  // Parse McKesson pasted text for vendor item numbers (fallback)
-  function parseMckPaste(text) {
-    if (!text || !text.trim()) return [];
-    var lines = text.split("\n").map(function(l) { return l.trim(); }).filter(function(l) { return l.length > 0; });
-    var items = [];
-    for (var i = 0; i < lines.length; i++) {
-      var match = lines[i].match(/\b(\d{7})\b/);
-      if (match) items.push(match[1]);
-    }
-    return items;
-  }
 
   async function handleValidate() {
     if (pdfs.length === 0) { toast("Upload at least one PDF", "error"); return; }
@@ -875,36 +897,37 @@ function POImportTool(props) {
         };
       });
 
-      // Step 4: McKesson screenshot cross-reference (using OCR data)
+      // Step 4: McKesson portal cross-reference (using NDCs from pasted table)
       var warnings = [];
-      if (vendor === "mckesson" && ocrData && ocrData.items && ocrData.items.length > 0) {
-        var screenshotItemNums = ocrData.items.map(function(item) { return item.mckItemNum; });
+      if (vendor === "mckesson" && mckParsed && mckParsed.length > 0) {
+        var portalNdcs = mckParsed.map(function(item) { return item.ndc; }); // already normalized (no dashes)
         var mckItems = matched.filter(function(r) { return r.vendorSource === "McKesson"; });
-        var pdfItemNums = mckItems.map(function(r) { return r.vendorItemNum; }).filter(Boolean);
+        var pdfNdcs = mckItems.map(function(r) { return normalizeNdcForCompare(r.ndc); }).filter(Boolean);
 
-        // Items in PDF but NOT in screenshot
+        // Items in PDF but NOT in portal
         var inPdfOnly = mckItems.filter(function(r) {
-          return r.vendorItemNum && screenshotItemNums.indexOf(r.vendorItemNum) < 0;
+          var ndcNorm = normalizeNdcForCompare(r.ndc);
+          return ndcNorm && portalNdcs.indexOf(ndcNorm) < 0;
         });
         inPdfOnly.forEach(function(item) {
-          warnings.push({ type: "pdf-only", msg: item.drugName + " (MCK#" + item.vendorItemNum + ") is in the PDF but NOT on the McKesson portal screenshot", item: item });
+          warnings.push({ type: "pdf-only", msg: item.drugName + " (NDC " + item.ndc + ") is in the PDF but NOT on the McKesson portal", item: item });
         });
 
-        // Items in screenshot but NOT in PDF
-        var inScreenshotOnly = screenshotItemNums.filter(function(num) {
-          return pdfItemNums.indexOf(num) < 0;
+        // Items in portal but NOT in PDF
+        var inPortalOnly = mckParsed.filter(function(pi) {
+          return pi.ndc && pdfNdcs.indexOf(pi.ndc) < 0;
         });
-        inScreenshotOnly.forEach(function(num) {
-          var ocrItem = ocrData.items.find(function(oi) { return oi.mckItemNum === num; });
-          var desc = ocrItem && ocrItem.description ? " — " + ocrItem.description : "";
-          warnings.push({ type: "screenshot-only", msg: "MCK#" + num + desc + " is on the McKesson portal but NOT in the PDF", item: null });
+        inPortalOnly.forEach(function(pi) {
+          var desc = pi.description ? " — " + pi.description : "";
+          warnings.push({ type: "screenshot-only", msg: "NDC " + pi.ndc + desc + " is on the McKesson portal but NOT in the PDF", item: null });
         });
 
         // Quantity mismatches
         mckItems.forEach(function(pdfItem) {
-          var ocrMatch = ocrData.items.find(function(oi) { return oi.mckItemNum === pdfItem.vendorItemNum; });
-          if (ocrMatch && ocrMatch.qty && pdfItem.qty && ocrMatch.qty !== pdfItem.qty) {
-            warnings.push({ type: "qty-mismatch", msg: pdfItem.drugName + " (MCK#" + pdfItem.vendorItemNum + "): PDF says qty " + pdfItem.qty + " but screenshot shows " + ocrMatch.qty, item: pdfItem });
+          var ndcNorm = normalizeNdcForCompare(pdfItem.ndc);
+          var portalMatch = mckParsed.find(function(pi) { return pi.ndc === ndcNorm; });
+          if (portalMatch && portalMatch.qty && pdfItem.qty && portalMatch.qty !== pdfItem.qty) {
+            warnings.push({ type: "qty-mismatch", msg: pdfItem.drugName + " (NDC " + pdfItem.ndc + "): PDF says qty " + pdfItem.qty + " but portal shows " + portalMatch.qty, item: pdfItem });
           }
         });
       }
@@ -935,7 +958,7 @@ function POImportTool(props) {
   }
 
   function reset() {
-    setPdfs([]); setScreenshotUrl(null); setOcrData(null); setOcrStatus(""); setShowRawOcr(false); setResults([]); setMckWarnings([]); setError(null);
+    setPdfs([]); setMckPaste(""); setMckParsed(null); setScreenshotUrl(null); setOcrRaw(""); setShowRawOcr(false); setResults([]); setMckWarnings([]); setError(null);
     if (pdfInputRef.current) pdfInputRef.current.value = "";
     if (screenshotInputRef.current) screenshotInputRef.current.value = "";
   }
@@ -966,23 +989,25 @@ function POImportTool(props) {
             {pdfs.length > 0 && <p style={{ color: "#10B981", fontSize: 11, marginTop: 6 }}>{"\u2713"} {pdfs.length} PDF{pdfs.length > 1 ? "s" : ""}: {pdfs.map(function(p) { return p.name; }).join(", ")}</p>}
           </div>
           {vendor === "mckesson" && <div>
-            <div style={{ fontSize: 12, color: "#94A3B8", fontWeight: 500, marginBottom: 6 }}>McKesson Portal Screenshot <span style={{ color: "#475569", fontWeight: 400 }}>(auto-reads items via OCR)</span></div>
-            <input ref={screenshotInputRef} type="file" accept="image/*" onChange={handleScreenshotChange} style={Object.assign({}, S.inp, { cursor: "pointer" })} />
+            <div style={{ fontSize: 12, color: "#94A3B8", fontWeight: 500, marginBottom: 6 }}>McKesson Portal Screenshot</div>
+            <input ref={screenshotInputRef} type="file" accept="image/*" onChange={handleScreenshotUpload} style={Object.assign({}, S.inp, { cursor: "pointer" })} />
             {ocrLoading && <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}><Spinner color={TOOL_COLOR} size={14} /><span style={{ fontSize: 12, color: TOOL_COLOR }}>{ocrStatus || "Processing..."}</span></div>}
-            {ocrData && ocrData.items.length > 0 && <p style={{ color: "#10B981", fontSize: 11, marginTop: 6 }}>{"\u2713"} OCR detected {ocrData.items.length} McKesson items from screenshot</p>}
-            {ocrData && ocrData.items.length === 0 && <p style={{ color: "#F59E0B", fontSize: 11, marginTop: 6 }}>{"\u26A0"} OCR ran but found 0 items — try a clearer screenshot</p>}
+            {mckParsed && !ocrLoading && <p style={{ color: "#10B981", fontSize: 11, marginTop: 6 }}>{"\u2713"} Found {mckParsed.length} NDCs</p>}
+            {screenshotUrl && !ocrLoading && !mckParsed && <p style={{ color: "#F59E0B", fontSize: 11, marginTop: 6 }}>{"\u26A0"} OCR could not find NDCs — paste them manually below</p>}
+            <div style={{ marginTop: 10, fontSize: 11, color: "#475569" }}>Or paste NDCs manually (one per line, with or without dashes):</div>
+            <textarea value={mckPaste} onChange={handleMckManualPaste} placeholder={"67877019710\n29300041001\n53746075101\n..."} rows={3} style={Object.assign({}, S.inp, { resize: "vertical", fontFamily: "monospace", fontSize: 10, marginTop: 4 })} />
           </div>}
         </div>
 
-        {vendor === "mckesson" && ocrData && <div style={{ marginTop: 16, background: "#0B0E14", border: "1px solid #1E2433", borderRadius: 8, padding: "10px 14px" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-            <div style={{ fontSize: 11, color: "#64748B", fontWeight: 600, textTransform: "uppercase" }}>OCR Results — {ocrData.items.length} MCK Items Detected</div>
-            <button onClick={function() { setShowRawOcr(!showRawOcr); }} style={{ background: "transparent", border: "1px solid #1E2433", borderRadius: 6, padding: "2px 8px", fontSize: 10, color: "#64748B", cursor: "pointer" }}>{showRawOcr ? "Hide" : "Show"} Raw OCR Text</button>
+        {vendor === "mckesson" && mckParsed && mckParsed.length > 0 && <div style={{ marginTop: 16, background: "#0B0E14", border: "1px solid #1E2433", borderRadius: 8, padding: "10px 14px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+            <div style={{ fontSize: 11, color: "#64748B", fontWeight: 600, textTransform: "uppercase" }}>Portal NDCs ({mckParsed.length})</div>
+            {ocrRaw && <button onClick={function() { setShowRawOcr(!showRawOcr); }} style={{ background: "transparent", border: "1px solid #1E2433", borderRadius: 6, padding: "2px 8px", fontSize: 10, color: "#64748B", cursor: "pointer" }}>{showRawOcr ? "Hide" : "Show"} Raw OCR</button>}
           </div>
-          {ocrData.items.length > 0 && <div style={{ maxHeight: 100, overflow: "auto", fontSize: 11, fontFamily: "monospace", color: "#94A3B8", marginBottom: showRawOcr ? 8 : 0 }}>
-            {ocrData.items.map(function(oi, idx) { return <div key={idx}>MCK#{oi.mckItemNum}{oi.description ? " — " + oi.description : ""}</div>; })}
-          </div>}
-          {showRawOcr && <div style={{ maxHeight: 200, overflow: "auto", fontSize: 10, fontFamily: "monospace", color: "#475569", background: "#080A0F", borderRadius: 6, padding: 8, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{ocrData.text || "(empty)"}</div>}
+          <div style={{ maxHeight: 80, overflow: "auto", fontSize: 11, fontFamily: "monospace", color: "#94A3B8" }}>
+            {mckParsed.map(function(pi, idx) { return <div key={idx}>{pi.ndc}</div>; })}
+          </div>
+          {showRawOcr && <div style={{ maxHeight: 200, overflow: "auto", fontSize: 9, fontFamily: "monospace", color: "#475569", background: "#080A0F", borderRadius: 6, padding: 8, marginTop: 8, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{ocrRaw}</div>}
         </div>}
 
         <div style={{ marginTop: 16, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
