@@ -9,7 +9,7 @@
  */
 
 const BASE = process.env.ACUMATICA_BASE_URL || "https://vetcove.acumatica.com";
-const PREFIX = process.env.ACUMATICA_ODATA_PREFIX || "/(W(89))/odata/VetCove";
+const PREFIX = process.env.ACUMATICA_ODATA_PREFIX || "/odata/VetCove";
 
 // OData view names — match whatever is configured in your Acumatica instance
 const ENDPOINTS = {
