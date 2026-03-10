@@ -957,22 +957,12 @@ function POImportTool(props) {
   }
 
   function downloadCSV() {
-    var isMck = vendor === "mckesson";
-    var header = "Status,Inventory ID,Warehouse,Description (Acumatica),UOM,Drug Name (PO),Alternate ID,Vendor,Order Qty. (PDF)" + (isMck ? ",Order Qty. (Screenshot),Qty Match" : "") + ",Unit Cost,Ext. Cost,PO#,Source File\r\n";
+    var header = "Status,Inventory ID,Warehouse,Description (Acumatica),UOM,Drug Name (PO),Alternate ID,Vendor,Order Qty.,Unit Cost,Ext. Cost,PO#,Source File\r\n";
     var lines = results.map(function(r) {
-      var extCost = (r.qty && r.unitPrice) ? (r.qty * r.unitPrice).toFixed(2) : (r.totalPrice || "");
-      var ssQty = screenshotQtys[r.ndc] != null ? screenshotQtys[r.ndc] : "";
-      var qtyMatch = "";
-      if (isMck && ssQty !== "" && r.qty) {
-        qtyMatch = parseInt(ssQty) === r.qty ? "MATCH" : "MISMATCH";
-      }
-      var row = [r.ndcFound ? "MATCHED" : "NOT FOUND", r.inventoryId || "", r.warehouse, r.acumaticaDesc || "", r.uom || "", r.drugName, r.ndc, r.vendorSource, r.qty || ""];
-      if (isMck) { row.push(ssQty); row.push(qtyMatch); }
-      row.push(r.unitPrice ? r.unitPrice.toFixed(4) : "");
-      row.push(extCost);
-      row.push(r.poNumber);
-      row.push(r.sourceFile || "");
-      return row.map(function(v) { return "\"" + String(v == null ? "" : v).replace(/"/g, "\"\"") + "\""; }).join(",");
+      var editedQty = screenshotQtys[r.ndc] != null ? parseInt(screenshotQtys[r.ndc]) : r.qty;
+      var extCost = (editedQty && r.unitPrice) ? (editedQty * r.unitPrice).toFixed(2) : (r.totalPrice || "");
+      return [r.ndcFound ? "MATCHED" : "NOT FOUND", r.inventoryId || "", r.warehouse, r.acumaticaDesc || "", r.uom || "", r.drugName, r.ndc, r.vendorSource, editedQty || "", r.unitPrice ? r.unitPrice.toFixed(4) : "", extCost, r.poNumber, r.sourceFile || ""]
+        .map(function(v) { return "\"" + String(v == null ? "" : v).replace(/"/g, "\"\"") + "\""; }).join(",");
     });
     var csv = header + lines.join("\r\n");
     var blob = new Blob([csv], { type: "text/csv" });
@@ -991,7 +981,7 @@ function POImportTool(props) {
   var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
   var foundCount = results.filter(function(r) { return r.ndcFound; }).length;
   var notFoundCount = results.length - foundCount;
-  var qtyMismatchCount = vendor === "mckesson" ? results.filter(function(r) { var sq = screenshotQtys[r.ndc]; return sq !== undefined && sq !== "" && r.qty && parseInt(sq) !== r.qty; }).length : 0;
+  var qtyMismatchCount = results.filter(function(r) { return screenshotQtys[r.ndc] != null && parseInt(screenshotQtys[r.ndc]) !== r.qty; }).length;
 
   return (
     <div>
@@ -1077,7 +1067,7 @@ function POImportTool(props) {
           <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#64748B", textTransform: "uppercase", fontWeight: 600 }}>Total Items</div><div style={{ fontSize: 24, fontWeight: 700, color: "#F8FAFC", marginTop: 4 }}>{results.length}</div></div>
           <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#64748B", textTransform: "uppercase", fontWeight: 600 }}>In OData</div><div style={{ fontSize: 24, fontWeight: 700, color: "#10B981", marginTop: 4 }}>{foundCount}</div></div>
           <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#64748B", textTransform: "uppercase", fontWeight: 600 }}>Not in OData</div><div style={{ fontSize: 24, fontWeight: 700, color: notFoundCount > 0 ? "#EF4444" : "#10B981", marginTop: 4 }}>{notFoundCount}</div></div>
-          {vendor === "mckesson" && <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#64748B", textTransform: "uppercase", fontWeight: 600 }}>Qty Mismatches</div><div style={{ fontSize: 24, fontWeight: 700, color: qtyMismatchCount > 0 ? "#EF4444" : "#10B981", marginTop: 4 }}>{qtyMismatchCount}</div></div>}
+          {vendor === "mckesson" && <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#64748B", textTransform: "uppercase", fontWeight: 600 }}>Qty Edited</div><div style={{ fontSize: 24, fontWeight: 700, color: qtyMismatchCount > 0 ? "#F59E0B" : "#10B981", marginTop: 4 }}>{qtyMismatchCount}</div></div>}
           {mckWarnings.length > 0 && <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#64748B", textTransform: "uppercase", fontWeight: 600 }}>MCK Warnings</div><div style={{ fontSize: 24, fontWeight: 700, color: "#F59E0B", marginTop: 4 }}>{mckWarnings.length}</div></div>}
         </div>
 
@@ -1098,18 +1088,17 @@ function POImportTool(props) {
               <th style={S.th}>UOM</th>
               <th style={S.th}>Drug Name (PO)</th>
               <th style={S.th}>Vendor</th>
-              <th style={Object.assign({}, S.th, { textAlign: "center" })}>{vendor === "mckesson" ? "PDF Qty" : "Qty"}</th>
-              {vendor === "mckesson" && <th style={Object.assign({}, S.th, { textAlign: "center" })}>Screenshot Qty</th>}
+              <th style={Object.assign({}, S.th, { textAlign: "center" })}>Qty</th>
               <th style={Object.assign({}, S.th, { textAlign: "right" })}>Unit Cost</th>
               <th style={Object.assign({}, S.th, { textAlign: "right" })}>Ext. Cost</th>
               {vendor === "mckesson" && <th style={S.th}>MCK Item #</th>}
               <th style={S.th}>Source</th>
             </tr></thead>
             <tbody>{results.map(function(r, i) {
-              var extCost = (r.qty && r.unitPrice) ? (r.qty * r.unitPrice) : r.totalPrice;
-              var ssQty = screenshotQtys[r.ndc] != null ? screenshotQtys[r.ndc] : "";
-              var qtyMismatch = vendor === "mckesson" && ssQty !== "" && r.qty && parseInt(ssQty) !== r.qty;
-              return <tr key={i} style={{ background: qtyMismatch ? "rgba(239,68,68,0.06)" : (r.ndcFound ? "transparent" : "rgba(239,68,68,0.04)") }}>
+              var editedQty = screenshotQtys[r.ndc] != null ? parseInt(screenshotQtys[r.ndc]) : r.qty;
+              var qtyChanged = screenshotQtys[r.ndc] != null && parseInt(screenshotQtys[r.ndc]) !== r.qty;
+              var extCost = (editedQty && r.unitPrice) ? (editedQty * r.unitPrice) : r.totalPrice;
+              return <tr key={i} style={{ background: qtyChanged ? "rgba(245,158,11,0.06)" : (r.ndcFound ? "transparent" : "rgba(239,68,68,0.04)") }}>
                 <td style={S.td}><span style={S.badge(r.ndcFound ? "success" : "danger")}>{r.ndcFound ? <><IconCheck /> Match</> : <><IconAlert /> Missing</>}</span></td>
                 <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, color: "#94A3B8" })}>{r.ndc}</td>
                 <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontWeight: 600, color: r.inventoryId ? "#34D399" : "#475569" })}>{r.inventoryId || "\u2014"}</td>
@@ -1117,8 +1106,7 @@ function POImportTool(props) {
                 <td style={Object.assign({}, S.td, { fontWeight: 600, color: r.uom ? "#06B6D4" : "#475569" })}>{r.uom || "\u2014"}</td>
                 <td style={Object.assign({}, S.td, { color: "#94A3B8", maxWidth: 200, wordBreak: "break-word" })}>{r.drugName || "\u2014"}</td>
                 <td style={Object.assign({}, S.td, { fontSize: 11 })}>{r.vendorSource || "\u2014"}</td>
-                <td style={Object.assign({}, S.td, { textAlign: "center", fontWeight: 600, color: qtyMismatch ? "#EF4444" : "#E2E8F0" })}>{r.qty || "\u2014"}</td>
-                {vendor === "mckesson" && <td style={Object.assign({}, S.td, { textAlign: "center" })}><input style={Object.assign({}, S.inp, { width: 60, padding: "4px 6px", fontSize: 12, textAlign: "center", fontWeight: 600, color: qtyMismatch ? "#EF4444" : "#E2E8F0", background: qtyMismatch ? "rgba(239,68,68,0.1)" : "#0B0E14" })} type="number" value={ssQty} placeholder="\u2014" onChange={function(e) { var updated = Object.assign({}, screenshotQtys); updated[r.ndc] = e.target.value; setScreenshotQtys(updated); }} /></td>}
+                <td style={Object.assign({}, S.td, { textAlign: "center" })}><input style={Object.assign({}, S.inp, { width: 60, padding: "4px 6px", fontSize: 12, textAlign: "center", fontWeight: 600, color: qtyChanged ? "#F59E0B" : "#E2E8F0", background: qtyChanged ? "rgba(245,158,11,0.1)" : "#0B0E14" })} type="number" value={screenshotQtys[r.ndc] != null ? screenshotQtys[r.ndc] : (r.qty || "")} onChange={function(e) { var updated = Object.assign({}, screenshotQtys); updated[r.ndc] = e.target.value; setScreenshotQtys(updated); }} /></td>
                 <td style={Object.assign({}, S.td, { textAlign: "right", color: "#34D399", fontWeight: 600 })}>{r.unitPrice ? "$" + r.unitPrice.toFixed(2) : "\u2014"}</td>
                 <td style={Object.assign({}, S.td, { textAlign: "right", fontFamily: "monospace" })}>{extCost ? "$" + extCost.toLocaleString(undefined, { minimumFractionDigits: 2 }) : "\u2014"}</td>
                 {vendor === "mckesson" && <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, color: "#64748B" })}>{r.vendorItemNum || "\u2014"}</td>}
