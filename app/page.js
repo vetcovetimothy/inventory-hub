@@ -664,6 +664,7 @@ function POImportTool(props) {
   var _ocrData = useState(null), ocrData = _ocrData[0], setOcrData = _ocrData[1];
   var _ocrLoading = useState(false), ocrLoading = _ocrLoading[0], setOcrLoading = _ocrLoading[1];
   var _ocrStatus = useState(""), ocrStatus = _ocrStatus[0], setOcrStatus = _ocrStatus[1];
+  var _showRawOcr = useState(false), showRawOcr = _showRawOcr[0], setShowRawOcr = _showRawOcr[1];
   var _loading = useState(false), loading = _loading[0], setLoading = _loading[1];
   var _results = useState([]), results = _results[0], setResults = _results[1];
   var _mckWarnings = useState([]), mckWarnings = _mckWarnings[0], setMckWarnings = _mckWarnings[1];
@@ -690,7 +691,7 @@ function POImportTool(props) {
     if (typeof window !== "undefined" && window.Tesseract) return window.Tesseract;
     return new Promise(function(resolve, reject) {
       var script = document.createElement("script");
-      script.src = "https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.1/tesseract.min.js";
+      script.src = "https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js";
       script.onload = function() { resolve(window.Tesseract); };
       script.onerror = function() { reject(new Error("Failed to load Tesseract.js")); };
       document.head.appendChild(script);
@@ -698,41 +699,46 @@ function POImportTool(props) {
   }
 
   function parseMckOcrText(text) {
-    // Parse OCR text to find rows with MCK ITEM #, NDC, QTY, PRICE
+    // Parse OCR text — find any 7-digit numbers (MCK ITEM #s)
+    // OCR on complex tables can be messy, so be very lenient
+    var allMckNums = [];
+    var seen = {};
+    // Find ALL 7-digit numbers in the entire text
+    var re7 = /\b(\d{7})\b/g;
+    var m;
+    while ((m = re7.exec(text)) !== null) {
+      var num = m[1];
+      // Skip common non-MCK patterns (like 8160 repeated, dates, etc)
+      if (num.startsWith("0000") || seen[num]) continue;
+      seen[num] = true;
+      allMckNums.push(num);
+    }
+    // Also try to find items line by line for descriptions
     var lines = text.split("\n").map(function(l) { return l.trim(); }).filter(function(l) { return l.length > 3; });
     var items = [];
+    var usedNums = {};
     for (var i = 0; i < lines.length; i++) {
       var line = lines[i];
-      // Look for 7-digit MCK item numbers
       var mckMatch = line.match(/\b(\d{7})\b/);
       if (!mckMatch) continue;
       var mckNum = mckMatch[1];
-      // Skip if it looks like a header or non-item line
-      if (line.toLowerCase().includes("mck item") || line.toLowerCase().includes("account")) continue;
-      // Try to find NDC pattern on this line
-      var ndcMatch = line.match(/(\d{4,5}-?\d{3,4}-?\d{1,2}|\d{10,11})/);
-      var ndc = ndcMatch ? ndcMatch[1] : "";
-      // Try to find quantities — look for standalone numbers
-      var allNums = [];
+      if (mckNum.startsWith("0000") || usedNums[mckNum]) continue;
+      if (line.toLowerCase().includes("mck item") || line.toLowerCase().includes("account") || line.toLowerCase().includes("page")) continue;
+      usedNums[mckNum] = true;
+      // Extract description — letters/spaces near the MCK#
+      var desc = line.replace(/\b\d{5,}\b/g, "").replace(/\$?[\d,.]+/g, "").replace(/[|]/g, "").replace(/\s+/g, " ").trim();
+      // Extract all numbers for qty/price guessing
+      var nums = [];
       var numRe = /\b(\d{1,5})\b/g;
       var nm;
-      var cleanLine = line.replace(/\d{7}/, "").replace(/\d{10,11}/, ""); // remove MCK# and NDC
-      while ((nm = numRe.exec(cleanLine)) !== null) { var n = parseInt(nm[1]); if (n > 0 && n < 100000) allNums.push(n); }
-      // Try to find prices — $X.XX or X.XXXX patterns
-      var prices = [];
-      var priceRe = /\$?([\d,]+\.\d{2,4})/g;
-      var pm;
-      while ((pm = priceRe.exec(line)) !== null) { prices.push(parseFloat(pm[1].replace(",", ""))); }
-      // Try to extract description text
-      var desc = line.replace(/\b\d{7}\b/, "").replace(/\d{10,11}/, "").replace(/\$?[\d,.]+/g, "").replace(/\s+/g, " ").trim();
-      items.push({
-        mckItemNum: mckNum,
-        ndc: ndc,
-        description: desc.slice(0, 80),
-        qty: allNums.length > 0 ? allNums[allNums.length - 1] : null,
-        prices: prices,
-      });
+      var cl = line.replace(/\b\d{7}\b/, "").replace(/\b\d{10,11}\b/, "");
+      while ((nm = numRe.exec(cl)) !== null) { var n = parseInt(nm[1]); if (n > 0 && n < 50000) nums.push(n); }
+      items.push({ mckItemNum: mckNum, description: desc.slice(0, 80), qty: null, nums: nums });
     }
+    // If line-by-line found fewer than allMckNums, add remaining as items with no description
+    allMckNums.forEach(function(num) {
+      if (!usedNums[num]) { items.push({ mckItemNum: num, description: "", qty: null, nums: [] }); }
+    });
     return items;
   }
 
@@ -746,8 +752,11 @@ function POImportTool(props) {
     setOcrStatus("Loading OCR engine...");
     try {
       var Tesseract = await loadTesseract();
-      setOcrStatus("Reading screenshot (this may take 15-30 seconds)...");
-      var worker = await Tesseract.createWorker("eng", 1, { logger: function(m) { if (m.status === "recognizing text") setOcrStatus("Recognizing text... " + Math.round((m.progress || 0) * 100) + "%"); } });
+      setOcrStatus("Initializing OCR worker...");
+      var worker = await Tesseract.createWorker({ logger: function(m) { if (m.status === "recognizing text") setOcrStatus("Recognizing text... " + Math.round((m.progress || 0) * 100) + "%"); } });
+      await worker.loadLanguage("eng");
+      await worker.initialize("eng");
+      setOcrStatus("Reading screenshot...");
       var result = await worker.recognize(url);
       await worker.terminate();
       var ocrText = result.data.text;
@@ -757,11 +766,12 @@ function POImportTool(props) {
       if (parsed.length > 0) {
         toast("Screenshot OCR complete: found " + parsed.length + " McKesson items");
       } else {
-        toast("OCR complete but no MCK items detected. The screenshot may be low quality.", "error");
+        toast("OCR could not detect MCK item numbers. Check the raw OCR text below.", "error");
       }
     } catch (err) {
       setOcrStatus("");
       toast("OCR failed: " + err.message, "error");
+      console.error("OCR error:", err);
     } finally { setOcrLoading(false); }
   }
 
@@ -925,7 +935,7 @@ function POImportTool(props) {
   }
 
   function reset() {
-    setPdfs([]); setScreenshotUrl(null); setOcrData(null); setOcrStatus(""); setResults([]); setMckWarnings([]); setError(null);
+    setPdfs([]); setScreenshotUrl(null); setOcrData(null); setOcrStatus(""); setShowRawOcr(false); setResults([]); setMckWarnings([]); setError(null);
     if (pdfInputRef.current) pdfInputRef.current.value = "";
     if (screenshotInputRef.current) screenshotInputRef.current.value = "";
   }
@@ -964,11 +974,15 @@ function POImportTool(props) {
           </div>}
         </div>
 
-        {vendor === "mckesson" && ocrData && ocrData.items.length > 0 && <div style={{ marginTop: 16, background: "#0B0E14", border: "1px solid #1E2433", borderRadius: 8, padding: "10px 14px" }}>
-          <div style={{ fontSize: 11, color: "#64748B", fontWeight: 600, textTransform: "uppercase", marginBottom: 6 }}>Screenshot Items Detected ({ocrData.items.length})</div>
-          <div style={{ maxHeight: 100, overflow: "auto", fontSize: 11, fontFamily: "monospace", color: "#94A3B8" }}>
-            {ocrData.items.map(function(oi, idx) { return <div key={idx}>MCK#{oi.mckItemNum}{oi.description ? " — " + oi.description : ""}{oi.qty ? " | Qty: " + oi.qty : ""}</div>; })}
+        {vendor === "mckesson" && ocrData && <div style={{ marginTop: 16, background: "#0B0E14", border: "1px solid #1E2433", borderRadius: 8, padding: "10px 14px" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+            <div style={{ fontSize: 11, color: "#64748B", fontWeight: 600, textTransform: "uppercase" }}>OCR Results — {ocrData.items.length} MCK Items Detected</div>
+            <button onClick={function() { setShowRawOcr(!showRawOcr); }} style={{ background: "transparent", border: "1px solid #1E2433", borderRadius: 6, padding: "2px 8px", fontSize: 10, color: "#64748B", cursor: "pointer" }}>{showRawOcr ? "Hide" : "Show"} Raw OCR Text</button>
           </div>
+          {ocrData.items.length > 0 && <div style={{ maxHeight: 100, overflow: "auto", fontSize: 11, fontFamily: "monospace", color: "#94A3B8", marginBottom: showRawOcr ? 8 : 0 }}>
+            {ocrData.items.map(function(oi, idx) { return <div key={idx}>MCK#{oi.mckItemNum}{oi.description ? " — " + oi.description : ""}</div>; })}
+          </div>}
+          {showRawOcr && <div style={{ maxHeight: 200, overflow: "auto", fontSize: 10, fontFamily: "monospace", color: "#475569", background: "#080A0F", borderRadius: 6, padding: 8, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{ocrData.text || "(empty)"}</div>}
         </div>}
 
         <div style={{ marginTop: 16, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
