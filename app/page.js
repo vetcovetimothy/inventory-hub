@@ -251,10 +251,12 @@ function Gate({ ok, prompt, children, style, onClick, disabled }) {
 }
 
 function CopyCell({ text, toast, color, accentColor }) {
+  var _copied = useState(false), copied = _copied[0], setCopied = _copied[1];
   return (
-    <div title={text} onClick={function() { navigator.clipboard.writeText(text); toast("Copied"); }}
-      style={{ cursor: "pointer", padding: "2px 6px", borderRadius: 4, userSelect: "all", wordBreak: "break-word", lineHeight: 1.4, color: color || "#5C5651" }}>
-      {text}
+    <div title={"Click to copy: " + text} onClick={function() { navigator.clipboard.writeText(text); setCopied(true); toast("Copied: " + text.slice(0, 40)); setTimeout(function() { setCopied(false); }, 1500); }}
+      style={{ cursor: "pointer", padding: "6px 10px", borderRadius: 8, wordBreak: "break-word", lineHeight: 1.4, color: color || "#4A4541", display: "flex", alignItems: "flex-start", gap: 6, background: copied ? "#ECFDF5" : "#F8F6F3", border: "1px solid " + (copied ? "#059669" : "#E8E4DE"), transition: "all 0.2s" }}>
+      <span style={{ flex: 1, fontSize: 14 }}>{text}</span>
+      <span style={{ flexShrink: 0, marginTop: 2, color: copied ? "#059669" : "#B5AEA5", transition: "all 0.2s" }}>{copied ? <IconCheck /> : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>}</span>
     </div>
   );
 }
