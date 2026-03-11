@@ -707,6 +707,60 @@ function ndcVariants(ndc) {
   return Object.keys(v);
 }
 
+/* ═══════ DROP ZONE COMPONENT ═══════ */
+function DropZone(props) {
+  var onFiles = props.onFiles, accept = props.accept, multiple = props.multiple, label = props.label, sublabel = props.sublabel, icon = props.icon, disabled = props.disabled, color = props.color;
+  var _drag = useState(false), dragging = _drag[0], setDragging = _drag[1];
+  var inputRef = useRef(null);
+  var accent = color || "#14B8A6";
+
+  function handleDrop(e) {
+    e.preventDefault(); e.stopPropagation(); setDragging(false);
+    if (disabled) return;
+    var files = Array.from(e.dataTransfer.files);
+    if (accept) {
+      var exts = accept.split(",").map(function(a) { return a.trim().toLowerCase(); });
+      files = files.filter(function(f) {
+        var name = f.name.toLowerCase();
+        var type = f.type.toLowerCase();
+        return exts.some(function(ext) { return ext.startsWith(".") ? name.endsWith(ext) : type.match(ext.replace("*", ".*")); });
+      });
+    }
+    if (files.length > 0) onFiles(multiple ? files : [files[0]]);
+  }
+  function handleDragOver(e) { e.preventDefault(); e.stopPropagation(); if (!disabled) setDragging(true); }
+  function handleDragLeave(e) { e.preventDefault(); e.stopPropagation(); setDragging(false); }
+  function handleClick() { if (!disabled && inputRef.current) inputRef.current.click(); }
+  function handleInput(e) { var files = Array.from(e.target.files || []); if (files.length > 0) onFiles(files); e.target.value = ""; }
+
+  var boxStyle = {
+    border: "2px dashed " + (dragging ? accent : "#D5D0C8"),
+    borderRadius: 12,
+    padding: "20px 16px",
+    textAlign: "center",
+    cursor: disabled ? "default" : "pointer",
+    background: dragging ? accent + "08" : "transparent",
+    transition: "all 0.15s ease",
+    opacity: disabled ? 0.5 : 1,
+  };
+
+  var iconSvg = icon === "pdf" ?
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={dragging ? accent : "#A69E95"} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+    : icon === "image" ?
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={dragging ? accent : "#A69E95"} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+    : icon === "spreadsheet" ?
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={dragging ? accent : "#A69E95"} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/><line x1="12" y1="9" x2="12" y2="21"/></svg>
+    :
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={dragging ? accent : "#A69E95"} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>;
+
+  return <div style={boxStyle} onDrop={handleDrop} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onClick={handleClick}>
+    <input ref={inputRef} type="file" accept={accept || ""} multiple={!!multiple} onChange={handleInput} style={{ display: "none" }} />
+    <div style={{ marginBottom: 6 }}>{iconSvg}</div>
+    <div style={{ fontSize: 13, color: "#4A4541", fontWeight: 600 }}>{label || "Drop file here"}</div>
+    {sublabel && <div style={{ fontSize: 11, color: "#A69E95", marginTop: 2 }}>{sublabel}</div>}
+  </div>;
+}
+
 /* ═══════ CYCLE COUNTING TOOL ═══════ */
 function CycleCountTool(props) {
   var toast = props.toast;
@@ -964,8 +1018,12 @@ function CycleCountTool(props) {
 
           <div style={{ fontSize: 14, color: "#4A4541", fontWeight: 600, marginBottom: 8, marginTop: 20 }}>3. Vendor Inventory CSV</div>
           <div style={{ fontSize: 12, color: "#8A8279", marginBottom: 6 }}>Export from Pharm Admin (contains SKU, Manufacturer Number, Reported Qty, Stock Qty)</div>
-          <input type="file" accept=".csv" onChange={function(e) { handleVendorUpload(e.target.files[0] || null); }} style={Object.assign({}, S.inp, { cursor: "pointer" })} />
-          {vendorFile && <p style={{ color: "#059669", fontSize: 12, marginTop: 6 }}>{"\u2713"} {vendorFile.name} — {vendorRows ? vendorRows.length.toLocaleString() + " rows" : "parsing..."}</p>}
+          {vendorFile ? <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(5,150,105,0.06)", border: "1px solid rgba(5,150,105,0.2)", borderRadius: 10 }}>
+              <span style={{ color: "#059669", fontSize: 13 }}>{"\u2713"} {vendorFile.name} — {vendorRows ? vendorRows.length.toLocaleString() + " rows" : "parsing..."}</span>
+              <button onClick={function() { setVendorFile(null); setVendorRows(null); setCsvWarehouses([]); setCsvWhSelected(""); }} style={{ background: "transparent", border: "none", color: "#A69E95", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 4px" }}>{"\u00D7"}</button>
+            </div>
+          </div> : <DropZone accept=".csv" label="Vendor Inventory CSV" sublabel="Drop CSV or click to browse" icon="spreadsheet" color={TOOL_COLOR} onFiles={function(files) { handleVendorUpload(files[0]); }} />}
           {csvWarehouses.length > 1 && <div style={{ marginTop: 10 }}>
             <div style={{ fontSize: 12, color: "#8A8279", marginBottom: 4 }}>Select warehouse from CSV:</div>
             <select value={csvWhSelected} onChange={function(e) { setCsvWhSelected(e.target.value); }} style={Object.assign({}, S.inp, { maxWidth: 280, cursor: "pointer" })}>
@@ -986,7 +1044,7 @@ function CycleCountTool(props) {
               <input type="file" accept=".xlsx,.xls" onChange={function(e) { if (e.target.files[0]) handleStockUpload(e.target.files[0]); }} style={{ display: "none" }} disabled={stockLoading} />
             </label>
           </div> : <div>
-            <input type="file" accept=".xlsx,.xls" onChange={function(e) { if (e.target.files[0]) handleStockUpload(e.target.files[0]); }} style={Object.assign({}, S.inp, { cursor: "pointer" })} disabled={stockLoading} />
+            <DropZone accept=".xlsx,.xls" label="Stock Items XLSX" sublabel="Drop file or click to browse" icon="spreadsheet" color={TOOL_COLOR} disabled={stockLoading} onFiles={function(files) { handleStockUpload(files[0]); }} />
             {stockLoading && <p style={{ color: TOOL_COLOR, fontSize: 12, marginTop: 6 }}>Parsing and saving...</p>}
           </div>}
         </div>
@@ -1032,7 +1090,6 @@ function CycleCountTool(props) {
 function POImportTool(props) {
   var toast = props.toast, cred = props.cred, ok = props.ok, lp = props.lp;
   var TOOL_COLOR = "#06B6D4";
-  var pdfInputRef = useRef(null);
 
   var _vendor = useState("other"), vendor = _vendor[0], setVendor = _vendor[1];
   var _pdfs = useState([]), pdfs = _pdfs[0], setPdfs = _pdfs[1];
@@ -1044,7 +1101,6 @@ function POImportTool(props) {
   var _ocrRaw = useState(""), ocrRaw = _ocrRaw[0], setOcrRaw = _ocrRaw[1];
   var _showRawOcr = useState(false), showRawOcr = _showRawOcr[0], setShowRawOcr = _showRawOcr[1];
   var _ocrFoundNdcs = useState(null), ocrFoundNdcs = _ocrFoundNdcs[0], setOcrFoundNdcs = _ocrFoundNdcs[1];
-  var screenshotInputRef = useRef(null);
   var _loading = useState(false), loading = _loading[0], setLoading = _loading[1];
   var _results = useState([]), results = _results[0], setResults = _results[1];
   var _screenshotQtys = useState({}), screenshotQtys = _screenshotQtys[0], setScreenshotQtys = _screenshotQtys[1];
@@ -1062,8 +1118,7 @@ function POImportTool(props) {
     });
   }
 
-  async function handlePdfChange(e) {
-    var files = Array.from(e.target.files);
+  async function handlePdfChange(files) {
     var converted = await Promise.all(files.map(async function(f) { return { data: await fileToBase64(f), name: f.name }; }));
     setPdfs(converted);
   }
@@ -1128,8 +1183,7 @@ function POImportTool(props) {
     return ndcs;
   }
 
-  async function handleScreenshotUpload(e) {
-    var files = Array.from(e.target.files || []);
+  async function handleScreenshotUpload(files) {
     if (files.length === 0) return;
     var urls = files.map(function(f) { return URL.createObjectURL(f); });
     setScreenshotUrls(urls);
@@ -1355,8 +1409,6 @@ function POImportTool(props) {
 
   function reset() {
     setPdfs([]); setMckPaste(""); setMckParsed(null); setScreenshotUrls([]); setOcrRaw(""); setShowRawOcr(false); setOcrFoundNdcs(null); setScreenshotQtys({}); setResults([]); setMckWarnings([]); setError(null);
-    if (pdfInputRef.current) pdfInputRef.current.value = "";
-    if (screenshotInputRef.current) screenshotInputRef.current.value = "";
   }
 
   var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
@@ -1382,14 +1434,22 @@ function POImportTool(props) {
         <div style={{ display: "grid", gridTemplateColumns: vendor === "mckesson" ? "1fr 1fr" : "1fr", gap: 16 }}>
           <div>
             <div style={{ fontSize: 12, color: "#8A8279", fontWeight: 500, marginBottom: 6 }}>PO PDF(s)</div>
-            <input ref={pdfInputRef} type="file" accept=".pdf" multiple onChange={handlePdfChange} style={Object.assign({}, S.inp, { cursor: "pointer" })} />
-            {pdfs.length > 0 && <p style={{ color: "#059669", fontSize: 11, marginTop: 6 }}>{"\u2713"} {pdfs.length} PDF{pdfs.length > 1 ? "s" : ""}: {pdfs.map(function(p) { return p.name; }).join(", ")}</p>}
+            {pdfs.length > 0 ? <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(5,150,105,0.06)", border: "1px solid rgba(5,150,105,0.2)", borderRadius: 10 }}>
+                <span style={{ color: "#059669", fontSize: 12 }}>{"\u2713"} {pdfs.length} PDF{pdfs.length > 1 ? "s" : ""}: {pdfs.map(function(p) { return p.name; }).join(", ")}</span>
+                <button onClick={function() { setPdfs([]); }} style={{ background: "transparent", border: "none", color: "#A69E95", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 4px" }}>{"\u00D7"}</button>
+              </div>
+            </div> : <DropZone accept=".pdf" multiple label="PO PDF(s)" sublabel="Drop PDFs or click to browse" icon="pdf" color={TOOL_COLOR} onFiles={handlePdfChange} />}
           </div>
           {vendor === "mckesson" && <div>
             <div style={{ fontSize: 12, color: "#8A8279", fontWeight: 500, marginBottom: 6 }}>McKesson Portal Screenshot(s)</div>
-            <input ref={screenshotInputRef} type="file" accept="image/*" multiple onChange={handleScreenshotUpload} style={Object.assign({}, S.inp, { cursor: "pointer" })} />
+            {screenshotUrls.length > 0 && !ocrLoading ? <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(5,150,105,0.06)", border: "1px solid rgba(5,150,105,0.2)", borderRadius: 10 }}>
+                <span style={{ color: "#059669", fontSize: 12 }}>{"\u2713"} {screenshotUrls.length} screenshot{screenshotUrls.length > 1 ? "s" : ""}{mckParsed ? " — " + mckParsed.length + " NDCs found" : ""}</span>
+                <button onClick={function() { setScreenshotUrls([]); setMckParsed(null); setOcrRaw(""); }} style={{ background: "transparent", border: "none", color: "#A69E95", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 4px" }}>{"\u00D7"}</button>
+              </div>
+            </div> : <DropZone accept="image/*" multiple label="McKesson Screenshots" sublabel="Drop images or click to browse" icon="image" color={TOOL_COLOR} disabled={ocrLoading} onFiles={handleScreenshotUpload} />}
             {ocrLoading && <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}><Spinner color={TOOL_COLOR} size={14} /><span style={{ fontSize: 12, color: TOOL_COLOR }}>{ocrStatus || "Processing..."}</span></div>}
-            {mckParsed && !ocrLoading && <p style={{ color: "#059669", fontSize: 11, marginTop: 6 }}>{"\u2713"} Found {mckParsed.length} NDCs</p>}
             {screenshotUrls.length > 0 && !ocrLoading && !mckParsed && <p style={{ color: "#D97706", fontSize: 11, marginTop: 6 }}>{"\u26A0"} OCR could not find NDCs — type them manually below</p>}
             <div style={{ marginTop: 10, fontSize: 11, color: "#A69E95" }}>Add any missing NDCs below (one per line — will be merged with OCR results):</div>
             <textarea value={mckPaste} onChange={handleMckManualPaste} placeholder={"67877019710\n29300041001\n53746075101\n..."} rows={3} style={Object.assign({}, S.inp, { resize: "vertical", fontFamily: "monospace", fontSize: 12, marginTop: 4 })} />
