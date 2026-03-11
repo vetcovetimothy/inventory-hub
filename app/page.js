@@ -722,17 +722,21 @@ function CycleCountTool(props) {
   var _errors = useState([]), errors = _errors[0], setErrors = _errors[1];
   var _loading = useState(false), loading = _loading[0], setLoading = _loading[1];
 
-  // Load cached stock items from KV on mount
+  // Load cached stock items from localStorage on mount
   useEffect(function() {
-    fetch("/api/kv?key=stock-items").then(function(r) { return r.json(); }).then(function(json) {
-      if (json.data && json.data.rows && json.data.rows.length > 0) {
-        setStockRows(json.data.rows);
-        setStockMeta({ date: json.data.date || "unknown", count: json.data.rows.length, name: json.data.name || "Stock Items" });
+    try {
+      var saved = localStorage.getItem("stock-items-cache");
+      if (saved) {
+        var parsed = JSON.parse(saved);
+        if (parsed && parsed.rows && parsed.rows.length > 0) {
+          setStockRows(parsed.rows);
+          setStockMeta({ date: parsed.date || "unknown", count: parsed.rows.length, name: parsed.name || "Stock Items" });
+        }
       }
-    }).catch(function() { /* KV unavailable, ignore */ });
+    } catch (e) { /* localStorage unavailable, ignore */ }
   }, []);
 
-  // Upload and cache stock items to KV
+  // Upload and cache stock items to localStorage
   function handleStockUpload(file) {
     if (!file) return;
     setStockFile(file);
@@ -743,17 +747,18 @@ function CycleCountTool(props) {
       return resp.json();
     }).then(function(json) {
       if (json.error) { toast("Stock Items parse error: " + json.error, "error"); setStockLoading(false); return; }
-      // Only keep the two columns we need to minimize KV storage
+      // Only keep the two columns we need to minimize storage
       var trimmed = json.rows.map(function(r) { return { "Inventory ID": r["Inventory ID"] || "", "Sales Unit": r["Sales Unit"] || "" }; }).filter(function(r) { return r["Inventory ID"]; });
       setStockRows(trimmed);
       var meta = { date: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }), count: trimmed.length, name: file.name };
       setStockMeta(meta);
-      // Save to KV
-      fetch("/api/kv", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "stock-items", value: { rows: trimmed, date: meta.date, name: meta.name } }) }).then(function() {
+      // Save to localStorage
+      try {
+        localStorage.setItem("stock-items-cache", JSON.stringify({ rows: trimmed, date: meta.date, name: meta.name }));
         toast("Stock Items saved (" + trimmed.length + " items)", "success");
-      }).catch(function() {
-        toast("Stock Items loaded but failed to save to server", "error");
-      });
+      } catch (e) {
+        toast("Stock Items loaded but failed to cache locally", "error");
+      }
       setStockLoading(false);
       setStockFile(null);
     }).catch(function(err) {
