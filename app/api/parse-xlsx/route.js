@@ -13,12 +13,46 @@ export async function POST(request) {
 
     const buffer = await file.arrayBuffer();
     const wb = XLSX.read(new Uint8Array(buffer), { type: "array" });
-    const ws = wb.Sheets[wb.SheetNames[0]];
+
+    // Try each sheet to find one with "Inventory ID" column
+    let bestRows = null;
+    let bestSheet = null;
+
+    for (const name of wb.SheetNames) {
+      try {
+        const ws = wb.Sheets[name];
+        if (!ws) continue;
+        const rows = XLSX.utils.sheet_to_json(ws, { defval: "", raw: false });
+        if (rows.length === 0) continue;
+
+        // Check if this sheet has the expected columns
+        const cols = Object.keys(rows[0]);
+        const hasInventoryId = cols.some(c => c.trim().toLowerCase() === "inventory id");
+        
+        if (hasInventoryId) {
+          bestRows = rows;
+          bestSheet = name;
+          break;
+        }
+
+        // Keep the first parseable sheet with data as fallback
+        if (!bestRows) {
+          bestRows = rows;
+          bestSheet = name;
+        }
+      } catch (sheetErr) {
+        // Skip sheets that fail to parse
+        continue;
+      }
+    }
+
+    if (!bestRows || bestRows.length === 0) {
+      return NextResponse.json({ 
+        error: "No readable data found. Sheets in file: " + wb.SheetNames.join(", ") 
+      }, { status: 400 });
+    }
     
-    // Use raw: false to preserve leading zeros in Inventory IDs like 0001-07
-    const rows = XLSX.utils.sheet_to_json(ws, { defval: "", raw: false });
-    
-    return NextResponse.json({ rows, count: rows.length });
+    return NextResponse.json({ rows: bestRows, count: bestRows.length, sheet: bestSheet });
   } catch (err) {
     return NextResponse.json({ error: "Failed to parse XLSX: " + err.message }, { status: 500 });
   }
