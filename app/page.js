@@ -1182,6 +1182,12 @@ function POImportTool(props) {
       var n = m[1];
       if (!seen[n]) { seen[n] = true; ndcs.push(n); }
     }
+    // Find 10-digit NDCs (some McKesson portals use 10-digit format) — pad with leading zero
+    var re10 = /\b(\d{10})\b/g;
+    while ((m = re10.exec(text)) !== null) {
+      var padded = "0" + m[1];
+      if (!seen[padded]) { seen[padded] = true; ndcs.push(padded); }
+    }
     // Also find dashed NDCs
     var reDash = /\b(\d{4,5}-\d{3,4}-\d{1,2})\b/g;
     while ((m = reDash.exec(text)) !== null) {
