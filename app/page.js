@@ -713,6 +713,9 @@ function CycleCountTool(props) {
   var TOOL_COLOR = "#14B8A6";
   var _ndcText = useState(""), ndcText = _ndcText[0], setNdcText = _ndcText[1];
   var _vendorFile = useState(null), vendorFile = _vendorFile[0], setVendorFile = _vendorFile[1];
+  var _vendorRows = useState(null), vendorRows = _vendorRows[0], setVendorRows = _vendorRows[1];
+  var _csvWarehouses = useState([]), csvWarehouses = _csvWarehouses[0], setCsvWarehouses = _csvWarehouses[1];
+  var _csvWhSelected = useState(""), csvWhSelected = _csvWhSelected[0], setCsvWhSelected = _csvWhSelected[1];
   var _stockFile = useState(null), stockFile = _stockFile[0], setStockFile = _stockFile[1];
   var _stockRows = useState(null), stockRows = _stockRows[0], setStockRows = _stockRows[1];
   var _stockMeta = useState(null), stockMeta = _stockMeta[0], setStockMeta = _stockMeta[1];
@@ -796,6 +799,23 @@ function CycleCountTool(props) {
     });
   }
 
+  function handleVendorUpload(file) {
+    if (!file) return;
+    setVendorFile(file);
+    readFileAsText(file).then(function(text) {
+      var rows = parseCSV(text);
+      setVendorRows(rows);
+      // Detect unique warehouse names from CSV
+      var whSet = {};
+      rows.forEach(function(r) { var w = (r.Warehouse || "").trim(); if (w) whSet[w] = 1; });
+      var whList = Object.keys(whSet).sort();
+      setCsvWarehouses(whList);
+      // Auto-select if only one warehouse
+      if (whList.length === 1) setCsvWhSelected(whList[0]);
+      else setCsvWhSelected("");
+    }).catch(function() { toast("Failed to read CSV", "error"); });
+  }
+
   function readXlsxFile(file) {
     return new Promise(function(resolve, reject) {
       var reader = new FileReader();
@@ -819,9 +839,10 @@ function CycleCountTool(props) {
 
   async function processData() {
     if (!ndcText.trim()) { toast("Paste the NDC list first", "error"); return; }
-    if (!vendorFile) { toast("Upload the Vendor Inventory CSV", "error"); return; }
+    if (!vendorRows || vendorRows.length === 0) { toast("Upload the Vendor Inventory CSV", "error"); return; }
+    if (!csvWhSelected) { toast("Select a warehouse from the CSV", "error"); return; }
     if (!stockRows || stockRows.length === 0) { toast("Upload the Stock Items XLSX first", "error"); return; }
-    if (!warehouse.trim()) { toast("Enter a warehouse code", "error"); return; }
+    if (!warehouse.trim()) { toast("Enter a warehouse code for output", "error"); return; }
 
     setLoading(true); setResults([]); setErrors([]);
     try {
@@ -840,16 +861,9 @@ function CycleCountTool(props) {
         if (cleaned.length >= 8) ndcs.push(cleaned);
       });
 
-      // Read vendor inventory CSV
-      var vendorText = await readFileAsText(vendorFile);
-      var vendorRows = parseCSV(vendorText);
-
-      // Filter by warehouse input
-      var whFilter = warehouse.trim().toUpperCase();
-      var whMap = { "TP-NY": "TRUEPILL_BROOKLYN", "TP-OH": "TRUEPILL_OHIO" };
-      var vendorWhName = whMap[whFilter] || whFilter;
+      // Filter pre-parsed vendor rows by selected CSV warehouse
       var filteredVendor = vendorRows.filter(function(r) {
-        return (r.Warehouse || "").toUpperCase() === vendorWhName.toUpperCase();
+        return (r.Warehouse || "").trim() === csvWhSelected;
       });
 
       // Build SKU → vendor row map (SKU = NDC without dashes)
@@ -877,7 +891,7 @@ function CycleCountTool(props) {
         var vendorRow = skuMap[ndcClean];
 
         if (!vendorRow) {
-          errs.push("NDC " + ndc + " (" + ndcClean + ") not found in Vendor Inventory for " + vendorWhName);
+          errs.push("NDC " + ndc + " (" + ndcClean + ") not found in Vendor Inventory for " + csvWhSelected);
           return;
         }
 
@@ -950,8 +964,16 @@ function CycleCountTool(props) {
 
           <div style={{ fontSize: 14, color: "#4A4541", fontWeight: 600, marginBottom: 8, marginTop: 20 }}>3. Vendor Inventory CSV</div>
           <div style={{ fontSize: 12, color: "#8A8279", marginBottom: 6 }}>Export from Pharm Admin (contains SKU, Manufacturer Number, Reported Qty, Stock Qty)</div>
-          <input type="file" accept=".csv" onChange={function(e) { setVendorFile(e.target.files[0] || null); }} style={Object.assign({}, S.inp, { cursor: "pointer" })} />
-          {vendorFile && <p style={{ color: "#059669", fontSize: 12, marginTop: 6 }}>{"\u2713"} {vendorFile.name}</p>}
+          <input type="file" accept=".csv" onChange={function(e) { handleVendorUpload(e.target.files[0] || null); }} style={Object.assign({}, S.inp, { cursor: "pointer" })} />
+          {vendorFile && <p style={{ color: "#059669", fontSize: 12, marginTop: 6 }}>{"\u2713"} {vendorFile.name} — {vendorRows ? vendorRows.length.toLocaleString() + " rows" : "parsing..."}</p>}
+          {csvWarehouses.length > 1 && <div style={{ marginTop: 10 }}>
+            <div style={{ fontSize: 12, color: "#8A8279", marginBottom: 4 }}>Select warehouse from CSV:</div>
+            <select value={csvWhSelected} onChange={function(e) { setCsvWhSelected(e.target.value); }} style={Object.assign({}, S.inp, { maxWidth: 280, cursor: "pointer" })}>
+              <option value="">— Select —</option>
+              {csvWarehouses.map(function(w) { return <option key={w} value={w}>{w}</option>; })}
+            </select>
+          </div>}
+          {csvWarehouses.length === 1 && <p style={{ color: TOOL_COLOR, fontSize: 12, marginTop: 4 }}>Warehouse: {csvWhSelected}</p>}
 
           <div style={{ fontSize: 14, color: "#4A4541", fontWeight: 600, marginBottom: 8, marginTop: 20 }}>4. Stock Items XLSX</div>
           <div style={{ fontSize: 12, color: "#8A8279", marginBottom: 6 }}>Contains Inventory ID and Sales Unit for UOM lookup</div>
