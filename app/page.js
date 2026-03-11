@@ -1112,6 +1112,7 @@ function POImportTool(props) {
   var _loading = useState(false), loading = _loading[0], setLoading = _loading[1];
   var _results = useState([]), results = _results[0], setResults = _results[1];
   var _screenshotQtys = useState({}), screenshotQtys = _screenshotQtys[0], setScreenshotQtys = _screenshotQtys[1];
+  var _editedPrices = useState({}), editedPrices = _editedPrices[0], setEditedPrices = _editedPrices[1];
   var _mckWarnings = useState([]), mckWarnings = _mckWarnings[0], setMckWarnings = _mckWarnings[1];
   var _mckPortalPrices = useState({}), mckPortalPrices = _mckPortalPrices[0], setMckPortalPrices = _mckPortalPrices[1];
   var _error = useState(null), error = _error[0], setError = _error[1];
@@ -1469,8 +1470,9 @@ function POImportTool(props) {
     var header = "Status,Inventory ID,Warehouse,Description (Acumatica),UOM,Drug Name (PO),Alternate ID,Vendor,Order Qty.,Unit Cost,Ext. Cost,PO#,Source File\r\n";
     var lines = results.map(function(r) {
       var editedQty = screenshotQtys[r.ndc] != null ? parseInt(screenshotQtys[r.ndc]) : r.qty;
-      var extCost = (editedQty && r.unitPrice) ? (editedQty * r.unitPrice).toFixed(2) : (r.totalPrice || "");
-      return [r.ndcFound ? "MATCHED" : "NOT FOUND", r.inventoryId || "", r.warehouse, r.acumaticaDesc || "", r.uom || "", r.drugName, r.ndc, r.vendorSource, editedQty || "", r.unitPrice ? r.unitPrice.toFixed(4) : "", extCost, r.poNumber, r.sourceFile || ""]
+      var editedPrice = editedPrices[r.ndc] != null ? parseFloat(editedPrices[r.ndc]) : r.unitPrice;
+      var extCost = (editedQty && editedPrice) ? (editedQty * editedPrice).toFixed(2) : (r.totalPrice || "");
+      return [r.ndcFound ? "MATCHED" : "NOT FOUND", r.inventoryId || "", r.warehouse, r.acumaticaDesc || "", r.uom || "", r.drugName, r.ndc, r.vendorSource, editedQty || "", editedPrice ? editedPrice.toFixed(4) : "", extCost, r.poNumber, r.sourceFile || ""]
         .map(function(v) { return "\"" + String(v == null ? "" : v).replace(/"/g, "\"\"") + "\""; }).join(",");
     });
     var csv = header + lines.join("\r\n");
@@ -1482,7 +1484,7 @@ function POImportTool(props) {
   }
 
   function reset() {
-    setPdfs([]); setMckPaste(""); setMckParsed(null); setScreenshotUrls([]); setOcrRaw(""); setShowRawOcr(false); setOcrFoundNdcs(null); setScreenshotQtys({}); setResults([]); setMckWarnings([]); setError(null); setMckPortalPrices({});
+    setPdfs([]); setMckPaste(""); setMckParsed(null); setScreenshotUrls([]); setOcrRaw(""); setShowRawOcr(false); setOcrFoundNdcs(null); setScreenshotQtys({}); setEditedPrices({}); setResults([]); setMckWarnings([]); setError(null); setMckPortalPrices({});
   }
 
   var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
@@ -1525,10 +1527,8 @@ function POImportTool(props) {
             </div> : <DropZone accept="image/*" multiple label="McKesson Screenshots" sublabel="Drop images or click to browse" icon="image" color={TOOL_COLOR} disabled={ocrLoading} onFiles={handleScreenshotUpload} />}
             {ocrLoading && <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}><Spinner color={TOOL_COLOR} size={14} /><span style={{ fontSize: 12, color: TOOL_COLOR }}>{ocrStatus || "Processing..."}</span></div>}
             {screenshotUrls.length > 0 && !ocrLoading && !mckParsed && <p style={{ color: "#D97706", fontSize: 11, marginTop: 6 }}>{"\u26A0"} OCR could not find NDCs — type them manually below</p>}
-            {(!mckParsed || mckParsed.length === 0) && <div>
-              <div style={{ marginTop: 10, fontSize: 11, color: "#A69E95" }}>Paste NDCs below, optionally with Est. Net Price (tab or space separated):</div>
-              <textarea value={mckPaste} onChange={handleMckManualPaste} placeholder={"06846213001\t5.90\n04354728403\t2.31\n07260331501\t4.15\n...\n\nOr just NDCs:\n67877019710\n29300041001"} rows={4} style={Object.assign({}, S.inp, { resize: "vertical", fontFamily: "monospace", fontSize: 12, marginTop: 4 })} />
-            </div>}
+            <div style={{ marginTop: 10, fontSize: 11, color: "#A69E95" }}>Paste NDCs below, optionally with Est. Net Price (tab or space separated):</div>
+            <textarea value={mckPaste} onChange={handleMckManualPaste} placeholder={"06846213001\t5.90\n04354728403\t2.31\n07260331501\t4.15\n...\n\nOr just NDCs:\n67877019710\n29300041001"} rows={4} style={Object.assign({}, S.inp, { resize: "vertical", fontFamily: "monospace", fontSize: 12, marginTop: 4 })} />
           </div>}
         </div>
 
@@ -1620,8 +1620,10 @@ function POImportTool(props) {
             <tbody>{results.map(function(r, i) {
               var editedQty = screenshotQtys[r.ndc] != null ? parseInt(screenshotQtys[r.ndc]) : r.qty;
               var qtyChanged = screenshotQtys[r.ndc] != null && parseInt(screenshotQtys[r.ndc]) !== r.qty;
-              var extCost = (editedQty && r.unitPrice) ? (editedQty * r.unitPrice) : r.totalPrice;
-              return <tr key={i} style={{ background: qtyChanged ? "rgba(245,158,11,0.06)" : (r.ndcFound ? "transparent" : "rgba(239,68,68,0.04)") }}>
+              var editedPrice = editedPrices[r.ndc] != null ? parseFloat(editedPrices[r.ndc]) : r.unitPrice;
+              var priceChanged = editedPrices[r.ndc] != null && parseFloat(editedPrices[r.ndc]) !== r.unitPrice;
+              var extCost = (editedQty && editedPrice) ? (editedQty * editedPrice) : r.totalPrice;
+              return <tr key={i} style={{ background: (qtyChanged || priceChanged) ? "rgba(245,158,11,0.06)" : (r.ndcFound ? "transparent" : "rgba(239,68,68,0.04)") }}>
                 <td style={S.td}><span style={S.badge(r.ndcFound ? "success" : "danger")}>{r.ndcFound ? <><IconCheck /> Match</> : <><IconAlert /> Missing</>}</span></td>
                 <td style={S.td}>{r.ndc}</td>
                 <td style={Object.assign({}, S.td, { color: r.inventoryId ? "#059669" : "#A69E95" })}>{r.inventoryId || "\u2014"}</td>
@@ -1630,7 +1632,7 @@ function POImportTool(props) {
                 <td style={Object.assign({}, S.td, { color: "#8A8279", maxWidth: 200, wordBreak: "break-word" })}>{r.drugName || "\u2014"}</td>
                 <td style={S.td}>{r.vendorSource || "\u2014"}</td>
                 <td style={Object.assign({}, S.td, { textAlign: "center" })}><input style={Object.assign({}, S.inp, { width: 70, padding: "6px 8px", textAlign: "center", color: qtyChanged ? "#D97706" : "#4A4541", background: qtyChanged ? "rgba(245,158,11,0.1)" : "#FAFAF8" })} type="number" value={screenshotQtys[r.ndc] != null ? screenshotQtys[r.ndc] : (r.qty || "")} onChange={function(e) { var updated = Object.assign({}, screenshotQtys); updated[r.ndc] = e.target.value; setScreenshotQtys(updated); }} /></td>
-                <td style={Object.assign({}, S.td, { textAlign: "right", color: r.priceSource === "portal" ? "#06B6D4" : "#059669" })}>{r.unitPrice ? "$" + r.unitPrice.toFixed(2) : "\u2014"}{r.priceSource === "portal" ? <span title="Est. Net Price from McKesson portal" style={{ marginLeft: 4, fontSize: 9, color: "#06B6D4" }}>{"\u25C6"}</span> : ""}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right" })}><input style={Object.assign({}, S.inp, { width: 90, padding: "6px 8px", textAlign: "right", color: priceChanged ? "#D97706" : r.priceSource === "portal" ? "#06B6D4" : "#059669", background: priceChanged ? "rgba(245,158,11,0.1)" : "#FAFAF8" })} type="number" step="0.01" value={editedPrices[r.ndc] != null ? editedPrices[r.ndc] : (r.unitPrice || "")} onChange={function(e) { var updated = Object.assign({}, editedPrices); updated[r.ndc] = e.target.value; setEditedPrices(updated); }} /></td>
                 <td style={Object.assign({}, S.td, { textAlign: "right" })}>{extCost ? "$" + extCost.toLocaleString(undefined, { minimumFractionDigits: 2 }) : "\u2014"}</td>
                 {vendor === "mckesson" && <td style={S.td}>{r.vendorItemNum || "\u2014"}</td>}
                 <td style={Object.assign({}, S.td, { color: "#A69E95" })}>{(r.sourceFile || "").split("/").pop()}</td>
