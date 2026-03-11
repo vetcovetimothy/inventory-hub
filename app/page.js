@@ -1113,6 +1113,7 @@ function POImportTool(props) {
   var _results = useState([]), results = _results[0], setResults = _results[1];
   var _screenshotQtys = useState({}), screenshotQtys = _screenshotQtys[0], setScreenshotQtys = _screenshotQtys[1];
   var _mckWarnings = useState([]), mckWarnings = _mckWarnings[0], setMckWarnings = _mckWarnings[1];
+  var _mckPortalPrices = useState({}), mckPortalPrices = _mckPortalPrices[0], setMckPortalPrices = _mckPortalPrices[1];
   var _error = useState(null), error = _error[0], setError = _error[1];
   var _ndcMap = useState(null), ndcMap = _ndcMap[0], setNdcMap = _ndcMap[1];
   var _ndcLoading = useState(false), ndcLoading = _ndcLoading[0], setNdcLoading = _ndcLoading[1];
@@ -1197,6 +1198,32 @@ function POImportTool(props) {
     return ndcs;
   }
 
+  // Extract NDC → price pairs from pasted text (tab or space separated, $ optional)
+  // Accepts: "6846213001\t$5.90" or "6846213001 5.90" or just "6846213001"
+  function extractNdcPricesFromText(text) {
+    var prices = {};
+    var lines = text.split("\n");
+    lines.forEach(function(line) {
+      line = line.trim();
+      if (!line) return;
+      // Try to find an NDC (10 or 11 digit) followed by a price
+      var match = line.match(/\b(\d{10,11})\b[\s\t,]+\$?([\d]+\.?\d*)/);
+      if (match) {
+        var ndc = match[1].length === 10 ? "0" + match[1] : match[1];
+        var price = parseFloat(match[2]);
+        if (!isNaN(price) && price > 0) prices[ndc] = price;
+      }
+      // Also try dashed NDC format
+      var dashMatch = line.match(/\b(\d{4,5}-\d{3,4}-\d{1,2})\b[\s\t,]+\$?([\d]+\.?\d*)/);
+      if (dashMatch) {
+        var ndcNorm = dashMatch[1].replace(/-/g, "");
+        var p = parseFloat(dashMatch[2]);
+        if (!isNaN(p) && p > 0) prices[ndcNorm] = p;
+      }
+    });
+    return prices;
+  }
+
   async function handleScreenshotUpload(files) {
     if (files.length === 0) return;
     var urls = files.map(function(f) { return URL.createObjectURL(f); });
@@ -1231,6 +1258,10 @@ function POImportTool(props) {
       setOcrRaw(allOcrText);
       var ocrNdcList = Object.keys(allNdcs);
       setOcrFoundNdcs(ocrNdcList);
+      // Try to extract prices from OCR text
+      var ocrPrices = extractNdcPricesFromText(allOcrText);
+      var manualPrices = extractNdcPricesFromText(mckPaste);
+      setMckPortalPrices(Object.assign({}, ocrPrices, manualPrices));
       // Merge with any manual NDCs already in paste box
       var manualNdcs = extractNdcsFromOcrText(mckPaste);
       manualNdcs.forEach(function(n) { allNdcs[n] = true; });
@@ -1254,8 +1285,9 @@ function POImportTool(props) {
   function handleMckManualPaste(e) {
     var text = e.target.value;
     setMckPaste(text);
-    // Merge manual NDCs with any OCR-found NDCs
+    // Extract NDCs and prices from manual paste
     var manualNdcs = extractNdcsFromOcrText(text);
+    var manualPrices = extractNdcPricesFromText(text);
     // Get existing OCR NDCs (stored separately)
     var ocrNdcList = (ocrFoundNdcs || []).slice();
     // Combine and deduplicate
@@ -1263,6 +1295,9 @@ function POImportTool(props) {
     ocrNdcList.forEach(function(n) { allNdcs[n] = true; });
     manualNdcs.forEach(function(n) { allNdcs[n] = true; });
     var combined = Object.keys(allNdcs);
+    // Merge prices: keep existing OCR prices, overlay manual prices
+    var newPrices = Object.assign({}, mckPortalPrices, manualPrices);
+    setMckPortalPrices(newPrices);
     if (combined.length > 0) {
       setMckParsed(combined.map(function(ndc) { return { ndc: ndc, description: "", qty: null, mckItemNum: "" }; }));
     } else {
@@ -1393,6 +1428,18 @@ function POImportTool(props) {
             warnings.push({ type: "qty-mismatch", msg: pdfItem.drugName + " (NDC " + pdfItem.ndc + "): PDF says qty " + pdfItem.qty + " but portal shows " + portalMatch.qty, item: pdfItem });
           }
         });
+
+        // Override unit prices with McKesson portal EST. NET PRICE when available
+        if (Object.keys(mckPortalPrices).length > 0) {
+          matched.forEach(function(r) {
+            var ndcNorm = normalizeNdcForCompare(r.ndc);
+            if (mckPortalPrices[ndcNorm] != null) {
+              r.unitPrice = mckPortalPrices[ndcNorm];
+              r.totalPrice = r.qty ? +(r.qty * r.unitPrice).toFixed(2) : r.totalPrice;
+              r.priceSource = "portal";
+            }
+          });
+        }
       }
 
       setResults(matched);
@@ -1422,7 +1469,7 @@ function POImportTool(props) {
   }
 
   function reset() {
-    setPdfs([]); setMckPaste(""); setMckParsed(null); setScreenshotUrls([]); setOcrRaw(""); setShowRawOcr(false); setOcrFoundNdcs(null); setScreenshotQtys({}); setResults([]); setMckWarnings([]); setError(null);
+    setPdfs([]); setMckPaste(""); setMckParsed(null); setScreenshotUrls([]); setOcrRaw(""); setShowRawOcr(false); setOcrFoundNdcs(null); setScreenshotQtys({}); setResults([]); setMckWarnings([]); setError(null); setMckPortalPrices({});
   }
 
   var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
@@ -1465,18 +1512,21 @@ function POImportTool(props) {
             </div> : <DropZone accept="image/*" multiple label="McKesson Screenshots" sublabel="Drop images or click to browse" icon="image" color={TOOL_COLOR} disabled={ocrLoading} onFiles={handleScreenshotUpload} />}
             {ocrLoading && <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}><Spinner color={TOOL_COLOR} size={14} /><span style={{ fontSize: 12, color: TOOL_COLOR }}>{ocrStatus || "Processing..."}</span></div>}
             {screenshotUrls.length > 0 && !ocrLoading && !mckParsed && <p style={{ color: "#D97706", fontSize: 11, marginTop: 6 }}>{"\u26A0"} OCR could not find NDCs — type them manually below</p>}
-            <div style={{ marginTop: 10, fontSize: 11, color: "#A69E95" }}>Add any missing NDCs below (one per line — will be merged with OCR results):</div>
-            <textarea value={mckPaste} onChange={handleMckManualPaste} placeholder={"67877019710\n29300041001\n53746075101\n..."} rows={3} style={Object.assign({}, S.inp, { resize: "vertical", fontFamily: "monospace", fontSize: 12, marginTop: 4 })} />
+            <div style={{ marginTop: 10, fontSize: 11, color: "#A69E95" }}>Paste NDCs below, optionally with Est. Net Price (tab or space separated):</div>
+            <textarea value={mckPaste} onChange={handleMckManualPaste} placeholder={"6846213001\t5.90\n4354728403\t2.31\n7260331501\t4.15\n...\n\nOr just NDCs:\n67877019710\n29300041001"} rows={4} style={Object.assign({}, S.inp, { resize: "vertical", fontFamily: "monospace", fontSize: 12, marginTop: 4 })} />
           </div>}
         </div>
 
         {vendor === "mckesson" && mckParsed && mckParsed.length > 0 && <div style={{ marginTop: 16, background: "#FAFAF8", border: "1px solid #E8E4DE", borderRadius: 8, padding: "10px 14px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-            <div style={{ fontSize: 11, color: "#8A8279", fontWeight: 600, textTransform: "uppercase" }}>Portal NDCs ({mckParsed.length})</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 11, color: "#8A8279", fontWeight: 600, textTransform: "uppercase" }}>Portal NDCs ({mckParsed.length})</span>
+              {Object.keys(mckPortalPrices).length > 0 && <span style={{ fontSize: 10, color: "#059669", fontWeight: 600 }}>{"\u2713"} {Object.keys(mckPortalPrices).length} price{Object.keys(mckPortalPrices).length !== 1 ? "s" : ""}</span>}
+            </div>
             {ocrRaw && <button onClick={function() { setShowRawOcr(!showRawOcr); }} style={{ background: "transparent", border: "1px solid #E8E4DE", borderRadius: 6, padding: "2px 8px", fontSize: 10, color: "#8A8279", cursor: "pointer" }}>{showRawOcr ? "Hide" : "Show"} Raw OCR</button>}
           </div>
           <div style={{ maxHeight: 80, overflow: "auto", fontSize: 13, fontFamily: "monospace", color: "#8A8279" }}>
-            {mckParsed.map(function(pi, idx) { return <div key={idx}>{pi.ndc}</div>; })}
+            {mckParsed.map(function(pi, idx) { return <div key={idx}>{pi.ndc}{mckPortalPrices[pi.ndc] != null ? <span style={{ color: "#059669", marginLeft: 8 }}>{"$" + mckPortalPrices[pi.ndc].toFixed(2)}</span> : ""}</div>; })}
           </div>
           {showRawOcr && <div style={{ maxHeight: 200, overflow: "auto", fontSize: 11, fontFamily: "monospace", color: "#A69E95", background: "#F0EDE8", borderRadius: 6, padding: 8, marginTop: 8, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{ocrRaw}</div>}
         </div>}
@@ -1565,7 +1615,7 @@ function POImportTool(props) {
                 <td style={Object.assign({}, S.td, { color: "#8A8279", maxWidth: 200, wordBreak: "break-word" })}>{r.drugName || "\u2014"}</td>
                 <td style={S.td}>{r.vendorSource || "\u2014"}</td>
                 <td style={Object.assign({}, S.td, { textAlign: "center" })}><input style={Object.assign({}, S.inp, { width: 70, padding: "6px 8px", textAlign: "center", color: qtyChanged ? "#D97706" : "#4A4541", background: qtyChanged ? "rgba(245,158,11,0.1)" : "#FAFAF8" })} type="number" value={screenshotQtys[r.ndc] != null ? screenshotQtys[r.ndc] : (r.qty || "")} onChange={function(e) { var updated = Object.assign({}, screenshotQtys); updated[r.ndc] = e.target.value; setScreenshotQtys(updated); }} /></td>
-                <td style={Object.assign({}, S.td, { textAlign: "right", color: "#059669" })}>{r.unitPrice ? "$" + r.unitPrice.toFixed(2) : "\u2014"}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right", color: r.priceSource === "portal" ? "#06B6D4" : "#059669" })}>{r.unitPrice ? "$" + r.unitPrice.toFixed(2) : "\u2014"}{r.priceSource === "portal" ? <span title="Est. Net Price from McKesson portal" style={{ marginLeft: 4, fontSize: 9, color: "#06B6D4" }}>{"\u25C6"}</span> : ""}</td>
                 <td style={Object.assign({}, S.td, { textAlign: "right" })}>{extCost ? "$" + extCost.toLocaleString(undefined, { minimumFractionDigits: 2 }) : "\u2014"}</td>
                 {vendor === "mckesson" && <td style={S.td}>{r.vendorItemNum || "\u2014"}</td>}
                 <td style={Object.assign({}, S.td, { color: "#A69E95" })}>{(r.sourceFile || "").split("/").pop()}</td>
