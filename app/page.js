@@ -1515,6 +1515,7 @@ function POImportTool(props) {
 
       {results.length > 0 && <div>
         <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
+          {(function() { var pos = {}; results.forEach(function(r) { if (r.poNumber) pos[r.poNumber] = 1; }); var poList = Object.keys(pos); return poList.length > 0 ? <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#8A8279", textTransform: "uppercase", fontWeight: 600 }}>PO #</div><div style={{ fontSize: 20, fontWeight: 700, color: TOOL_COLOR, marginTop: 4 }}>{poList.join(", ")}</div></div> : null; })()}
           <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#8A8279", textTransform: "uppercase", fontWeight: 600 }}>Total Items</div><div style={{ fontSize: 24, fontWeight: 700, color: "#2C2825", marginTop: 4 }}>{results.length}</div></div>
           <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#8A8279", textTransform: "uppercase", fontWeight: 600 }}>In OData</div><div style={{ fontSize: 24, fontWeight: 700, color: "#059669", marginTop: 4 }}>{foundCount}</div></div>
           <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#8A8279", textTransform: "uppercase", fontWeight: 600 }}>Not in OData</div><div style={{ fontSize: 24, fontWeight: 700, color: notFoundCount > 0 ? "#DC2626" : "#059669", marginTop: 4 }}>{notFoundCount}</div></div>
@@ -1524,10 +1525,7 @@ function POImportTool(props) {
 
         <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto" })}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", borderBottom: "1px solid #E8E4DE" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-              <span style={{ fontSize: 14, fontWeight: 600, color: "#2C2825" }}>NDC Validation Results</span>
-              {(function() { var pos = {}; results.forEach(function(r) { if (r.poNumber) pos[r.poNumber] = 1; }); var poList = Object.keys(pos); return poList.length > 0 ? poList.map(function(po) { return <span key={po} style={{ background: TOOL_COLOR + "15", color: TOOL_COLOR, fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 20 }}>PO# {po}</span>; }) : null; })()}
-            </div>
+            <span style={{ fontSize: 14, fontWeight: 600, color: "#2C2825" }}>NDC Validation Results</span>
             <div style={{ display: "flex", gap: 8 }}>
               <button onClick={reset} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}><IconTrash /> Clear</button>
               <button onClick={downloadCSV} style={Object.assign({}, S.btn(), { padding: "6px 14px", fontSize: 12 })}><IconCSV /> Download CSV</button>
