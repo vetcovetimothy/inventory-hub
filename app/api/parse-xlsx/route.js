@@ -12,10 +12,10 @@ export async function POST(request) {
     }
 
     const buffer = await file.arrayBuffer();
-    const wb = XLSX.read(new Uint8Array(buffer), { type: "array", cellText: true, raw: false });
+    const wb = XLSX.read(new Uint8Array(buffer), { type: "array" });
     const ws = wb.Sheets[wb.SheetNames[0]];
     
-    // Use raw: false and cellText: true to preserve leading zeros
+    // Use raw: false to preserve leading zeros in Inventory IDs like 0001-07
     const rows = XLSX.utils.sheet_to_json(ws, { defval: "", raw: false });
     
     return NextResponse.json({ rows, count: rows.length });
