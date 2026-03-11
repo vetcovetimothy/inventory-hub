@@ -1273,7 +1273,17 @@ function POImportTool(props) {
 
         // === Spatial table parsing for prices ===
         try {
-          var words = result.data.words || [];
+          // Tesseract.js v4: words are nested in blocks > paragraphs > lines > words
+          var words = [];
+          (result.data.blocks || []).forEach(function(block) {
+            (block.paragraphs || []).forEach(function(para) {
+              (para.lines || []).forEach(function(line) {
+                (line.words || []).forEach(function(word) {
+                  if (word.text && word.bbox) words.push(word);
+                });
+              });
+            });
+          });
           if (words.length > 0) {
             var spatialPrices = extractPricesSpatially(words);
             Object.keys(spatialPrices).forEach(function(ndc) {
@@ -1286,7 +1296,10 @@ function POImportTool(props) {
         }
       }
       await worker.terminate();
-      setOcrRaw(allOcrText);
+      var spatialDebug = "\n\n--- SPATIAL DEBUG ---\nSpatial prices found: " + Object.keys(allOcrPrices).length;
+      Object.keys(allOcrPrices).forEach(function(ndc) { spatialDebug += "\n  " + ndc + " → $" + allOcrPrices[ndc]; });
+      if (Object.keys(allOcrPrices).length === 0) spatialDebug += "\n  (none found — using text fallback)";
+      setOcrRaw(allOcrText + spatialDebug);
       var ocrNdcList = Object.keys(allNdcs);
       setOcrFoundNdcs(ocrNdcList);
 
@@ -1322,7 +1335,8 @@ function POImportTool(props) {
     if (!words || words.length === 0) return prices;
 
     // Step 1: Group words into rows by vertical position (y-center)
-    var rowThreshold = 10; // pixels — words within this y-range are same row
+    // Image is 2x scaled, so use larger threshold
+    var rowThreshold = 25; // pixels — words within this y-range are same row
     var wordData = words.map(function(w) {
       var b = w.bbox;
       return { text: (w.text || "").trim(), x0: b.x0, y0: b.y0, x1: b.x1, y1: b.y1, yMid: (b.y0 + b.y1) / 2, xMid: (b.x0 + b.x1) / 2 };
@@ -1348,8 +1362,8 @@ function POImportTool(props) {
       rows.push(currentRow);
     }
 
-    // Step 2: Find the header row — look for "EST" or "NET" to locate the Est. Net Price column
-    var estNetColX = null;
+    // Step 2: Find header row and locate ALL price column positions
+    var priceColumns = {}; // { "est_net": xMid, "purchase": xMid, "unit": xMid }
     var ndcColX = null;
     var headerRowIdx = -1;
 
@@ -1357,67 +1371,111 @@ function POImportTool(props) {
       var rowText = rows[ri].map(function(w) { return w.text.toUpperCase(); });
       var fullRowText = rowText.join(" ");
 
-      // Look for EST. NET PRICE or EST NET or just NET in header
+      // Only process rows that look like headers (contain price-related words)
+      if (fullRowText.indexOf("PRICE") < 0 && fullRowText.indexOf("NDC") < 0 && fullRowText.indexOf("COST") < 0) continue;
+
       for (var wi = 0; wi < rows[ri].length; wi++) {
         var upperText = rows[ri][wi].text.toUpperCase();
-        if (upperText === "EST" || upperText === "EST." || upperText === "NET" || fullRowText.indexOf("EST") >= 0 && (upperText === "NET" || upperText === "PRICE")) {
-          // Found part of "EST. NET PRICE" — use the x-center of this cluster
-          // Look for nearby "NET" or "PRICE" words to get the column center
+
+        // Find EST. NET PRICE column — look for "EST" and find the cluster
+        if ((upperText === "EST" || upperText === "EST.") && !priceColumns.est_net) {
           var clusterXs = [];
-          for (var ci = Math.max(0, wi - 2); ci < Math.min(rows[ri].length, wi + 3); ci++) {
+          for (var ci = wi; ci < Math.min(rows[ri].length, wi + 4); ci++) {
             var ct = rows[ri][ci].text.toUpperCase();
             if (ct === "EST" || ct === "EST." || ct === "NET" || ct === "PRICE") {
               clusterXs.push(rows[ri][ci].xMid);
             }
           }
           if (clusterXs.length > 0) {
-            estNetColX = clusterXs.reduce(function(a, b) { return a + b; }, 0) / clusterXs.length;
+            priceColumns.est_net = clusterXs.reduce(function(a, b) { return a + b; }, 0) / clusterXs.length;
             headerRowIdx = ri;
           }
         }
-        // Also find NDC column
+
+        // Find PURCHASE PRICE column
+        if (upperText === "PURCHASE" && !priceColumns.purchase) {
+          var pCluster = [rows[ri][wi].xMid];
+          if (wi + 1 < rows[ri].length && rows[ri][wi + 1].text.toUpperCase() === "PRICE") {
+            pCluster.push(rows[ri][wi + 1].xMid);
+          }
+          priceColumns.purchase = pCluster.reduce(function(a, b) { return a + b; }, 0) / pCluster.length;
+        }
+
+        // Find UNIT PRICE column
+        if (upperText === "UNIT" && !priceColumns.unit) {
+          var uCluster = [rows[ri][wi].xMid];
+          if (wi + 1 < rows[ri].length && rows[ri][wi + 1].text.toUpperCase() === "PRICE") {
+            uCluster.push(rows[ri][wi + 1].xMid);
+          }
+          priceColumns.unit = uCluster.reduce(function(a, b) { return a + b; }, 0) / uCluster.length;
+        }
+
+        // Find NDC column
         if (upperText === "NDC" || upperText === "10-DIGIT") {
           ndcColX = rows[ri][wi].xMid;
         }
       }
-      if (estNetColX) break;
+      if (priceColumns.est_net) break;
     }
 
     // If we couldn't find Est. Net Price header, return empty
-    if (!estNetColX) return prices;
+    if (!priceColumns.est_net) return prices;
 
-    // Step 3: For each data row after the header, find NDC and the price at Est. Net Price column
+    // Build list of all known column x-positions for disambiguation
+    var allColXs = [];
+    Object.keys(priceColumns).forEach(function(key) { allColXs.push({ name: key, x: priceColumns[key] }); });
+
+    // Step 3: For each data row after the header, find NDC and assign prices to columns
     for (var di = headerRowIdx + 1; di < rows.length; di++) {
       var dataRow = rows[di];
       var rowNdc = null;
-      var bestPrice = null;
-      var bestPriceDist = Infinity;
+      var estNetPrice = null;
 
+      // Find NDC on this row
       for (var dwi = 0; dwi < dataRow.length; dwi++) {
         var wText = dataRow[dwi].text.replace(/[^0-9]/g, "");
-
-        // Check if this word is an NDC (11 digits)
         if (/^\d{11}$/.test(wText)) {
           rowNdc = wText;
-        }
-
-        // Check if this word is a dollar amount near the Est. Net Price column
-        var priceMatch = dataRow[dwi].text.match(/^\$?([\d,]+\.[\d]{2,4})$/);
-        if (priceMatch) {
-          var pVal = parseFloat(priceMatch[1].replace(/,/g, ""));
-          var dist = Math.abs(dataRow[dwi].xMid - estNetColX);
-          // Must be within reasonable range of the column header
-          if (dist < bestPriceDist && pVal > 0) {
-            bestPrice = pVal;
-            bestPriceDist = dist;
-          }
+          break;
         }
       }
 
-      // Only accept the price if it's reasonably close to the Est. Net Price column
-      // and we found an NDC on this row
-      if (rowNdc && bestPrice != null && bestPriceDist < 80) {
-        prices[rowNdc] = bestPrice;
+      if (!rowNdc) continue;
+
+      // Find all dollar amounts on this row
+      var rowPrices = [];
+      for (var dwi2 = 0; dwi2 < dataRow.length; dwi2++) {
+        var priceMatch = dataRow[dwi2].text.match(/^\$?([\d,]+\.[\d]{2,4})$/);
+        if (priceMatch) {
+          var pVal = parseFloat(priceMatch[1].replace(/,/g, ""));
+          if (pVal > 0) rowPrices.push({ value: pVal, xMid: dataRow[dwi2].xMid });
+        }
+      }
+
+      // Assign each price to its nearest column, then pick Est. Net Price
+      if (rowPrices.length > 0 && allColXs.length > 0) {
+        // For each price, find which column it belongs to
+        var colAssignments = {};
+        rowPrices.forEach(function(rp) {
+          var bestCol = null;
+          var bestDist = Infinity;
+          allColXs.forEach(function(col) {
+            var d = Math.abs(rp.xMid - col.x);
+            if (d < bestDist) { bestDist = d; bestCol = col.name; }
+          });
+          // Keep the closest price for each column
+          if (!colAssignments[bestCol] || Math.abs(rp.xMid - priceColumns[bestCol]) < Math.abs(colAssignments[bestCol].xMid - priceColumns[bestCol])) {
+            colAssignments[bestCol] = rp;
+          }
+        });
+
+        if (colAssignments.est_net) {
+          estNetPrice = colAssignments.est_net.value;
+        }
+      }
+
+      if (rowNdc && estNetPrice != null) {
+        prices[rowNdc] = estNetPrice;
       }
     }
 
