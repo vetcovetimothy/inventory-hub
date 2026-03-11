@@ -753,24 +753,15 @@ function CycleCountTool(props) {
       var reader = new FileReader();
       reader.onload = function() {
         try {
-          var script = document.createElement("script");
-          script.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
-          script.onload = function() {
-            var data = new Uint8Array(reader.result);
-            var wb = window.XLSX.read(data, { type: "array" });
-            var ws = wb.Sheets[wb.SheetNames[0]];
-            var rows = window.XLSX.utils.sheet_to_json(ws, { defval: "" });
-            resolve(rows);
-          };
-          script.onerror = function() { reject(new Error("Failed to load XLSX library")); };
-          if (window.XLSX) {
-            var data2 = new Uint8Array(reader.result);
-            var wb2 = window.XLSX.read(data2, { type: "array" });
-            var ws2 = wb2.Sheets[wb2.SheetNames[0]];
-            resolve(window.XLSX.utils.sheet_to_json(ws2, { defval: "" }));
-          } else {
-            document.head.appendChild(script);
-          }
+          // Send to server for parsing since CDN may be blocked
+          var formData = new FormData();
+          formData.append("file", file);
+          fetch("/api/parse-xlsx", { method: "POST", body: formData }).then(function(resp) {
+            return resp.json();
+          }).then(function(json) {
+            if (json.error) reject(new Error(json.error));
+            else resolve(json.rows);
+          }).catch(reject);
         } catch (err) { reject(err); }
       };
       reader.onerror = function() { reject(new Error("Failed to read file")); };
@@ -786,18 +777,19 @@ function CycleCountTool(props) {
 
     setLoading(true); setResults([]); setErrors([]);
     try {
-      // Parse NDCs from pasted text — extract NDCs with dashes
-      var ndcLines = ndcText.split("\n").map(function(l) { return l.trim(); }).filter(function(l) { return l.length > 0; });
+      // Parse NDCs from pasted text — extract NDCs with dashes, skip blanks
+      var ndcLines = ndcText.split("\n").map(function(l) { return l.trim(); }).filter(function(l) { return l.length > 0 && /\d/.test(l); });
       var ndcs = [];
       ndcLines.forEach(function(line) {
+        // Try dashed format first (5-4-2 or 4-4-2)
         var match = line.match(/(\d{4,5}-\d{3,4}-\d{1,2})/);
-        if (match) ndcs.push(match[1]);
-        else {
-          // Try without dashes (11 digits)
-          var m2 = line.match(/(\d{11})/);
-          if (m2) ndcs.push(m2[1]);
-          else if (line.match(/\d/)) ndcs.push(line.replace(/[^\d-]/g, ""));
-        }
+        if (match) { ndcs.push(match[1]); return; }
+        // Try 11-digit no-dash format
+        var m2 = line.match(/(\d{11})/);
+        if (m2) { ndcs.push(m2[1]); return; }
+        // Fallback: clean and use whatever digits+dashes are there
+        var cleaned = line.replace(/[^\d-]/g, "").trim();
+        if (cleaned.length >= 8) ndcs.push(cleaned);
       });
 
       // Read vendor inventory CSV
@@ -822,12 +814,12 @@ function CycleCountTool(props) {
       // Read stock items XLSX
       var stockRows = await readXlsxFile(stockFile);
 
-      // Build Inventory ID → Sales Unit map
+      // Build Inventory ID → Sales Unit map (preserve leading zeros)
       var salesUnitMap = {};
       stockRows.forEach(function(r) {
-        var invId = r["Inventory ID"] || "";
-        var salesUnit = r["Sales Unit"] || "";
-        if (invId) salesUnitMap[invId.trim()] = salesUnit.trim();
+        var invId = String(r["Inventory ID"] || "").trim();
+        var salesUnit = String(r["Sales Unit"] || "").trim();
+        if (invId) salesUnitMap[invId] = salesUnit;
       });
 
       // Process each NDC
