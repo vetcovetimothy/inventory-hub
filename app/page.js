@@ -714,10 +714,53 @@ function CycleCountTool(props) {
   var _ndcText = useState(""), ndcText = _ndcText[0], setNdcText = _ndcText[1];
   var _vendorFile = useState(null), vendorFile = _vendorFile[0], setVendorFile = _vendorFile[1];
   var _stockFile = useState(null), stockFile = _stockFile[0], setStockFile = _stockFile[1];
+  var _stockRows = useState(null), stockRows = _stockRows[0], setStockRows = _stockRows[1];
+  var _stockMeta = useState(null), stockMeta = _stockMeta[0], setStockMeta = _stockMeta[1];
+  var _stockLoading = useState(false), stockLoading = _stockLoading[0], setStockLoading = _stockLoading[1];
   var _warehouse = useState(""), warehouse = _warehouse[0], setWarehouse = _warehouse[1];
   var _results = useState([]), results = _results[0], setResults = _results[1];
   var _errors = useState([]), errors = _errors[0], setErrors = _errors[1];
   var _loading = useState(false), loading = _loading[0], setLoading = _loading[1];
+
+  // Load cached stock items from KV on mount
+  useEffect(function() {
+    fetch("/api/kv?key=stock-items").then(function(r) { return r.json(); }).then(function(json) {
+      if (json.data && json.data.rows && json.data.rows.length > 0) {
+        setStockRows(json.data.rows);
+        setStockMeta({ date: json.data.date || "unknown", count: json.data.rows.length, name: json.data.name || "Stock Items" });
+      }
+    }).catch(function() { /* KV unavailable, ignore */ });
+  }, []);
+
+  // Upload and cache stock items to KV
+  function handleStockUpload(file) {
+    if (!file) return;
+    setStockFile(file);
+    setStockLoading(true);
+    var formData = new FormData();
+    formData.append("file", file);
+    fetch("/api/parse-xlsx", { method: "POST", body: formData }).then(function(resp) {
+      return resp.json();
+    }).then(function(json) {
+      if (json.error) { toast("Stock Items parse error: " + json.error, "error"); setStockLoading(false); return; }
+      // Only keep the two columns we need to minimize KV storage
+      var trimmed = json.rows.map(function(r) { return { "Inventory ID": r["Inventory ID"] || "", "Sales Unit": r["Sales Unit"] || "" }; }).filter(function(r) { return r["Inventory ID"]; });
+      setStockRows(trimmed);
+      var meta = { date: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }), count: trimmed.length, name: file.name };
+      setStockMeta(meta);
+      // Save to KV
+      fetch("/api/kv", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "stock-items", value: { rows: trimmed, date: meta.date, name: meta.name } }) }).then(function() {
+        toast("Stock Items saved (" + trimmed.length + " items)", "success");
+      }).catch(function() {
+        toast("Stock Items loaded but failed to save to server", "error");
+      });
+      setStockLoading(false);
+      setStockFile(null);
+    }).catch(function(err) {
+      toast("Failed to parse Stock Items: " + err.message, "error");
+      setStockLoading(false);
+    });
+  }
   var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
 
   function parseCSV(text) {
@@ -772,7 +815,7 @@ function CycleCountTool(props) {
   async function processData() {
     if (!ndcText.trim()) { toast("Paste the NDC list first", "error"); return; }
     if (!vendorFile) { toast("Upload the Vendor Inventory CSV", "error"); return; }
-    if (!stockFile) { toast("Upload the Stock Items XLSX", "error"); return; }
+    if (!stockRows || stockRows.length === 0) { toast("Upload the Stock Items XLSX first", "error"); return; }
     if (!warehouse.trim()) { toast("Enter a warehouse code", "error"); return; }
 
     setLoading(true); setResults([]); setErrors([]);
@@ -811,10 +854,7 @@ function CycleCountTool(props) {
         if (sku) skuMap[sku] = r;
       });
 
-      // Read stock items XLSX
-      var stockRows = await readXlsxFile(stockFile);
-
-      // Build Inventory ID → Sales Unit map (preserve leading zeros)
+      // Build Inventory ID → Sales Unit map from cached stock items
       var salesUnitMap = {};
       stockRows.forEach(function(r) {
         var invId = String(r["Inventory ID"] || "").trim();
@@ -910,8 +950,18 @@ function CycleCountTool(props) {
 
           <div style={{ fontSize: 14, color: "#4A4541", fontWeight: 600, marginBottom: 8, marginTop: 20 }}>4. Stock Items XLSX</div>
           <div style={{ fontSize: 12, color: "#8A8279", marginBottom: 6 }}>Contains Inventory ID and Sales Unit for UOM lookup</div>
-          <input type="file" accept=".xlsx,.xls" onChange={function(e) { setStockFile(e.target.files[0] || null); }} style={Object.assign({}, S.inp, { cursor: "pointer" })} />
-          {stockFile && <p style={{ color: "#059669", fontSize: 12, marginTop: 6 }}>{"\u2713"} {stockFile.name}</p>}
+          {stockRows && stockMeta ? <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(5,150,105,0.06)", border: "1px solid rgba(5,150,105,0.2)", borderRadius: 10 }}>
+              <span style={{ color: "#059669", fontSize: 13 }}>{"\u2713"} {stockMeta.name} — {stockMeta.count.toLocaleString()} items (saved {stockMeta.date})</span>
+            </div>
+            <label style={{ display: "inline-block", marginTop: 8, fontSize: 12, color: TOOL_COLOR, cursor: "pointer", textDecoration: "underline" }}>
+              {stockLoading ? "Uploading..." : "Replace with new file"}
+              <input type="file" accept=".xlsx,.xls" onChange={function(e) { if (e.target.files[0]) handleStockUpload(e.target.files[0]); }} style={{ display: "none" }} disabled={stockLoading} />
+            </label>
+          </div> : <div>
+            <input type="file" accept=".xlsx,.xls" onChange={function(e) { if (e.target.files[0]) handleStockUpload(e.target.files[0]); }} style={Object.assign({}, S.inp, { cursor: "pointer" })} disabled={stockLoading} />
+            {stockLoading && <p style={{ color: TOOL_COLOR, fontSize: 12, marginTop: 6 }}>Parsing and saving...</p>}
+          </div>}
         </div>
       </div>
 
