@@ -1258,23 +1258,43 @@ function POImportTool(props) {
       await worker.setParameters({ tessedit_pageseg_mode: "6" });
       var allOcrText = "";
       var allNdcs = {};
+      var allOcrPrices = {};
+
       for (var fi = 0; fi < urls.length; fi++) {
         setOcrStatus("Processing screenshot " + (fi + 1) + " of " + urls.length + "...");
         var processedUrl = await preprocessImageForOcr(urls[fi]);
         var result = await worker.recognize(processedUrl);
         var ocrText = result.data.text;
         allOcrText += (fi > 0 ? "\n--- Screenshot " + (fi + 1) + " ---\n" : "") + ocrText;
+
+        // Extract NDCs from plain text (always works)
         var ndcs = extractNdcsFromOcrText(ocrText);
         ndcs.forEach(function(n) { allNdcs[n] = true; });
+
+        // === Spatial table parsing for prices ===
+        try {
+          var words = result.data.words || [];
+          if (words.length > 0) {
+            var spatialPrices = extractPricesSpatially(words);
+            Object.keys(spatialPrices).forEach(function(ndc) {
+              if (!allOcrPrices[ndc]) allOcrPrices[ndc] = spatialPrices[ndc];
+            });
+          }
+        } catch (spatialErr) {
+          // Spatial parsing failed, fall back to text-based extraction
+          console.warn("Spatial parsing failed:", spatialErr.message);
+        }
       }
       await worker.terminate();
       setOcrRaw(allOcrText);
       var ocrNdcList = Object.keys(allNdcs);
       setOcrFoundNdcs(ocrNdcList);
-      // Try to extract prices from OCR text
-      var ocrPrices = extractNdcPricesFromText(allOcrText);
+
+      // If spatial didn't find prices, fall back to text-based
+      var ocrPrices = Object.keys(allOcrPrices).length > 0 ? allOcrPrices : extractNdcPricesFromText(allOcrText);
       var manualPrices = extractNdcPricesFromText(mckPaste);
       setMckPortalPrices(Object.assign({}, ocrPrices, manualPrices));
+
       // Merge with any manual NDCs already in paste box
       var manualNdcs = extractNdcsFromOcrText(mckPaste);
       manualNdcs.forEach(function(n) { allNdcs[n] = true; });
@@ -1283,7 +1303,7 @@ function POImportTool(props) {
         var items = combined.map(function(ndc) { return { ndc: ndc, description: "", qty: null, mckItemNum: "" }; });
         setMckParsed(items);
         var priceCount = Object.keys(ocrPrices).length + Object.keys(manualPrices).length;
-        toast("OCR found " + ocrNdcList.length + " NDCs" + (priceCount > 0 ? " and " + priceCount + " Est. Net Price" + (priceCount > 1 ? "s" : "") : "") + " from " + urls.length + " screenshot" + (urls.length > 1 ? "s" : "") + (manualNdcs.length > 0 ? " + " + manualNdcs.length + " manual" : ""));
+        toast("OCR found " + ocrNdcList.length + " NDCs" + (priceCount > 0 ? " and " + priceCount + " Est. Net Price" + (priceCount > 1 ? "s" : "") : "") + " from " + urls.length + " screenshot" + (urls.length > 1 ? "s" : ""));
       } else {
         setMckParsed(null);
         toast("OCR could not find NDCs. You can also paste them manually below.", "error");
@@ -1294,6 +1314,114 @@ function POImportTool(props) {
       setOcrLoading(false);
       setOcrStatus("");
     }
+  }
+
+  // Spatial table parser: uses word bounding boxes to identify columns and match NDCs to Est. Net Prices
+  function extractPricesSpatially(words) {
+    var prices = {};
+    if (!words || words.length === 0) return prices;
+
+    // Step 1: Group words into rows by vertical position (y-center)
+    var rowThreshold = 10; // pixels — words within this y-range are same row
+    var wordData = words.map(function(w) {
+      var b = w.bbox;
+      return { text: (w.text || "").trim(), x0: b.x0, y0: b.y0, x1: b.x1, y1: b.y1, yMid: (b.y0 + b.y1) / 2, xMid: (b.x0 + b.x1) / 2 };
+    }).filter(function(w) { return w.text.length > 0; });
+
+    // Sort by y position
+    wordData.sort(function(a, b) { return a.yMid - b.yMid; });
+
+    // Group into rows
+    var rows = [];
+    var currentRow = [wordData[0]];
+    for (var i = 1; i < wordData.length; i++) {
+      if (Math.abs(wordData[i].yMid - currentRow[0].yMid) < rowThreshold) {
+        currentRow.push(wordData[i]);
+      } else {
+        currentRow.sort(function(a, b) { return a.x0 - b.x0; });
+        rows.push(currentRow);
+        currentRow = [wordData[i]];
+      }
+    }
+    if (currentRow.length > 0) {
+      currentRow.sort(function(a, b) { return a.x0 - b.x0; });
+      rows.push(currentRow);
+    }
+
+    // Step 2: Find the header row — look for "EST" or "NET" to locate the Est. Net Price column
+    var estNetColX = null;
+    var ndcColX = null;
+    var headerRowIdx = -1;
+
+    for (var ri = 0; ri < Math.min(rows.length, 15); ri++) {
+      var rowText = rows[ri].map(function(w) { return w.text.toUpperCase(); });
+      var fullRowText = rowText.join(" ");
+
+      // Look for EST. NET PRICE or EST NET or just NET in header
+      for (var wi = 0; wi < rows[ri].length; wi++) {
+        var upperText = rows[ri][wi].text.toUpperCase();
+        if (upperText === "EST" || upperText === "EST." || upperText === "NET" || fullRowText.indexOf("EST") >= 0 && (upperText === "NET" || upperText === "PRICE")) {
+          // Found part of "EST. NET PRICE" — use the x-center of this cluster
+          // Look for nearby "NET" or "PRICE" words to get the column center
+          var clusterXs = [];
+          for (var ci = Math.max(0, wi - 2); ci < Math.min(rows[ri].length, wi + 3); ci++) {
+            var ct = rows[ri][ci].text.toUpperCase();
+            if (ct === "EST" || ct === "EST." || ct === "NET" || ct === "PRICE") {
+              clusterXs.push(rows[ri][ci].xMid);
+            }
+          }
+          if (clusterXs.length > 0) {
+            estNetColX = clusterXs.reduce(function(a, b) { return a + b; }, 0) / clusterXs.length;
+            headerRowIdx = ri;
+          }
+        }
+        // Also find NDC column
+        if (upperText === "NDC" || upperText === "10-DIGIT") {
+          ndcColX = rows[ri][wi].xMid;
+        }
+      }
+      if (estNetColX) break;
+    }
+
+    // If we couldn't find Est. Net Price header, return empty
+    if (!estNetColX) return prices;
+
+    // Step 3: For each data row after the header, find NDC and the price at Est. Net Price column
+    for (var di = headerRowIdx + 1; di < rows.length; di++) {
+      var dataRow = rows[di];
+      var rowNdc = null;
+      var bestPrice = null;
+      var bestPriceDist = Infinity;
+
+      for (var dwi = 0; dwi < dataRow.length; dwi++) {
+        var wText = dataRow[dwi].text.replace(/[^0-9]/g, "");
+
+        // Check if this word is an NDC (11 digits)
+        if (/^\d{11}$/.test(wText)) {
+          rowNdc = wText;
+        }
+
+        // Check if this word is a dollar amount near the Est. Net Price column
+        var priceMatch = dataRow[dwi].text.match(/^\$?([\d,]+\.[\d]{2,4})$/);
+        if (priceMatch) {
+          var pVal = parseFloat(priceMatch[1].replace(/,/g, ""));
+          var dist = Math.abs(dataRow[dwi].xMid - estNetColX);
+          // Must be within reasonable range of the column header
+          if (dist < bestPriceDist && pVal > 0) {
+            bestPrice = pVal;
+            bestPriceDist = dist;
+          }
+        }
+      }
+
+      // Only accept the price if it's reasonably close to the Est. Net Price column
+      // and we found an NDC on this row
+      if (rowNdc && bestPrice != null && bestPriceDist < 80) {
+        prices[rowNdc] = bestPrice;
+      }
+    }
+
+    return prices;
   }
 
   function handleMckManualPaste(e) {
