@@ -707,6 +707,259 @@ function ndcVariants(ndc) {
   return Object.keys(v);
 }
 
+/* ═══════ CYCLE COUNTING TOOL ═══════ */
+function CycleCountTool(props) {
+  var toast = props.toast;
+  var TOOL_COLOR = "#14B8A6";
+  var _ndcText = useState(""), ndcText = _ndcText[0], setNdcText = _ndcText[1];
+  var _vendorFile = useState(null), vendorFile = _vendorFile[0], setVendorFile = _vendorFile[1];
+  var _stockFile = useState(null), stockFile = _stockFile[0], setStockFile = _stockFile[1];
+  var _warehouse = useState(""), warehouse = _warehouse[0], setWarehouse = _warehouse[1];
+  var _results = useState([]), results = _results[0], setResults = _results[1];
+  var _errors = useState([]), errors = _errors[0], setErrors = _errors[1];
+  var _loading = useState(false), loading = _loading[0], setLoading = _loading[1];
+  var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
+
+  function parseCSV(text) {
+    var lines = text.split("\n").map(function(l) { return l.trim(); }).filter(function(l) { return l.length > 0; });
+    if (lines.length === 0) return [];
+    var headers = lines[0].split(",").map(function(h) { return h.replace(/"/g, "").trim(); });
+    return lines.slice(1).map(function(line) {
+      var vals = [];
+      var inQuote = false, cur = "";
+      for (var i = 0; i < line.length; i++) {
+        if (line[i] === '"') { inQuote = !inQuote; }
+        else if (line[i] === ',' && !inQuote) { vals.push(cur.trim()); cur = ""; }
+        else { cur += line[i]; }
+      }
+      vals.push(cur.trim());
+      var obj = {};
+      headers.forEach(function(h, idx) { obj[h] = vals[idx] || ""; });
+      return obj;
+    });
+  }
+
+  function readFileAsText(file) {
+    return new Promise(function(resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function() { resolve(reader.result); };
+      reader.onerror = function() { reject(new Error("Failed to read file")); };
+      reader.readAsText(file);
+    });
+  }
+
+  function readXlsxFile(file) {
+    return new Promise(function(resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function() {
+        try {
+          var script = document.createElement("script");
+          script.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+          script.onload = function() {
+            var data = new Uint8Array(reader.result);
+            var wb = window.XLSX.read(data, { type: "array" });
+            var ws = wb.Sheets[wb.SheetNames[0]];
+            var rows = window.XLSX.utils.sheet_to_json(ws, { defval: "" });
+            resolve(rows);
+          };
+          script.onerror = function() { reject(new Error("Failed to load XLSX library")); };
+          if (window.XLSX) {
+            var data2 = new Uint8Array(reader.result);
+            var wb2 = window.XLSX.read(data2, { type: "array" });
+            var ws2 = wb2.Sheets[wb2.SheetNames[0]];
+            resolve(window.XLSX.utils.sheet_to_json(ws2, { defval: "" }));
+          } else {
+            document.head.appendChild(script);
+          }
+        } catch (err) { reject(err); }
+      };
+      reader.onerror = function() { reject(new Error("Failed to read file")); };
+      reader.readAsArrayBuffer(file);
+    });
+  }
+
+  async function processData() {
+    if (!ndcText.trim()) { toast("Paste the NDC list first", "error"); return; }
+    if (!vendorFile) { toast("Upload the Vendor Inventory CSV", "error"); return; }
+    if (!stockFile) { toast("Upload the Stock Items XLSX", "error"); return; }
+    if (!warehouse.trim()) { toast("Enter a warehouse code", "error"); return; }
+
+    setLoading(true); setResults([]); setErrors([]);
+    try {
+      // Parse NDCs from pasted text — extract NDCs with dashes
+      var ndcLines = ndcText.split("\n").map(function(l) { return l.trim(); }).filter(function(l) { return l.length > 0; });
+      var ndcs = [];
+      ndcLines.forEach(function(line) {
+        var match = line.match(/(\d{4,5}-\d{3,4}-\d{1,2})/);
+        if (match) ndcs.push(match[1]);
+        else {
+          // Try without dashes (11 digits)
+          var m2 = line.match(/(\d{11})/);
+          if (m2) ndcs.push(m2[1]);
+          else if (line.match(/\d/)) ndcs.push(line.replace(/[^\d-]/g, ""));
+        }
+      });
+
+      // Read vendor inventory CSV
+      var vendorText = await readFileAsText(vendorFile);
+      var vendorRows = parseCSV(vendorText);
+
+      // Filter by warehouse input
+      var whFilter = warehouse.trim().toUpperCase();
+      var whMap = { "TP-NY": "TRUEPILL_BROOKLYN", "TP-OH": "TRUEPILL_OHIO" };
+      var vendorWhName = whMap[whFilter] || whFilter;
+      var filteredVendor = vendorRows.filter(function(r) {
+        return (r.Warehouse || "").toUpperCase() === vendorWhName.toUpperCase();
+      });
+
+      // Build SKU → vendor row map (SKU = NDC without dashes)
+      var skuMap = {};
+      filteredVendor.forEach(function(r) {
+        var sku = (r.SKU || "").trim();
+        if (sku) skuMap[sku] = r;
+      });
+
+      // Read stock items XLSX
+      var stockRows = await readXlsxFile(stockFile);
+
+      // Build Inventory ID → Sales Unit map
+      var salesUnitMap = {};
+      stockRows.forEach(function(r) {
+        var invId = r["Inventory ID"] || "";
+        var salesUnit = r["Sales Unit"] || "";
+        if (invId) salesUnitMap[invId.trim()] = salesUnit.trim();
+      });
+
+      // Process each NDC
+      var output = [];
+      var errs = [];
+      var wh = warehouse.trim();
+
+      ndcs.forEach(function(ndc) {
+        var ndcClean = ndc.replace(/-/g, "");
+        var vendorRow = skuMap[ndcClean];
+
+        if (!vendorRow) {
+          errs.push("NDC " + ndc + " (" + ndcClean + ") not found in Vendor Inventory for " + vendorWhName);
+          return;
+        }
+
+        var invId = (vendorRow["Manufacturer Number"] || "").trim();
+        var reportedQty = parseFloat(vendorRow["Reported Qty"]) || 0;
+        var stockQty = parseFloat(vendorRow["Stock Qty"]) || 0;
+        var quantity = reportedQty - stockQty;
+
+        // Location: GEN- or UNV- items use NDC without dashes, others use warehouse code
+        var location = (invId.startsWith("GEN-") || invId.startsWith("UNV-")) ? ndcClean : wh;
+
+        // UOM from stock items
+        var uom = salesUnitMap[invId] || "";
+        if (!uom) {
+          errs.push("Inventory ID " + invId + " (NDC " + ndc + ") not found in Stock Items for UOM");
+        }
+
+        output.push({
+          inventoryId: invId,
+          warehouse: wh,
+          location: location,
+          quantity: quantity,
+          uom: uom,
+          ndc: ndc,
+          ndcClean: ndcClean,
+          reportedQty: reportedQty,
+          stockQty: stockQty,
+        });
+      });
+
+      setResults(output);
+      setErrors(errs);
+      toast("Processed " + output.length + " items" + (errs.length > 0 ? ", " + errs.length + " warnings" : ""));
+    } catch (err) {
+      toast("Error: " + err.message, "error");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function downloadCSV() {
+    var header = "Inventory ID,Warehouse,Location,Quantity,UOM\r\n";
+    var lines = results.map(function(r) {
+      return [r.inventoryId, r.warehouse, r.location, r.quantity, r.uom]
+        .map(function(v) { return "\"" + String(v == null ? "" : v).replace(/"/g, '""') + "\""; }).join(",");
+    });
+    var csv = header + lines.join("\r\n");
+    var blob = new Blob([csv], { type: "text/csv" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url; a.download = "CC_" + warehouse.trim() + "_" + new Date().toISOString().slice(5, 10).replace("-", "_") + ".csv"; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  return <div>
+    <p style={{ color: "#8A8279", fontSize: 14, marginBottom: 20 }}>Generate cycle count adjustment CSVs from Pharm Admin data and Stock Items.</p>
+
+    <div style={S.card}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+        <div>
+          <div style={{ fontSize: 14, color: "#4A4541", fontWeight: 600, marginBottom: 8 }}>1. Paste NDC List</div>
+          <div style={{ fontSize: 12, color: "#8A8279", marginBottom: 6 }}>Copy the NDC column from your Google Sheet and paste below</div>
+          <textarea value={ndcText} onChange={function(e) { setNdcText(e.target.value); }} placeholder={"68462-0128-01\n68462-0129-01\n43547-0336-10\n..."} rows={8} style={Object.assign({}, S.inp, { resize: "vertical", fontFamily: "monospace", fontSize: 12 })} />
+          {ndcText.trim() && <p style={{ color: "#059669", fontSize: 12, marginTop: 6 }}>{"\u2713"} {ndcText.trim().split("\n").filter(function(l) { return l.trim(); }).length} NDCs pasted</p>}
+        </div>
+        <div>
+          <div style={{ fontSize: 14, color: "#4A4541", fontWeight: 600, marginBottom: 8 }}>2. Warehouse Code</div>
+          <div style={{ fontSize: 12, color: "#8A8279", marginBottom: 6 }}>Type the warehouse code for the output (e.g. TP-NY, TP-OH)</div>
+          <input value={warehouse} onChange={function(e) { setWarehouse(e.target.value); }} placeholder="TP-NY" style={Object.assign({}, S.inp, { maxWidth: 200 })} />
+
+          <div style={{ fontSize: 14, color: "#4A4541", fontWeight: 600, marginBottom: 8, marginTop: 20 }}>3. Vendor Inventory CSV</div>
+          <div style={{ fontSize: 12, color: "#8A8279", marginBottom: 6 }}>Export from Pharm Admin (contains SKU, Manufacturer Number, Reported Qty, Stock Qty)</div>
+          <input type="file" accept=".csv" onChange={function(e) { setVendorFile(e.target.files[0] || null); }} style={Object.assign({}, S.inp, { cursor: "pointer" })} />
+          {vendorFile && <p style={{ color: "#059669", fontSize: 12, marginTop: 6 }}>{"\u2713"} {vendorFile.name}</p>}
+
+          <div style={{ fontSize: 14, color: "#4A4541", fontWeight: 600, marginBottom: 8, marginTop: 20 }}>4. Stock Items XLSX</div>
+          <div style={{ fontSize: 12, color: "#8A8279", marginBottom: 6 }}>Contains Inventory ID and Sales Unit for UOM lookup</div>
+          <input type="file" accept=".xlsx,.xls" onChange={function(e) { setStockFile(e.target.files[0] || null); }} style={Object.assign({}, S.inp, { cursor: "pointer" })} />
+          {stockFile && <p style={{ color: "#059669", fontSize: 12, marginTop: 6 }}>{"\u2713"} {stockFile.name}</p>}
+        </div>
+      </div>
+
+      <div style={{ marginTop: 20, display: "flex", gap: 10, alignItems: "center" }}>
+        <button onClick={processData} disabled={loading} style={Object.assign({}, S.btn(), { padding: "10px 20px", opacity: loading ? 0.5 : 1 })}>
+          {loading ? "Processing..." : "Generate Cycle Count"}
+        </button>
+        {results.length > 0 && <button onClick={downloadCSV} style={Object.assign({}, S.btn("ghost"), { padding: "10px 16px" })}><IconDL /> Download CSV</button>}
+        {results.length > 0 && <span style={{ fontSize: 12, color: "#8A8279" }}>{results.length} items</span>}
+      </div>
+    </div>
+
+    {errors.length > 0 && <div style={{ marginBottom: 16 }}>
+      {errors.map(function(err, i) {
+        return <div key={i} style={{ background: "rgba(217,119,6,0.08)", border: "1px solid rgba(217,119,6,0.2)", borderRadius: 10, padding: "8px 14px", marginBottom: 6, fontSize: 13, color: "#D97706" }}>{"\u26A0"} {err}</div>;
+      })}
+    </div>}
+
+    {results.length > 0 && <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto", maxHeight: "calc(100vh - 300px)" })}>
+      <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
+        <thead><tr>
+          {["Inventory ID", "Warehouse", "Location", "Quantity", "UOM", "NDC", "Reported Qty", "Stock Qty"].map(function(h) { return <th key={h} style={S.th}>{h}</th>; })}
+        </tr></thead>
+        <tbody>{results.map(function(r, i) {
+          return <tr key={i} style={{ background: r.quantity < 0 ? "rgba(220,38,38,0.04)" : "transparent" }}>
+            <td style={Object.assign({}, S.td, { color: r.inventoryId.startsWith("GEN-") ? "#059669" : r.inventoryId.startsWith("UNV-") ? "#2563EB" : "#4A4541" })}>{r.inventoryId}</td>
+            <td style={S.td}>{r.warehouse}</td>
+            <td style={S.td}>{r.location}</td>
+            <td style={Object.assign({}, S.td, { color: r.quantity < 0 ? "#DC2626" : "#4A4541" })}>{r.quantity}</td>
+            <td style={S.td}>{r.uom}</td>
+            <td style={Object.assign({}, S.td, { color: "#8A8279" })}>{r.ndc}</td>
+            <td style={Object.assign({}, S.td, { color: "#8A8279" })}>{r.reportedQty}</td>
+            <td style={Object.assign({}, S.td, { color: "#8A8279" })}>{r.stockQty}</td>
+          </tr>;
+        })}</tbody>
+      </table>
+    </div>}
+  </div>;
+}
+
 function POImportTool(props) {
   var toast = props.toast, cred = props.cred, ok = props.ok, lp = props.lp;
   var TOOL_COLOR = "#06B6D4";
@@ -1284,8 +1537,8 @@ export default function Hub() {
   );
 
   var isWH = page in WH;
-  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "po-import" ? "#06B6D4" : "#3B82F6";
-  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "po-import" ? "PO NDC Validator" : showLogin ? "Login" : "Shipping Rules";
+  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "po-import" ? "#06B6D4" : page === "cycle-count" ? "#14B8A6" : "#3B82F6";
+  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "po-import" ? "PO NDC Validator" : page === "cycle-count" ? "Cycle Counting" : showLogin ? "Login" : "Shipping Rules";
 
   function SideLink(p) {
     var active = page === p.id && !showLogin;
@@ -1305,6 +1558,7 @@ export default function Hub() {
         {Object.entries(WH).map(function(e) { return <SideLink key={e[0]} id={e[0]} label={e[1].full} color={e[1].color} />; })}
         <div style={{ padding: "12px 12px 4px", marginTop: 4, borderTop: "1px solid #E8E4DE" }}><div style={{ fontSize: 10, fontWeight: 600, color: "#A69E95", textTransform: "uppercase", letterSpacing: "1px", padding: "8px 12px" }}>Generic PO Tools</div></div>
         <SideLink id="po-import" label="PO NDC Validator" color="#06B6D4" />
+        <SideLink id="cycle-count" label="Cycle Counting" color="#14B8A6" />
         <div style={{ padding: "12px 12px 4px", marginTop: 4, borderTop: "1px solid #E8E4DE" }}><div style={{ fontSize: 10, fontWeight: 600, color: "#A69E95", textTransform: "uppercase", letterSpacing: "1px", padding: "8px 12px" }}>Inventory Tools</div></div>
         <SideLink id="short-dating" label="Short-Dating" color="#E879F9" />
         <SideLink id="backorder" label="Backorders" color="#F97316" />
@@ -1382,6 +1636,7 @@ export default function Hub() {
           {!showLogin && page === "short-dating" && <TrackerTool toolKey="short-dating" toolLabel="Short-Dating Tracker" toolColor="#E879F9" demoData={SD_DEMO} columns={sdColumns} emailConfig={sdEmail} toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} />}
           {!showLogin && page === "backorder" && <TrackerTool toolKey="backorder" toolLabel="Backorder Tracker" toolColor="#F97316" demoData={BKO_DEMO} columns={bkoColumns} emailConfig={bkoEmail} skipVendors={BKO_SKIP} toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} />}
           {!showLogin && page === "po-import" && <POImportTool toast={showToast} cred={cred} ok={ok} lp={promptLogin} />}
+          {!showLogin && page === "cycle-count" && <CycleCountTool toast={showToast} />}
         </div>
       </div>
 
