@@ -1375,42 +1375,72 @@ function POImportTool(props) {
       var cropResults = [];
 
       for (var fi = 0; fi < urls.length; fi++) {
-        setOcrStatus("Detecting table in screenshot " + (fi + 1) + "...");
-        var croppedUrl = await autoCropToTable(urls[fi]);
-        var wasCropped = croppedUrl !== urls[fi];
-        cropResults.push(wasCropped);
-        setOcrStatus("Reading screenshot " + (fi + 1) + " of " + urls.length + (wasCropped ? " (table detected)" : " (no table header found)") + "...");
-        var processedUrl = await preprocessImageForOcr(croppedUrl);
+        // Pass 1: Full image OCR for NDC detection (proven reliable)
+        setOcrStatus("Reading NDCs from screenshot " + (fi + 1) + " of " + urls.length + "...");
+        var processedUrl = await preprocessImageForOcr(urls[fi]);
         var result = await worker.recognize(processedUrl);
         var ocrText = result.data.text;
         allOcrText += (fi > 0 ? "\n--- Screenshot " + (fi + 1) + " ---\n" : "") + ocrText;
 
-        // Extract NDCs from plain text (always works)
+        // Extract NDCs from plain text
         var ndcs = extractNdcsFromOcrText(ocrText);
         ndcs.forEach(function(n) { allNdcs[n] = true; });
 
-        // === Spatial table parsing for prices ===
-        try {
-          // Tesseract.js v4: words are nested in blocks > paragraphs > lines > words
-          var words = [];
-          (result.data.blocks || []).forEach(function(block) {
-            (block.paragraphs || []).forEach(function(para) {
-              (para.lines || []).forEach(function(line) {
-                (line.words || []).forEach(function(word) {
-                  if (word.text && word.bbox) words.push(word);
+        // Pass 2: Cropped image OCR for spatial price extraction
+        setOcrStatus("Detecting table for prices in screenshot " + (fi + 1) + "...");
+        var croppedUrl = await autoCropToTable(urls[fi]);
+        var wasCropped = croppedUrl !== urls[fi];
+        cropResults.push(wasCropped);
+
+        if (wasCropped) {
+          setOcrStatus("Reading prices from cropped table " + (fi + 1) + "...");
+          var croppedProcessed = await preprocessImageForOcr(croppedUrl);
+          var cropResult = await worker.recognize(croppedProcessed);
+          allOcrText += "\n--- Cropped " + (fi + 1) + " ---\n" + cropResult.data.text;
+
+          // Spatial parsing on cropped result (better column alignment)
+          try {
+            var words = [];
+            (cropResult.data.blocks || []).forEach(function(block) {
+              (block.paragraphs || []).forEach(function(para) {
+                (para.lines || []).forEach(function(line) {
+                  (line.words || []).forEach(function(word) {
+                    if (word.text && word.bbox) words.push(word);
+                  });
                 });
               });
             });
-          });
-          if (words.length > 0) {
-            var spatialPrices = extractPricesSpatially(words);
-            Object.keys(spatialPrices).forEach(function(ndc) {
-              if (!allOcrPrices[ndc]) allOcrPrices[ndc] = spatialPrices[ndc];
-            });
+            if (words.length > 0) {
+              var spatialPrices = extractPricesSpatially(words);
+              Object.keys(spatialPrices).forEach(function(ndc) {
+                if (!allOcrPrices[ndc]) allOcrPrices[ndc] = spatialPrices[ndc];
+              });
+            }
+          } catch (spatialErr) {
+            console.warn("Spatial parsing failed:", spatialErr.message);
           }
-        } catch (spatialErr) {
-          // Spatial parsing failed, fall back to text-based extraction
-          console.warn("Spatial parsing failed:", spatialErr.message);
+        } else {
+          // No crop available — try spatial on full image result
+          try {
+            var fullWords = [];
+            (result.data.blocks || []).forEach(function(block) {
+              (block.paragraphs || []).forEach(function(para) {
+                (para.lines || []).forEach(function(line) {
+                  (line.words || []).forEach(function(word) {
+                    if (word.text && word.bbox) fullWords.push(word);
+                  });
+                });
+              });
+            });
+            if (fullWords.length > 0) {
+              var spatialPrices2 = extractPricesSpatially(fullWords);
+              Object.keys(spatialPrices2).forEach(function(ndc) {
+                if (!allOcrPrices[ndc]) allOcrPrices[ndc] = spatialPrices2[ndc];
+              });
+            }
+          } catch (spatialErr2) {
+            console.warn("Spatial parsing on full image failed:", spatialErr2.message);
+          }
         }
       }
       await worker.terminate();
