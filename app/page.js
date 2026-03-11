@@ -1525,8 +1525,10 @@ function POImportTool(props) {
             </div> : <DropZone accept="image/*" multiple label="McKesson Screenshots" sublabel="Drop images or click to browse" icon="image" color={TOOL_COLOR} disabled={ocrLoading} onFiles={handleScreenshotUpload} />}
             {ocrLoading && <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}><Spinner color={TOOL_COLOR} size={14} /><span style={{ fontSize: 12, color: TOOL_COLOR }}>{ocrStatus || "Processing..."}</span></div>}
             {screenshotUrls.length > 0 && !ocrLoading && !mckParsed && <p style={{ color: "#D97706", fontSize: 11, marginTop: 6 }}>{"\u26A0"} OCR could not find NDCs — type them manually below</p>}
-            <div style={{ marginTop: 10, fontSize: 11, color: "#A69E95" }}>Paste NDCs below, optionally with Est. Net Price (tab or space separated):</div>
-            <textarea value={mckPaste} onChange={handleMckManualPaste} placeholder={"6846213001\t5.90\n4354728403\t2.31\n7260331501\t4.15\n...\n\nOr just NDCs:\n67877019710\n29300041001"} rows={4} style={Object.assign({}, S.inp, { resize: "vertical", fontFamily: "monospace", fontSize: 12, marginTop: 4 })} />
+            {(!mckParsed || mckParsed.length === 0) && <div>
+              <div style={{ marginTop: 10, fontSize: 11, color: "#A69E95" }}>Paste NDCs below, optionally with Est. Net Price (tab or space separated):</div>
+              <textarea value={mckPaste} onChange={handleMckManualPaste} placeholder={"06846213001\t5.90\n04354728403\t2.31\n07260331501\t4.15\n...\n\nOr just NDCs:\n67877019710\n29300041001"} rows={4} style={Object.assign({}, S.inp, { resize: "vertical", fontFamily: "monospace", fontSize: 12, marginTop: 4 })} />
+            </div>}
           </div>}
         </div>
 
