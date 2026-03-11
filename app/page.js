@@ -1183,12 +1183,6 @@ function POImportTool(props) {
       var n = m[1];
       if (!seen[n]) { seen[n] = true; ndcs.push(n); }
     }
-    // Find 10-digit NDCs (some McKesson portals use 10-digit format) — pad with leading zero
-    var re10 = /\b(\d{10})\b/g;
-    while ((m = re10.exec(text)) !== null) {
-      var padded = "0" + m[1];
-      if (!seen[padded]) { seen[padded] = true; ndcs.push(padded); }
-    }
     // Also find dashed NDCs
     var reDash = /\b(\d{4,5}-\d{3,4}-\d{1,2})\b/g;
     while ((m = reDash.exec(text)) !== null) {
@@ -1207,9 +1201,9 @@ function POImportTool(props) {
       line = line.trim();
       if (!line) return;
       // Try to find an NDC (10 or 11 digit) followed by a price
-      var match = line.match(/\b(\d{10,11})\b[\s\t,]+\$?([\d]+\.?\d*)/);
+      var match = line.match(/\b(\d{11})\b[\s\t,]+\$?([\d]+\.?\d*)/);
       if (match) {
-        var ndc = match[1].length === 10 ? "0" + match[1] : match[1];
+        var ndc = match[1];
         var price = parseFloat(match[2]);
         if (!isNaN(price) && price > 0) prices[ndc] = price;
       }
