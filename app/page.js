@@ -1137,6 +1137,85 @@ function POImportTool(props) {
     return (ndc || "").replace(/-/g, "").replace(/\s/g, "");
   }
 
+  // Auto-detect and crop to the McKesson table area
+  // Looks for the distinctive dark blue/teal header band
+  function autoCropToTable(imgUrl) {
+    return new Promise(function(resolve) {
+      var img = new Image();
+      img.onload = function() {
+        var canvas = document.createElement("canvas");
+        canvas.width = img.width;
+        canvas.height = img.height;
+        var ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0);
+        var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        var data = imageData.data;
+        var w = canvas.width;
+        var h = canvas.height;
+
+        // Scan each row to find the blue header band
+        // McKesson header is dark blue/teal: R<120, G<120, B>140, and at least 30% of row is this color
+        var headerStart = -1;
+        var headerEnd = -1;
+        var tableBottom = h;
+
+        for (var y = 0; y < h; y++) {
+          var blueCount = 0;
+          for (var x = 0; x < w; x += 3) { // sample every 3rd pixel for speed
+            var idx = (y * w + x) * 4;
+            var r = data[idx], g = data[idx + 1], b = data[idx + 2];
+            // Dark blue/teal: low red, low-mid green, higher blue
+            if (r < 120 && g < 140 && b > 140 && b > r + 30) {
+              blueCount++;
+            }
+          }
+          var blueRatio = blueCount / (w / 3);
+
+          if (blueRatio > 0.25) {
+            if (headerStart < 0) headerStart = y;
+            headerEnd = y;
+          } else if (headerStart > 0 && headerEnd > 0 && y > headerEnd + 5) {
+            // We've passed the header — now look for where data ends
+            // Data rows are mostly white/light background
+            // If we hit a very dark or very colorful row (taskbar, etc), stop
+            var darkCount = 0;
+            for (var x2 = 0; x2 < w; x2 += 3) {
+              var idx2 = (y * w + x2) * 4;
+              var r2 = data[idx2], g2 = data[idx2 + 1], b2 = data[idx2 + 2];
+              var brightness = r2 * 0.299 + g2 * 0.587 + b2 * 0.114;
+              if (brightness < 60) darkCount++;
+            }
+            // If more than 40% of pixels are very dark, this is probably browser chrome/taskbar
+            if (darkCount / (w / 3) > 0.4) {
+              tableBottom = y;
+              break;
+            }
+          }
+        }
+
+        if (headerStart < 0) {
+          // No blue header found — return original image
+          resolve(imgUrl);
+          return;
+        }
+
+        // Crop: start a few pixels above header, end at table bottom + some padding
+        var cropTop = Math.max(0, headerStart - 5);
+        var cropBottom = Math.min(h, tableBottom + 10);
+        var cropHeight = cropBottom - cropTop;
+
+        var cropCanvas = document.createElement("canvas");
+        cropCanvas.width = w;
+        cropCanvas.height = cropHeight;
+        var cropCtx = cropCanvas.getContext("2d");
+        cropCtx.drawImage(img, 0, cropTop, w, cropHeight, 0, 0, w, cropHeight);
+
+        resolve(cropCanvas.toDataURL("image/png"));
+      };
+      img.src = imgUrl;
+    });
+  }
+
   function preprocessImageForOcr(imgUrl) {
     return new Promise(function(resolve) {
       var img = new Image();
@@ -1259,10 +1338,15 @@ function POImportTool(props) {
       var allOcrText = "";
       var allNdcs = {};
       var allOcrPrices = {};
+      var cropResults = [];
 
       for (var fi = 0; fi < urls.length; fi++) {
-        setOcrStatus("Processing screenshot " + (fi + 1) + " of " + urls.length + "...");
-        var processedUrl = await preprocessImageForOcr(urls[fi]);
+        setOcrStatus("Detecting table in screenshot " + (fi + 1) + "...");
+        var croppedUrl = await autoCropToTable(urls[fi]);
+        var wasCropped = croppedUrl !== urls[fi];
+        cropResults.push(wasCropped);
+        setOcrStatus("Reading screenshot " + (fi + 1) + " of " + urls.length + (wasCropped ? " (table detected)" : " (no table header found)") + "...");
+        var processedUrl = await preprocessImageForOcr(croppedUrl);
         var result = await worker.recognize(processedUrl);
         var ocrText = result.data.text;
         allOcrText += (fi > 0 ? "\n--- Screenshot " + (fi + 1) + " ---\n" : "") + ocrText;
@@ -1296,7 +1380,7 @@ function POImportTool(props) {
         }
       }
       await worker.terminate();
-      var spatialDebug = "\n\n--- SPATIAL DEBUG ---\nSpatial prices found: " + Object.keys(allOcrPrices).length;
+      var spatialDebug = "\n\n--- SPATIAL DEBUG ---\nAuto-crop: " + cropResults.map(function(c, i) { return "Screenshot " + (i + 1) + ": " + (c ? "table detected & cropped" : "no table header, used full image"); }).join(", ") + "\nSpatial prices found: " + Object.keys(allOcrPrices).length;
       Object.keys(allOcrPrices).forEach(function(ndc) { spatialDebug += "\n  " + ndc + " → $" + allOcrPrices[ndc]; });
       if (Object.keys(allOcrPrices).length === 0) spatialDebug += "\n  (none found — using text fallback)";
       setOcrRaw(allOcrText + spatialDebug);
