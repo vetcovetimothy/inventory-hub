@@ -1516,7 +1516,10 @@ function POImportTool(props) {
 
         <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto" })}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", borderBottom: "1px solid #E8E4DE" }}>
-            <span style={{ fontSize: 14, fontWeight: 600, color: "#2C2825" }}>NDC Validation Results</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 14, fontWeight: 600, color: "#2C2825" }}>NDC Validation Results</span>
+              {(function() { var pos = {}; results.forEach(function(r) { if (r.poNumber) pos[r.poNumber] = 1; }); var poList = Object.keys(pos); return poList.length > 0 ? poList.map(function(po) { return <span key={po} style={{ background: TOOL_COLOR + "15", color: TOOL_COLOR, fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 20 }}>PO# {po}</span>; }) : null; })()}
+            </div>
             <div style={{ display: "flex", gap: 8 }}>
               <button onClick={reset} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}><IconTrash /> Clear</button>
               <button onClick={downloadCSV} style={Object.assign({}, S.btn(), { padding: "6px 14px", fontSize: 12 })}><IconCSV /> Download CSV</button>
