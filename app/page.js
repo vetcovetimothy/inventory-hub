@@ -1138,7 +1138,7 @@ function POImportTool(props) {
   }
 
   // Auto-detect and crop to the McKesson table area
-  // Looks for the distinctive dark blue/teal header band
+  // Looks for the last blue header band (the table header, not the nav bar)
   function autoCropToTable(imgUrl) {
     return new Promise(function(resolve) {
       var img = new Image();
@@ -1153,56 +1153,81 @@ function POImportTool(props) {
         var w = canvas.width;
         var h = canvas.height;
 
-        // Scan each row to find the blue header band
-        // McKesson header is dark blue/teal: R<120, G<120, B>140, and at least 30% of row is this color
-        var headerStart = -1;
-        var headerEnd = -1;
-        var tableBottom = h;
+        // Step 1: Find all blue bands (McKesson uses (0,91,142) style blue)
+        // A blue band is a contiguous group of rows where >15% of pixels are McKesson blue
+        var blueBands = []; // [{start, end}]
+        var bandStart = -1;
 
         for (var y = 0; y < h; y++) {
           var blueCount = 0;
-          for (var x = 0; x < w; x += 3) { // sample every 3rd pixel for speed
+          var total = 0;
+          for (var x = 0; x < w; x += 3) {
+            total++;
             var idx = (y * w + x) * 4;
             var r = data[idx], g = data[idx + 1], b = data[idx + 2];
-            // Dark blue/teal: low red, low-mid green, higher blue
-            if (r < 120 && g < 140 && b > 140 && b > r + 30) {
+            // McKesson blue: r<80, g in 60-150, b in 120-200, b > r+30
+            if (r < 80 && g > 60 && g < 150 && b > 120 && b > r + 30) {
               blueCount++;
             }
           }
-          var blueRatio = blueCount / (w / 3);
+          var ratio = blueCount / total;
 
-          if (blueRatio > 0.25) {
-            if (headerStart < 0) headerStart = y;
-            headerEnd = y;
-          } else if (headerStart > 0 && headerEnd > 0 && y > headerEnd + 5) {
-            // We've passed the header — now look for where data ends
-            // Data rows are mostly white/light background
-            // If we hit a very dark or very colorful row (taskbar, etc), stop
-            var darkCount = 0;
-            for (var x2 = 0; x2 < w; x2 += 3) {
-              var idx2 = (y * w + x2) * 4;
-              var r2 = data[idx2], g2 = data[idx2 + 1], b2 = data[idx2 + 2];
-              var brightness = r2 * 0.299 + g2 * 0.587 + b2 * 0.114;
-              if (brightness < 60) darkCount++;
-            }
-            // If more than 40% of pixels are very dark, this is probably browser chrome/taskbar
-            if (darkCount / (w / 3) > 0.4) {
-              tableBottom = y;
-              break;
+          if (ratio > 0.15) {
+            if (bandStart < 0) bandStart = y;
+          } else {
+            if (bandStart >= 0) {
+              blueBands.push({ start: bandStart, end: y - 1 });
+              bandStart = -1;
             }
           }
         }
+        if (bandStart >= 0) blueBands.push({ start: bandStart, end: h - 1 });
 
-        if (headerStart < 0) {
-          // No blue header found — return original image
+        if (blueBands.length === 0) {
           resolve(imgUrl);
           return;
         }
 
-        // Crop: start a few pixels above header, end at table bottom + some padding
-        var cropTop = Math.max(0, headerStart - 5);
+        // Step 2: The table header is the last blue band (nav bars come first)
+        // Use the last band that's at least a few pixels tall
+        var tableBand = null;
+        for (var bi = blueBands.length - 1; bi >= 0; bi--) {
+          if (blueBands[bi].end - blueBands[bi].start >= 3) {
+            tableBand = blueBands[bi];
+            break;
+          }
+        }
+        if (!tableBand) {
+          resolve(imgUrl);
+          return;
+        }
+
+        // Step 3: Find where table data ends below the header
+        var tableBottom = h;
+        for (var y2 = tableBand.end + 30; y2 < h; y2++) {
+          var darkCount = 0;
+          var total2 = 0;
+          for (var x2 = 0; x2 < w; x2 += 3) {
+            total2++;
+            var idx2 = (y2 * w + x2) * 4;
+            var brightness = data[idx2] * 0.299 + data[idx2 + 1] * 0.587 + data[idx2 + 2] * 0.114;
+            if (brightness < 60) darkCount++;
+          }
+          if (darkCount / total2 > 0.4) {
+            tableBottom = y2;
+            break;
+          }
+        }
+
+        // Step 4: Crop from header to table bottom
+        var cropTop = Math.max(0, tableBand.start - 5);
         var cropBottom = Math.min(h, tableBottom + 10);
         var cropHeight = cropBottom - cropTop;
+
+        if (cropHeight < 50) {
+          resolve(imgUrl);
+          return;
+        }
 
         var cropCanvas = document.createElement("canvas");
         cropCanvas.width = w;
