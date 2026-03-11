@@ -1192,27 +1192,45 @@ function POImportTool(props) {
     return ndcs;
   }
 
-  // Extract NDC → price pairs from pasted text (tab or space separated, $ optional)
-  // Accepts: "6846213001\t$5.90" or "6846213001 5.90" or just "6846213001"
+  // Extract NDC → Est. Net Price pairs from OCR or pasted text
+  // McKesson portal columns: PURCHASE PRICE, EST. NET PRICE, UNIT PRICE
+  // Strategy: find NDC on a line, find all dollar amounts, pick Est. Net Price (2nd of 3)
   function extractNdcPricesFromText(text) {
     var prices = {};
     var lines = text.split("\n");
     lines.forEach(function(line) {
       line = line.trim();
       if (!line) return;
-      // Try to find an NDC (10 or 11 digit) followed by a price
-      var match = line.match(/\b(\d{11})\b[\s\t,]+\$?([\d]+\.?\d*)/);
-      if (match) {
-        var ndc = match[1];
-        var price = parseFloat(match[2]);
-        if (!isNaN(price) && price > 0) prices[ndc] = price;
+      // Find NDC on this line (11-digit or dashed)
+      var ndcMatch = line.match(/\b(\d{11})\b/) || line.match(/\b(\d{4,5}-\d{3,4}-\d{1,2})\b/);
+      if (!ndcMatch) return;
+      var ndc = ndcMatch[1].replace(/-/g, "");
+
+      // Find all dollar amounts on this line: $X.XX or X.XX patterns
+      var dollarMatches = [];
+      var dollarRe = /\$?([\d,]+\.[\d]{2,4})\b/g;
+      var dm;
+      while ((dm = dollarRe.exec(line)) !== null) {
+        var val = parseFloat(dm[1].replace(/,/g, ""));
+        if (!isNaN(val) && val > 0) dollarMatches.push(val);
       }
-      // Also try dashed NDC format
-      var dashMatch = line.match(/\b(\d{4,5}-\d{3,4}-\d{1,2})\b[\s\t,]+\$?([\d]+\.?\d*)/);
-      if (dashMatch) {
-        var ndcNorm = dashMatch[1].replace(/-/g, "");
-        var p = parseFloat(dashMatch[2]);
-        if (!isNaN(p) && p > 0) prices[ndcNorm] = p;
+
+      if (dollarMatches.length === 0) return;
+
+      // Heuristic: separate into real prices (>= $1) and unit prices (< $1 or 4+ decimal places)
+      var realPrices = dollarMatches.filter(function(v) { return v >= 1; });
+      
+      var estNetPrice = null;
+      if (realPrices.length >= 2) {
+        // 2+ real prices: Est. Net Price is the 2nd one (after Purchase Price)
+        estNetPrice = realPrices[1];
+      } else if (realPrices.length === 1) {
+        // Only 1 real price — likely Est. Net Price (Purchase may have been missed by OCR)
+        estNetPrice = realPrices[0];
+      }
+
+      if (estNetPrice != null && !prices[ndc]) {
+        prices[ndc] = estNetPrice;
       }
     });
     return prices;
@@ -1263,7 +1281,8 @@ function POImportTool(props) {
       if (combined.length > 0) {
         var items = combined.map(function(ndc) { return { ndc: ndc, description: "", qty: null, mckItemNum: "" }; });
         setMckParsed(items);
-        toast("OCR found " + ocrNdcList.length + " NDCs from " + urls.length + " screenshot" + (urls.length > 1 ? "s" : "") + (manualNdcs.length > 0 ? " + " + manualNdcs.length + " manual" : ""));
+        var priceCount = Object.keys(ocrPrices).length + Object.keys(manualPrices).length;
+        toast("OCR found " + ocrNdcList.length + " NDCs" + (priceCount > 0 ? " and " + priceCount + " Est. Net Price" + (priceCount > 1 ? "s" : "") : "") + " from " + urls.length + " screenshot" + (urls.length > 1 ? "s" : "") + (manualNdcs.length > 0 ? " + " + manualNdcs.length + " manual" : ""));
       } else {
         setMckParsed(null);
         toast("OCR could not find NDCs. You can also paste them manually below.", "error");
