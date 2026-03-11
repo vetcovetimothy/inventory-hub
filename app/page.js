@@ -1041,7 +1041,7 @@ function CycleCountTool(props) {
           </div>}
           {csvWarehouses.length === 1 && <p style={{ color: TOOL_COLOR, fontSize: 12, marginTop: 4 }}>Warehouse: {csvWhSelected}</p>}
 
-          <div style={{ fontSize: 14, color: "#4A4541", fontWeight: 600, marginBottom: 8, marginTop: 20, display: "flex", alignItems: "center", gap: 6 }}>4. Stock Items XLSX <InfoTip text="Make sure the first sheet in your Excel file contains the data. If there are multiple tabs, the parser will only read the first one." /></div>
+          <div style={{ fontSize: 14, color: "#4A4541", fontWeight: 600, marginBottom: 8, marginTop: 20, display: "flex", alignItems: "center", gap: 6 }}>4. Stock Items XLSX <InfoTip text="The parser will automatically find the sheet with Inventory ID data. You can upload the file as-is — no need to delete extra tabs." /></div>
           <div style={{ fontSize: 12, color: "#8A8279", marginBottom: 6 }}>Contains Inventory ID and Sales Unit for UOM lookup</div>
           {stockRows && stockMeta ? <div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(5,150,105,0.06)", border: "1px solid rgba(5,150,105,0.2)", borderRadius: 10 }}>
