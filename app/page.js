@@ -1154,9 +1154,9 @@ function POImportTool(props) {
         var h = canvas.height;
 
         // Step 1: Find all blue bands (McKesson uses (0,91,142) style blue)
-        // A blue band is a contiguous group of rows where >15% of pixels are McKesson blue
-        var blueBands = []; // [{start, end}]
-        var bandStart = -1;
+        // A blue band is a group of rows where many pixels are McKesson blue
+        // Allow small gaps (2-3 non-blue rows) within a band
+        var blueRows = []; // y-positions of blue rows
 
         for (var y = 0; y < h; y++) {
           var blueCount = 0;
@@ -1170,50 +1170,59 @@ function POImportTool(props) {
               blueCount++;
             }
           }
-          var ratio = blueCount / total;
+          if (blueCount / total > 0.10) blueRows.push(y);
+        }
 
-          if (ratio > 0.15) {
-            if (bandStart < 0) bandStart = y;
+        if (blueRows.length === 0) {
+          resolve(imgUrl);
+          return;
+        }
+
+        // Group blue rows into bands (allow gaps up to 8 pixels)
+        var blueBands = [];
+        var bandStart = blueRows[0];
+        var bandEnd = blueRows[0];
+        for (var bri = 1; bri < blueRows.length; bri++) {
+          if (blueRows[bri] - bandEnd <= 8) {
+            bandEnd = blueRows[bri];
           } else {
-            if (bandStart >= 0) {
-              blueBands.push({ start: bandStart, end: y - 1 });
-              bandStart = -1;
-            }
+            blueBands.push({ start: bandStart, end: bandEnd });
+            bandStart = blueRows[bri];
+            bandEnd = blueRows[bri];
           }
         }
-        if (bandStart >= 0) blueBands.push({ start: bandStart, end: h - 1 });
+        blueBands.push({ start: bandStart, end: bandEnd });
 
         if (blueBands.length === 0) {
           resolve(imgUrl);
           return;
         }
 
-        // Step 2: The table header is the last blue band (nav bars come first)
-        // Use the last band that's at least a few pixels tall
-        var tableBand = null;
-        for (var bi = blueBands.length - 1; bi >= 0; bi--) {
-          if (blueBands[bi].end - blueBands[bi].start >= 3) {
-            tableBand = blueBands[bi];
-            break;
-          }
-        }
+        // Step 2: The table header is the last substantial blue band
+        // Filter to bands at least 15px tall (nav bars and headers, not thin lines)
+        var substantialBands = blueBands.filter(function(b) { return b.end - b.start >= 15; });
+        var tableBand = substantialBands.length > 0 ? substantialBands[substantialBands.length - 1] : null;
         if (!tableBand) {
           resolve(imgUrl);
           return;
         }
 
         // Step 3: Find where table data ends below the header
+        // Be very conservative — mainly we want to remove browser chrome ABOVE the table
+        // Below the header, include everything unless we hit a definite non-table area
+        // (like a Windows taskbar which is >60% dark)
         var tableBottom = h;
-        for (var y2 = tableBand.end + 30; y2 < h; y2++) {
+        for (var y2 = tableBand.end + 100; y2 < h; y2++) {
           var darkCount = 0;
           var total2 = 0;
           for (var x2 = 0; x2 < w; x2 += 3) {
             total2++;
             var idx2 = (y2 * w + x2) * 4;
             var brightness = data[idx2] * 0.299 + data[idx2 + 1] * 0.587 + data[idx2 + 2] * 0.114;
-            if (brightness < 60) darkCount++;
+            if (brightness < 50) darkCount++;
           }
-          if (darkCount / total2 > 0.4) {
+          // Only stop at very dark rows (like OS taskbar), not scrollbars
+          if (darkCount / total2 > 0.6) {
             tableBottom = y2;
             break;
           }
