@@ -1114,7 +1114,6 @@ function POImportTool(props) {
   var _screenshotQtys = useState({}), screenshotQtys = _screenshotQtys[0], setScreenshotQtys = _screenshotQtys[1];
   var _editedPrices = useState({}), editedPrices = _editedPrices[0], setEditedPrices = _editedPrices[1];
   var _mckWarnings = useState([]), mckWarnings = _mckWarnings[0], setMckWarnings = _mckWarnings[1];
-  var _mckPortalPrices = useState({}), mckPortalPrices = _mckPortalPrices[0], setMckPortalPrices = _mckPortalPrices[1];
   var _error = useState(null), error = _error[0], setError = _error[1];
   var _ndcMap = useState(null), ndcMap = _ndcMap[0], setNdcMap = _ndcMap[1];
   var _ndcLoading = useState(false), ndcLoading = _ndcLoading[0], setNdcLoading = _ndcLoading[1];
@@ -1135,147 +1134,6 @@ function POImportTool(props) {
 
   function normalizeNdcForCompare(ndc) {
     return (ndc || "").replace(/-/g, "").replace(/\s/g, "");
-  }
-
-  // Auto-detect and crop to the McKesson table area
-  // Looks for the last blue header band (the table header, not the nav bar)
-  function autoCropToTable(imgUrl) {
-    return new Promise(function(resolve) {
-      var img = new Image();
-      img.onload = function() {
-        var canvas = document.createElement("canvas");
-        canvas.width = img.width;
-        canvas.height = img.height;
-        var ctx = canvas.getContext("2d");
-        ctx.drawImage(img, 0, 0);
-        var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        var data = imageData.data;
-        var w = canvas.width;
-        var h = canvas.height;
-
-        // Step 1: Find all blue bands (McKesson uses (0,91,142) style blue)
-        // A blue band is a group of rows where many pixels are McKesson blue
-        // Allow small gaps (2-3 non-blue rows) within a band
-        var blueRows = []; // y-positions of blue rows
-
-        for (var y = 0; y < h; y++) {
-          var blueCount = 0;
-          var total = 0;
-          for (var x = 0; x < w; x += 3) {
-            total++;
-            var idx = (y * w + x) * 4;
-            var r = data[idx], g = data[idx + 1], b = data[idx + 2];
-            // McKesson blue: r<80, g in 60-150, b in 120-200, b > r+30
-            if (r < 80 && g > 60 && g < 150 && b > 120 && b > r + 30) {
-              blueCount++;
-            }
-          }
-          if (blueCount / total > 0.10) blueRows.push(y);
-        }
-
-        if (blueRows.length === 0) {
-          resolve(imgUrl);
-          return;
-        }
-
-        // Group blue rows into bands (allow gaps up to 8 pixels)
-        var blueBands = [];
-        var bandStart = blueRows[0];
-        var bandEnd = blueRows[0];
-        for (var bri = 1; bri < blueRows.length; bri++) {
-          if (blueRows[bri] - bandEnd <= 8) {
-            bandEnd = blueRows[bri];
-          } else {
-            blueBands.push({ start: bandStart, end: bandEnd });
-            bandStart = blueRows[bri];
-            bandEnd = blueRows[bri];
-          }
-        }
-        blueBands.push({ start: bandStart, end: bandEnd });
-
-        if (blueBands.length === 0) {
-          resolve(imgUrl);
-          return;
-        }
-
-        // Step 2: The table header is the last substantial blue band with data below it
-        // Filter to bands at least 15px tall, then pick the last one that has
-        // at least 100px of content below it (to skip bottom button bars)
-        var substantialBands = blueBands.filter(function(b) { return b.end - b.start >= 15; });
-        var tableBand = null;
-        for (var sbi = substantialBands.length - 1; sbi >= 0; sbi--) {
-          var spaceBelow = h - substantialBands[sbi].end;
-          if (spaceBelow > 100) {
-            tableBand = substantialBands[sbi];
-            break;
-          }
-        }
-        if (!tableBand) {
-          resolve(imgUrl);
-          return;
-        }
-
-        // Step 3: Find where table data ends below the header
-        // Be very conservative — mainly we want to remove browser chrome ABOVE the table
-        // Below the header, include everything unless we hit a definite non-table area
-        // (like a Windows taskbar which is >60% dark)
-        var tableBottom = h;
-        for (var y2 = tableBand.end + 100; y2 < h; y2++) {
-          var darkCount = 0;
-          var total2 = 0;
-          for (var x2 = 0; x2 < w; x2 += 3) {
-            total2++;
-            var idx2 = (y2 * w + x2) * 4;
-            var brightness = data[idx2] * 0.299 + data[idx2 + 1] * 0.587 + data[idx2 + 2] * 0.114;
-            if (brightness < 50) darkCount++;
-          }
-          // Only stop at very dark rows (like OS taskbar), not scrollbars
-          if (darkCount / total2 > 0.6) {
-            tableBottom = y2;
-            break;
-          }
-        }
-
-        // Step 4: Crop from header to table bottom
-        var cropTop = Math.max(0, tableBand.start - 5);
-        var cropBottom = Math.min(h, tableBottom + 10);
-        var cropHeight = cropBottom - cropTop;
-
-        if (cropHeight < 50) {
-          resolve(imgUrl);
-          return;
-        }
-
-        var cropCanvas = document.createElement("canvas");
-        cropCanvas.width = w;
-        cropCanvas.height = cropHeight;
-        var cropCtx = cropCanvas.getContext("2d");
-        cropCtx.drawImage(img, 0, cropTop, w, cropHeight, 0, 0, w, cropHeight);
-
-        resolve(cropCanvas.toDataURL("image/png"));
-      };
-      img.src = imgUrl;
-    });
-  }
-
-  // Light preprocessing: scale 2x only, no contrast manipulation
-  // Table data is already black text on white background
-  function preprocessImageLight(imgUrl) {
-    return new Promise(function(resolve) {
-      var img = new Image();
-      img.onload = function() {
-        var scale = 2;
-        var canvas = document.createElement("canvas");
-        canvas.width = img.width * scale;
-        canvas.height = img.height * scale;
-        var ctx = canvas.getContext("2d");
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = "high";
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL("image/png"));
-      };
-      img.src = imgUrl;
-    });
   }
 
   function preprocessImageForOcr(imgUrl) {
@@ -1334,50 +1192,6 @@ function POImportTool(props) {
     return ndcs;
   }
 
-  // Extract NDC → Est. Net Price pairs from OCR or pasted text
-  // McKesson portal columns: PURCHASE PRICE, EST. NET PRICE, UNIT PRICE
-  // Strategy: find NDC on a line, find all dollar amounts, pick Est. Net Price (2nd of 3)
-  function extractNdcPricesFromText(text) {
-    var prices = {};
-    var lines = text.split("\n");
-    lines.forEach(function(line) {
-      line = line.trim();
-      if (!line) return;
-      // Find NDC on this line (11-digit or dashed)
-      var ndcMatch = line.match(/\b(\d{11})\b/) || line.match(/\b(\d{4,5}-\d{3,4}-\d{1,2})\b/);
-      if (!ndcMatch) return;
-      var ndc = ndcMatch[1].replace(/-/g, "");
-
-      // Find all dollar amounts on this line: $X.XX or X.XX patterns
-      var dollarMatches = [];
-      var dollarRe = /\$?([\d,]+\.[\d]{2,4})\b/g;
-      var dm;
-      while ((dm = dollarRe.exec(line)) !== null) {
-        var val = parseFloat(dm[1].replace(/,/g, ""));
-        if (!isNaN(val) && val > 0) dollarMatches.push(val);
-      }
-
-      if (dollarMatches.length === 0) return;
-
-      // Heuristic: separate into real prices (>= $1) and unit prices (< $1 or 4+ decimal places)
-      var realPrices = dollarMatches.filter(function(v) { return v >= 1; });
-      
-      var estNetPrice = null;
-      if (realPrices.length >= 2) {
-        // 2+ real prices: Est. Net Price is the 2nd one (after Purchase Price)
-        estNetPrice = realPrices[1];
-      } else if (realPrices.length === 1) {
-        // Only 1 real price — likely Est. Net Price (Purchase may have been missed by OCR)
-        estNetPrice = realPrices[0];
-      }
-
-      if (estNetPrice != null && !prices[ndc]) {
-        prices[ndc] = estNetPrice;
-      }
-    });
-    return prices;
-  }
-
   async function handleScreenshotUpload(files) {
     if (files.length === 0) return;
     var urls = files.map(function(f) { return URL.createObjectURL(f); });
@@ -1399,91 +1213,19 @@ function POImportTool(props) {
       await worker.setParameters({ tessedit_pageseg_mode: "6" });
       var allOcrText = "";
       var allNdcs = {};
-      var allOcrPrices = {};
-      var cropResults = [];
-
       for (var fi = 0; fi < urls.length; fi++) {
-        // Pass 1: Full image OCR for NDC detection (proven reliable)
-        setOcrStatus("Reading NDCs from screenshot " + (fi + 1) + " of " + urls.length + "...");
+        setOcrStatus("Processing screenshot " + (fi + 1) + " of " + urls.length + "...");
         var processedUrl = await preprocessImageForOcr(urls[fi]);
         var result = await worker.recognize(processedUrl);
         var ocrText = result.data.text;
         allOcrText += (fi > 0 ? "\n--- Screenshot " + (fi + 1) + " ---\n" : "") + ocrText;
-
-        // Extract NDCs from plain text
         var ndcs = extractNdcsFromOcrText(ocrText);
         ndcs.forEach(function(n) { allNdcs[n] = true; });
-
-        // Pass 2: Cropped image OCR for spatial price extraction
-        setOcrStatus("Detecting table for prices in screenshot " + (fi + 1) + "...");
-        var croppedUrl = await autoCropToTable(urls[fi]);
-        var wasCropped = croppedUrl !== urls[fi];
-        cropResults.push(wasCropped);
-
-        if (wasCropped) {
-          setOcrStatus("Reading prices from cropped table " + (fi + 1) + "...");
-          var croppedProcessed = await preprocessImageLight(croppedUrl);
-          var cropResult = await worker.recognize(croppedProcessed);
-          allOcrText += "\n--- Cropped " + (fi + 1) + " ---\n" + cropResult.data.text;
-
-          // Spatial parsing on cropped result (better column alignment)
-          try {
-            var words = [];
-            (cropResult.data.blocks || []).forEach(function(block) {
-              (block.paragraphs || []).forEach(function(para) {
-                (para.lines || []).forEach(function(line) {
-                  (line.words || []).forEach(function(word) {
-                    if (word.text && word.bbox) words.push(word);
-                  });
-                });
-              });
-            });
-            if (words.length > 0) {
-              var spatialPrices = extractPricesSpatially(words);
-              Object.keys(spatialPrices).forEach(function(ndc) {
-                if (!allOcrPrices[ndc]) allOcrPrices[ndc] = spatialPrices[ndc];
-              });
-            }
-          } catch (spatialErr) {
-            console.warn("Spatial parsing failed:", spatialErr.message);
-          }
-        } else {
-          // No crop available — try spatial on full image result
-          try {
-            var fullWords = [];
-            (result.data.blocks || []).forEach(function(block) {
-              (block.paragraphs || []).forEach(function(para) {
-                (para.lines || []).forEach(function(line) {
-                  (line.words || []).forEach(function(word) {
-                    if (word.text && word.bbox) fullWords.push(word);
-                  });
-                });
-              });
-            });
-            if (fullWords.length > 0) {
-              var spatialPrices2 = extractPricesSpatially(fullWords);
-              Object.keys(spatialPrices2).forEach(function(ndc) {
-                if (!allOcrPrices[ndc]) allOcrPrices[ndc] = spatialPrices2[ndc];
-              });
-            }
-          } catch (spatialErr2) {
-            console.warn("Spatial parsing on full image failed:", spatialErr2.message);
-          }
-        }
       }
       await worker.terminate();
-      var spatialDebug = "\n\n--- SPATIAL DEBUG ---\nAuto-crop: " + cropResults.map(function(c, i) { return "Screenshot " + (i + 1) + ": " + (c ? "table detected & cropped" : "no table header, used full image"); }).join(", ") + "\nSpatial prices found: " + Object.keys(allOcrPrices).length;
-      Object.keys(allOcrPrices).forEach(function(ndc) { spatialDebug += "\n  " + ndc + " → $" + allOcrPrices[ndc]; });
-      if (Object.keys(allOcrPrices).length === 0) spatialDebug += "\n  (none found — using text fallback)";
-      setOcrRaw(allOcrText + spatialDebug);
+      setOcrRaw(allOcrText);
       var ocrNdcList = Object.keys(allNdcs);
       setOcrFoundNdcs(ocrNdcList);
-
-      // If spatial didn't find prices, fall back to text-based
-      var ocrPrices = Object.keys(allOcrPrices).length > 0 ? allOcrPrices : extractNdcPricesFromText(allOcrText);
-      var manualPrices = extractNdcPricesFromText(mckPaste);
-      setMckPortalPrices(Object.assign({}, ocrPrices, manualPrices));
-
       // Merge with any manual NDCs already in paste box
       var manualNdcs = extractNdcsFromOcrText(mckPaste);
       manualNdcs.forEach(function(n) { allNdcs[n] = true; });
@@ -1491,8 +1233,7 @@ function POImportTool(props) {
       if (combined.length > 0) {
         var items = combined.map(function(ndc) { return { ndc: ndc, description: "", qty: null, mckItemNum: "" }; });
         setMckParsed(items);
-        var priceCount = Object.keys(ocrPrices).length + Object.keys(manualPrices).length;
-        toast("OCR found " + ocrNdcList.length + " NDCs" + (priceCount > 0 ? " and " + priceCount + " Est. Net Price" + (priceCount > 1 ? "s" : "") : "") + " from " + urls.length + " screenshot" + (urls.length > 1 ? "s" : ""));
+        toast("OCR found " + ocrNdcList.length + " NDCs from " + urls.length + " screenshot" + (urls.length > 1 ? "s" : "") + (manualNdcs.length > 0 ? " + " + manualNdcs.length + " manual" : ""));
       } else {
         setMckParsed(null);
         toast("OCR could not find NDCs. You can also paste them manually below.", "error");
@@ -1505,183 +1246,11 @@ function POImportTool(props) {
     }
   }
 
-  // Spatial table parser: uses word bounding boxes to identify columns and match NDCs to Est. Net Prices
-  function extractPricesSpatially(words) {
-    var prices = {};
-    if (!words || words.length === 0) return prices;
-
-    // Step 1: Group words into rows by vertical position (y-center)
-    // Image is 2x scaled, so use larger threshold
-    var rowThreshold = 25; // pixels — words within this y-range are same row
-    var wordData = words.map(function(w) {
-      var b = w.bbox;
-      return { text: (w.text || "").trim(), x0: b.x0, y0: b.y0, x1: b.x1, y1: b.y1, yMid: (b.y0 + b.y1) / 2, xMid: (b.x0 + b.x1) / 2 };
-    }).filter(function(w) { return w.text.length > 0; });
-
-    // Sort by y position
-    wordData.sort(function(a, b) { return a.yMid - b.yMid; });
-
-    // Group into rows
-    var rows = [];
-    var currentRow = [wordData[0]];
-    for (var i = 1; i < wordData.length; i++) {
-      if (Math.abs(wordData[i].yMid - currentRow[0].yMid) < rowThreshold) {
-        currentRow.push(wordData[i]);
-      } else {
-        currentRow.sort(function(a, b) { return a.x0 - b.x0; });
-        rows.push(currentRow);
-        currentRow = [wordData[i]];
-      }
-    }
-    if (currentRow.length > 0) {
-      currentRow.sort(function(a, b) { return a.x0 - b.x0; });
-      rows.push(currentRow);
-    }
-
-    // Step 2: Find header row and locate ALL price column positions
-    var priceColumns = {}; // { "est_net": xMid, "purchase": xMid, "unit": xMid }
-    var ndcColX = null;
-    var headerRowIdx = -1;
-
-    for (var ri = 0; ri < Math.min(rows.length, 15); ri++) {
-      var rowText = rows[ri].map(function(w) { return w.text.toUpperCase(); });
-      var fullRowText = rowText.join(" ");
-
-      // Only process rows that look like headers
-      if (fullRowText.indexOf("PRICE") < 0 && fullRowText.indexOf("NDC") < 0 && fullRowText.indexOf("COST") < 0 && fullRowText.indexOf("PURCHASE") < 0 && fullRowText.indexOf("EST") < 0 && fullRowText.indexOf("NET") < 0) continue;
-
-      for (var wi = 0; wi < rows[ri].length; wi++) {
-        var upperText = rows[ri][wi].text.toUpperCase();
-
-        // Find EST. NET PRICE column — match various OCR readings
-        var isEstNet = upperText.indexOf("EST") >= 0 && (upperText.indexOf("NET") >= 0 || upperText === "EST" || upperText === "EST.");
-        if (isEstNet && !priceColumns.est_net) {
-          var clusterXs = [rows[ri][wi].xMid];
-          for (var ci = wi + 1; ci < Math.min(rows[ri].length, wi + 4); ci++) {
-            var ct = rows[ri][ci].text.toUpperCase();
-            if (ct === "NET" || ct.indexOf("PRICE") >= 0 || ct === "EST." || ct === "EST") {
-              clusterXs.push(rows[ri][ci].xMid);
-            }
-          }
-          priceColumns.est_net = clusterXs.reduce(function(a, b) { return a + b; }, 0) / clusterXs.length;
-          headerRowIdx = ri;
-        }
-
-        // Find PURCHASE PRICE column
-        if (upperText.indexOf("PURCHASE") >= 0 && !priceColumns.purchase) {
-          var pCluster = [rows[ri][wi].xMid];
-          if (wi + 1 < rows[ri].length && rows[ri][wi + 1].text.toUpperCase().indexOf("PRICE") >= 0) {
-            pCluster.push(rows[ri][wi + 1].xMid);
-          }
-          priceColumns.purchase = pCluster.reduce(function(a, b) { return a + b; }, 0) / pCluster.length;
-        }
-
-        // Find UNIT PRICE column
-        if (upperText === "UNIT" && !priceColumns.unit) {
-          var uCluster = [rows[ri][wi].xMid];
-          if (wi + 1 < rows[ri].length && rows[ri][wi + 1].text.toUpperCase().indexOf("PRICE") >= 0) {
-            uCluster.push(rows[ri][wi + 1].xMid);
-          }
-          priceColumns.unit = uCluster.reduce(function(a, b) { return a + b; }, 0) / uCluster.length;
-        }
-
-        // Find NDC column
-        if (upperText === "NDC" || upperText === "10-DIGIT") {
-          ndcColX = rows[ri][wi].xMid;
-        }
-      }
-      if (priceColumns.est_net) break;
-    }
-
-    // If we couldn't find Est. Net Price header, return empty
-    if (!priceColumns.est_net) return prices;
-
-    // Build list of all known column x-positions for disambiguation
-    var allColXs = [];
-    Object.keys(priceColumns).forEach(function(key) { allColXs.push({ name: key, x: priceColumns[key] }); });
-
-    // Step 3: For each data row after the header, find NDC and assign prices to columns
-    for (var di = headerRowIdx + 1; di < rows.length; di++) {
-      var dataRow = rows[di];
-      var rowNdc = null;
-      var estNetPrice = null;
-
-      // Find NDC on this row
-      for (var dwi = 0; dwi < dataRow.length; dwi++) {
-        var wText = dataRow[dwi].text.replace(/[^0-9]/g, "");
-        if (/^\d{11}$/.test(wText)) {
-          rowNdc = wText;
-          break;
-        }
-      }
-
-      if (!rowNdc) continue;
-
-      // Find all dollar amounts on this row
-      var rowPrices = [];
-      for (var dwi2 = 0; dwi2 < dataRow.length; dwi2++) {
-        var priceMatch = dataRow[dwi2].text.match(/^\$?([\d,]+\.?\d*)$/);
-        if (priceMatch) {
-          var rawText = priceMatch[1].replace(/,/g, "");
-          var pVal = parseFloat(rawText);
-          if (pVal > 0 && rawText.length <= 10) rowPrices.push({ value: pVal, xMid: dataRow[dwi2].xMid, raw: dataRow[dwi2].text });
-        }
-      }
-
-      // Assign each price to its nearest column, then pick Est. Net Price
-      if (rowPrices.length > 0 && allColXs.length > 0) {
-        // For each price, find which column it belongs to
-        var colAssignments = {};
-        rowPrices.forEach(function(rp) {
-          var bestCol = null;
-          var bestDist = Infinity;
-          allColXs.forEach(function(col) {
-            var d = Math.abs(rp.xMid - col.x);
-            if (d < bestDist) { bestDist = d; bestCol = col.name; }
-          });
-          // Keep the closest price for each column
-          if (!colAssignments[bestCol] || Math.abs(rp.xMid - priceColumns[bestCol]) < Math.abs(colAssignments[bestCol].xMid - priceColumns[bestCol])) {
-            colAssignments[bestCol] = rp;
-          }
-        });
-
-        if (colAssignments.est_net) {
-          estNetPrice = colAssignments.est_net.value;
-
-          // Sanity check: Est. Net Price should be ≤ Purchase Price
-          // If it's not, OCR likely dropped a decimal point — try to fix it
-          var purchasePrice = colAssignments.purchase ? colAssignments.purchase.value : null;
-          if (purchasePrice && estNetPrice > purchasePrice) {
-            var raw = String(colAssignments.est_net.value);
-            // Try inserting decimal at different positions
-            var digits = raw.replace(/\./g, "");
-            var fixed = null;
-            for (var dp = 1; dp < digits.length; dp++) {
-              var candidate = parseFloat(digits.substring(0, dp) + "." + digits.substring(dp));
-              if (candidate > 0 && candidate <= purchasePrice) {
-                fixed = candidate;
-                break;
-              }
-            }
-            if (fixed != null) estNetPrice = fixed;
-          }
-        }
-      }
-
-      if (rowNdc && estNetPrice != null) {
-        prices[rowNdc] = estNetPrice;
-      }
-    }
-
-    return prices;
-  }
-
   function handleMckManualPaste(e) {
     var text = e.target.value;
     setMckPaste(text);
-    // Extract NDCs and prices from manual paste
+    // Merge manual NDCs with any OCR-found NDCs
     var manualNdcs = extractNdcsFromOcrText(text);
-    var manualPrices = extractNdcPricesFromText(text);
     // Get existing OCR NDCs (stored separately)
     var ocrNdcList = (ocrFoundNdcs || []).slice();
     // Combine and deduplicate
@@ -1689,9 +1258,6 @@ function POImportTool(props) {
     ocrNdcList.forEach(function(n) { allNdcs[n] = true; });
     manualNdcs.forEach(function(n) { allNdcs[n] = true; });
     var combined = Object.keys(allNdcs);
-    // Merge prices: keep existing OCR prices, overlay manual prices
-    var newPrices = Object.assign({}, mckPortalPrices, manualPrices);
-    setMckPortalPrices(newPrices);
     if (combined.length > 0) {
       setMckParsed(combined.map(function(ndc) { return { ndc: ndc, description: "", qty: null, mckItemNum: "" }; }));
     } else {
@@ -1822,18 +1388,6 @@ function POImportTool(props) {
             warnings.push({ type: "qty-mismatch", msg: pdfItem.drugName + " (NDC " + pdfItem.ndc + "): PDF says qty " + pdfItem.qty + " but portal shows " + portalMatch.qty, item: pdfItem });
           }
         });
-
-        // Override unit prices with McKesson portal EST. NET PRICE when available
-        if (Object.keys(mckPortalPrices).length > 0) {
-          matched.forEach(function(r) {
-            var ndcNorm = normalizeNdcForCompare(r.ndc);
-            if (mckPortalPrices[ndcNorm] != null) {
-              r.unitPrice = mckPortalPrices[ndcNorm];
-              r.totalPrice = r.qty ? +(r.qty * r.unitPrice).toFixed(2) : r.totalPrice;
-              r.priceSource = "portal";
-            }
-          });
-        }
       }
 
       setResults(matched);
@@ -1864,7 +1418,7 @@ function POImportTool(props) {
   }
 
   function reset() {
-    setPdfs([]); setMckPaste(""); setMckParsed(null); setScreenshotUrls([]); setOcrRaw(""); setShowRawOcr(false); setOcrFoundNdcs(null); setScreenshotQtys({}); setEditedPrices({}); setResults([]); setMckWarnings([]); setError(null); setMckPortalPrices({});
+    setPdfs([]); setMckPaste(""); setMckParsed(null); setScreenshotUrls([]); setOcrRaw(""); setShowRawOcr(false); setOcrFoundNdcs(null); setScreenshotQtys({}); setEditedPrices({}); setResults([]); setMckWarnings([]); setError(null);
   }
 
   var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
@@ -1907,21 +1461,18 @@ function POImportTool(props) {
             </div> : <DropZone accept="image/*" multiple label="McKesson Screenshots" sublabel="Drop images or click to browse" icon="image" color={TOOL_COLOR} disabled={ocrLoading} onFiles={handleScreenshotUpload} />}
             {ocrLoading && <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}><Spinner color={TOOL_COLOR} size={14} /><span style={{ fontSize: 12, color: TOOL_COLOR }}>{ocrStatus || "Processing..."}</span></div>}
             {screenshotUrls.length > 0 && !ocrLoading && !mckParsed && <p style={{ color: "#D97706", fontSize: 11, marginTop: 6 }}>{"\u26A0"} OCR could not find NDCs — type them manually below</p>}
-            <div style={{ marginTop: 10, fontSize: 11, color: "#A69E95" }}>Paste NDCs below, optionally with Est. Net Price (tab or space separated):</div>
-            <textarea value={mckPaste} onChange={handleMckManualPaste} placeholder={"06846213001\t5.90\n04354728403\t2.31\n07260331501\t4.15\n...\n\nOr just NDCs:\n67877019710\n29300041001"} rows={4} style={Object.assign({}, S.inp, { resize: "vertical", fontFamily: "monospace", fontSize: 12, marginTop: 4 })} />
+            <div style={{ marginTop: 10, fontSize: 11, color: "#A69E95" }}>Add any missing NDCs below (one per line — will be merged with OCR results):</div>
+            <textarea value={mckPaste} onChange={handleMckManualPaste} placeholder={"67877019710\n29300041001\n53746075101\n..."} rows={3} style={Object.assign({}, S.inp, { resize: "vertical", fontFamily: "monospace", fontSize: 12, marginTop: 4 })} />
           </div>}
         </div>
 
         {vendor === "mckesson" && mckParsed && mckParsed.length > 0 && <div style={{ marginTop: 16, background: "#FAFAF8", border: "1px solid #E8E4DE", borderRadius: 8, padding: "10px 14px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ fontSize: 11, color: "#8A8279", fontWeight: 600, textTransform: "uppercase" }}>Portal NDCs ({mckParsed.length})</span>
-              {Object.keys(mckPortalPrices).length > 0 && <span style={{ fontSize: 10, color: "#059669", fontWeight: 600 }}>{"\u2713"} {Object.keys(mckPortalPrices).length} price{Object.keys(mckPortalPrices).length !== 1 ? "s" : ""}</span>}
-            </div>
+            <div style={{ fontSize: 11, color: "#8A8279", fontWeight: 600, textTransform: "uppercase" }}>Portal NDCs ({mckParsed.length})</div>
             {ocrRaw && <button onClick={function() { setShowRawOcr(!showRawOcr); }} style={{ background: "transparent", border: "1px solid #E8E4DE", borderRadius: 6, padding: "2px 8px", fontSize: 10, color: "#8A8279", cursor: "pointer" }}>{showRawOcr ? "Hide" : "Show"} Raw OCR</button>}
           </div>
           <div style={{ maxHeight: 80, overflow: "auto", fontSize: 13, fontFamily: "monospace", color: "#8A8279" }}>
-            {mckParsed.map(function(pi, idx) { return <div key={idx}>{pi.ndc}{mckPortalPrices[pi.ndc] != null ? <span style={{ color: "#059669", marginLeft: 8 }}>{"$" + mckPortalPrices[pi.ndc].toFixed(2)}</span> : ""}</div>; })}
+            {mckParsed.map(function(pi, idx) { return <div key={idx}>{pi.ndc}</div>; })}
           </div>
           {showRawOcr && <div style={{ maxHeight: 200, overflow: "auto", fontSize: 11, fontFamily: "monospace", color: "#A69E95", background: "#F0EDE8", borderRadius: 6, padding: 8, marginTop: 8, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{ocrRaw}</div>}
         </div>}
@@ -2012,7 +1563,7 @@ function POImportTool(props) {
                 <td style={Object.assign({}, S.td, { color: "#8A8279", maxWidth: 200, wordBreak: "break-word" })}>{r.drugName || "\u2014"}</td>
                 <td style={S.td}>{r.vendorSource || "\u2014"}</td>
                 <td style={Object.assign({}, S.td, { textAlign: "center" })}><input style={Object.assign({}, S.inp, { width: 70, padding: "6px 8px", textAlign: "center", color: qtyChanged ? "#D97706" : "#4A4541", background: qtyChanged ? "rgba(245,158,11,0.1)" : "#FAFAF8" })} type="number" value={screenshotQtys[r.ndc] != null ? screenshotQtys[r.ndc] : (r.qty || "")} onChange={function(e) { var updated = Object.assign({}, screenshotQtys); updated[r.ndc] = e.target.value; setScreenshotQtys(updated); }} /></td>
-                <td style={Object.assign({}, S.td, { textAlign: "right" })}><input style={Object.assign({}, S.inp, { width: 90, padding: "6px 8px", textAlign: "right", color: priceChanged ? "#D97706" : r.priceSource === "portal" ? "#06B6D4" : "#059669", background: priceChanged ? "rgba(245,158,11,0.1)" : "#FAFAF8" })} type="number" step="0.01" value={editedPrices[r.ndc] != null ? editedPrices[r.ndc] : (r.unitPrice || "")} onChange={function(e) { var updated = Object.assign({}, editedPrices); updated[r.ndc] = e.target.value; setEditedPrices(updated); }} /></td>
+                <td style={Object.assign({}, S.td, { textAlign: "right" })}><input style={Object.assign({}, S.inp, { width: 90, padding: "6px 8px", textAlign: "right", color: priceChanged ? "#D97706" : "#059669", background: priceChanged ? "rgba(245,158,11,0.1)" : "#FAFAF8" })} type="number" step="0.01" value={editedPrices[r.ndc] != null ? editedPrices[r.ndc] : (r.unitPrice || "")} onChange={function(e) { var updated = Object.assign({}, editedPrices); updated[r.ndc] = e.target.value; setEditedPrices(updated); }} /></td>
                 <td style={Object.assign({}, S.td, { textAlign: "right" })}>{extCost ? "$" + extCost.toLocaleString(undefined, { minimumFractionDigits: 2 }) : "\u2014"}</td>
                 {vendor === "mckesson" && <td style={S.td}>{r.vendorItemNum || "\u2014"}</td>}
                 <td style={Object.assign({}, S.td, { color: "#A69E95" })}>{(r.sourceFile || "").split("/").pop()}</td>
