@@ -1554,12 +1554,12 @@ function POImportTool(props) {
         var upperText = rows[ri][wi].text.toUpperCase();
 
         // Find EST. NET PRICE column — match various OCR readings
-        var isEstNet = upperText === "EST" || upperText === "EST." || upperText === "EST.NET" || upperText.indexOf("EST") === 0 && upperText.indexOf("NET") > 0;
+        var isEstNet = upperText.indexOf("EST") >= 0 && (upperText.indexOf("NET") >= 0 || upperText === "EST" || upperText === "EST.");
         if (isEstNet && !priceColumns.est_net) {
           var clusterXs = [rows[ri][wi].xMid];
           for (var ci = wi + 1; ci < Math.min(rows[ri].length, wi + 4); ci++) {
             var ct = rows[ri][ci].text.toUpperCase();
-            if (ct === "NET" || ct === "PRICE" || ct === "EST." || ct === "EST") {
+            if (ct === "NET" || ct.indexOf("PRICE") >= 0 || ct === "EST." || ct === "EST") {
               clusterXs.push(rows[ri][ci].xMid);
             }
           }
@@ -1568,9 +1568,9 @@ function POImportTool(props) {
         }
 
         // Find PURCHASE PRICE column
-        if (upperText === "PURCHASE" && !priceColumns.purchase) {
+        if (upperText.indexOf("PURCHASE") >= 0 && !priceColumns.purchase) {
           var pCluster = [rows[ri][wi].xMid];
-          if (wi + 1 < rows[ri].length && rows[ri][wi + 1].text.toUpperCase() === "PRICE") {
+          if (wi + 1 < rows[ri].length && rows[ri][wi + 1].text.toUpperCase().indexOf("PRICE") >= 0) {
             pCluster.push(rows[ri][wi + 1].xMid);
           }
           priceColumns.purchase = pCluster.reduce(function(a, b) { return a + b; }, 0) / pCluster.length;
@@ -1579,7 +1579,7 @@ function POImportTool(props) {
         // Find UNIT PRICE column
         if (upperText === "UNIT" && !priceColumns.unit) {
           var uCluster = [rows[ri][wi].xMid];
-          if (wi + 1 < rows[ri].length && rows[ri][wi + 1].text.toUpperCase() === "PRICE") {
+          if (wi + 1 < rows[ri].length && rows[ri][wi + 1].text.toUpperCase().indexOf("PRICE") >= 0) {
             uCluster.push(rows[ri][wi + 1].xMid);
           }
           priceColumns.unit = uCluster.reduce(function(a, b) { return a + b; }, 0) / uCluster.length;
