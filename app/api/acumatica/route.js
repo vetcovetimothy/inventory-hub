@@ -147,7 +147,6 @@ export async function POST(request) {
 
     const json = await resp.json();
     let rawRows = json.value || [];
-    let debugInfo = null;
 
     // For PO fetches, filter to today's date only and exclude certain vendors
     if ((type === "po" || type === "po-ggm") && rawRows.length > 0) {
@@ -158,37 +157,22 @@ export async function POST(request) {
       const dateKeys = ["Date", "OrderDate", "TranDate", "DocumentDate", "DocDate"];
       const vendorKeys = ["VendorName", "Vendor", "Vendor Name"];
 
-      // Debug: track why rows are filtered
-      const debug = { today: todayStr, type, totalRaw: rawRows.length, kept: 0, filteredDate: 0, filteredVendor: 0, vendors: {} };
-
       rawRows = rawRows.filter(row => {
-        // Find vendor name
-        let vendorName = "";
-        for (const k of vendorKeys) { if (row[k]) { vendorName = String(row[k]).toLowerCase(); break; } }
-        
-        // Track all vendors seen
-        const vKey = vendorName || "(empty)";
-        if (!debug.vendors[vKey]) debug.vendors[vKey] = { total: 0, kept: 0, filteredDate: 0, filteredVendor: 0 };
-        debug.vendors[vKey].total++;
-
-        // Find and check date value
         let dateVal = null;
         for (const k of dateKeys) { if (row[k] != null) { dateVal = row[k]; break; } }
         if (dateVal) {
           const dateStr = String(dateVal).slice(0, 10);
-          if (dateStr !== todayStr) { debug.filteredDate++; debug.vendors[vKey].filteredDate++; return false; }
+          if (dateStr !== todayStr) return false;
         }
 
         // Exclude certain vendors (GGM-KY keeps Vetcove Generics)
-        if (vendorName.includes("truepill") || vendorName.includes("bloodworth")) { debug.filteredVendor++; debug.vendors[vKey].filteredVendor++; return false; }
-        if (vendorName.includes("vetcove generics") && type !== "po-ggm") { debug.filteredVendor++; debug.vendors[vKey].filteredVendor++; return false; }
+        let vendorName = "";
+        for (const k of vendorKeys) { if (row[k]) { vendorName = String(row[k]).toLowerCase(); break; } }
+        if (vendorName.includes("truepill") || vendorName.includes("bloodworth")) return false;
+        if (vendorName.includes("vetcove generics") && type !== "po-ggm") return false;
 
-        debug.kept++;
-        debug.vendors[vKey].kept++;
         return true;
       });
-
-      debugInfo = debug;
     }
 
     if (rawRows.length === 0) {
@@ -224,7 +208,7 @@ export async function POST(request) {
       return obj;
     });
 
-    return Response.json({ data, count: data.length, _debug: debugInfo });
+    return Response.json({ data, count: data.length });
   } catch (err) {
     console.error("Acumatica proxy error:", err);
     return Response.json({ error: "Server error", detail: err.message }, { status: 500 });
