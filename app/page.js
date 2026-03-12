@@ -1258,8 +1258,8 @@ function POImportTool(props) {
     });
   }
 
-  // Light preprocessing: scale 2x and sharpen contrast, but keep grayscale (no B/W threshold)
-  // Better for reading prices where decimal points and $ signs matter
+  // Light preprocessing: scale 2x only, no contrast manipulation
+  // Table data is already black text on white background
   function preprocessImageLight(imgUrl) {
     return new Promise(function(resolve) {
       var img = new Image();
@@ -1272,16 +1272,6 @@ function POImportTool(props) {
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = "high";
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        // Increase contrast without destroying small characters
-        var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        var data = imageData.data;
-        for (var i = 0; i < data.length; i += 4) {
-          var gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-          // Stretch contrast: darks get darker, lights get lighter, but keep gradients
-          var adjusted = gray < 180 ? Math.max(0, gray * 0.5) : Math.min(255, gray * 1.2);
-          data[i] = adjusted; data[i + 1] = adjusted; data[i + 2] = adjusted; data[i + 3] = 255;
-        }
-        ctx.putImageData(imageData, 0, 0);
         resolve(canvas.toDataURL("image/png"));
       };
       img.src = imgUrl;
@@ -1557,25 +1547,24 @@ function POImportTool(props) {
       var rowText = rows[ri].map(function(w) { return w.text.toUpperCase(); });
       var fullRowText = rowText.join(" ");
 
-      // Only process rows that look like headers (contain price-related words)
-      if (fullRowText.indexOf("PRICE") < 0 && fullRowText.indexOf("NDC") < 0 && fullRowText.indexOf("COST") < 0) continue;
+      // Only process rows that look like headers
+      if (fullRowText.indexOf("PRICE") < 0 && fullRowText.indexOf("NDC") < 0 && fullRowText.indexOf("COST") < 0 && fullRowText.indexOf("PURCHASE") < 0 && fullRowText.indexOf("EST") < 0 && fullRowText.indexOf("NET") < 0) continue;
 
       for (var wi = 0; wi < rows[ri].length; wi++) {
         var upperText = rows[ri][wi].text.toUpperCase();
 
-        // Find EST. NET PRICE column — look for "EST" and find the cluster
-        if ((upperText === "EST" || upperText === "EST.") && !priceColumns.est_net) {
-          var clusterXs = [];
-          for (var ci = wi; ci < Math.min(rows[ri].length, wi + 4); ci++) {
+        // Find EST. NET PRICE column — match various OCR readings
+        var isEstNet = upperText === "EST" || upperText === "EST." || upperText === "EST.NET" || upperText.indexOf("EST") === 0 && upperText.indexOf("NET") > 0;
+        if (isEstNet && !priceColumns.est_net) {
+          var clusterXs = [rows[ri][wi].xMid];
+          for (var ci = wi + 1; ci < Math.min(rows[ri].length, wi + 4); ci++) {
             var ct = rows[ri][ci].text.toUpperCase();
-            if (ct === "EST" || ct === "EST." || ct === "NET" || ct === "PRICE") {
+            if (ct === "NET" || ct === "PRICE" || ct === "EST." || ct === "EST") {
               clusterXs.push(rows[ri][ci].xMid);
             }
           }
-          if (clusterXs.length > 0) {
-            priceColumns.est_net = clusterXs.reduce(function(a, b) { return a + b; }, 0) / clusterXs.length;
-            headerRowIdx = ri;
-          }
+          priceColumns.est_net = clusterXs.reduce(function(a, b) { return a + b; }, 0) / clusterXs.length;
+          headerRowIdx = ri;
         }
 
         // Find PURCHASE PRICE column
@@ -1631,10 +1620,11 @@ function POImportTool(props) {
       // Find all dollar amounts on this row
       var rowPrices = [];
       for (var dwi2 = 0; dwi2 < dataRow.length; dwi2++) {
-        var priceMatch = dataRow[dwi2].text.match(/^\$?([\d,]+\.[\d]{2,4})$/);
+        var priceMatch = dataRow[dwi2].text.match(/^\$?([\d,]+\.?\d*)$/);
         if (priceMatch) {
-          var pVal = parseFloat(priceMatch[1].replace(/,/g, ""));
-          if (pVal > 0) rowPrices.push({ value: pVal, xMid: dataRow[dwi2].xMid });
+          var rawText = priceMatch[1].replace(/,/g, "");
+          var pVal = parseFloat(rawText);
+          if (pVal > 0 && rawText.length <= 10) rowPrices.push({ value: pVal, xMid: dataRow[dwi2].xMid, raw: dataRow[dwi2].text });
         }
       }
 
