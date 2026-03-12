@@ -1250,6 +1250,36 @@ function POImportTool(props) {
     });
   }
 
+  // Light preprocessing: scale 2x and sharpen contrast, but keep grayscale (no B/W threshold)
+  // Better for reading prices where decimal points and $ signs matter
+  function preprocessImageLight(imgUrl) {
+    return new Promise(function(resolve) {
+      var img = new Image();
+      img.onload = function() {
+        var scale = 2;
+        var canvas = document.createElement("canvas");
+        canvas.width = img.width * scale;
+        canvas.height = img.height * scale;
+        var ctx = canvas.getContext("2d");
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        // Increase contrast without destroying small characters
+        var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        var data = imageData.data;
+        for (var i = 0; i < data.length; i += 4) {
+          var gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+          // Stretch contrast: darks get darker, lights get lighter, but keep gradients
+          var adjusted = gray < 180 ? Math.max(0, gray * 0.5) : Math.min(255, gray * 1.2);
+          data[i] = adjusted; data[i + 1] = adjusted; data[i + 2] = adjusted; data[i + 3] = 255;
+        }
+        ctx.putImageData(imageData, 0, 0);
+        resolve(canvas.toDataURL("image/png"));
+      };
+      img.src = imgUrl;
+    });
+  }
+
   function preprocessImageForOcr(imgUrl) {
     return new Promise(function(resolve) {
       var img = new Image();
@@ -1394,7 +1424,7 @@ function POImportTool(props) {
 
         if (wasCropped) {
           setOcrStatus("Reading prices from cropped table " + (fi + 1) + "...");
-          var croppedProcessed = await preprocessImageForOcr(croppedUrl);
+          var croppedProcessed = await preprocessImageLight(croppedUrl);
           var cropResult = await worker.recognize(croppedProcessed);
           allOcrText += "\n--- Cropped " + (fi + 1) + " ---\n" + cropResult.data.text;
 
