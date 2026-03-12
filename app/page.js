@@ -924,6 +924,10 @@ function CycleCountTool(props) {
         if (cleaned.length >= 8) ndcs.push(cleaned);
       });
 
+      // Deduplicate NDCs
+      var seen = {};
+      ndcs = ndcs.filter(function(ndc) { if (seen[ndc]) return false; seen[ndc] = true; return true; });
+
       // Filter pre-parsed vendor rows by selected CSV warehouse
       var filteredVendor = vendorRows.filter(function(r) {
         return (r.Warehouse || "").trim() === csvWhSelected;
@@ -1018,7 +1022,7 @@ function CycleCountTool(props) {
           <div style={{ fontSize: 14, color: "#4A4541", fontWeight: 600, marginBottom: 8 }}>1. Paste NDC List</div>
           <div style={{ fontSize: 12, color: "#8A8279", marginBottom: 6 }}>Copy the NDC column from your Google Sheet and paste below</div>
           <textarea value={ndcText} onChange={function(e) { setNdcText(e.target.value); }} placeholder={"68462-0128-01\n68462-0129-01\n43547-0336-10\n..."} rows={8} style={Object.assign({}, S.inp, { resize: "vertical", fontFamily: "monospace", fontSize: 12 })} />
-          {ndcText.trim() && <p style={{ color: "#059669", fontSize: 12, marginTop: 6 }}>{"\u2713"} {ndcText.trim().split("\n").filter(function(l) { return l.trim(); }).length} NDCs pasted</p>}
+          {ndcText.trim() && (function() { var lines = ndcText.trim().split("\n").filter(function(l) { return l.trim(); }); var u = {}; lines.forEach(function(l) { u[l.trim()] = 1; }); var total = lines.length, unique = Object.keys(u).length; return <p style={{ color: "#059669", fontSize: 12, marginTop: 6 }}>{"\u2713"} {unique} NDCs pasted{total > unique ? " (" + (total - unique) + " duplicate" + (total - unique > 1 ? "s" : "") + " removed)" : ""}</p>; })()}
         </div>
         <div>
           <div style={{ fontSize: 14, color: "#4A4541", fontWeight: 600, marginBottom: 8 }}>2. Warehouse Code</div>
