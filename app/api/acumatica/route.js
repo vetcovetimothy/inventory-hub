@@ -167,10 +167,11 @@ export async function POST(request) {
           if (dateStr !== todayStr) return false;
         }
 
-        // Exclude certain vendors
+        // Exclude certain vendors (GGM-KY keeps Vetcove Generics)
         let vendorName = "";
         for (const k of vendorKeys) { if (row[k]) { vendorName = String(row[k]).toLowerCase(); break; } }
-        if (vendorName.includes("truepill") || vendorName.includes("vetcove generics") || vendorName.includes("bloodworth")) return false;
+        if (vendorName.includes("truepill") || vendorName.includes("bloodworth")) return false;
+        if (vendorName.includes("vetcove generics") && type !== "po-ggm") return false;
 
         return true;
       });
