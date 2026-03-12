@@ -1198,10 +1198,18 @@ function POImportTool(props) {
           return;
         }
 
-        // Step 2: The table header is the last substantial blue band
-        // Filter to bands at least 15px tall (nav bars and headers, not thin lines)
+        // Step 2: The table header is the last substantial blue band with data below it
+        // Filter to bands at least 15px tall, then pick the last one that has
+        // at least 100px of content below it (to skip bottom button bars)
         var substantialBands = blueBands.filter(function(b) { return b.end - b.start >= 15; });
-        var tableBand = substantialBands.length > 0 ? substantialBands[substantialBands.length - 1] : null;
+        var tableBand = null;
+        for (var sbi = substantialBands.length - 1; sbi >= 0; sbi--) {
+          var spaceBelow = h - substantialBands[sbi].end;
+          if (spaceBelow > 100) {
+            tableBand = substantialBands[sbi];
+            break;
+          }
+        }
         if (!tableBand) {
           resolve(imgUrl);
           return;
