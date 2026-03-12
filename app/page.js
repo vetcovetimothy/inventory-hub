@@ -24,6 +24,7 @@ async function fetchAcumatica(type, warehouse, username, password) {
   });
   const json = await resp.json();
   if (!resp.ok) throw new Error(json.error || "Acumatica request failed");
+  if (json._debug) console.log("[Acumatica Debug]", JSON.stringify(json._debug, null, 2));
   return json.data || [];
 }
 
