@@ -200,7 +200,7 @@ export async function POST(request) {
     const colDefs = COLUMN_MAP[type] || [];
     const resolved = colDefs.map(col => {
       const found = col.keys.find(k => k in sample);
-      return { label: col.label, key: found || null };
+      return { label: col.label, key: found || null, keys: col.keys };
     });
 
     // Map rows to normalized objects
@@ -209,6 +209,12 @@ export async function POST(request) {
       for (const col of resolved) {
         let val = col.key ? row[col.key] : "";
         if (val == null) val = "";
+        // SKUNDC fallback: if primary field is empty, try all fallback keys per row
+        if (col.label === "SKUNDC" && !val) {
+          for (const fallbackKey of col.keys || []) {
+            if (row[fallbackKey]) { val = row[fallbackKey]; break; }
+          }
+        }
         // Clean up Inventory IDs (strip whitespace)
         if (col.label === "InventoryID" && typeof val === "string") {
           val = val.replace(/\s+/g, "");
