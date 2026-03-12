@@ -1647,6 +1647,24 @@ function POImportTool(props) {
 
         if (colAssignments.est_net) {
           estNetPrice = colAssignments.est_net.value;
+
+          // Sanity check: Est. Net Price should be ≤ Purchase Price
+          // If it's not, OCR likely dropped a decimal point — try to fix it
+          var purchasePrice = colAssignments.purchase ? colAssignments.purchase.value : null;
+          if (purchasePrice && estNetPrice > purchasePrice) {
+            var raw = String(colAssignments.est_net.value);
+            // Try inserting decimal at different positions
+            var digits = raw.replace(/\./g, "");
+            var fixed = null;
+            for (var dp = 1; dp < digits.length; dp++) {
+              var candidate = parseFloat(digits.substring(0, dp) + "." + digits.substring(dp));
+              if (candidate > 0 && candidate <= purchasePrice) {
+                fixed = candidate;
+                break;
+              }
+            }
+            if (fixed != null) estNetPrice = fixed;
+          }
         }
       }
 
