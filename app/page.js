@@ -779,6 +779,7 @@ function CycleCountTool(props) {
   var _vendorRows = useState(null), vendorRows = _vendorRows[0], setVendorRows = _vendorRows[1];
   var _csvWarehouses = useState([]), csvWarehouses = _csvWarehouses[0], setCsvWarehouses = _csvWarehouses[1];
   var _csvWhSelected = useState(""), csvWhSelected = _csvWhSelected[0], setCsvWhSelected = _csvWhSelected[1];
+  var _csvWhCounts = useState({}), csvWhCounts = _csvWhCounts[0], setCsvWhCounts = _csvWhCounts[1];
   var _stockFile = useState(null), stockFile = _stockFile[0], setStockFile = _stockFile[1];
   var _stockRows = useState(null), stockRows = _stockRows[0], setStockRows = _stockRows[1];
   var _stockMeta = useState(null), stockMeta = _stockMeta[0], setStockMeta = _stockMeta[1];
@@ -868,11 +869,12 @@ function CycleCountTool(props) {
     readFileAsText(file).then(function(text) {
       var rows = parseCSV(text);
       setVendorRows(rows);
-      // Detect unique warehouse names from CSV
-      var whSet = {};
-      rows.forEach(function(r) { var w = (r.Warehouse || "").trim(); if (w) whSet[w] = 1; });
-      var whList = Object.keys(whSet).sort();
+      // Detect unique warehouse names and count rows per warehouse
+      var whCounts = {};
+      rows.forEach(function(r) { var w = (r.Warehouse || "").trim(); if (w) { whCounts[w] = (whCounts[w] || 0) + 1; } });
+      var whList = Object.keys(whCounts).sort();
       setCsvWarehouses(whList);
+      setCsvWhCounts(whCounts);
       // Auto-select if only one warehouse
       if (whList.length === 1) setCsvWhSelected(whList[0]);
       else setCsvWhSelected("");
@@ -1034,17 +1036,18 @@ function CycleCountTool(props) {
           {vendorFile ? <div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(5,150,105,0.06)", border: "1px solid rgba(5,150,105,0.2)", borderRadius: 10 }}>
               <span style={{ color: "#059669", fontSize: 13 }}>{"\u2713"} {vendorFile.name} — {vendorRows ? vendorRows.length.toLocaleString() + " rows" : "parsing..."}</span>
-              <button onClick={function() { setVendorFile(null); setVendorRows(null); setCsvWarehouses([]); setCsvWhSelected(""); }} style={{ background: "transparent", border: "none", color: "#A69E95", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 4px" }}>{"\u00D7"}</button>
+              <button onClick={function() { setVendorFile(null); setVendorRows(null); setCsvWarehouses([]); setCsvWhSelected(""); setCsvWhCounts({}); }} style={{ background: "transparent", border: "none", color: "#A69E95", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 4px" }}>{"\u00D7"}</button>
             </div>
           </div> : <DropZone accept=".csv" label="Vendor Inventory CSV" sublabel="Drop CSV or click to browse" icon="spreadsheet" color={TOOL_COLOR} onFiles={function(files) { handleVendorUpload(files[0]); }} />}
           {csvWarehouses.length > 1 && <div style={{ marginTop: 10 }}>
             <div style={{ fontSize: 12, color: "#8A8279", marginBottom: 4 }}>Select warehouse from CSV:</div>
             <select value={csvWhSelected} onChange={function(e) { setCsvWhSelected(e.target.value); }} style={Object.assign({}, S.inp, { maxWidth: 280, cursor: "pointer" })}>
               <option value="">— Select —</option>
-              {csvWarehouses.map(function(w) { return <option key={w} value={w}>{w}</option>; })}
+              {csvWarehouses.map(function(w) { return <option key={w} value={w}>{w} ({(csvWhCounts[w] || 0).toLocaleString()} rows)</option>; })}
             </select>
+            {csvWhSelected && <p style={{ color: TOOL_COLOR, fontSize: 12, marginTop: 4 }}>Filtering to {(csvWhCounts[csvWhSelected] || 0).toLocaleString()} rows from {csvWhSelected}</p>}
           </div>}
-          {csvWarehouses.length === 1 && <p style={{ color: TOOL_COLOR, fontSize: 12, marginTop: 4 }}>Warehouse: {csvWhSelected}</p>}
+          {csvWarehouses.length === 1 && <p style={{ color: TOOL_COLOR, fontSize: 12, marginTop: 4 }}>Warehouse: {csvWhSelected} ({(csvWhCounts[csvWhSelected] || 0).toLocaleString()} rows)</p>}
 
           <div style={{ fontSize: 14, color: "#4A4541", fontWeight: 600, marginBottom: 8, marginTop: 20, display: "flex", alignItems: "center", gap: 6 }}>4. Stock Items XLSX <InfoTip text="Before uploading, make sure to delete all tabs except the one labeled 'Data' in the Excel file." /></div>
           <div style={{ fontSize: 12, color: "#8A8279", marginBottom: 6 }}>Contains Inventory ID and Sales Unit for UOM lookup</div>
