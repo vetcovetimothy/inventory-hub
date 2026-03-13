@@ -1072,6 +1072,7 @@ function CycleCountTool(props) {
         </button>
         {results.length > 0 && <button onClick={downloadCSV} style={Object.assign({}, S.btn("ghost"), { padding: "10px 16px" })}><IconDL /> Download CSV</button>}
         {results.length > 0 && <span style={{ fontSize: 12, color: "#8A8279" }}>{results.length} items</span>}
+        {(ndcText.trim() || vendorFile || results.length > 0) && <button onClick={function() { setNdcText(""); setVendorFile(null); setVendorRows(null); setCsvWarehouses([]); setCsvWhSelected(""); setCsvWhCounts({}); setWarehouse(""); setResults([]); setErrors([]); }} style={Object.assign({}, S.btn("ghost"), { padding: "10px 16px", marginLeft: "auto" })}><IconTrash /> Clear</button>}
       </div>
     </div>
 
@@ -1495,6 +1496,7 @@ function POImportTool(props) {
             {ndcLoading ? <><Spinner /> Loading...</> : <><IconRefresh /> {ndcMap ? "Refresh NDC Map" : "Pre-load NDC Map"}</>}
           </button>
           {ndcMap && <span style={{ fontSize: 11, color: "#059669" }}>{"\u2713"} NDC map loaded</span>}
+          {(pdfs.length > 0 || mckParsed || results.length > 0) && <button onClick={reset} style={Object.assign({}, S.btn("ghost"), { padding: "10px 16px", marginLeft: "auto" })}><IconTrash /> Clear</button>}
         </div>
       </div>
 
