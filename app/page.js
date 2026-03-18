@@ -1412,11 +1412,12 @@ function POImportTool(props) {
     a.href = url;
     var d = new Date();
     var dateStr = (d.getMonth() + 1) + "." + d.getDate() + "." + String(d.getFullYear()).slice(2);
-    var vendors = {}; var pos = {};
-    results.forEach(function(r) { if (r.vendorSource) vendors[r.vendorSource] = 1; if (r.poNumber) pos[r.poNumber] = 1; });
+    var vendors = {}; var pos = {}; var whs = {};
+    results.forEach(function(r) { if (r.vendorSource) vendors[r.vendorSource] = 1; if (r.poNumber) pos[r.poNumber] = 1; if (r.warehouse) whs[r.warehouse] = 1; });
     var vendorStr = Object.keys(vendors).join(" ") || "Unknown";
     var poStr = Object.keys(pos).map(function(p) { return "#" + p; }).join(" ") || "";
-    a.download = dateStr + " " + vendorStr + " PO " + poStr + ".csv";
+    var whStr = Object.keys(whs).join(" ");
+    a.download = dateStr + " " + vendorStr + " " + (whStr ? whStr + " " : "") + "PO " + poStr + ".csv";
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -1509,7 +1510,7 @@ function POImportTool(props) {
 
       {results.length > 0 && <div>
         <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
-          {(function() { var pos = {}; var vendors = {}; results.forEach(function(r) { if (r.poNumber) pos[r.poNumber] = 1; if (r.vendorSource) vendors[r.vendorSource] = 1; }); var poList = Object.keys(pos); var vendorList = Object.keys(vendors); return <>{poList.length > 0 && <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#8A8279", textTransform: "uppercase", fontWeight: 600 }}>PO #</div><div style={{ fontSize: 20, fontWeight: 700, color: TOOL_COLOR, marginTop: 4 }}>{poList.join(", ")}</div></div>}{vendorList.length > 0 && <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#8A8279", textTransform: "uppercase", fontWeight: 600 }}>Vendor</div><div style={{ fontSize: 18, fontWeight: 700, color: "#2C2825", marginTop: 4 }}>{vendorList.join(", ")}</div></div>}</>; })()}
+          {(function() { var pos = {}; var vendors = {}; var whs = {}; results.forEach(function(r) { if (r.poNumber) pos[r.poNumber] = 1; if (r.vendorSource) vendors[r.vendorSource] = 1; if (r.warehouse) whs[r.warehouse] = 1; }); var poList = Object.keys(pos); var vendorList = Object.keys(vendors); var whList = Object.keys(whs); return <>{poList.length > 0 && <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#8A8279", textTransform: "uppercase", fontWeight: 600 }}>PO #</div><div style={{ fontSize: 20, fontWeight: 700, color: TOOL_COLOR, marginTop: 4 }}>{poList.join(", ")}</div></div>}{vendorList.length > 0 && <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#8A8279", textTransform: "uppercase", fontWeight: 600 }}>Vendor</div><div style={{ fontSize: 18, fontWeight: 700, color: "#2C2825", marginTop: 4 }}>{vendorList.join(", ")}</div></div>}{whList.length > 0 && <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#8A8279", textTransform: "uppercase", fontWeight: 600 }}>Warehouse</div><div style={{ fontSize: 20, fontWeight: 700, color: "#2C2825", marginTop: 4 }}>{whList.join(", ")}</div></div>}</>; })()}
           <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#8A8279", textTransform: "uppercase", fontWeight: 600 }}>Total Items</div><div style={{ fontSize: 24, fontWeight: 700, color: "#2C2825", marginTop: 4 }}>{results.length}</div></div>
           <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#8A8279", textTransform: "uppercase", fontWeight: 600 }}>In OData</div><div style={{ fontSize: 24, fontWeight: 700, color: "#059669", marginTop: 4 }}>{foundCount}</div></div>
           <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#8A8279", textTransform: "uppercase", fontWeight: 600 }}>Not in OData</div><div style={{ fontSize: 24, fontWeight: 700, color: notFoundCount > 0 ? "#DC2626" : "#059669", marginTop: 4 }}>{notFoundCount}</div></div>
