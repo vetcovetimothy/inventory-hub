@@ -1112,12 +1112,9 @@ function POImportTool(props) {
   var _pdfs = useState([]), pdfs = _pdfs[0], setPdfs = _pdfs[1];
   var _mckPaste = useState(""), mckPaste = _mckPaste[0], setMckPaste = _mckPaste[1];
   var _mckParsed = useState(null), mckParsed = _mckParsed[0], setMckParsed = _mckParsed[1];
-  var _screenshotUrls = useState([]), screenshotUrls = _screenshotUrls[0], setScreenshotUrls = _screenshotUrls[1];
-  var _ocrLoading = useState(false), ocrLoading = _ocrLoading[0], setOcrLoading = _ocrLoading[1];
-  var _ocrStatus = useState(""), ocrStatus = _ocrStatus[0], setOcrStatus = _ocrStatus[1];
-  var _ocrRaw = useState(""), ocrRaw = _ocrRaw[0], setOcrRaw = _ocrRaw[1];
-  var _showRawOcr = useState(false), showRawOcr = _showRawOcr[0], setShowRawOcr = _showRawOcr[1];
-  var _ocrFoundNdcs = useState(null), ocrFoundNdcs = _ocrFoundNdcs[0], setOcrFoundNdcs = _ocrFoundNdcs[1];
+  var _mckFile = useState(null), mckFile = _mckFile[0], setMckFile = _mckFile[1];
+  var _mckFileLoading = useState(false), mckFileLoading = _mckFileLoading[0], setMckFileLoading = _mckFileLoading[1];
+  var _mckPortalPrices = useState({}), mckPortalPrices = _mckPortalPrices[0], setMckPortalPrices = _mckPortalPrices[1];
   var _loading = useState(false), loading = _loading[0], setLoading = _loading[1];
   var _results = useState([]), results = _results[0], setResults = _results[1];
   var _screenshotQtys = useState({}), screenshotQtys = _screenshotQtys[0], setScreenshotQtys = _screenshotQtys[1];
@@ -1145,130 +1142,109 @@ function POImportTool(props) {
     return (ndc || "").replace(/-/g, "").replace(/\s/g, "");
   }
 
-  function preprocessImageForOcr(imgUrl) {
-    return new Promise(function(resolve) {
-      var img = new Image();
-      img.onload = function() {
-        var scale = 2; // 2x is optimal based on testing
-        var canvas = document.createElement("canvas");
-        canvas.width = img.width * scale;
-        canvas.height = img.height * scale;
-        var ctx = canvas.getContext("2d");
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = "high";
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        var data = imageData.data;
-        for (var i = 0; i < data.length; i += 4) {
-          var gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-          var bw = gray < 128 ? 0 : 255; // threshold 128 — tested to find all 16 NDCs
-          data[i] = bw; data[i + 1] = bw; data[i + 2] = bw; data[i + 3] = 255;
-        }
-        ctx.putImageData(imageData, 0, 0);
-        resolve(canvas.toDataURL("image/png"));
-      };
-      img.src = imgUrl;
-    });
-  }
+  // Parse McKesson export CSV
+  // Key columns: FilledNdcUpc (NDC), OrderQty (quantity), Est. Net Price (unit cost)
+  // First row may be metadata ("Export Date = ..."), headers on row 2
+  function parseMckCsv(text) {
+    var lines = text.split("\n").map(function(l) { return l.replace(/\r/g, "").trim(); }).filter(function(l) { return l.length > 0; });
+    if (lines.length < 2) return { items: [], prices: {} };
 
-  async function loadTesseract() {
-    if (typeof window !== "undefined" && window.Tesseract) return window.Tesseract;
-    return new Promise(function(resolve, reject) {
-      var script = document.createElement("script");
-      script.src = "https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js";
-      script.onload = function() { resolve(window.Tesseract); };
-      script.onerror = function() { reject(new Error("Failed to load Tesseract.js")); };
-      document.head.appendChild(script);
-    });
-  }
+    // Detect if first line is metadata (not headers)
+    var headerIdx = 0;
+    if (lines[0].indexOf("Export Date") >= 0 || lines[0].indexOf("Number of records") >= 0) headerIdx = 1;
 
-  function extractNdcsFromOcrText(text) {
-    var ndcs = [];
-    var seen = {};
-    // Find 11-digit NDCs (no dashes — McKesson portal format)
-    var re11 = /\b(\d{11})\b/g;
-    var m;
-    while ((m = re11.exec(text)) !== null) {
-      var n = m[1];
-      if (!seen[n]) { seen[n] = true; ndcs.push(n); }
+    var headers = [];
+    var inQ = false, cur = "";
+    for (var ci = 0; ci < lines[headerIdx].length; ci++) {
+      var ch = lines[headerIdx][ci];
+      if (ch === '"') { inQ = !inQ; }
+      else if (ch === "," && !inQ) { headers.push(cur.trim()); cur = ""; }
+      else { cur += ch; }
     }
-    // Also find dashed NDCs
-    var reDash = /\b(\d{4,5}-\d{3,4}-\d{1,2})\b/g;
-    while ((m = reDash.exec(text)) !== null) {
-      var norm = m[1].replace(/-/g, "");
-      if (!seen[norm]) { seen[norm] = true; ndcs.push(norm); }
+    headers.push(cur.trim());
+
+    var items = [];
+    var prices = {};
+
+    for (var li = headerIdx + 1; li < lines.length; li++) {
+      var vals = [];
+      var inQuote = false, cell = "";
+      for (var vi = 0; vi < lines[li].length; vi++) {
+        var c = lines[li][vi];
+        if (c === '"') { inQuote = !inQuote; }
+        else if (c === "," && !inQuote) { vals.push(cell.trim()); cell = ""; }
+        else { cell += c; }
+      }
+      vals.push(cell.trim());
+
+      var row = {};
+      headers.forEach(function(h, idx) { row[h] = vals[idx] || ""; });
+
+      // Find NDC — pad to 11 digits
+      var rawNdc = (row["FilledNdcUpc"] || row["NDC"] || "").replace(/[^0-9]/g, "");
+      if (rawNdc.length < 8) continue;
+      while (rawNdc.length < 11) rawNdc = "0" + rawNdc;
+
+      var qty = parseInt(row["OrderQty"]) || null;
+      var estNet = parseFloat((row["Est. Net Price"] || "").replace(/[$,]/g, ""));
+
+      items.push({ ndc: rawNdc, description: row["SellDescription"] || row["FirstDatabankDescription"] || "", qty: qty, mckItemNum: row["FilledItemNumber"] || "" });
+      if (!isNaN(estNet) && estNet > 0) prices[rawNdc] = estNet;
     }
-    return ndcs;
+
+    return { items: items, prices: prices };
   }
 
-  async function handleScreenshotUpload(files) {
-    if (files.length === 0) return;
-    var urls = files.map(function(f) { return URL.createObjectURL(f); });
-    setScreenshotUrls(urls);
-    setOcrLoading(true);
-    setOcrStatus("Preprocessing images...");
-    setOcrRaw("");
-    setMckParsed(null);
+  async function handleMckFileUpload(files) {
+    var file = files[0];
+    if (!file) return;
+    setMckFile(file);
+    setMckFileLoading(true);
     try {
-      var Tesseract = await loadTesseract();
-      var worker = await Tesseract.createWorker({
-        logger: function(m) {
-          if (m.status === "recognizing text") setOcrStatus("Reading text... " + Math.round((m.progress || 0) * 100) + "%");
-          if (m.status === "loading language traineddata") setOcrStatus("Loading language data...");
-        }
+      var text = await new Promise(function(resolve, reject) {
+        var reader = new FileReader();
+        reader.onload = function() { resolve(reader.result); };
+        reader.onerror = function() { reject(new Error("Failed to read file")); };
+        reader.readAsText(file);
       });
-      await worker.loadLanguage("eng");
-      await worker.initialize("eng");
-      await worker.setParameters({ tessedit_pageseg_mode: "6" });
-      var allOcrText = "";
-      var allNdcs = {};
-      for (var fi = 0; fi < urls.length; fi++) {
-        setOcrStatus("Processing screenshot " + (fi + 1) + " of " + urls.length + "...");
-        var processedUrl = await preprocessImageForOcr(urls[fi]);
-        var result = await worker.recognize(processedUrl);
-        var ocrText = result.data.text;
-        allOcrText += (fi > 0 ? "\n--- Screenshot " + (fi + 1) + " ---\n" : "") + ocrText;
-        var ndcs = extractNdcsFromOcrText(ocrText);
-        ndcs.forEach(function(n) { allNdcs[n] = true; });
-      }
-      await worker.terminate();
-      setOcrRaw(allOcrText);
-      var ocrNdcList = Object.keys(allNdcs);
-      setOcrFoundNdcs(ocrNdcList);
-      // Merge with any manual NDCs already in paste box
-      var manualNdcs = extractNdcsFromOcrText(mckPaste);
-      manualNdcs.forEach(function(n) { allNdcs[n] = true; });
-      var combined = Object.keys(allNdcs);
-      if (combined.length > 0) {
-        var items = combined.map(function(ndc) { return { ndc: ndc, description: "", qty: null, mckItemNum: "" }; });
-        setMckParsed(items);
-        toast("OCR found " + ocrNdcList.length + " NDCs from " + urls.length + " screenshot" + (urls.length > 1 ? "s" : "") + (manualNdcs.length > 0 ? " + " + manualNdcs.length + " manual" : ""));
-      } else {
-        setMckParsed(null);
-        toast("OCR could not find NDCs. You can also paste them manually below.", "error");
-      }
+      var result = parseMckCsv(text);
+      if (result.items.length === 0) throw new Error("No items found in CSV. Check that FilledNdcUpc column exists.");
+      setMckParsed(result.items);
+      setMckPortalPrices(result.prices);
+      var priceCount = Object.keys(result.prices).length;
+      toast("Loaded " + result.items.length + " items with " + priceCount + " prices from " + file.name);
     } catch (err) {
-      toast("OCR error: " + err.message, "error");
+      toast("McKesson CSV error: " + err.message, "error");
+      setMckFile(null);
     } finally {
-      setOcrLoading(false);
-      setOcrStatus("");
+      setMckFileLoading(false);
     }
+  }
+
+  // Extract NDCs from text (manual paste)
+  function extractNdcsFromText(text) {
+    var ndcs = [], seen = {};
+    var re11 = /\b(\d{11})\b/g, m;
+    while ((m = re11.exec(text)) !== null) { if (!seen[m[1]]) { seen[m[1]] = true; ndcs.push(m[1]); } }
+    var reDash = /\b(\d{4,5}-\d{3,4}-\d{1,2})\b/g;
+    while ((m = reDash.exec(text)) !== null) { var n = m[1].replace(/-/g, ""); if (!seen[n]) { seen[n] = true; ndcs.push(n); } }
+    return ndcs;
   }
 
   function handleMckManualPaste(e) {
     var text = e.target.value;
     setMckPaste(text);
-    // Merge manual NDCs with any OCR-found NDCs
-    var manualNdcs = extractNdcsFromOcrText(text);
-    // Get existing OCR NDCs (stored separately)
-    var ocrNdcList = (ocrFoundNdcs || []).slice();
-    // Combine and deduplicate
+    var manualNdcs = extractNdcsFromText(text);
+    // Merge with file NDCs
+    var fileItems = (mckFile && mckParsed) ? mckParsed.slice() : [];
     var allNdcs = {};
-    ocrNdcList.forEach(function(n) { allNdcs[n] = true; });
-    manualNdcs.forEach(function(n) { allNdcs[n] = true; });
-    var combined = Object.keys(allNdcs);
+    fileItems.forEach(function(item) { allNdcs[item.ndc] = item; });
+    manualNdcs.forEach(function(ndc) {
+      if (!allNdcs[ndc]) allNdcs[ndc] = { ndc: ndc, description: "", qty: null, mckItemNum: "" };
+    });
+    var combined = Object.values(allNdcs);
     if (combined.length > 0) {
-      setMckParsed(combined.map(function(ndc) { return { ndc: ndc, description: "", qty: null, mckItemNum: "" }; }));
+      setMckParsed(combined);
     } else {
       setMckParsed(null);
     }
@@ -1397,6 +1373,17 @@ function POImportTool(props) {
             warnings.push({ type: "qty-mismatch", msg: pdfItem.drugName + " (NDC " + pdfItem.ndc + "): PDF says qty " + pdfItem.qty + " but portal shows " + portalMatch.qty, item: pdfItem });
           }
         });
+
+        // Override unit prices with McKesson CSV Est. Net Price
+        if (Object.keys(mckPortalPrices).length > 0) {
+          matched.forEach(function(r) {
+            var ndcNorm = normalizeNdcForCompare(r.ndc);
+            if (mckPortalPrices[ndcNorm] != null) {
+              r.unitPrice = mckPortalPrices[ndcNorm];
+              r.totalPrice = r.qty ? +(r.qty * r.unitPrice).toFixed(2) : r.totalPrice;
+            }
+          });
+        }
       }
 
       setResults(matched);
@@ -1427,7 +1414,7 @@ function POImportTool(props) {
   }
 
   function reset() {
-    setPdfs([]); setMckPaste(""); setMckParsed(null); setScreenshotUrls([]); setOcrRaw(""); setShowRawOcr(false); setOcrFoundNdcs(null); setScreenshotQtys({}); setEditedPrices({}); setResults([]); setMckWarnings([]); setError(null);
+    setPdfs([]); setMckPaste(""); setMckParsed(null); setMckFile(null); setMckPortalPrices({}); setScreenshotQtys({}); setEditedPrices({}); setResults([]); setMckWarnings([]); setError(null);
   }
 
   var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
@@ -1461,29 +1448,24 @@ function POImportTool(props) {
             </div> : <DropZone accept=".pdf" multiple label="PO PDF(s)" sublabel="Drop PDFs or click to browse" icon="pdf" color={TOOL_COLOR} onFiles={handlePdfChange} />}
           </div>
           {vendor === "mckesson" && <div>
-            <div style={{ fontSize: 12, color: "#8A8279", fontWeight: 500, marginBottom: 6 }}>McKesson Portal Screenshot(s)</div>
-            {screenshotUrls.length > 0 && !ocrLoading ? <div>
+            <div style={{ fontSize: 12, color: "#8A8279", fontWeight: 500, marginBottom: 6 }}>McKesson Export CSV <InfoTip text="Have the WM download the order from the McKesson portal as CSV. Key columns: FilledNdcUpc, OrderQty, Est. Net Price." /></div>
+            {mckFile && mckParsed ? <div>
               <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(5,150,105,0.06)", border: "1px solid rgba(5,150,105,0.2)", borderRadius: 10 }}>
-                <span style={{ color: "#059669", fontSize: 12 }}>{"\u2713"} {screenshotUrls.length} screenshot{screenshotUrls.length > 1 ? "s" : ""}{mckParsed ? " — " + mckParsed.length + " NDCs found" : ""}</span>
-                <button onClick={function() { setScreenshotUrls([]); setMckParsed(null); setOcrRaw(""); }} style={{ background: "transparent", border: "none", color: "#A69E95", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 4px" }}>{"\u00D7"}</button>
+                <span style={{ color: "#059669", fontSize: 12 }}>{"\u2713"} {mckFile.name} — {mckParsed.length} items, {Object.keys(mckPortalPrices).length} prices</span>
+                <button onClick={function() { setMckFile(null); setMckParsed(null); setMckPortalPrices({}); }} style={{ background: "transparent", border: "none", color: "#A69E95", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 4px" }}>{"\u00D7"}</button>
               </div>
-            </div> : <DropZone accept="image/*" multiple label="McKesson Screenshots" sublabel="Drop images or click to browse" icon="image" color={TOOL_COLOR} disabled={ocrLoading} onFiles={handleScreenshotUpload} />}
-            {ocrLoading && <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}><Spinner color={TOOL_COLOR} size={14} /><span style={{ fontSize: 12, color: TOOL_COLOR }}>{ocrStatus || "Processing..."}</span></div>}
-            {screenshotUrls.length > 0 && !ocrLoading && !mckParsed && <p style={{ color: "#D97706", fontSize: 11, marginTop: 6 }}>{"\u26A0"} OCR could not find NDCs — type them manually below</p>}
-            <div style={{ marginTop: 10, fontSize: 11, color: "#A69E95" }}>Add any missing NDCs below (one per line — will be merged with OCR results):</div>
+            </div> : <DropZone accept=".csv" label="McKesson Export CSV" sublabel="Drop CSV from McKesson portal" icon="spreadsheet" color={TOOL_COLOR} disabled={mckFileLoading} onFiles={handleMckFileUpload} />}
+            {mckFileLoading && <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}><Spinner color={TOOL_COLOR} size={14} /><span style={{ fontSize: 12, color: TOOL_COLOR }}>Parsing CSV...</span></div>}
+            <div style={{ marginTop: 10, fontSize: 11, color: "#A69E95" }}>Or paste NDCs manually (one per line):</div>
             <textarea value={mckPaste} onChange={handleMckManualPaste} placeholder={"67877019710\n29300041001\n53746075101\n..."} rows={3} style={Object.assign({}, S.inp, { resize: "vertical", fontFamily: "monospace", fontSize: 12, marginTop: 4 })} />
           </div>}
         </div>
 
         {vendor === "mckesson" && mckParsed && mckParsed.length > 0 && <div style={{ marginTop: 16, background: "#FAFAF8", border: "1px solid #E8E4DE", borderRadius: 8, padding: "10px 14px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-            <div style={{ fontSize: 11, color: "#8A8279", fontWeight: 600, textTransform: "uppercase" }}>Portal NDCs ({mckParsed.length})</div>
-            {ocrRaw && <button onClick={function() { setShowRawOcr(!showRawOcr); }} style={{ background: "transparent", border: "1px solid #E8E4DE", borderRadius: 6, padding: "2px 8px", fontSize: 10, color: "#8A8279", cursor: "pointer" }}>{showRawOcr ? "Hide" : "Show"} Raw OCR</button>}
+          <div style={{ fontSize: 11, color: "#8A8279", fontWeight: 600, textTransform: "uppercase", marginBottom: 6 }}>McKesson Items ({mckParsed.length}){Object.keys(mckPortalPrices).length > 0 && <span style={{ color: "#059669", fontWeight: 600, marginLeft: 8 }}>{"\u2713"} {Object.keys(mckPortalPrices).length} prices loaded</span>}</div>
+          <div style={{ maxHeight: 100, overflow: "auto", fontSize: 12, fontFamily: "monospace", color: "#8A8279" }}>
+            {mckParsed.map(function(pi, idx) { return <div key={idx} style={{ display: "flex", gap: 16 }}><span>{pi.ndc}</span>{mckPortalPrices[pi.ndc] != null && <span style={{ color: "#059669" }}>{"$" + mckPortalPrices[pi.ndc].toFixed(2)}</span>}{pi.qty && <span style={{ color: "#A69E95" }}>qty: {pi.qty}</span>}</div>; })}
           </div>
-          <div style={{ maxHeight: 80, overflow: "auto", fontSize: 13, fontFamily: "monospace", color: "#8A8279" }}>
-            {mckParsed.map(function(pi, idx) { return <div key={idx}>{pi.ndc}</div>; })}
-          </div>
-          {showRawOcr && <div style={{ maxHeight: 200, overflow: "auto", fontSize: 11, fontFamily: "monospace", color: "#A69E95", background: "#F0EDE8", borderRadius: 6, padding: 8, marginTop: 8, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{ocrRaw}</div>}
         </div>}
 
         <div style={{ marginTop: 16, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
@@ -1501,14 +1483,6 @@ function POImportTool(props) {
       </div>
 
       {error && <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 10, padding: "12px 16px", marginBottom: 16, color: "#DC2626", fontSize: 13 }}>Error: {error}</div>}
-
-      {screenshotUrls.length > 0 && vendor === "mckesson" && <div style={S.card}>
-        <div style={{ fontSize: 14, fontWeight: 600, color: "#2C2825", marginBottom: 12 }}>McKesson Portal Screenshot{screenshotUrls.length > 1 ? "s (" + screenshotUrls.length + ")" : ""}</div>
-        {screenshotUrls.map(function(url, idx) { return <div key={idx} style={{ border: "1px solid #E8E4DE", borderRadius: 8, overflow: "hidden", maxHeight: 400, overflowY: "auto", marginBottom: screenshotUrls.length > 1 ? 12 : 0 }}>
-          {screenshotUrls.length > 1 && <div style={{ padding: "6px 12px", background: "#F5F3EF", fontSize: 12, color: "#8A8279" }}>Screenshot {idx + 1}</div>}
-          <img src={url} alt={"McKesson screenshot " + (idx + 1)} style={{ width: "100%", display: "block" }} />
-        </div>; })}
-      </div>}
 
       {mckWarnings.length > 0 && <div style={{ marginBottom: 16 }}>
         {mckWarnings.map(function(w, i) {
