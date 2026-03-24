@@ -583,6 +583,30 @@ function WHT(props) {
         }
         var excluded = whKey === "GGM-KY" ? EXCLUDED.filter(function(ex) { return ex !== "vetcove generics"; }) : EXCLUDED;
         var rows = raw.filter(function(r) { return r.SKUNDC && (r.Warehouse || "").trim() === whKey && !excluded.some(function(ex) { return (r.VendorName || "").toLowerCase().indexOf(ex) >= 0; }); }).map(function(r) { return Object.assign({}, r, { Price: Number(r.Price) || 0, OrderQty: Number(r.OrderQty) || 0, TotalPrice: +((Number(r.Price) || 0) * (Number(r.OrderQty) || 0)).toFixed(2) }); });
+
+        // Fetch default prices from cross reference for items with $0 price
+        var zeroRows = rows.filter(function(r) { return !r.Price || r.Price === 0; });
+        if (zeroRows.length > 0 && cred && cred.username && cred.password) {
+          try {
+            var xref = await fetchAcumatica("item-xref", null, cred.username, cred.password);
+            var priceMap = {};
+            xref.forEach(function(x) {
+              var id = String(x.InventoryID || "").trim();
+              var price = parseFloat(x.DefaultPrice);
+              if (id && !isNaN(price) && price > 0) priceMap[id] = price;
+            });
+            rows = rows.map(function(r) {
+              if ((!r.Price || r.Price === 0) && priceMap[r.SKUNDC]) {
+                var p = priceMap[r.SKUNDC];
+                return Object.assign({}, r, { Price: p, TotalPrice: +(p * (r.OrderQty || 0)).toFixed(2) });
+              }
+              return r;
+            });
+          } catch (xrefErr) {
+            console.warn("Cross reference fetch failed:", xrefErr.message);
+          }
+        }
+
         var now = new Date().toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
         var who = cred && cred.username ? cred.username : "You";
         setData(rows); setRunBy(who); setRunTime(now); setLoading(false); setSubPage("data"); persist(rows, false, who, now, {}); setShipNotes({}); toast(cfg.label + ": Fetched " + rows.length + " lines");
