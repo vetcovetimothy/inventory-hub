@@ -526,12 +526,12 @@ function WHT(props) {
         var resp = await fetch("/api/kv?key=" + encodeURIComponent(kvKey));
         var json = await resp.json();
         if (m && json.data && json.data.data && json.data.data.length > 0) {
-          setData(json.data.data); setEmailSent(json.data.emailSent || false); setRunBy(json.data.runBy || null); setRunTime(json.data.runTime || null); setShipNotes(json.data.shipNotes || {});
+          setData(json.data.data); setEmailSent(json.data.emailSent || false); setRunBy(json.data.runBy || null); setRunTime(json.data.runTime || null); setShipNotes(json.data.shipNotes || {}); setSubPage("data");
         }
       } catch (e) {
         // Fallback to localStorage
         var s = sGet("wh-data-" + whKey);
-        if (m && s && s.data && s.data.length > 0) { setData(s.data); setEmailSent(s.emailSent || false); setRunBy(s.runBy || null); setRunTime(s.runTime || null); setShipNotes(s.shipNotes || {}); }
+        if (m && s && s.data && s.data.length > 0) { setData(s.data); setEmailSent(s.emailSent || false); setRunBy(s.runBy || null); setRunTime(s.runTime || null); setShipNotes(s.shipNotes || {}); setSubPage("data"); }
       }
       if (m) setInitLoading(false);
     })();
@@ -1573,7 +1573,8 @@ function POImportTool(props) {
 
 /* ═══════ MAIN HUB ═══════ */
 export default function Hub() {
-  var _p = useState("TP-NY"), page = _p[0], setPage = _p[1];
+  var _p = useState(function() { var s = sGet("active-page"); return s || "TP-NY"; }), page = _p[0], setPage = _p[1];
+  function setPagePersist(p) { setPage(p); sSet("active-page", p); }
   var _c = useState({ username: "", password: "" }), cred = _c[0], setCred = _c[1];
   var _ok = useState(false), ok = _ok[0], setOk = _ok[1];
   var _sl = useState(false), showLogin = _sl[0], setShowLogin = _sl[1];
@@ -1679,7 +1680,7 @@ export default function Hub() {
 
   function SideLink(p) {
     var active = page === p.id && !showLogin;
-    return <div onClick={function() { setPage(p.id); setShowLogin(false); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 24px", fontSize: 14, cursor: "pointer", transition: "all 0.15s", fontWeight: active ? 600 : 400, color: active ? "#2C2825" : "#8A8279", background: active ? p.color + "15" : "transparent", borderRight: active ? "2px solid " + p.color : "2px solid transparent" }}><Dot color={p.color} />{p.label}</div>;
+    return <div onClick={function() { setPagePersist(p.id); setShowLogin(false); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 24px", fontSize: 14, cursor: "pointer", transition: "all 0.15s", fontWeight: active ? 600 : 400, color: active ? "#2C2825" : "#8A8279", background: active ? p.color + "15" : "transparent", borderRight: active ? "2px solid " + p.color : "2px solid transparent" }}><Dot color={p.color} />{p.label}</div>;
   }
 
   return (
@@ -1700,7 +1701,7 @@ export default function Hub() {
         <SideLink id="short-dating" label="Short-Dating" color="#E879F9" />
         <SideLink id="backorder" label="Backorders" color="#F97316" />
         <div style={{ padding: "12px 12px 4px", marginTop: 4, borderTop: "1px solid #E8E4DE" }}><div style={{ fontSize: 10, fontWeight: 600, color: "#A69E95", textTransform: "uppercase", letterSpacing: "1px", padding: "8px 12px" }}>Settings</div></div>
-        <div onClick={function() { setPage("rules"); setShowLogin(false); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 24px", fontSize: 14, cursor: "pointer", fontWeight: page === "rules" && !showLogin ? 600 : 400, color: page === "rules" && !showLogin ? "#2C2825" : "#8A8279", background: page === "rules" && !showLogin ? "rgba(59,130,246,0.1)" : "transparent", borderRight: page === "rules" && !showLogin ? "2px solid #3B82F6" : "2px solid transparent" }}><IconTruck /> Shipping Rules</div>
+        <div onClick={function() { setPagePersist("rules"); setShowLogin(false); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 24px", fontSize: 14, cursor: "pointer", fontWeight: page === "rules" && !showLogin ? 600 : 400, color: page === "rules" && !showLogin ? "#2C2825" : "#8A8279", background: page === "rules" && !showLogin ? "rgba(59,130,246,0.1)" : "transparent", borderRight: page === "rules" && !showLogin ? "2px solid #3B82F6" : "2px solid transparent" }}><IconTruck /> Shipping Rules</div>
         <div style={{ flex: 1 }} />
         <div style={{ padding: "0 16px" }}>
           <div style={{ padding: "12px 16px", background: ok ? "rgba(16,185,129,0.08)" : "rgba(239,68,68,0.08)", borderRadius: 10, border: "1px solid " + (ok ? "rgba(16,185,129,0.2)" : "rgba(239,68,68,0.2)") }}>
