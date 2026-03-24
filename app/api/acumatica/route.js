@@ -16,6 +16,7 @@ const ENDPOINTS = {
   "po":            "PURCH%20-%20TP%20PO%20Export%20with%20Replen",
   "po-ggm":        "PURCH%20-%20Export%20PO%20Lines%20GGM",
   "ndc-lookup":    "PURCH%20-%20Generic%20Current%20NDCs",
+  "item-xref":     "ITEM%20-%20Non-Stock%20Cross%20Reference",
   "short-dating":  "INV%20-%20Short-Dating%20Tracker",
   "backorder":     "INV%20-%20Backorder%20Item%20Review",
 };
@@ -58,6 +59,13 @@ const COLUMN_MAP = {
     { label: "Description",   keys: ["Description", "Descr", "ItemDescription"] },
     { label: "UOM",           keys: ["UOM", "Uom", "BaseUnit", "BaseUOM"] },
   ],
+  "item-xref": [
+    { label: "InventoryID",   keys: ["InventoryID", "InventoryId", "InventoryCd", "InventoryCD", "Inventory ID"] },
+    { label: "Description",   keys: ["Description", "Descr", "ItemDescription"] },
+    { label: "AlternateID",   keys: ["AlternateID", "AlternateId", "Alternate ID"] },
+    { label: "UOM",           keys: ["UOM", "Uom", "BaseUnit", "BaseUOM"] },
+    { label: "DefaultPrice",  keys: ["DefaultPrice", "Default Price", "Price", "UnitPrice"] },
+  ],
   "short-dating": [
     { label: "ItemStatus",      keys: ["ItemStatus", "Status"] },
     { label: "MovementClass",   keys: ["MovementClass"] },
@@ -92,7 +100,7 @@ export async function POST(request) {
     const { type, warehouse, username, password, useServiceAccount } = body;
 
     if (!type || !ENDPOINTS[type]) {
-      return Response.json({ error: "Invalid type. Use: po, po-ggm, ndc-lookup, short-dating, backorder" }, { status: 400 });
+      return Response.json({ error: "Invalid type. Use: po, po-ggm, ndc-lookup, item-xref, short-dating, backorder" }, { status: 400 });
     }
 
     // Use service account credentials from env vars, or user-provided credentials
@@ -117,6 +125,11 @@ export async function POST(request) {
     // For PO fetches, filter by warehouse in OData
     if ((type === "po" || type === "po-ggm") && warehouse) {
       url += `?$filter=Warehouse eq '${warehouse}'`;
+    }
+
+    // For cross reference, get all records
+    if (type === "item-xref") {
+      url += `?$top=10000`;
     }
 
     // Call Acumatica
