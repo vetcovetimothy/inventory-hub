@@ -596,7 +596,7 @@ function WHT(props) {
   var totalVal = useMemo(function() { return data.reduce(function(s, r) { return s + r.TotalPrice; }, 0); }, [data]);
   var flags = useMemo(function() { var f = { s: [], so: [] }; data.forEach(function(r, i) { var mc = (r.MovementClass || "").toLowerCase().trim(); if (mc === "short-dating") f.s.push(i); if (mc === "sell-off item") f.so.push(i); }); return f; }, [data]);
   var flagCount = flags.s.length + flags.so.length;
-  var emailBlocked = whKey !== "GGM-KY" && (flags.s.length > 0 || flags.so.length > 0);
+  var emailBlocked = flags.s.length > 0 || flags.so.length > 0;
   var getFlag = function(r) { var mc = (r.MovementClass || "").toLowerCase().trim(); if (mc === "short-dating") return "short"; if (mc === "sell-off item") return "selloff"; return null; };
   var filtered = useMemo(function() { var d = data.slice(); if (search) { var s = search.toLowerCase(); d = d.filter(function(r) { return r.SKUNDC.toLowerCase().indexOf(s) >= 0 || r.Description.toLowerCase().indexOf(s) >= 0 || r.VendorName.toLowerCase().indexOf(s) >= 0; }); } if (vendorFilter !== "all") d = d.filter(function(r) { return r.VendorName === vendorFilter; }); if (flagsOnly) { var fi = new Set(flags.s.concat(flags.so)); d = d.filter(function(r) { return fi.has(data.indexOf(r)); }); } d.sort(function(a, b) { var fa = getFlag(a) ? 0 : 1; var fb = getFlag(b) ? 0 : 1; return fa - fb; }); return d; }, [data, search, vendorFilter, flagsOnly, flags]);
   var todayStr = new Date().toLocaleDateString("en-US", { month: "numeric", day: "numeric" });
@@ -670,7 +670,8 @@ function WHT(props) {
           {uniqueVendors.map(function(v) { var count = data.filter(function(r) { return r.VendorName === v; }).length; return <div key={v} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: "#FAFAF8", borderRadius: 8, marginBottom: 4 }}><IconDL /><span style={{ fontSize: 12, color: "#5C5651" }}>{v} PO Data - {whKey}.xlsx</span><div style={{ flex: 1 }} /><span style={{ fontSize: 11, color: "#A69E95" }}>{count} rows</span></div>; })}
         </div>
         <div style={{ marginTop: 20, display: "flex", gap: 10 }}>
-          <Gate ok={ok} prompt={lp} style={Object.assign({}, S.btn(), { padding: "10px 24px", opacity: (emailSent || emailLoading || emailBlocked) ? 0.5 : 1 })} onClick={async function() {
+          <div title={emailBlocked ? "Short-dated/Sell-Off Items Detected" : undefined}>
+          <Gate ok={ok} prompt={lp} style={Object.assign({}, S.btn(), { padding: "10px 24px", opacity: (emailSent || emailLoading || emailBlocked) ? 0.5 : 1, cursor: emailBlocked ? "not-allowed" : undefined })} onClick={async function() {
             if (emailBlocked) { toast("Remove all flagged items (short-dating / sell-off) before sending email", "error"); return; }
             if (!gmail || !gmail.token) { toast("Please connect your Gmail account first (bottom-left)", "error"); return; }
             setEmailLoading(true);
@@ -692,7 +693,8 @@ function WHT(props) {
             } catch (err) {
               toast("Gmail error: " + err.message, "error");
             } finally { setEmailLoading(false); }
-          }} disabled={emailSent || emailLoading || emailBlocked || data.length === 0}><IconMail /> {emailBlocked ? flagCount + " Flagged Item" + (flagCount > 1 ? "s" : "") + " Present" : emailLoading ? "Creating..." : emailSent ? "Draft Created" : "Create Gmail Draft"}</Gate>
+          }} disabled={emailSent || emailLoading || emailBlocked || data.length === 0}>{emailBlocked ? <span style={{ display: "flex", alignItems: "center", gap: 6, color: "#A69E95" }}><IconLock /> Create Gmail Draft</span> : emailLoading ? <><Spinner /> Creating...</> : emailSent ? "Draft Created" : <><IconMail /> Create Gmail Draft</>}</Gate>
+          </div>
           {emailSent && <Gate ok={ok} prompt={lp} style={Object.assign({}, S.btn("danger"), { marginLeft: "auto" })} onClick={clearAll}><IconTrash /> Clear</Gate>}
         </div>
       </div>
