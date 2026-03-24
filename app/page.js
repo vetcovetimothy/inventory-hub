@@ -518,20 +518,24 @@ function WHT(props) {
   var S = useMemo(function() { return makeStyles(cfg.color); }, [cfg.color]);
   var kvKey = "po:" + whKey;
 
-  // Load from KV on mount
+  // Load from KV on mount, fall back to localStorage
   useEffect(function() {
     var m = true;
     (async function() {
+      var loaded = false;
+      // Try KV first
       try {
         var resp = await fetch("/api/kv?key=" + encodeURIComponent(kvKey));
         var json = await resp.json();
         if (m && json.data && json.data.data && json.data.data.length > 0) {
           setData(json.data.data); setEmailSent(json.data.emailSent || false); setRunBy(json.data.runBy || null); setRunTime(json.data.runTime || null); setShipNotes(json.data.shipNotes || {}); setSubPage("data");
+          loaded = true;
         }
-      } catch (e) {
-        // Fallback to localStorage
+      } catch (e) {}
+      // Fall back to localStorage if KV had nothing
+      if (!loaded && m) {
         var s = sGet("wh-data-" + whKey);
-        if (m && s && s.data && s.data.length > 0) { setData(s.data); setEmailSent(s.emailSent || false); setRunBy(s.runBy || null); setRunTime(s.runTime || null); setShipNotes(s.shipNotes || {}); setSubPage("data"); }
+        if (s && s.data && s.data.length > 0) { setData(s.data); setEmailSent(s.emailSent || false); setRunBy(s.runBy || null); setRunTime(s.runTime || null); setShipNotes(s.shipNotes || {}); setSubPage("data"); }
       }
       if (m) setInitLoading(false);
     })();
