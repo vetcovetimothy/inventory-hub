@@ -596,7 +596,7 @@ function WHT(props) {
   var totalVal = useMemo(function() { return data.reduce(function(s, r) { return s + r.TotalPrice; }, 0); }, [data]);
   var flags = useMemo(function() { var f = { s: [], so: [] }; data.forEach(function(r, i) { var mc = (r.MovementClass || "").toLowerCase().trim(); if (mc === "short-dating") f.s.push(i); if (mc === "sell-off item") f.so.push(i); }); return f; }, [data]);
   var flagCount = flags.s.length + flags.so.length;
-  var emailBlocked = flags.s.length > 0 || flags.so.length > 0;
+  var emailBlocked = whKey !== "GGM-KY" && (flags.s.length > 0 || flags.so.length > 0);
   var getFlag = function(r) { var mc = (r.MovementClass || "").toLowerCase().trim(); if (mc === "short-dating") return "short"; if (mc === "sell-off item") return "selloff"; return null; };
   var filtered = useMemo(function() { var d = data.slice(); if (search) { var s = search.toLowerCase(); d = d.filter(function(r) { return r.SKUNDC.toLowerCase().indexOf(s) >= 0 || r.Description.toLowerCase().indexOf(s) >= 0 || r.VendorName.toLowerCase().indexOf(s) >= 0; }); } if (vendorFilter !== "all") d = d.filter(function(r) { return r.VendorName === vendorFilter; }); if (flagsOnly) { var fi = new Set(flags.s.concat(flags.so)); d = d.filter(function(r) { return fi.has(data.indexOf(r)); }); } d.sort(function(a, b) { var fa = getFlag(a) ? 0 : 1; var fb = getFlag(b) ? 0 : 1; return fa - fb; }); return d; }, [data, search, vendorFilter, flagsOnly, flags]);
   var todayStr = new Date().toLocaleDateString("en-US", { month: "numeric", day: "numeric" });
