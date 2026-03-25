@@ -711,7 +711,7 @@ function WHT(props) {
       {data.length > 0 ? <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto", maxHeight: "calc(100vh - 260px)" })}>
         <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
           <thead><tr>{["SKU", "Description", "Qty", "Vendor", "PO #"].concat(whKey !== "GGM-KY" ? ["Reorder", "Max", "Lead", "Min", "Avail"] : []).concat(["Price", "Total", "Flag"]).map(function(h) { return <th key={h} style={S.th}>{h}</th>; })}</tr></thead>
-          <tbody>{filtered.map(function(r, i) { var f = getFlag(r); var bg = f === "short" ? "rgba(220,38,38,0.04)" : f === "selloff" ? "rgba(217,119,6,0.04)" : "transparent"; var tc = f === "short" ? "#DC2626" : f === "selloff" ? "#D97706" : "#4A4541"; var fmt = function(v) { var n = parseFloat(v); if (isNaN(n)) return v; return n % 1 === 0 ? String(Math.round(n)) : n.toFixed(2); }; return <tr key={i} style={{ background: bg }}><td style={Object.assign({}, S.td, { color: tc })}>{r.SKUNDC}</td><td style={Object.assign({}, S.td, { color: tc, minWidth: 180, maxWidth: 350 })}><CopyCell text={r.Description} toast={toast} color={tc} accentColor={cfg.color} /></td><td style={Object.assign({}, S.td, { color: tc })}>{fmt(r.OrderQty)}</td><td style={Object.assign({}, S.td, { color: tc })}>{r.VendorName}</td><td style={Object.assign({}, S.td, { color: tc })}>{r.OrderNbr}</td>{whKey !== "GGM-KY" && <><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.ReorderPoint)}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.MaxQty)}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.LeadTime)}d</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.MinOrderQty)}</td><td style={Object.assign({}, S.td, { color: r.QtyAvailable < 0 ? "#DC2626" : tc, textAlign: "right" })}>{fmt(r.QtyAvailable)}</td></>}<td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>${r.Price.toFixed(2)}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>${r.TotalPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td><td style={S.td}>{f ? <span style={S.badge(f === "short" ? "danger" : "warning")}>{f === "short" ? "Short" : "Sell-Off"}</span> : "\u2014"}</td></tr>; })}</tbody>
+          <tbody>{filtered.map(function(r, i) { var f = getFlag(r); var bg = f === "short" ? "rgba(220,38,38,0.04)" : f === "selloff" ? "rgba(217,119,6,0.04)" : "transparent"; var tc = f === "short" ? "#DC2626" : f === "selloff" ? "#D97706" : "#4A4541"; var fmt = function(v) { var n = parseFloat(v); if (isNaN(n)) return v; return n % 1 === 0 ? String(Math.round(n)) : n.toFixed(2); }; return <tr key={i} style={{ background: bg }}><td style={Object.assign({}, S.td, { color: tc, minWidth: 120, whiteSpace: "nowrap" })}>{r.SKUNDC}</td><td style={Object.assign({}, S.td, { color: tc, minWidth: 180, maxWidth: 350 })}><CopyCell text={r.Description} toast={toast} color={tc} accentColor={cfg.color} /></td><td style={Object.assign({}, S.td, { color: tc })}>{fmt(r.OrderQty)}</td><td style={Object.assign({}, S.td, { color: tc })}>{r.VendorName}</td><td style={Object.assign({}, S.td, { color: tc })}>{r.OrderNbr}</td>{whKey !== "GGM-KY" && <><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.ReorderPoint)}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.MaxQty)}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.LeadTime)}d</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.MinOrderQty)}</td><td style={Object.assign({}, S.td, { color: r.QtyAvailable < 0 ? "#DC2626" : tc, textAlign: "right" })}>{fmt(r.QtyAvailable)}</td></>}<td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>${r.Price.toFixed(2)}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>${r.TotalPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td><td style={S.td}>{f ? <span style={S.badge(f === "short" ? "danger" : "warning")}>{f === "short" ? "Short" : "Sell-Off"}</span> : "\u2014"}</td></tr>; })}</tbody>
         </table>
       </div> : <div style={Object.assign({}, S.card, { textAlign: "center", padding: 48, color: "#A69E95" })}>Run fetch first.</div>}
     </div>}
@@ -734,52 +734,53 @@ function WHT(props) {
       var allChecked = rows.length > 0 && rows.every(function(r) { return priceChecked[priceCheckKey + ":" + r.SKUNDC]; });
       var checkedCount = rows.filter(function(r) { return priceChecked[priceCheckKey + ":" + r.SKUNDC]; }).length;
       var uncheckedItems = rows.filter(function(r) { return !priceChecked[priceCheckKey + ":" + r.SKUNDC]; });
-      return <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.4)", zIndex: 999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }} onClick={function(e) { if (e.target === e.currentTarget) setPriceCheckKey(null); }}>
-        <div style={{ background: "#FFFFFF", borderRadius: 16, maxWidth: 900, width: "100%", maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 25px 50px rgba(0,0,0,0.15)" }}>
-          <div style={{ padding: "20px 24px", borderBottom: "1px solid #E8E4DE", display: "flex", alignItems: "center", gap: 12 }}>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 16, fontWeight: 700, color: "#2C2825" }}>Price Check — {vendorName}</div>
-              <div style={{ fontSize: 12, color: "#8A8279", marginTop: 2 }}>{poNum && "PO: " + poNum + " · "}{rows.length} items · Total: ${total.toLocaleString(undefined, { minimumFractionDigits: 2 })} · Checked: {checkedCount}/{rows.length}</div>
+      return <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.35)", zIndex: 999, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }} onClick={function(e) { if (e.target === e.currentTarget) setPriceCheckKey(null); }}>
+        <div style={{ background: "#FFFFFF", borderRadius: 20, maxWidth: 960, width: "100%", maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 25px 60px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.04)" }}>
+          {/* Header */}
+          <div style={{ padding: "24px 32px 20px", borderBottom: "1px solid #F0EDE8" }}>
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
+              <div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: "#2C2825", letterSpacing: "-0.01em" }}>Price Check</div>
+                <div style={{ fontSize: 14, color: "#5C5651", marginTop: 4 }}>{vendorName}{poNum && <span style={{ color: "#A69E95" }}> · {poNum}</span>}</div>
+              </div>
+              <button onClick={function() { setPriceCheckKey(null); }} style={{ background: "#F5F3EF", border: "none", cursor: "pointer", fontSize: 16, color: "#8A8279", width: 32, height: 32, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center" }}>{"\u00D7"}</button>
             </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={function() { var updated = Object.assign({}, priceChecked); rows.forEach(function(r) { updated[priceCheckKey + ":" + r.SKUNDC] = !allChecked; }); setPriceChecked(updated); }} style={Object.assign({}, S.btn(allChecked ? "ghost" : "default"), { padding: "6px 14px", fontSize: 11 })}>{allChecked ? "Uncheck All" : "Check All"}</button>
-              <button onClick={function() { setPriceCheckKey(null); }} style={{ background: "transparent", border: "none", cursor: "pointer", fontSize: 20, color: "#8A8279", padding: "0 4px" }}>{"\u00D7"}</button>
+            <div style={{ display: "flex", gap: 16, marginTop: 16, alignItems: "center" }}>
+              <div style={{ display: "flex", gap: 24, fontSize: 13 }}>
+                <div><span style={{ color: "#8A8279" }}>Items</span> <span style={{ fontWeight: 600, color: "#2C2825" }}>{rows.length}</span></div>
+                <div><span style={{ color: "#8A8279" }}>Total</span> <span style={{ fontWeight: 600, color: "#2C2825" }}>${total.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></div>
+                <div><span style={{ color: "#8A8279" }}>Verified</span> <span style={{ fontWeight: 600, color: allChecked ? "#059669" : checkedCount > 0 ? "#D97706" : "#8A8279" }}>{checkedCount}/{rows.length}</span></div>
+              </div>
+              <div style={{ flex: 1 }} />
+              <button onClick={function() { var updated = Object.assign({}, priceChecked); rows.forEach(function(r) { updated[priceCheckKey + ":" + r.SKUNDC] = !allChecked; }); setPriceChecked(updated); }} style={Object.assign({}, S.btn(allChecked ? "ghost" : "default"), { padding: "8px 16px", fontSize: 12 })}>{allChecked ? "Uncheck All" : "Check All"}</button>
+            </div>
+            {/* Progress bar */}
+            <div style={{ marginTop: 12, height: 3, background: "#F0EDE8", borderRadius: 2, overflow: "hidden" }}>
+              <div style={{ height: "100%", width: rows.length > 0 ? (checkedCount / rows.length * 100) + "%" : "0%", background: allChecked ? "#059669" : "#D97706", borderRadius: 2, transition: "width 0.3s ease" }} />
             </div>
           </div>
-          <div style={{ overflow: "auto", flex: 1 }}>
-            <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
-              <thead><tr>
-                <th style={Object.assign({}, S.th, { width: 40, textAlign: "center" })}>{"\u2713"}</th>
-                <th style={S.th}>SKU</th>
-                <th style={Object.assign({}, S.th, { minWidth: 200 })}>Description</th>
-                <th style={Object.assign({}, S.th, { textAlign: "right" })}>Qty</th>
-                <th style={Object.assign({}, S.th, { textAlign: "right" })}>Unit Price</th>
-                <th style={Object.assign({}, S.th, { textAlign: "right" })}>Total</th>
-              </tr></thead>
-              <tbody>{rows.map(function(r, i) {
-                var ck = priceChecked[priceCheckKey + ":" + r.SKUNDC] || false;
-                return <tr key={i} style={{ background: ck ? "rgba(5,150,105,0.04)" : "transparent" }}>
-                  <td style={Object.assign({}, S.td, { textAlign: "center" })}>
-                    <input type="checkbox" checked={ck} onChange={function() {
-                      var updated = Object.assign({}, priceChecked);
-                      updated[priceCheckKey + ":" + r.SKUNDC] = !ck;
-                      setPriceChecked(updated);
-                    }} style={{ cursor: "pointer", width: 16, height: 16, accentColor: cfg.color }} />
-                  </td>
-                  <td style={Object.assign({}, S.td, { fontFamily: "monospace", color: ck ? "#059669" : "#4A4541" })}>{r.SKUNDC}</td>
-                  <td style={Object.assign({}, S.td, { color: ck ? "#059669" : "#4A4541" })}>{r.Description}</td>
-                  <td style={Object.assign({}, S.td, { textAlign: "right", color: ck ? "#059669" : "#4A4541" })}>{r.OrderQty}</td>
-                  <td style={Object.assign({}, S.td, { textAlign: "right", color: ck ? "#059669" : "#4A4541" })}>${r.Price.toFixed(2)}</td>
-                  <td style={Object.assign({}, S.td, { textAlign: "right", fontWeight: 600, color: ck ? "#059669" : "#2C2825" })}>${r.TotalPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                </tr>;
-              })}</tbody>
-            </table>
+          {/* Item list */}
+          <div style={{ overflow: "auto", flex: 1, padding: "8px 16px" }}>
+            {rows.map(function(r, i) {
+              var ck = priceChecked[priceCheckKey + ":" + r.SKUNDC] || false;
+              return <div key={i} onClick={function() { var updated = Object.assign({}, priceChecked); updated[priceCheckKey + ":" + r.SKUNDC] = !ck; setPriceChecked(updated); }} style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", margin: "4px 0", borderRadius: 12, cursor: "pointer", transition: "all 0.15s", background: ck ? "rgba(5,150,105,0.05)" : "transparent", border: ck ? "1px solid rgba(5,150,105,0.15)" : "1px solid transparent" }}>
+                <div style={{ width: 22, height: 22, borderRadius: 6, border: ck ? "2px solid #059669" : "2px solid #D5D0CA", background: ck ? "#059669" : "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, transition: "all 0.15s" }}>
+                  {ck && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}
+                </div>
+                <div style={{ minWidth: 110, fontFamily: "monospace", fontSize: 13, color: ck ? "#059669" : "#4A4541", fontWeight: 500 }}>{r.SKUNDC}</div>
+                <div style={{ flex: 1, fontSize: 13, color: ck ? "#059669" : "#4A4541", lineHeight: 1.4 }}>{r.Description}</div>
+                <div style={{ textAlign: "right", minWidth: 50, fontSize: 13, color: ck ? "#059669" : "#8A8279" }}>{r.OrderQty}</div>
+                <div style={{ textAlign: "right", minWidth: 80, fontSize: 13, color: ck ? "#059669" : "#4A4541" }}>${r.Price.toFixed(2)}</div>
+                <div style={{ textAlign: "right", minWidth: 100, fontSize: 14, fontWeight: 700, color: ck ? "#059669" : "#2C2825" }}>${r.TotalPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+              </div>;
+            })}
           </div>
-          {uncheckedItems.length > 0 && uncheckedItems.length < rows.length && <div style={{ padding: "12px 24px", borderTop: "1px solid #E8E4DE", background: "rgba(245,158,11,0.06)", fontSize: 12, color: "#D97706" }}>
-            <strong>{uncheckedItems.length} item{uncheckedItems.length > 1 ? "s" : ""} unchecked:</strong> {uncheckedItems.map(function(r) { return r.SKUNDC; }).join(", ")}
+          {/* Footer */}
+          {uncheckedItems.length > 0 && uncheckedItems.length < rows.length && <div style={{ padding: "14px 32px", borderTop: "1px solid #F0EDE8", background: "rgba(245,158,11,0.04)", fontSize: 12, color: "#D97706", lineHeight: 1.5 }}>
+            <strong>{uncheckedItems.length} item{uncheckedItems.length > 1 ? "s" : ""} remaining:</strong> {uncheckedItems.map(function(r) { return r.SKUNDC; }).join(", ")}
           </div>}
-          {allChecked && <div style={{ padding: "12px 24px", borderTop: "1px solid #E8E4DE", background: "rgba(5,150,105,0.06)", fontSize: 12, color: "#059669", fontWeight: 600 }}>
-            {"\u2713"} All prices verified
+          {allChecked && <div style={{ padding: "16px 32px", borderTop: "1px solid #F0EDE8", background: "rgba(5,150,105,0.04)", fontSize: 14, color: "#059669", fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
+            <IconCheck /> All prices verified
           </div>}
         </div>
       </div>;
