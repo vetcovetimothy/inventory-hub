@@ -528,14 +528,22 @@ function WHT(props) {
         var resp = await fetch("/api/kv?key=" + encodeURIComponent(kvKey));
         var json = await resp.json();
         if (m && json.data && json.data.data && json.data.data.length > 0) {
+          console.log("[KV Load]", kvKey, "got", json.data.data.length, "rows, runBy:", json.data.runBy, "runTime:", json.data.runTime);
           setData(json.data.data); setEmailSent(json.data.emailSent || false); setRunBy(json.data.runBy || null); setRunTime(json.data.runTime || null); setShipNotes(json.data.shipNotes || {}); setSubPage("data");
           loaded = true;
+        } else {
+          console.log("[KV Load]", kvKey, "empty or no data. json.data:", json.data ? "exists" : "null");
         }
-      } catch (e) {}
+      } catch (e) { console.warn("[KV Load Error]", kvKey, e.message); }
       // Fall back to localStorage if KV had nothing
       if (!loaded && m) {
         var s = sGet("wh-data-" + whKey);
-        if (s && s.data && s.data.length > 0) { setData(s.data); setEmailSent(s.emailSent || false); setRunBy(s.runBy || null); setRunTime(s.runTime || null); setShipNotes(s.shipNotes || {}); setSubPage("data"); }
+        if (s && s.data && s.data.length > 0) {
+          console.log("[LS Load]", whKey, "got", s.data.length, "rows from localStorage");
+          setData(s.data); setEmailSent(s.emailSent || false); setRunBy(s.runBy || null); setRunTime(s.runTime || null); setShipNotes(s.shipNotes || {}); setSubPage("data");
+        } else {
+          console.log("[LS Load]", whKey, "no localStorage data");
+        }
       }
       if (m) setInitLoading(false);
     })();
@@ -568,8 +576,12 @@ function WHT(props) {
     var payload = { data: d, emailSent: es, runBy: by, runTime: time, shipNotes: sn || {} };
     // Save to localStorage as cache
     sSet("wh-data-" + whKey, payload);
-    // Save to KV for sharing
-    try { await fetch("/api/kv", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: kvKey, value: payload }) }); } catch (e) {}
+    // Save to KV for sharing with other users
+    try {
+      var resp = await fetch("/api/kv", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: kvKey, value: payload }) });
+      var json = await resp.json();
+      if (!resp.ok || json.error) console.warn("[KV Save Failed]", kvKey, json.error || resp.status);
+    } catch (e) { console.warn("[KV Save Error]", kvKey, e.message); }
   }, [kvKey, whKey]);
   var fetchData = useCallback(function() {
     if (!ok) { lp(); return; } setLoading(true); setEmailSent(false); setConfirmClear(false);
