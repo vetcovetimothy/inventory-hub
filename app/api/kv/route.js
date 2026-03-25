@@ -5,20 +5,29 @@ const KV_URL = process.env.KV_REST_API_URL;
 const KV_TOKEN = process.env.KV_REST_API_TOKEN;
 
 async function kvGet(key) {
+  if (!KV_URL || !KV_TOKEN) return null;
   const resp = await fetch(`${KV_URL}/get/${encodeURIComponent(key)}`, {
     headers: { Authorization: `Bearer ${KV_TOKEN}` },
   });
+  if (!resp.ok) { console.error("[KV GET error]", resp.status, await resp.text()); return null; }
   const json = await resp.json();
   if (json.result === null || json.result === undefined) return null;
   try { return JSON.parse(json.result); } catch { return json.result; }
 }
 
 async function kvSet(key, value) {
+  if (!KV_URL || !KV_TOKEN) throw new Error("KV not configured");
+  const body = JSON.stringify(JSON.stringify(value));
   const resp = await fetch(`${KV_URL}/set/${encodeURIComponent(key)}`, {
     method: "POST",
     headers: { Authorization: `Bearer ${KV_TOKEN}`, "Content-Type": "application/json" },
-    body: JSON.stringify(JSON.stringify(value)),
+    body: body,
   });
+  if (!resp.ok) {
+    const errText = await resp.text();
+    console.error("[KV SET error]", resp.status, errText, "payload size:", body.length);
+    throw new Error("KV save failed: " + resp.status);
+  }
   return resp.json();
 }
 
