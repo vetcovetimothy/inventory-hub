@@ -770,7 +770,7 @@ function WHT(props) {
             <div style={{ textAlign: "right", minWidth: 95 }}>Total</div>
             <div style={{ width: 1, height: 14, background: "#E5E7EB", margin: "0 4px" }}></div>
             <div style={{ textAlign: "right", minWidth: 90 }}>Reported</div>
-            <div style={{ textAlign: "right", minWidth: 75 }}>Unit Diff</div>
+            <div style={{ textAlign: "right", minWidth: 75 }}>Unit Cost</div>
           </div>
           {/* Item list */}
           <div style={{ overflow: "auto", flex: 1, padding: "4px 16px" }}>
@@ -780,8 +780,6 @@ function WHT(props) {
               var reported = pcReported[rKey] || "";
               var reportedNum = parseFloat(String(reported).replace(/[$,]/g, ""));
               var reportedUnit = !isNaN(reportedNum) && r.OrderQty > 0 ? reportedNum / r.OrderQty : null;
-              var diff = reportedUnit !== null ? reportedUnit - r.Price : null;
-              var diffColor = diff === null ? "#9CA3AF" : Math.abs(diff) < 0.01 ? "#059669" : diff > 0 ? "#DC2626" : "#D97706";
               return <div key={i} style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 16px", margin: "2px 0", borderRadius: 10, cursor: "pointer", transition: "all 0.15s", background: ck ? "rgba(5,150,105,0.04)" : "transparent", border: ck ? "1px solid rgba(5,150,105,0.12)" : "1px solid transparent" }}>
                 <div onClick={function() { var updated = Object.assign({}, priceChecked); updated[rKey] = !ck; setPriceChecked(updated); }} style={{ width: 22, height: 22, borderRadius: 6, border: ck ? "2px solid #059669" : "2px solid #D1D5DB", background: ck ? "#059669" : "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, transition: "all 0.15s", cursor: "pointer" }}>
                   {ck && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}
@@ -795,8 +793,8 @@ function WHT(props) {
                 <div style={{ minWidth: 90 }} onClick={function(e) { e.stopPropagation(); }}>
                   <input value={reported} onChange={function(e) { var u = Object.assign({}, pcReported); u[rKey] = e.target.value; setPcReported(u); }} placeholder="$0.00" style={{ width: 85, padding: "5px 8px", borderRadius: 6, border: "1px solid #E5E7EB", fontSize: 12, textAlign: "right", outline: "none", background: reported ? "#FFFFFF" : "#F9FAFB", color: "#374151" }} />
                 </div>
-                <div style={{ textAlign: "right", minWidth: 75, fontSize: 12, fontWeight: 600, color: diffColor }}>
-                  {reportedUnit !== null ? (Math.abs(diff) < 0.01 ? "\u2713 Match" : (diff > 0 ? "+" : "") + "$" + diff.toFixed(2)) : "\u2014"}
+                <div style={{ textAlign: "right", minWidth: 75, fontSize: 12, fontWeight: 600, color: reportedUnit !== null ? "#1F2937" : "#9CA3AF" }}>
+                  {reportedUnit !== null ? "$" + reportedUnit.toFixed(4) : "\u2014"}
                 </div>
               </div>;
             })}
