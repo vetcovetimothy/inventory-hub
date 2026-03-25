@@ -7,11 +7,13 @@ const KV_TOKEN = process.env.KV_REST_API_TOKEN;
 
 async function kvGet(key) {
   if (!KV_URL || !KV_TOKEN) return null;
-  const resp = await fetch(`${KV_URL}/get/${encodeURIComponent(key)}`, {
-    headers: { Authorization: `Bearer ${KV_TOKEN}` },
+  const resp = await fetch(`${KV_URL}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${KV_TOKEN}`, "Content-Type": "application/json" },
+    body: JSON.stringify(["GET", key]),
     cache: "no-store",
   });
-  if (!resp.ok) { console.error("[KV GET error]", resp.status, await resp.text()); return null; }
+  if (!resp.ok) return null;
   const json = await resp.json();
   if (json.result === null || json.result === undefined) return null;
   try { return JSON.parse(json.result); } catch { return json.result; }
@@ -19,19 +21,20 @@ async function kvGet(key) {
 
 async function kvSet(key, value) {
   if (!KV_URL || !KV_TOKEN) throw new Error("KV not configured");
-  const body = JSON.stringify(JSON.stringify(value));
-  const resp = await fetch(`${KV_URL}/set/${encodeURIComponent(key)}`, {
+  const serialized = JSON.stringify(value);
+  const resp = await fetch(`${KV_URL}`, {
     method: "POST",
     headers: { Authorization: `Bearer ${KV_TOKEN}`, "Content-Type": "application/json" },
-    body: body,
+    body: JSON.stringify(["SET", key, serialized]),
     cache: "no-store",
   });
   if (!resp.ok) {
     const errText = await resp.text();
-    console.error("[KV SET error]", resp.status, errText, "payload size:", body.length);
-    throw new Error("KV save failed: " + resp.status);
+    throw new Error("KV save failed: " + resp.status + " " + errText);
   }
-  return resp.json();
+  const json = await resp.json();
+  if (json.error) throw new Error("KV error: " + json.error);
+  return json;
 }
 
 export async function GET(request) {
@@ -41,7 +44,7 @@ export async function GET(request) {
     if (!key) return Response.json({ error: "Missing key" }, { status: 400 });
     const data = await kvGet(key);
     return Response.json({ data }, {
-      headers: { "Cache-Control": "no-store, no-cache, must-revalidate", "Pragma": "no-cache" },
+      headers: { "Cache-Control": "no-store, no-cache, must-revalidate" },
     });
   } catch (err) {
     return Response.json({ error: err.message }, { status: 500 });
