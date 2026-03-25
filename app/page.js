@@ -15,6 +15,19 @@ function sDel(k) {
   try { localStorage.removeItem("vh-" + k); } catch {}
 }
 
+/* ═══════ KV HELPERS ═══════ */
+var KV_SECRET = typeof process !== "undefined" && process.env && process.env.NEXT_PUBLIC_KV_SECRET || "";
+function kvHeaders(extra) {
+  var h = Object.assign({ "x-kv-secret": KV_SECRET }, extra || {});
+  return h;
+}
+function kvGet(key) {
+  return fetch("/api/kv?key=" + encodeURIComponent(key) + "&_t=" + Date.now(), { cache: "no-store", headers: kvHeaders() });
+}
+function kvPost(key, value) {
+  return fetch("/api/kv", { method: "POST", headers: kvHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ key: key, value: value }) });
+}
+
 /* ═══════ API HELPERS ═══════ */
 async function fetchAcumatica(type, warehouse, username, password) {
   const resp = await fetch("/api/acumatica", {
@@ -525,7 +538,7 @@ function WHT(props) {
       var loaded = false;
       // Try KV first
       try {
-        var resp = await fetch("/api/kv?key=" + encodeURIComponent(kvKey) + "&_t=" + Date.now(), { cache: "no-store" });
+        var resp = await kvGet(kvKey);
         var json = await resp.json();
         if (m && json.data && json.data.data && json.data.data.length > 0) {
           setData(json.data.data); setEmailSent(json.data.emailSent || false); setRunBy(json.data.runBy || null); setRunTime(json.data.runTime || null); setShipNotes(json.data.shipNotes || {}); setSubPage("data");
@@ -557,7 +570,7 @@ function WHT(props) {
     var m = true;
     var poll = setInterval(async function() {
       try {
-        var resp = await fetch("/api/kv?key=" + encodeURIComponent(kvKey) + "&_t=" + Date.now(), { cache: "no-store" });
+        var resp = await kvGet(kvKey);
         var json = await resp.json();
         if (!m || !json.data) return;
         var remote = json.data;
@@ -582,13 +595,12 @@ function WHT(props) {
     sSet("wh-data-" + whKey, payload);
     // Save to KV for sharing with other users
     try {
-      var bodyStr = JSON.stringify({ key: kvKey, value: payload });
-      var sizeKB = Math.round(bodyStr.length / 1024);
-      var resp = await fetch("/api/kv", { method: "POST", headers: { "Content-Type": "application/json" }, body: bodyStr });
+      var sizeKB = Math.round(JSON.stringify(payload).length / 1024);
+      var resp = await kvPost(kvKey, payload);
       var json = await resp.json();
       if (!resp.ok || json.error) { setKvStatus("save-fail:" + sizeKB + "KB " + (json.error || resp.status)); return; }
       // Verify: read it back immediately
-      var vResp = await fetch("/api/kv?key=" + encodeURIComponent(kvKey) + "&_t=" + Date.now(), { cache: "no-store" });
+      var vResp = await kvGet(kvKey);
       var vJson = await vResp.json();
       if (vJson.data && vJson.data.data && vJson.data.data.length > 0) {
         setKvStatus("verified:" + sizeKB + "KB," + vJson.data.data.length + "rows");
@@ -642,7 +654,7 @@ function WHT(props) {
       }
     })();
   }, [whKey, cred, cfg.label, toast, ok, lp, persist]);
-  var clearAll = useCallback(async function() { if (!ok) { lp(); return; } setData([]); setSearch(""); setVendorFilter("all"); setFlagsOnly(false); setEmailSent(false); setConfirmClear(false); setRunBy(null); setRunTime(null); setSubPage("overview"); setShipNotes({}); sDel("wh-data-" + whKey); try { await fetch("/api/kv", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: kvKey, value: {} }) }); } catch (e) {} toast(cfg.label + ": Cleared"); }, [cfg.label, toast, ok, lp, kvKey, whKey]);
+  var clearAll = useCallback(async function() { if (!ok) { lp(); return; } setData([]); setSearch(""); setVendorFilter("all"); setFlagsOnly(false); setEmailSent(false); setConfirmClear(false); setRunBy(null); setRunTime(null); setSubPage("overview"); setShipNotes({}); sDel("wh-data-" + whKey); try { await kvPost(kvKey, {}); } catch (e) {} toast(cfg.label + ": Cleared"); }, [cfg.label, toast, ok, lp, kvKey, whKey]);
 
   var vendorGroups = useMemo(function() { var g = {}; data.forEach(function(r) { var key = r.VendorName + " || " + (r.OrderNbr || ""); if (!g[key]) g[key] = []; g[key].push(r); }); return g; }, [data]);
   var vendorTotals = useMemo(function() { var t = {}; Object.entries(vendorGroups).forEach(function(e) { t[e[0]] = e[1].reduce(function(s, r) { return s + r.TotalPrice; }, 0); }); return t; }, [vendorGroups]);
