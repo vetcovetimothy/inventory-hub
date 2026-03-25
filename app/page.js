@@ -532,7 +532,9 @@ function WHT(props) {
           if (m) setKvStatus("loaded-kv:" + json.data.data.length);
           loaded = true;
         } else {
-          if (m) setKvStatus("kv-empty");
+          // Show what KV returned for debugging
+          var dbg = json.data === null ? "null" : json.data === undefined ? "undef" : typeof json.data === "object" ? (json.data.data ? "data:" + (json.data.data.length || 0) : "no-data-key") : typeof json.data;
+          if (m) setKvStatus("kv-empty(" + dbg + ")");
         }
       } catch (e) { if (m) setKvStatus("kv-error:" + e.message); }
       // Fall back to localStorage if KV had nothing
@@ -580,10 +582,19 @@ function WHT(props) {
     sSet("wh-data-" + whKey, payload);
     // Save to KV for sharing with other users
     try {
-      var resp = await fetch("/api/kv", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: kvKey, value: payload }) });
+      var bodyStr = JSON.stringify({ key: kvKey, value: payload });
+      var sizeKB = Math.round(bodyStr.length / 1024);
+      var resp = await fetch("/api/kv", { method: "POST", headers: { "Content-Type": "application/json" }, body: bodyStr });
       var json = await resp.json();
-      if (!resp.ok || json.error) { setKvStatus("save-fail:" + (json.error || resp.status)); }
-      else { setKvStatus("saved"); }
+      if (!resp.ok || json.error) { setKvStatus("save-fail:" + sizeKB + "KB " + (json.error || resp.status)); return; }
+      // Verify: read it back immediately
+      var vResp = await fetch("/api/kv?key=" + encodeURIComponent(kvKey));
+      var vJson = await vResp.json();
+      if (vJson.data && vJson.data.data && vJson.data.data.length > 0) {
+        setKvStatus("verified:" + sizeKB + "KB," + vJson.data.data.length + "rows");
+      } else {
+        setKvStatus("save-lost:" + sizeKB + "KB,readback-empty");
+      }
     } catch (e) { setKvStatus("save-error:" + e.message); }
   }, [kvKey, whKey]);
   var fetchData = useCallback(function() {
@@ -653,7 +664,7 @@ function WHT(props) {
       </div>
       <div style={{ flex: 1 }} />
       {runTime && <span style={{ fontSize: 11, color: "#A69E95" }}>Last: {runTime}{runBy ? " by " + runBy : ""}</span>}
-      {kvStatus && <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 4, background: kvStatus.startsWith("saved") || kvStatus.startsWith("loaded-kv") ? "rgba(5,150,105,0.1)" : kvStatus.startsWith("loaded-ls") ? "rgba(245,158,11,0.1)" : "rgba(239,68,68,0.1)", color: kvStatus.startsWith("saved") || kvStatus.startsWith("loaded-kv") ? "#059669" : kvStatus.startsWith("loaded-ls") ? "#D97706" : "#DC2626" }}>{kvStatus.startsWith("saved") ? "KV synced" : kvStatus.startsWith("loaded-kv") ? "from KV" : kvStatus.startsWith("loaded-ls") ? "local only" : kvStatus}</span>}
+      {kvStatus && <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 4, background: kvStatus.startsWith("verified") || kvStatus.startsWith("loaded-kv") ? "rgba(5,150,105,0.1)" : kvStatus.startsWith("loaded-ls") ? "rgba(245,158,11,0.1)" : "rgba(239,68,68,0.1)", color: kvStatus.startsWith("verified") || kvStatus.startsWith("loaded-kv") ? "#059669" : kvStatus.startsWith("loaded-ls") ? "#D97706" : "#DC2626" }}>{kvStatus}</span>}
       {data.length > 0 && <span style={S.badge(emailSent ? "success" : "default")}>{emailSent ? <><IconCheck /> Sent</> : data.length + " lines"}</span>}
       {data.length > 0 && (confirmClear ? <div style={{ display: "flex", gap: 8, alignItems: "center" }}><span style={{ fontSize: 12, color: "#DC2626" }}>Clear?</span><button onClick={clearAll} style={Object.assign({}, S.btn("danger"), { padding: "6px 14px", fontSize: 12 })}>Yes</button><button onClick={function() { setConfirmClear(false); }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}>No</button></div> : <Gate ok={ok} prompt={lp} onClick={function() { setConfirmClear(true); }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12, color: "#8A8279" })}><IconTrash /> Clear</Gate>)}
     </div>
