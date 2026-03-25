@@ -793,8 +793,8 @@ function WHT(props) {
                 <div style={{ minWidth: 90 }} onClick={function(e) { e.stopPropagation(); }}>
                   <input value={reported} onChange={function(e) { var u = Object.assign({}, pcReported); u[rKey] = e.target.value; setPcReported(u); }} placeholder="$0.00" style={{ width: 85, padding: "5px 8px", borderRadius: 6, border: "1px solid #E5E7EB", fontSize: 12, textAlign: "right", outline: "none", background: reported ? "#FFFFFF" : "#F9FAFB", color: "#374151" }} />
                 </div>
-                <div style={{ textAlign: "right", minWidth: 75, fontSize: 12, fontWeight: 600, color: reportedUnit !== null ? "#1F2937" : "#9CA3AF" }}>
-                  {reportedUnit !== null ? "$" + reportedUnit.toFixed(4) : "\u2014"}
+                <div style={{ textAlign: "right", minWidth: 85, fontSize: 12, fontWeight: 600, color: reportedUnit !== null ? (Math.abs(reportedUnit - r.Price) < 0.01 ? "#059669" : "#DC2626") : "#9CA3AF", display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 4 }}>
+                  {reportedUnit !== null ? <>{Math.abs(reportedUnit - r.Price) < 0.01 ? <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg> : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#DC2626" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>}{"$" + reportedUnit.toFixed(4)}</> : "\u2014"}
                 </div>
               </div>;
             })}
