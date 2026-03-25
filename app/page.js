@@ -244,34 +244,34 @@ function Spinner({ color, size }) { return <span style={{ width: size || 14, hei
 function InfoTip({ text }) {
   var _show = useState(false), show = _show[0], setShow = _show[1];
   return <span style={{ position: "relative", display: "inline-flex" }} onMouseEnter={function() { setShow(true); }} onMouseLeave={function() { setShow(false); }}>
-    <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 18, height: 18, borderRadius: "50%", border: "1.5px solid #A69E95", color: "#A69E95", fontSize: 11, fontWeight: 700, cursor: "help", flexShrink: 0, lineHeight: 1 }}>i</span>
-    {show && <span style={{ position: "absolute", bottom: "calc(100% + 8px)", left: "50%", transform: "translateX(-50%)", background: "#2C2825", color: "#fff", fontSize: 12, lineHeight: 1.4, padding: "8px 12px", borderRadius: 8, whiteSpace: "normal", width: 240, zIndex: 100, boxShadow: "0 4px 12px rgba(0,0,0,0.15)", pointerEvents: "none" }}>{text}<span style={{ position: "absolute", top: "100%", left: "50%", transform: "translateX(-50%)", borderLeft: "6px solid transparent", borderRight: "6px solid transparent", borderTop: "6px solid #2C2825" }} /></span>}
+    <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 18, height: 18, borderRadius: "50%", border: "1.5px solid #9CA3AF", color: "#9CA3AF", fontSize: 11, fontWeight: 700, cursor: "help", flexShrink: 0, lineHeight: 1 }}>i</span>
+    {show && <span style={{ position: "absolute", bottom: "calc(100% + 8px)", left: "50%", transform: "translateX(-50%)", background: "#1F2937", color: "#fff", fontSize: 12, lineHeight: 1.4, padding: "8px 12px", borderRadius: 8, whiteSpace: "normal", width: 240, zIndex: 100, boxShadow: "0 4px 12px rgba(0,0,0,0.15)", pointerEvents: "none" }}>{text}<span style={{ position: "absolute", top: "100%", left: "50%", transform: "translateX(-50%)", borderLeft: "6px solid transparent", borderRight: "6px solid transparent", borderTop: "6px solid #1F2937" }} /></span>}
   </span>;
 }
 
 /* ═══════ STYLES ═══════ */
 function makeStyles(accent) {
   return {
-    card: { background: "#FFFFFF", border: "1px solid #E8E4DE", borderRadius: 16, padding: 24, marginBottom: 20, boxShadow: "0 1px 4px rgba(44,40,37,0.05)" },
-    statCard: { background: "#FFFFFF", border: "1px solid #E8E4DE", borderRadius: 16, padding: "20px 24px", flex: 1, minWidth: 160, position: "relative", overflow: "hidden", boxShadow: "0 1px 4px rgba(44,40,37,0.05)" },
+    card: { background: "#FFFFFF", border: "0.5px solid #E5E7EB", borderRadius: 14, padding: 24, marginBottom: 20 },
+    statCard: { borderRadius: 14, padding: "20px 24px", flex: 1, minWidth: 160, position: "relative", overflow: "hidden" },
     btn: function(v) {
-      var base = { display: "inline-flex", alignItems: "center", gap: 6, padding: "10px 18px", borderRadius: 10, border: "none", fontSize: 14, fontWeight: 600, cursor: "pointer", transition: "all 0.15s" };
+      var base = { display: "inline-flex", alignItems: "center", gap: 6, padding: "10px 18px", borderRadius: 10, border: "none", fontSize: 13, fontWeight: 600, cursor: "pointer", transition: "all 0.15s" };
       if (v === "danger") return Object.assign({}, base, { background: "#DC2626", color: "#fff" });
-      if (v === "ghost") return Object.assign({}, base, { background: "transparent", color: "#8A8279", border: "1px solid #E8E4DE" });
+      if (v === "ghost") return Object.assign({}, base, { background: "transparent", color: "#6B7280", border: "1px solid #E5E7EB" });
       return Object.assign({}, base, { background: accent, color: "#fff" });
     },
-    inp: { background: "#F8F6F3", border: "1px solid #E8E4DE", borderRadius: 10, padding: "10px 14px", color: "#2C2825", fontSize: 14, outline: "none", width: "100%" },
-    sel: { background: "#F8F6F3", border: "1px solid #E8E4DE", borderRadius: 10, padding: "10px 14px", color: "#2C2825", fontSize: 14, outline: "none" },
-    th: { padding: "14px 14px", textAlign: "left", background: "#F5F3EF", color: "#9A928A", fontWeight: 600, fontSize: 13, textTransform: "uppercase", letterSpacing: "0.3px", borderBottom: "2px solid #E8E4DE", position: "sticky", top: 0, zIndex: 2 },
-    td: { padding: "14px 14px", borderBottom: "1px solid #F0EDE8", color: "#4A4541", fontSize: 14 },
+    inp: { background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 8, padding: "9px 14px", color: "#1F2937", fontSize: 13, outline: "none", width: "100%" },
+    sel: { background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 8, padding: "9px 14px", color: "#1F2937", fontSize: 13, outline: "none" },
+    th: { padding: "10px 16px", textAlign: "left", background: "#F9FAFB", color: "#9CA3AF", fontWeight: 500, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: "1px solid #E5E7EB", position: "sticky", top: 0, zIndex: 2 },
+    td: { padding: "14px 16px", borderBottom: "1px solid #F3F4F6", color: "#374151", fontSize: 13 },
     badge: function(t) {
-      var base = { display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 20, fontSize: 12, fontWeight: 600 };
+      var base = { display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 20, fontSize: 12, fontWeight: 500 };
       var colors = { success: ["#ECFDF5", "#059669"], danger: ["#FEF2F2", "#DC2626"], warning: ["#FFFBEB", "#D97706"], purple: ["#F5F3FF", "#7C3AED"], blue: ["#EFF6FF", "#2563EB"] };
-      var c = colors[t] || ["#F5F3EF", "#8A8279"];
+      var c = colors[t] || ["#F3F4F6", "#6B7280"];
       return Object.assign({}, base, { background: c[0], color: c[1] });
     },
     pill: function(active, col) {
-      return { padding: "10px 20px", borderRadius: 10, fontSize: 15, fontWeight: 600, border: "none", cursor: "pointer", transition: "all 0.15s", display: "flex", alignItems: "center", gap: 6, background: active ? (col || accent) : "transparent", color: active ? "#fff" : "#9A928A" };
+      return { padding: "8px 18px", borderRadius: 8, fontSize: 13, fontWeight: 500, border: "none", cursor: "pointer", transition: "all 0.15s", display: "flex", alignItems: "center", gap: 6, background: active ? (col || accent) : "transparent", color: active ? "#fff" : "#9CA3AF" };
     },
   };
 }
@@ -285,7 +285,7 @@ function CopyCell({ text, toast, color, accentColor }) {
   var _copied = useState(false), copied = _copied[0], setCopied = _copied[1];
   return (
     <div title={"Click to copy: " + text} onClick={function() { navigator.clipboard.writeText(text); setCopied(true); toast("Copied: " + text.slice(0, 40)); setTimeout(function() { setCopied(false); }, 1500); }}
-      style={{ cursor: "pointer", padding: "6px 10px", borderRadius: 8, wordBreak: "break-word", lineHeight: 1.4, color: color || "#4A4541", display: "flex", alignItems: "flex-start", gap: 6, background: copied ? "#ECFDF5" : "#F8F6F3", border: "1px solid " + (copied ? "#059669" : "#E8E4DE"), transition: "all 0.2s" }}>
+      style={{ cursor: "pointer", padding: "6px 10px", borderRadius: 8, wordBreak: "break-word", lineHeight: 1.4, color: color || "#374151", display: "flex", alignItems: "flex-start", gap: 6, background: copied ? "#ECFDF5" : "#F9FAFB", border: "1px solid " + (copied ? "#059669" : "#E5E7EB"), transition: "all 0.2s" }}>
       <span style={{ flex: 1, fontSize: 12 }}>{text}</span>
       <span style={{ flexShrink: 0, marginTop: 2, color: copied ? "#059669" : "#B5AEA5", transition: "all 0.2s" }}>{copied ? <IconCheck /> : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>}</span>
     </div>
@@ -418,7 +418,7 @@ function TrackerTool(props) {
     }
   }, [ok, lp, gmail, emailVendors, emailConfig, toast, data, runBy, runTime, persist, toolLabel]);
 
-  if (initLoading) return <div style={Object.assign({}, S.card, { textAlign: "center", padding: 48, color: "#8A8279" })}><Spinner color={toolColor} size={20} /></div>;
+  if (initLoading) return <div style={Object.assign({}, S.card, { textAlign: "center", padding: 48, color: "#6B7280" })}><Spinner color={toolColor} size={20} /></div>;
 
   var ToolIcon = toolKey === "backorder" ? IconBox : IconClock;
   var dataLabel = toolKey === "backorder" ? "Backorder Data" : "Short Data";
@@ -426,31 +426,31 @@ function TrackerTool(props) {
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24, flexWrap: "wrap" }}>
-        <div style={{ display: "flex", gap: 4, background: "#FAFAF8", borderRadius: 10, padding: 3 }}>
+        <div style={{ display: "flex", gap: 4, background: "#F8F9FB", borderRadius: 10, padding: 3 }}>
           <button onClick={function() { setSubPage("data"); }} style={S.pill(subPage === "data", toolColor)}>{dataLabel}{data.length > 0 && <span style={{ fontSize: 10, background: subPage === "data" ? "rgba(255,255,255,0.2)" : "rgba(100,116,139,0.2)", padding: "1px 6px", borderRadius: 4 }}>{data.length}</span>}</button>
           <button onClick={function() { if (!ok) { lp(); return; } setSubPage("emails"); }} style={Object.assign({}, S.pill(subPage === "emails", toolColor), !ok ? { opacity: 0.5 } : {})}>{!ok && <IconLock />} Email Drafts</button>
           <button onClick={function() { if (!ok) { lp(); return; } setSubPage("contacts"); }} style={Object.assign({}, S.pill(subPage === "contacts", toolColor), !ok ? { opacity: 0.5 } : {})}>{!ok && <IconLock />} Vendor Contacts</button>
         </div>
         <div style={{ flex: 1 }} />
-        {runTime && <span style={{ fontSize: 11, color: "#A69E95" }}>Last: {runTime}{runBy ? " by " + runBy : ""}</span>}
+        {runTime && <span style={{ fontSize: 11, color: "#9CA3AF" }}>Last: {runTime}{runBy ? " by " + runBy : ""}</span>}
         {data.length > 0 && <span style={S.badge(drafts > 0 ? "success" : "default")}>{drafts > 0 ? <><IconCheck /> {drafts} drafts</> : data.length + " items"}</span>}
         {data.length > 0 && (confirmClear
           ? <div style={{ display: "flex", gap: 8, alignItems: "center" }}><span style={{ fontSize: 12, color: "#DC2626" }}>Clear?</span><button onClick={clearAll} style={Object.assign({}, S.btn("danger"), { padding: "6px 14px", fontSize: 12 })}>Yes</button><button onClick={function() { setConfirmClear(false); }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}>No</button></div>
-          : <button onClick={function() { setConfirmClear(true); }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12, color: "#8A8279" })}><IconTrash /> Clear</button>
+          : <button onClick={function() { setConfirmClear(true); }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12, color: "#6B7280" })}><IconTrash /> Clear</button>
         )}
       </div>
 
       {subPage === "data" && <div>
         <div style={Object.assign({}, S.card, { display: "flex", alignItems: "center", gap: 16, padding: "16px 24px" })}>
           <div style={{ width: 40, height: 40, borderRadius: 10, background: toolColor + "20", display: "flex", alignItems: "center", justifyContent: "center", color: toolColor }}><ToolIcon /></div>
-          <div style={{ flex: 1 }}><div style={{ fontSize: 16, fontWeight: 700, color: "#2C2825" }}>{toolLabel}</div><div style={{ fontSize: 12, color: "#8A8279" }}>{data.length > 0 ? data.length + " items across " + uniqueVendors.length + " vendors" : "No data synced"}</div></div>
+          <div style={{ flex: 1 }}><div style={{ fontSize: 16, fontWeight: 700, color: "#1F2937" }}>{toolLabel}</div><div style={{ fontSize: 12, color: "#6B7280" }}>{data.length > 0 ? data.length + " items across " + uniqueVendors.length + " vendors" : "No data synced"}</div></div>
           <button style={Object.assign({}, S.btn(), { padding: "10px 24px" })} onClick={syncData} disabled={loading}>{loading ? <><Spinner /> Syncing...</> : <><IconRefresh /> {data.length > 0 ? "Re-sync" : "Sync Data"}</>}</button>
         </div>
         {data.length > 0 && <>
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
             <input style={Object.assign({}, S.inp, { maxWidth: 260 })} placeholder="Search..." value={search} onChange={function(e) { setSearch(e.target.value); }} />
             <select style={S.sel} value={vendorFilter} onChange={function(e) { setVendorFilter(e.target.value); }}><option value="all">All Vendors</option>{uniqueVendors.map(function(v) { return <option key={v} value={v}>{v}</option>; })}</select>
-            <div style={{ flex: 1 }} /><span style={{ fontSize: 12, color: "#8A8279" }}>{filtered.length}/{data.length}</span>
+            <div style={{ flex: 1 }} /><span style={{ fontSize: 12, color: "#6B7280" }}>{filtered.length}/{data.length}</span>
           </div>
           <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto" })}>
             <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
@@ -469,13 +469,13 @@ function TrackerTool(props) {
             </table>
           </div>
         </>}
-        {data.length === 0 && !loading && <div style={Object.assign({}, S.card, { textAlign: "center", padding: 60, color: "#A69E95" })}><ToolIcon /><p style={{ marginTop: 12, fontSize: 14 }}>Click <strong>Sync Data</strong> to pull {toolLabel.toLowerCase()} from Acumatica.</p></div>}
+        {data.length === 0 && !loading && <div style={Object.assign({}, S.card, { textAlign: "center", padding: 60, color: "#9CA3AF" })}><ToolIcon /><p style={{ marginTop: 12, fontSize: 14 }}>Click <strong>Sync Data</strong> to pull {toolLabel.toLowerCase()} from Acumatica.</p></div>}
       </div>}
 
       {subPage === "emails" && <div>
-        <h3 style={{ fontSize: 16, fontWeight: 700, color: "#2C2825", margin: "0 0 4px" }}>{emailConfig.title}</h3>
-        <p style={{ color: "#8A8279", fontSize: 12, margin: "0 0 16px" }}>{emailConfig.subtitle}</p>
-        {skipVendors.length > 0 && <div style={{ background: "rgba(100,116,139,0.06)", border: "1px solid #E8E4DE", borderRadius: 8, padding: "10px 16px", marginBottom: 16, fontSize: 12, color: "#8A8279" }}>Skipped: {skipVendors.join(", ")}</div>}
+        <h3 style={{ fontSize: 16, fontWeight: 700, color: "#1F2937", margin: "0 0 4px" }}>{emailConfig.title}</h3>
+        <p style={{ color: "#6B7280", fontSize: 12, margin: "0 0 16px" }}>{emailConfig.subtitle}</p>
+        {skipVendors.length > 0 && <div style={{ background: "rgba(100,116,139,0.06)", border: "1px solid #E5E7EB", borderRadius: 8, padding: "10px 16px", marginBottom: 16, fontSize: 12, color: "#6B7280" }}>Skipped: {skipVendors.join(", ")}</div>}
         {drafts > 0 && <div style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.3)", borderRadius: 10, padding: "14px 20px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}><IconCheck /><span style={{ fontSize: 13, color: "#059669" }}><strong>{drafts} draft(s) created!</strong></span></div>}
         {data.length > 0 ? <>
           {emailVendors.map(function(entry) {
@@ -484,7 +484,7 @@ function TrackerTool(props) {
             var toLine = emailConfig.buildTo(email);
             return <div key={vendor} style={S.card}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
-                <div><div style={{ fontSize: 14, fontWeight: 600, color: "#2C2825" }}>{vendor}</div><div style={{ fontSize: 11, color: "#8A8279", marginTop: 2 }}>{items.length} items &middot; To: {toLine || "No email on file"}</div></div>
+                <div><div style={{ fontSize: 14, fontWeight: 600, color: "#1F2937" }}>{vendor}</div><div style={{ fontSize: 11, color: "#6B7280", marginTop: 2 }}>{items.length} items &middot; To: {toLine || "No email on file"}</div></div>
                 <span style={S.badge("purple")}>{items.length}</span>
               </div>
               <div style={{ overflow: "auto", maxHeight: 200 }}>
@@ -496,15 +496,15 @@ function TrackerTool(props) {
             </div>;
           })}
           <Gate ok={ok} prompt={lp} style={Object.assign({}, S.btn(), { padding: "10px 24px", opacity: drafts > 0 ? 0.5 : 1 })} onClick={genDrafts} disabled={drafts > 0}><IconMail /> {drafts > 0 ? drafts + " Drafts Created" : "Generate " + emailVendors.length + " Email Drafts"}</Gate>
-        </> : <div style={Object.assign({}, S.card, { textAlign: "center", padding: 48, color: "#A69E95" })}>Sync data first.</div>}
+        </> : <div style={Object.assign({}, S.card, { textAlign: "center", padding: 48, color: "#9CA3AF" })}>Sync data first.</div>}
       </div>}
 
       {subPage === "contacts" && <div>
-        <h3 style={{ fontSize: 16, fontWeight: 700, color: "#2C2825", margin: "0 0 16px" }}>Vendor Contacts</h3>
+        <h3 style={{ fontSize: 16, fontWeight: 700, color: "#1F2937", margin: "0 0 16px" }}>Vendor Contacts</h3>
         <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto" })}>
           <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
             <thead><tr><th style={S.th}>Vendor</th><th style={S.th}>Email(s)</th></tr></thead>
-            <tbody>{Object.entries(CONTACTS).filter(function(e) { return e[1]; }).sort(function(a, b) { return a[0].localeCompare(b[0]); }).map(function(e) { return <tr key={e[0]}><td style={Object.assign({}, S.td, { fontWeight: 500, color: "#4A4541" })}>{e[0]}</td><td style={Object.assign({}, S.td, { fontSize: 14, color: "#8A8279" })}>{e[1]}</td></tr>; })}</tbody>
+            <tbody>{Object.entries(CONTACTS).filter(function(e) { return e[1]; }).sort(function(a, b) { return a[0].localeCompare(b[0]); }).map(function(e) { return <tr key={e[0]}><td style={Object.assign({}, S.td, { fontWeight: 500, color: "#374151" })}>{e[0]}</td><td style={Object.assign({}, S.td, { fontSize: 14, color: "#6B7280" })}>{e[1]}</td></tr>; })}</tbody>
           </table>
         </div>
       </div>}
@@ -669,35 +669,35 @@ function WHT(props) {
   var filtered = useMemo(function() { var d = data.slice(); if (search) { var s = search.toLowerCase(); d = d.filter(function(r) { return r.SKUNDC.toLowerCase().indexOf(s) >= 0 || r.Description.toLowerCase().indexOf(s) >= 0 || r.VendorName.toLowerCase().indexOf(s) >= 0; }); } if (vendorFilter !== "all") d = d.filter(function(r) { return r.VendorName === vendorFilter; }); if (flagsOnly) { var fi = new Set(flags.s.concat(flags.so)); d = d.filter(function(r) { return fi.has(data.indexOf(r)); }); } d.sort(function(a, b) { var fa = getFlag(a) ? 0 : 1; var fb = getFlag(b) ? 0 : 1; return fa - fb; }); return d; }, [data, search, vendorFilter, flagsOnly, flags]);
   var todayStr = new Date().toLocaleDateString("en-US", { month: "numeric", day: "numeric" });
 
-  if (initLoading) return <div style={Object.assign({}, S.card, { textAlign: "center", padding: 48, color: "#8A8279" })}><Spinner color={cfg.color} size={20} /></div>;
+  if (initLoading) return <div style={Object.assign({}, S.card, { textAlign: "center", padding: 48, color: "#6B7280" })}><Spinner color={cfg.color} size={20} /></div>;
 
   return (<div>
     <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24, flexWrap: "wrap" }}>
-      <div style={{ display: "flex", gap: 4, background: "#FAFAF8", borderRadius: 10, padding: 3 }}>
+      <div style={{ display: "flex", gap: 4, background: "#F8F9FB", borderRadius: 10, padding: 3 }}>
         {[{ id: "overview", lb: "Overview" }, { id: "data", lb: "PO Data", ct: data.length || null }, { id: "shipping", lb: "Shipping" }, { id: "email", lb: "Email" }].map(function(n) { return <button key={n.id} onClick={function() { setSubPage(n.id); }} style={S.pill(subPage === n.id, cfg.color)}>{n.lb}{n.ct ? <span style={{ fontSize: 10, background: subPage === n.id ? "rgba(255,255,255,0.2)" : "rgba(100,116,139,0.2)", padding: "1px 6px", borderRadius: 4 }}>{n.ct}</span> : null}</button>; })}
       </div>
       <div style={{ flex: 1 }} />
-      {runTime && <span style={{ fontSize: 11, color: "#A69E95" }}>Last: {runTime}{runBy ? " by " + runBy : ""}</span>}
+      {runTime && <span style={{ fontSize: 11, color: "#9CA3AF" }}>Last: {runTime}{runBy ? " by " + runBy : ""}</span>}
       {kvStatus && <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 4, background: kvStatus.startsWith("verified") || kvStatus.startsWith("loaded-kv") ? "rgba(5,150,105,0.1)" : kvStatus.startsWith("loaded-ls") ? "rgba(245,158,11,0.1)" : "rgba(239,68,68,0.1)", color: kvStatus.startsWith("verified") || kvStatus.startsWith("loaded-kv") ? "#059669" : kvStatus.startsWith("loaded-ls") ? "#D97706" : "#DC2626" }}>{kvStatus}</span>}
       {data.length > 0 && <span style={S.badge(emailSent ? "success" : "default")}>{emailSent ? <><IconCheck /> Sent</> : data.length + " lines"}</span>}
-      {data.length > 0 && (confirmClear ? <div style={{ display: "flex", gap: 8, alignItems: "center" }}><span style={{ fontSize: 12, color: "#DC2626" }}>Clear?</span><button onClick={clearAll} style={Object.assign({}, S.btn("danger"), { padding: "6px 14px", fontSize: 12 })}>Yes</button><button onClick={function() { setConfirmClear(false); }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}>No</button></div> : <Gate ok={ok} prompt={lp} onClick={function() { setConfirmClear(true); }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12, color: "#8A8279" })}><IconTrash /> Clear</Gate>)}
+      {data.length > 0 && (confirmClear ? <div style={{ display: "flex", gap: 8, alignItems: "center" }}><span style={{ fontSize: 12, color: "#DC2626" }}>Clear?</span><button onClick={clearAll} style={Object.assign({}, S.btn("danger"), { padding: "6px 14px", fontSize: 12 })}>Yes</button><button onClick={function() { setConfirmClear(false); }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}>No</button></div> : <Gate ok={ok} prompt={lp} onClick={function() { setConfirmClear(true); }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12, color: "#6B7280" })}><IconTrash /> Clear</Gate>)}
     </div>
 
     {subPage === "overview" && <div>
       <div style={Object.assign({}, S.card, { display: "flex", alignItems: "center", gap: 16, padding: "16px 24px" })}>
         <div style={{ width: 40, height: 40, borderRadius: 10, background: cfg.color + "20", display: "flex", alignItems: "center", justifyContent: "center", color: cfg.color }}><IconWH /></div>
-        <div style={{ flex: 1 }}><div style={{ fontSize: 16, fontWeight: 700, color: "#2C2825" }}>{cfg.full}</div><div style={{ fontSize: 12, color: "#8A8279" }}>{data.length > 0 ? data.length + " lines · " + uniqueVendors.length + " vendors · $" + totalVal.toLocaleString(undefined, { minimumFractionDigits: 2 }) : "No data loaded"}</div></div>
+        <div style={{ flex: 1 }}><div style={{ fontSize: 16, fontWeight: 700, color: "#1F2937" }}>{cfg.full}</div><div style={{ fontSize: 12, color: "#6B7280" }}>{data.length > 0 ? data.length + " lines · " + uniqueVendors.length + " vendors · $" + totalVal.toLocaleString(undefined, { minimumFractionDigits: 2 }) : "No data loaded"}</div></div>
         <Gate ok={ok} prompt={lp} style={Object.assign({}, S.btn(), { padding: "10px 24px" })} onClick={fetchData} disabled={loading}>{loading ? <><Spinner /> Fetching...</> : <><IconRefresh /> {data.length > 0 ? "Re-fetch" : "Run PO Fetch"}</>}</Gate>
       </div>
       {data.length > 0 && <>
         <div style={{ display: "flex", gap: 16, marginBottom: 20, flexWrap: "wrap" }}>
-          {[{ l: "Lines", v: data.length, c: cfg.color }, { l: "Vendors", v: uniqueVendors.length, c: "#059669" }, { l: "Value", v: "$" + totalVal.toLocaleString(undefined, { minimumFractionDigits: 2 }), c: "#D97706" }, { l: "Flags", v: flagCount || "Clear", c: flagCount ? "#DC2626" : "#059669" }].map(function(s) { return <div key={s.l} style={S.statCard}><div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: s.c }} /><div style={{ fontSize: 12, color: "#8A8279", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>{s.l}</div><div style={{ fontSize: 28, fontWeight: 700, color: s.l === "Flags" ? s.c : "#2C2825", marginTop: 4 }}>{s.v}</div></div>; })}
+          {[{ l: "Lines", v: data.length, c: cfg.color, bg: "#EEF4FF", lc: "#6B8ABF" }, { l: "Vendors", v: uniqueVendors.length, c: "#059669", bg: "#ECFDF5", lc: "#6B9E8A" }, { l: "Value", v: "$" + totalVal.toLocaleString(undefined, { minimumFractionDigits: 2 }), c: "#D97706", bg: "#FEF7EC", lc: "#B08A4A" }, { l: "Flags", v: flagCount || "Clear", c: flagCount ? "#DC2626" : "#059669", bg: flagCount ? "#FEF2F2" : "#ECFDF5", lc: flagCount ? "#C47070" : "#6B9E8A" }].map(function(s) { return <div key={s.l} style={Object.assign({}, S.statCard, { background: s.bg })}><div style={{ fontSize: 11, color: s.lc, fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>{s.l}</div><div style={{ fontSize: 28, fontWeight: 500, color: s.c, marginTop: 6 }}>{s.v}</div></div>; })}
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(280px,1fr))", gap: 12 }}>
-          {Object.entries(vendorGroups).sort(function(a, b) { return a[0].localeCompare(b[0]); }).map(function(e) { var key = e[0], rs = e[1], parts = key.split(" || "), v = parts[0], po = parts[1] || "", t = vendorTotals[key], rl = SHIP_RULES[v], st = rl ? evalShip(rl, t) : "No Rule", isFree = st === "Free Shipping", vl = getVendorLabel(v); return <div key={key} style={Object.assign({}, S.card, { padding: "16px 20px", marginBottom: 0 })}><div style={{ display: "flex", justifyContent: "space-between" }}><div><div style={{ display: "flex", alignItems: "center", gap: 8 }}><div style={{ fontSize: 13, fontWeight: 600, color: "#2C2825" }}>{v}</div>{vl && <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 10, background: vl === "Truecommerce" ? "#EFF6FF" : "#FFF7ED", color: vl === "Truecommerce" ? "#2563EB" : "#C2410C", fontWeight: 600 }}>{vl}</span>}</div><div style={{ fontSize: 11, color: "#8A8279", marginTop: 2 }}>{rs.length} lines · {po}</div></div><div style={{ fontSize: 15, fontWeight: 700, color: "#2C2825" }}>${t.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div></div><div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 6 }}><IconTruck /><span style={S.badge(isFree ? "success" : "danger")}>{isFree ? <IconCheck /> : <IconAlert />}{st}</span></div></div>; })}
+          {Object.entries(vendorGroups).sort(function(a, b) { return a[0].localeCompare(b[0]); }).map(function(e) { var key = e[0], rs = e[1], parts = key.split(" || "), v = parts[0], po = parts[1] || "", t = vendorTotals[key], rl = SHIP_RULES[v], st = rl ? evalShip(rl, t) : "No Rule", isFree = st === "Free Shipping", vl = getVendorLabel(v); return <div key={key} style={Object.assign({}, S.card, { padding: "16px 20px", marginBottom: 0 })}><div style={{ display: "flex", justifyContent: "space-between" }}><div><div style={{ display: "flex", alignItems: "center", gap: 8 }}><div style={{ fontSize: 13, fontWeight: 600, color: "#1F2937" }}>{v}</div>{vl && <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 10, background: vl === "Truecommerce" ? "#EFF6FF" : "#FFF7ED", color: vl === "Truecommerce" ? "#2563EB" : "#C2410C", fontWeight: 600 }}>{vl}</span>}</div><div style={{ fontSize: 11, color: "#6B7280", marginTop: 2 }}>{rs.length} lines · {po}</div></div><div style={{ fontSize: 15, fontWeight: 700, color: "#1F2937" }}>${t.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div></div><div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 6 }}><IconTruck /><span style={S.badge(isFree ? "success" : "danger")}>{isFree ? <IconCheck /> : <IconAlert />}{st}</span></div></div>; })}
         </div>
       </>}
-      {data.length === 0 && !loading && <div style={Object.assign({}, S.card, { textAlign: "center", padding: 60, color: "#A69E95" })}><IconWH /><p style={{ marginTop: 12, fontSize: 14 }}>Click <strong>Run PO Fetch</strong> to load data for {cfg.full}.</p></div>}
+      {data.length === 0 && !loading && <div style={Object.assign({}, S.card, { textAlign: "center", padding: 60, color: "#9CA3AF" })}><IconWH /><p style={{ marginTop: 12, fontSize: 14 }}>Click <strong>Run PO Fetch</strong> to load data for {cfg.full}.</p></div>}
     </div>}
 
     {subPage === "data" && <div>
@@ -706,23 +706,23 @@ function WHT(props) {
         <input style={Object.assign({}, S.inp, { maxWidth: 260 })} placeholder="Search..." value={search} onChange={function(e) { setSearch(e.target.value); }} />
         <select style={S.sel} value={vendorFilter} onChange={function(e) { setVendorFilter(e.target.value); }}><option value="all">All Vendors</option>{uniqueVendors.map(function(v) { return <option key={v} value={v}>{v}</option>; })}</select>
         <button style={S.btn(flagsOnly ? "danger" : "ghost")} onClick={function() { setFlagsOnly(!flagsOnly); }}><IconFilter /> {flagsOnly ? "Flags" : "Filter Flags"}</button>
-        <div style={{ flex: 1 }} /><Gate ok={ok} prompt={lp} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })} onClick={fetchData} disabled={loading}>{loading ? <><Spinner /> Fetching...</> : <><IconRefresh /> Re-fetch</>}</Gate><span style={{ fontSize: 12, color: "#8A8279" }}>{filtered.length}/{data.length}</span>
+        <div style={{ flex: 1 }} /><Gate ok={ok} prompt={lp} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })} onClick={fetchData} disabled={loading}>{loading ? <><Spinner /> Fetching...</> : <><IconRefresh /> Re-fetch</>}</Gate><span style={{ fontSize: 12, color: "#6B7280" }}>{filtered.length}/{data.length}</span>
       </div>
       {data.length > 0 ? <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto", maxHeight: "calc(100vh - 260px)" })}>
         <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
           <thead><tr>{["SKU", "Description", "Qty", "Vendor", "PO #"].concat(whKey !== "GGM-KY" ? ["Reorder", "Max", "Lead", "Min", "Avail"] : []).concat(["Price", "Total", "Flag"]).map(function(h) { return <th key={h} style={S.th}>{h}</th>; })}</tr></thead>
-          <tbody>{filtered.map(function(r, i) { var f = getFlag(r); var bg = f === "short" ? "rgba(220,38,38,0.04)" : f === "selloff" ? "rgba(217,119,6,0.04)" : "transparent"; var tc = f === "short" ? "#DC2626" : f === "selloff" ? "#D97706" : "#4A4541"; var fmt = function(v) { var n = parseFloat(v); if (isNaN(n)) return v; return n % 1 === 0 ? String(Math.round(n)) : n.toFixed(2); }; return <tr key={i} style={{ background: bg }}><td style={Object.assign({}, S.td, { color: tc, minWidth: 120, whiteSpace: "nowrap" })}>{r.SKUNDC}</td><td style={Object.assign({}, S.td, { color: tc, minWidth: 180, maxWidth: 350 })}><CopyCell text={r.Description} toast={toast} color={tc} accentColor={cfg.color} /></td><td style={Object.assign({}, S.td, { color: tc })}>{fmt(r.OrderQty)}</td><td style={Object.assign({}, S.td, { color: tc })}>{r.VendorName}</td><td style={Object.assign({}, S.td, { color: tc })}>{r.OrderNbr}</td>{whKey !== "GGM-KY" && <><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.ReorderPoint)}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.MaxQty)}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.LeadTime)}d</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.MinOrderQty)}</td><td style={Object.assign({}, S.td, { color: r.QtyAvailable < 0 ? "#DC2626" : tc, textAlign: "right" })}>{fmt(r.QtyAvailable)}</td></>}<td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>${r.Price.toFixed(2)}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>${r.TotalPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td><td style={S.td}>{f ? <span style={S.badge(f === "short" ? "danger" : "warning")}>{f === "short" ? "Short" : "Sell-Off"}</span> : "\u2014"}</td></tr>; })}</tbody>
+          <tbody>{filtered.map(function(r, i) { var f = getFlag(r); var bg = f === "short" ? "rgba(220,38,38,0.04)" : f === "selloff" ? "rgba(217,119,6,0.04)" : "transparent"; var tc = f === "short" ? "#DC2626" : f === "selloff" ? "#D97706" : "#374151"; var fmt = function(v) { var n = parseFloat(v); if (isNaN(n)) return v; return n % 1 === 0 ? String(Math.round(n)) : n.toFixed(2); }; return <tr key={i} style={{ background: bg }}><td style={Object.assign({}, S.td, { color: tc, minWidth: 120, whiteSpace: "nowrap" })}>{r.SKUNDC}</td><td style={Object.assign({}, S.td, { color: tc, minWidth: 180, maxWidth: 350 })}><CopyCell text={r.Description} toast={toast} color={tc} accentColor={cfg.color} /></td><td style={Object.assign({}, S.td, { color: tc })}>{fmt(r.OrderQty)}</td><td style={Object.assign({}, S.td, { color: tc })}>{r.VendorName}</td><td style={Object.assign({}, S.td, { color: tc })}>{r.OrderNbr}</td>{whKey !== "GGM-KY" && <><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.ReorderPoint)}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.MaxQty)}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.LeadTime)}d</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.MinOrderQty)}</td><td style={Object.assign({}, S.td, { color: r.QtyAvailable < 0 ? "#DC2626" : tc, textAlign: "right" })}>{fmt(r.QtyAvailable)}</td></>}<td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>${r.Price.toFixed(2)}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>${r.TotalPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td><td style={S.td}>{f ? <span style={S.badge(f === "short" ? "danger" : "warning")}>{f === "short" ? "Short" : "Sell-Off"}</span> : "\u2014"}</td></tr>; })}</tbody>
         </table>
-      </div> : <div style={Object.assign({}, S.card, { textAlign: "center", padding: 48, color: "#A69E95" })}>Run fetch first.</div>}
+      </div> : <div style={Object.assign({}, S.card, { textAlign: "center", padding: 48, color: "#9CA3AF" })}>Run fetch first.</div>}
     </div>}
 
     {subPage === "shipping" && <div>
       {data.length > 0 ? <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto" })}>
         <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
           <thead><tr><th style={S.th}>Vendor</th><th style={Object.assign({}, S.th, { width: 140 })}>PO #</th><th style={Object.assign({}, S.th, { textAlign: "right" })}>Total</th><th style={S.th}>Shipping</th><th style={Object.assign({}, S.th, { width: 200 })}>Vendor Reference</th><th style={Object.assign({}, S.th, { width: 100 })}>Price Check</th></tr></thead>
-          <tbody>{Object.keys(vendorGroups).sort().map(function(key) { var parts = key.split(" || "), v = parts[0], po = parts[1] || ""; var t = vendorTotals[key], rl = SHIP_RULES[v] || "", st = rl ? evalShip(rl, t) : "No Rule", isFree = st === "Free Shipping"; var sn = shipNotes[key] || {}; var vl = getVendorLabel(v); var rows = vendorGroups[key] || []; var checkedCount = rows.filter(function(r) { return priceChecked[key + ":" + r.SKUNDC]; }).length; return <tr key={key}><td style={Object.assign({}, S.td, { color: "#2C2825" })}><div>{v}</div>{vl && <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 10, background: vl === "Truecommerce" ? "#EFF6FF" : "#FFF7ED", color: vl === "Truecommerce" ? "#2563EB" : "#C2410C", fontWeight: 600, display: "inline-block", marginTop: 4 }}>{vl}</span>}</td><td style={Object.assign({}, S.td, { color: "#4A4541" })}>{po || <input style={Object.assign({}, S.inp, { padding: "6px 10px" })} placeholder="Paste PO #" value={sn.po || ""} onChange={function(e) { var updated = Object.assign({}, shipNotes); updated[key] = Object.assign({}, sn, { po: e.target.value }); setShipNotes(updated); persist(data, emailSent, runBy, runTime, updated); }} />}</td><td style={Object.assign({}, S.td, { textAlign: "right" })}>${t.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td><td style={S.td}><span style={S.badge(isFree ? "success" : "danger")}>{isFree ? <IconCheck /> : <IconAlert />}{st}</span></td><td style={S.td}><input style={Object.assign({}, S.inp, { padding: "6px 10px" })} placeholder="Paste PO #..." value={sn.notes || ""} onChange={function(e) { var updated = Object.assign({}, shipNotes); updated[key] = Object.assign({}, sn, { notes: e.target.value }); setShipNotes(updated); persist(data, emailSent, runBy, runTime, updated); }} /></td><td style={Object.assign({}, S.td, { textAlign: "center" })}><button onClick={function() { setPriceCheckKey(key); }} style={Object.assign({}, S.btn("ghost"), { padding: "4px 10px", fontSize: 11 })}>{checkedCount === rows.length && rows.length > 0 ? <><IconCheck /> All</> : checkedCount > 0 ? checkedCount + "/" + rows.length : "Review"}</button></td></tr>; })}</tbody>
+          <tbody>{Object.keys(vendorGroups).sort().map(function(key) { var parts = key.split(" || "), v = parts[0], po = parts[1] || ""; var t = vendorTotals[key], rl = SHIP_RULES[v] || "", st = rl ? evalShip(rl, t) : "No Rule", isFree = st === "Free Shipping"; var sn = shipNotes[key] || {}; var vl = getVendorLabel(v); var rows = vendorGroups[key] || []; var checkedCount = rows.filter(function(r) { return priceChecked[key + ":" + r.SKUNDC]; }).length; return <tr key={key}><td style={Object.assign({}, S.td, { color: "#1F2937" })}><div>{v}</div>{vl && <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 10, background: vl === "Truecommerce" ? "#EFF6FF" : "#FFF7ED", color: vl === "Truecommerce" ? "#2563EB" : "#C2410C", fontWeight: 600, display: "inline-block", marginTop: 4 }}>{vl}</span>}</td><td style={Object.assign({}, S.td, { color: "#374151" })}>{po || <input style={Object.assign({}, S.inp, { padding: "6px 10px" })} placeholder="Paste PO #" value={sn.po || ""} onChange={function(e) { var updated = Object.assign({}, shipNotes); updated[key] = Object.assign({}, sn, { po: e.target.value }); setShipNotes(updated); persist(data, emailSent, runBy, runTime, updated); }} />}</td><td style={Object.assign({}, S.td, { textAlign: "right" })}>${t.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td><td style={S.td}><span style={S.badge(isFree ? "success" : "danger")}>{isFree ? <IconCheck /> : <IconAlert />}{st}</span></td><td style={S.td}><input style={Object.assign({}, S.inp, { padding: "6px 10px" })} placeholder="Paste PO #..." value={sn.notes || ""} onChange={function(e) { var updated = Object.assign({}, shipNotes); updated[key] = Object.assign({}, sn, { notes: e.target.value }); setShipNotes(updated); persist(data, emailSent, runBy, runTime, updated); }} /></td><td style={Object.assign({}, S.td, { textAlign: "center" })}><button onClick={function() { setPriceCheckKey(key); }} style={Object.assign({}, S.btn("ghost"), { padding: "4px 10px", fontSize: 11 })}>{checkedCount === rows.length && rows.length > 0 ? <><IconCheck /> All</> : checkedCount > 0 ? checkedCount + "/" + rows.length : "Review"}</button></td></tr>; })}</tbody>
         </table>
-      </div> : <div style={Object.assign({}, S.card, { textAlign: "center", padding: 48, color: "#A69E95" })}>Run fetch first.</div>}
+      </div> : <div style={Object.assign({}, S.card, { textAlign: "center", padding: 48, color: "#9CA3AF" })}>Run fetch first.</div>}
     </div>}
 
     {/* Price Check Modal */}
@@ -737,25 +737,25 @@ function WHT(props) {
       return <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.35)", zIndex: 999, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }} onClick={function(e) { if (e.target === e.currentTarget) setPriceCheckKey(null); }}>
         <div style={{ background: "#FFFFFF", borderRadius: 20, maxWidth: 960, width: "100%", maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 25px 60px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.04)" }}>
           {/* Header */}
-          <div style={{ padding: "24px 32px 20px", borderBottom: "1px solid #F0EDE8" }}>
+          <div style={{ padding: "24px 32px 20px", borderBottom: "1px solid #F3F4F6" }}>
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
               <div>
-                <div style={{ fontSize: 18, fontWeight: 700, color: "#2C2825", letterSpacing: "-0.01em" }}>Price Check</div>
-                <div style={{ fontSize: 14, color: "#5C5651", marginTop: 4 }}>{vendorName}{poNum && <span style={{ color: "#A69E95" }}> · {poNum}</span>}</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: "#1F2937", letterSpacing: "-0.01em" }}>Price Check</div>
+                <div style={{ fontSize: 14, color: "#4B5563", marginTop: 4 }}>{vendorName}{poNum && <span style={{ color: "#9CA3AF" }}> · {poNum}</span>}</div>
               </div>
-              <button onClick={function() { setPriceCheckKey(null); }} style={{ background: "#F5F3EF", border: "none", cursor: "pointer", fontSize: 16, color: "#8A8279", width: 32, height: 32, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center" }}>{"\u00D7"}</button>
+              <button onClick={function() { setPriceCheckKey(null); }} style={{ background: "#F9FAFB", border: "none", cursor: "pointer", fontSize: 16, color: "#6B7280", width: 32, height: 32, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center" }}>{"\u00D7"}</button>
             </div>
             <div style={{ display: "flex", gap: 16, marginTop: 16, alignItems: "center" }}>
               <div style={{ display: "flex", gap: 24, fontSize: 13 }}>
-                <div><span style={{ color: "#8A8279" }}>Items</span> <span style={{ fontWeight: 600, color: "#2C2825" }}>{rows.length}</span></div>
-                <div><span style={{ color: "#8A8279" }}>Total</span> <span style={{ fontWeight: 600, color: "#2C2825" }}>${total.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></div>
-                <div><span style={{ color: "#8A8279" }}>Verified</span> <span style={{ fontWeight: 600, color: allChecked ? "#059669" : checkedCount > 0 ? "#D97706" : "#8A8279" }}>{checkedCount}/{rows.length}</span></div>
+                <div><span style={{ color: "#6B7280" }}>Items</span> <span style={{ fontWeight: 600, color: "#1F2937" }}>{rows.length}</span></div>
+                <div><span style={{ color: "#6B7280" }}>Total</span> <span style={{ fontWeight: 600, color: "#1F2937" }}>${total.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></div>
+                <div><span style={{ color: "#6B7280" }}>Verified</span> <span style={{ fontWeight: 600, color: allChecked ? "#059669" : checkedCount > 0 ? "#D97706" : "#6B7280" }}>{checkedCount}/{rows.length}</span></div>
               </div>
               <div style={{ flex: 1 }} />
               <button onClick={function() { var updated = Object.assign({}, priceChecked); rows.forEach(function(r) { updated[priceCheckKey + ":" + r.SKUNDC] = !allChecked; }); setPriceChecked(updated); }} style={Object.assign({}, S.btn(allChecked ? "ghost" : "default"), { padding: "8px 16px", fontSize: 12 })}>{allChecked ? "Uncheck All" : "Check All"}</button>
             </div>
             {/* Progress bar */}
-            <div style={{ marginTop: 12, height: 3, background: "#F0EDE8", borderRadius: 2, overflow: "hidden" }}>
+            <div style={{ marginTop: 12, height: 3, background: "#F3F4F6", borderRadius: 2, overflow: "hidden" }}>
               <div style={{ height: "100%", width: rows.length > 0 ? (checkedCount / rows.length * 100) + "%" : "0%", background: allChecked ? "#059669" : "#D97706", borderRadius: 2, transition: "width 0.3s ease" }} />
             </div>
           </div>
@@ -767,19 +767,19 @@ function WHT(props) {
                 <div style={{ width: 22, height: 22, borderRadius: 6, border: ck ? "2px solid #059669" : "2px solid #D5D0CA", background: ck ? "#059669" : "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, transition: "all 0.15s" }}>
                   {ck && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}
                 </div>
-                <div style={{ minWidth: 110, fontFamily: "monospace", fontSize: 13, color: ck ? "#059669" : "#4A4541", fontWeight: 500 }}>{r.SKUNDC}</div>
-                <div style={{ flex: 1, fontSize: 13, color: ck ? "#059669" : "#4A4541", lineHeight: 1.4 }}>{r.Description}</div>
-                <div style={{ textAlign: "right", minWidth: 50, fontSize: 13, color: ck ? "#059669" : "#8A8279" }}>{r.OrderQty}</div>
-                <div style={{ textAlign: "right", minWidth: 80, fontSize: 13, color: ck ? "#059669" : "#4A4541" }}>${r.Price.toFixed(2)}</div>
-                <div style={{ textAlign: "right", minWidth: 100, fontSize: 14, fontWeight: 700, color: ck ? "#059669" : "#2C2825" }}>${r.TotalPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+                <div style={{ minWidth: 110, fontFamily: "monospace", fontSize: 13, color: ck ? "#059669" : "#374151", fontWeight: 500 }}>{r.SKUNDC}</div>
+                <div style={{ flex: 1, fontSize: 13, color: ck ? "#059669" : "#374151", lineHeight: 1.4 }}>{r.Description}</div>
+                <div style={{ textAlign: "right", minWidth: 50, fontSize: 13, color: ck ? "#059669" : "#6B7280" }}>{r.OrderQty}</div>
+                <div style={{ textAlign: "right", minWidth: 80, fontSize: 13, color: ck ? "#059669" : "#374151" }}>${r.Price.toFixed(2)}</div>
+                <div style={{ textAlign: "right", minWidth: 100, fontSize: 14, fontWeight: 700, color: ck ? "#059669" : "#1F2937" }}>${r.TotalPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
               </div>;
             })}
           </div>
           {/* Footer */}
-          {uncheckedItems.length > 0 && uncheckedItems.length < rows.length && <div style={{ padding: "14px 32px", borderTop: "1px solid #F0EDE8", background: "rgba(245,158,11,0.04)", fontSize: 12, color: "#D97706", lineHeight: 1.5 }}>
+          {uncheckedItems.length > 0 && uncheckedItems.length < rows.length && <div style={{ padding: "14px 32px", borderTop: "1px solid #F3F4F6", background: "rgba(245,158,11,0.04)", fontSize: 12, color: "#D97706", lineHeight: 1.5 }}>
             <strong>{uncheckedItems.length} item{uncheckedItems.length > 1 ? "s" : ""} remaining:</strong> {uncheckedItems.map(function(r) { return r.SKUNDC; }).join(", ")}
           </div>}
-          {allChecked && <div style={{ padding: "16px 32px", borderTop: "1px solid #F0EDE8", background: "rgba(5,150,105,0.04)", fontSize: 14, color: "#059669", fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
+          {allChecked && <div style={{ padding: "16px 32px", borderTop: "1px solid #F3F4F6", background: "rgba(5,150,105,0.04)", fontSize: 14, color: "#059669", fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
             <IconCheck /> All prices verified
           </div>}
         </div>
@@ -791,13 +791,13 @@ function WHT(props) {
       {emailSent && <div style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.3)", borderRadius: 10, padding: "14px 20px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}><IconCheck /><span style={{ fontSize: 13, color: "#059669" }}><strong>Draft created!</strong></span></div>}
       <div style={S.card}>
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <div style={{ display: "flex", gap: 8 }}><span style={{ fontSize: 12, color: "#8A8279", fontWeight: 500, width: 50 }}>To:</span><span style={{ fontSize: 13, color: "#4A4541" }}>{cfg.emailTo}</span></div>
-          <div style={{ display: "flex", gap: 8 }}><span style={{ fontSize: 12, color: "#8A8279", fontWeight: 500, width: 50 }}>Subject:</span><span style={{ fontSize: 13, color: "#2C2825", fontWeight: 600 }}>{cfg.subjectFn(todayStr)}</span></div>
-          <div style={{ borderTop: "1px solid #E8E4DE", paddingTop: 16, marginTop: 4, fontSize: 13, color: "#4A4541", lineHeight: 1.7 }}>Good morning,<br /><br />Attached are today&apos;s POs.<br /><br />Thanks in advance,<br /><br /><span style={{ color: "#8A8279", fontStyle: "italic" }}>[Vetcove Signature]</span></div>
+          <div style={{ display: "flex", gap: 8 }}><span style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, width: 50 }}>To:</span><span style={{ fontSize: 13, color: "#374151" }}>{cfg.emailTo}</span></div>
+          <div style={{ display: "flex", gap: 8 }}><span style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, width: 50 }}>Subject:</span><span style={{ fontSize: 13, color: "#1F2937", fontWeight: 600 }}>{cfg.subjectFn(todayStr)}</span></div>
+          <div style={{ borderTop: "1px solid #E5E7EB", paddingTop: 16, marginTop: 4, fontSize: 13, color: "#374151", lineHeight: 1.7 }}>Good morning,<br /><br />Attached are today&apos;s POs.<br /><br />Thanks in advance,<br /><br /><span style={{ color: "#6B7280", fontStyle: "italic" }}>[Vetcove Signature]</span></div>
         </div>
-        <div style={{ marginTop: 20, borderTop: "1px solid #E8E4DE", paddingTop: 16 }}>
-          <div style={{ fontSize: 12, color: "#8A8279", fontWeight: 500, marginBottom: 10, textTransform: "uppercase" }}>Attachments ({uniqueVendors.length})</div>
-          {uniqueVendors.map(function(v) { var count = data.filter(function(r) { return r.VendorName === v; }).length; return <div key={v} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: "#FAFAF8", borderRadius: 8, marginBottom: 4 }}><IconDL /><span style={{ fontSize: 12, color: "#5C5651" }}>{v} PO Data - {whKey}.xlsx</span><div style={{ flex: 1 }} /><span style={{ fontSize: 11, color: "#A69E95" }}>{count} rows</span></div>; })}
+        <div style={{ marginTop: 20, borderTop: "1px solid #E5E7EB", paddingTop: 16 }}>
+          <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, marginBottom: 10, textTransform: "uppercase" }}>Attachments ({uniqueVendors.length})</div>
+          {uniqueVendors.map(function(v) { var count = data.filter(function(r) { return r.VendorName === v; }).length; return <div key={v} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: "#F8F9FB", borderRadius: 8, marginBottom: 4 }}><IconDL /><span style={{ fontSize: 12, color: "#4B5563" }}>{v} PO Data - {whKey}.xlsx</span><div style={{ flex: 1 }} /><span style={{ fontSize: 11, color: "#9CA3AF" }}>{count} rows</span></div>; })}
         </div>
         <div style={{ marginTop: 20, display: "flex", gap: 10 }}>
           <div title={emailBlocked ? "Short-dated/Sell-Off Items Detected" : undefined}>
@@ -823,7 +823,7 @@ function WHT(props) {
             } catch (err) {
               toast("Gmail error: " + err.message, "error");
             } finally { setEmailLoading(false); }
-          }} disabled={emailSent || emailLoading || emailBlocked || data.length === 0}>{emailBlocked ? <span style={{ display: "flex", alignItems: "center", gap: 6, color: "#A69E95" }}><IconLock /> Create Gmail Draft</span> : emailLoading ? <><Spinner /> Creating...</> : emailSent ? "Draft Created" : <><IconMail /> Create Gmail Draft</>}</Gate>
+          }} disabled={emailSent || emailLoading || emailBlocked || data.length === 0}>{emailBlocked ? <span style={{ display: "flex", alignItems: "center", gap: 6, color: "#9CA3AF" }}><IconLock /> Create Gmail Draft</span> : emailLoading ? <><Spinner /> Creating...</> : emailSent ? "Draft Created" : <><IconMail /> Create Gmail Draft</>}</Gate>
           </div>
           {emailSent && <Gate ok={ok} prompt={lp} style={Object.assign({}, S.btn("danger"), { marginLeft: "auto" })} onClick={clearAll}><IconTrash /> Clear</Gate>}
         </div>
@@ -886,19 +886,19 @@ function DropZone(props) {
   };
 
   var iconSvg = icon === "pdf" ?
-    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={dragging ? accent : "#A69E95"} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={dragging ? accent : "#9CA3AF"} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
     : icon === "image" ?
-    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={dragging ? accent : "#A69E95"} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={dragging ? accent : "#9CA3AF"} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
     : icon === "spreadsheet" ?
-    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={dragging ? accent : "#A69E95"} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/><line x1="12" y1="9" x2="12" y2="21"/></svg>
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={dragging ? accent : "#9CA3AF"} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/><line x1="12" y1="9" x2="12" y2="21"/></svg>
     :
-    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={dragging ? accent : "#A69E95"} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>;
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={dragging ? accent : "#9CA3AF"} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>;
 
   return <div style={boxStyle} onDrop={handleDrop} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onClick={handleClick}>
     <input ref={inputRef} type="file" accept={accept || ""} multiple={!!multiple} onChange={handleInput} style={{ display: "none" }} />
     <div style={{ marginBottom: 6 }}>{iconSvg}</div>
-    <div style={{ fontSize: 13, color: "#4A4541", fontWeight: 600 }}>{label || "Drop file here"}</div>
-    {sublabel && <div style={{ fontSize: 11, color: "#A69E95", marginTop: 2 }}>{sublabel}</div>}
+    <div style={{ fontSize: 13, color: "#374151", fontWeight: 600 }}>{label || "Drop file here"}</div>
+    {sublabel && <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>{sublabel}</div>}
   </div>;
 }
 
@@ -1148,31 +1148,31 @@ function CycleCountTool(props) {
   }
 
   return <div>
-    <p style={{ color: "#8A8279", fontSize: 14, marginBottom: 20 }}>Generate cycle count adjustment CSVs from Pharm Admin data and Stock Items.</p>
+    <p style={{ color: "#6B7280", fontSize: 14, marginBottom: 20 }}>Generate cycle count adjustment CSVs from Pharm Admin data and Stock Items.</p>
 
     <div style={S.card}>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
         <div>
-          <div style={{ fontSize: 14, color: "#4A4541", fontWeight: 600, marginBottom: 8 }}>1. Paste NDC List</div>
-          <div style={{ fontSize: 12, color: "#8A8279", marginBottom: 6 }}>Copy the NDC column from your Google Sheet and paste below</div>
+          <div style={{ fontSize: 14, color: "#374151", fontWeight: 600, marginBottom: 8 }}>1. Paste NDC List</div>
+          <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 6 }}>Copy the NDC column from your Google Sheet and paste below</div>
           <textarea value={ndcText} onChange={function(e) { setNdcText(e.target.value); }} placeholder={"68462-0128-01\n68462-0129-01\n43547-0336-10\n..."} rows={8} style={Object.assign({}, S.inp, { resize: "vertical", fontFamily: "monospace", fontSize: 12 })} />
           {ndcText.trim() && (function() { var lines = ndcText.trim().split("\n").filter(function(l) { return l.trim(); }); var u = {}; lines.forEach(function(l) { u[l.trim()] = 1; }); var total = lines.length, unique = Object.keys(u).length; return <p style={{ color: "#059669", fontSize: 12, marginTop: 6 }}>{"\u2713"} {unique} NDCs pasted{total > unique ? " (" + (total - unique) + " duplicate" + (total - unique > 1 ? "s" : "") + " removed)" : ""}</p>; })()}
         </div>
         <div>
-          <div style={{ fontSize: 14, color: "#4A4541", fontWeight: 600, marginBottom: 8 }}>2. Warehouse Code</div>
-          <div style={{ fontSize: 12, color: "#8A8279", marginBottom: 6 }}>Type the warehouse code for the output (e.g. TP-NY, TP-OH)</div>
+          <div style={{ fontSize: 14, color: "#374151", fontWeight: 600, marginBottom: 8 }}>2. Warehouse Code</div>
+          <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 6 }}>Type the warehouse code for the output (e.g. TP-NY, TP-OH)</div>
           <input value={warehouse} onChange={function(e) { setWarehouse(e.target.value); }} placeholder="TP-NY" style={Object.assign({}, S.inp, { maxWidth: 200 })} />
 
-          <div style={{ fontSize: 14, color: "#4A4541", fontWeight: 600, marginBottom: 8, marginTop: 20 }}>3. Vendor Inventory CSV</div>
-          <div style={{ fontSize: 12, color: "#8A8279", marginBottom: 6 }}>Export from Pharm Admin (contains SKU, Manufacturer Number, Reported Qty, Stock Qty)</div>
+          <div style={{ fontSize: 14, color: "#374151", fontWeight: 600, marginBottom: 8, marginTop: 20 }}>3. Vendor Inventory CSV</div>
+          <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 6 }}>Export from Pharm Admin (contains SKU, Manufacturer Number, Reported Qty, Stock Qty)</div>
           {vendorFile ? <div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(5,150,105,0.06)", border: "1px solid rgba(5,150,105,0.2)", borderRadius: 10 }}>
               <span style={{ color: "#059669", fontSize: 13 }}>{"\u2713"} {vendorFile.name} — {vendorRows ? vendorRows.length.toLocaleString() + " rows" : "parsing..."}</span>
-              <button onClick={function() { setVendorFile(null); setVendorRows(null); setCsvWarehouses([]); setCsvWhSelected(""); setCsvWhCounts({}); }} style={{ background: "transparent", border: "none", color: "#A69E95", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 4px" }}>{"\u00D7"}</button>
+              <button onClick={function() { setVendorFile(null); setVendorRows(null); setCsvWarehouses([]); setCsvWhSelected(""); setCsvWhCounts({}); }} style={{ background: "transparent", border: "none", color: "#9CA3AF", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 4px" }}>{"\u00D7"}</button>
             </div>
           </div> : <DropZone accept=".csv" label="Vendor Inventory CSV" sublabel="Drop CSV or click to browse" icon="spreadsheet" color={TOOL_COLOR} onFiles={function(files) { handleVendorUpload(files[0]); }} />}
           {csvWarehouses.length > 1 && <div style={{ marginTop: 10 }}>
-            <div style={{ fontSize: 12, color: "#8A8279", marginBottom: 4 }}>Select warehouse from CSV:</div>
+            <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 4 }}>Select warehouse from CSV:</div>
             <select value={csvWhSelected} onChange={function(e) { setCsvWhSelected(e.target.value); }} style={Object.assign({}, S.inp, { maxWidth: 280, cursor: "pointer" })}>
               <option value="">— Select —</option>
               {csvWarehouses.map(function(w) { return <option key={w} value={w}>{w} ({(csvWhCounts[w] || 0).toLocaleString()} rows)</option>; })}
@@ -1181,8 +1181,8 @@ function CycleCountTool(props) {
           </div>}
           {csvWarehouses.length === 1 && <p style={{ color: TOOL_COLOR, fontSize: 12, marginTop: 4 }}>Warehouse: {csvWhSelected} ({(csvWhCounts[csvWhSelected] || 0).toLocaleString()} rows)</p>}
 
-          <div style={{ fontSize: 14, color: "#4A4541", fontWeight: 600, marginBottom: 8, marginTop: 20, display: "flex", alignItems: "center", gap: 6 }}>4. Stock Items XLSX <InfoTip text="Before uploading, make sure to delete all tabs except the one labeled 'Data' in the Excel file." /></div>
-          <div style={{ fontSize: 12, color: "#8A8279", marginBottom: 6 }}>Contains Inventory ID and Sales Unit for UOM lookup</div>
+          <div style={{ fontSize: 14, color: "#374151", fontWeight: 600, marginBottom: 8, marginTop: 20, display: "flex", alignItems: "center", gap: 6 }}>4. Stock Items XLSX <InfoTip text="Before uploading, make sure to delete all tabs except the one labeled 'Data' in the Excel file." /></div>
+          <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 6 }}>Contains Inventory ID and Sales Unit for UOM lookup</div>
           {stockRows && stockMeta ? <div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(5,150,105,0.06)", border: "1px solid rgba(5,150,105,0.2)", borderRadius: 10 }}>
               <span style={{ color: "#059669", fontSize: 13 }}>{"\u2713"} {stockMeta.name} — {stockMeta.count.toLocaleString()} items (saved {stockMeta.date})</span>
@@ -1203,7 +1203,7 @@ function CycleCountTool(props) {
           {loading ? "Processing..." : "Generate Cycle Count"}
         </button>
         {results.length > 0 && <button onClick={downloadCSV} style={Object.assign({}, S.btn("ghost"), { padding: "10px 16px" })}><IconDL /> Download CSV</button>}
-        {results.length > 0 && <span style={{ fontSize: 12, color: "#8A8279" }}>{results.length} items</span>}
+        {results.length > 0 && <span style={{ fontSize: 12, color: "#6B7280" }}>{results.length} items</span>}
         {(ndcText.trim() || vendorFile || results.length > 0) && <button onClick={function() { setNdcText(""); setVendorFile(null); setVendorRows(null); setCsvWarehouses([]); setCsvWhSelected(""); setCsvWhCounts({}); setWarehouse(""); setResults([]); setErrors([]); }} style={Object.assign({}, S.btn("ghost"), { padding: "10px 16px", marginLeft: "auto" })}><IconTrash /> Clear</button>}
       </div>
     </div>
@@ -1221,14 +1221,14 @@ function CycleCountTool(props) {
         </tr></thead>
         <tbody>{results.map(function(r, i) {
           return <tr key={i} style={{ background: r.quantity < 0 ? "rgba(220,38,38,0.04)" : "transparent" }}>
-            <td style={Object.assign({}, S.td, { color: r.inventoryId.startsWith("GEN-") ? "#059669" : r.inventoryId.startsWith("UNV-") ? "#2563EB" : "#4A4541" })}>{r.inventoryId}</td>
+            <td style={Object.assign({}, S.td, { color: r.inventoryId.startsWith("GEN-") ? "#059669" : r.inventoryId.startsWith("UNV-") ? "#2563EB" : "#374151" })}>{r.inventoryId}</td>
             <td style={S.td}>{r.warehouse}</td>
             <td style={S.td}>{r.location}</td>
-            <td style={Object.assign({}, S.td, { color: r.quantity < 0 ? "#DC2626" : "#4A4541" })}>{r.quantity}</td>
+            <td style={Object.assign({}, S.td, { color: r.quantity < 0 ? "#DC2626" : "#374151" })}>{r.quantity}</td>
             <td style={S.td}>{r.uom}</td>
-            <td style={Object.assign({}, S.td, { color: "#8A8279" })}>{r.ndc}</td>
-            <td style={Object.assign({}, S.td, { color: "#8A8279" })}>{r.reportedQty}</td>
-            <td style={Object.assign({}, S.td, { color: "#8A8279" })}>{r.stockQty}</td>
+            <td style={Object.assign({}, S.td, { color: "#6B7280" })}>{r.ndc}</td>
+            <td style={Object.assign({}, S.td, { color: "#6B7280" })}>{r.reportedQty}</td>
+            <td style={Object.assign({}, S.td, { color: "#6B7280" })}>{r.stockQty}</td>
           </tr>;
         })}</tbody>
       </table>
@@ -1565,47 +1565,47 @@ function POImportTool(props) {
 
   return (
     <div>
-      <p style={{ color: "#8A8279", fontSize: 13, marginBottom: 20 }}>Upload vendor PO PDFs to extract NDCs, then validate against Acumatica <strong>Generic Current NDCs</strong> OData to find GEN- Inventory IDs.</p>
+      <p style={{ color: "#6B7280", fontSize: 13, marginBottom: 20 }}>Upload vendor PO PDFs to extract NDCs, then validate against Acumatica <strong>Generic Current NDCs</strong> OData to find GEN- Inventory IDs.</p>
 
       <div style={S.card}>
         <div style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 12, color: "#8A8279", fontWeight: 500, marginBottom: 8 }}>Vendor Type</div>
+          <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, marginBottom: 8 }}>Vendor Type</div>
           <div style={{ display: "flex", gap: 10 }}>
             {[["other", "Keysource / Anda / Bloodworth"], ["mckesson", "McKesson"]].map(function(v) {
               return <button key={v[0]} onClick={function() { setVendor(v[0]); reset(); }}
-                style={{ padding: "8px 18px", borderRadius: 8, border: "1px solid " + (vendor === v[0] ? TOOL_COLOR : "#E8E4DE"), background: vendor === v[0] ? TOOL_COLOR + "20" : "transparent", color: vendor === v[0] ? TOOL_COLOR : "#8A8279", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>{v[1]}</button>;
+                style={{ padding: "8px 18px", borderRadius: 8, border: "1px solid " + (vendor === v[0] ? TOOL_COLOR : "#E5E7EB"), background: vendor === v[0] ? TOOL_COLOR + "20" : "transparent", color: vendor === v[0] ? TOOL_COLOR : "#6B7280", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>{v[1]}</button>;
             })}
           </div>
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: vendor === "mckesson" ? "1fr 1fr" : "1fr", gap: 16 }}>
           <div>
-            <div style={{ fontSize: 12, color: "#8A8279", fontWeight: 500, marginBottom: 6 }}>PO PDF(s)</div>
+            <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, marginBottom: 6 }}>PO PDF(s)</div>
             {pdfs.length > 0 ? <div>
               <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(5,150,105,0.06)", border: "1px solid rgba(5,150,105,0.2)", borderRadius: 10 }}>
                 <span style={{ color: "#059669", fontSize: 12 }}>{"\u2713"} {pdfs.length} PDF{pdfs.length > 1 ? "s" : ""}: {pdfs.map(function(p) { return p.name; }).join(", ")}</span>
-                <button onClick={function() { setPdfs([]); }} style={{ background: "transparent", border: "none", color: "#A69E95", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 4px" }}>{"\u00D7"}</button>
+                <button onClick={function() { setPdfs([]); }} style={{ background: "transparent", border: "none", color: "#9CA3AF", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 4px" }}>{"\u00D7"}</button>
               </div>
             </div> : <DropZone accept=".pdf" multiple label="PO PDF(s)" sublabel="Drop PDFs or click to browse" icon="pdf" color={TOOL_COLOR} onFiles={handlePdfChange} />}
           </div>
           {vendor === "mckesson" && <div>
-            <div style={{ fontSize: 12, color: "#8A8279", fontWeight: 500, marginBottom: 6 }}>McKesson Export CSV <InfoTip text="Have the WM download the order from the McKesson portal as CSV. Key columns: FilledNdcUpc, OrderQty, Est. Net Price." /></div>
+            <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, marginBottom: 6 }}>McKesson Export CSV <InfoTip text="Have the WM download the order from the McKesson portal as CSV. Key columns: FilledNdcUpc, OrderQty, Est. Net Price." /></div>
             {mckFile && mckParsed ? <div>
               <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(5,150,105,0.06)", border: "1px solid rgba(5,150,105,0.2)", borderRadius: 10 }}>
                 <span style={{ color: "#059669", fontSize: 12 }}>{"\u2713"} {mckFile.name} — {mckParsed.length} items, {Object.keys(mckPortalPrices).length} prices</span>
-                <button onClick={function() { setMckFile(null); setMckParsed(null); setMckPortalPrices({}); }} style={{ background: "transparent", border: "none", color: "#A69E95", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 4px" }}>{"\u00D7"}</button>
+                <button onClick={function() { setMckFile(null); setMckParsed(null); setMckPortalPrices({}); }} style={{ background: "transparent", border: "none", color: "#9CA3AF", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 4px" }}>{"\u00D7"}</button>
               </div>
             </div> : <DropZone accept=".csv" label="McKesson Export CSV" sublabel="Drop CSV from McKesson portal" icon="spreadsheet" color={TOOL_COLOR} disabled={mckFileLoading} onFiles={handleMckFileUpload} />}
             {mckFileLoading && <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}><Spinner color={TOOL_COLOR} size={14} /><span style={{ fontSize: 12, color: TOOL_COLOR }}>Parsing CSV...</span></div>}
-            <div style={{ marginTop: 10, fontSize: 11, color: "#A69E95" }}>Or paste NDCs manually (one per line):</div>
+            <div style={{ marginTop: 10, fontSize: 11, color: "#9CA3AF" }}>Or paste NDCs manually (one per line):</div>
             <textarea value={mckPaste} onChange={handleMckManualPaste} placeholder={"67877019710\n29300041001\n53746075101\n..."} rows={3} style={Object.assign({}, S.inp, { resize: "vertical", fontFamily: "monospace", fontSize: 12, marginTop: 4 })} />
           </div>}
         </div>
 
-        {vendor === "mckesson" && mckParsed && mckParsed.length > 0 && <div style={{ marginTop: 16, background: "#FAFAF8", border: "1px solid #E8E4DE", borderRadius: 8, padding: "10px 14px" }}>
-          <div style={{ fontSize: 11, color: "#8A8279", fontWeight: 600, textTransform: "uppercase", marginBottom: 6 }}>McKesson Items ({mckParsed.length}){Object.keys(mckPortalPrices).length > 0 && <span style={{ color: "#059669", fontWeight: 600, marginLeft: 8 }}>{"\u2713"} {Object.keys(mckPortalPrices).length} prices loaded</span>}</div>
-          <div style={{ maxHeight: 100, overflow: "auto", fontSize: 12, fontFamily: "monospace", color: "#8A8279" }}>
-            {mckParsed.map(function(pi, idx) { return <div key={idx} style={{ display: "flex", gap: 16 }}><span>{pi.ndc}</span>{mckPortalPrices[pi.ndc] != null && <span style={{ color: "#059669" }}>{"$" + mckPortalPrices[pi.ndc].toFixed(2)}</span>}{pi.qty && <span style={{ color: "#A69E95" }}>qty: {pi.qty}</span>}</div>; })}
+        {vendor === "mckesson" && mckParsed && mckParsed.length > 0 && <div style={{ marginTop: 16, background: "#F8F9FB", border: "1px solid #E5E7EB", borderRadius: 8, padding: "10px 14px" }}>
+          <div style={{ fontSize: 11, color: "#6B7280", fontWeight: 600, textTransform: "uppercase", marginBottom: 6 }}>McKesson Items ({mckParsed.length}){Object.keys(mckPortalPrices).length > 0 && <span style={{ color: "#059669", fontWeight: 600, marginLeft: 8 }}>{"\u2713"} {Object.keys(mckPortalPrices).length} prices loaded</span>}</div>
+          <div style={{ maxHeight: 100, overflow: "auto", fontSize: 12, fontFamily: "monospace", color: "#6B7280" }}>
+            {mckParsed.map(function(pi, idx) { return <div key={idx} style={{ display: "flex", gap: 16 }}><span>{pi.ndc}</span>{mckPortalPrices[pi.ndc] != null && <span style={{ color: "#059669" }}>{"$" + mckPortalPrices[pi.ndc].toFixed(2)}</span>}{pi.qty && <span style={{ color: "#9CA3AF" }}>qty: {pi.qty}</span>}</div>; })}
           </div>
         </div>}
 
@@ -1642,17 +1642,17 @@ function POImportTool(props) {
 
       {results.length > 0 && <div>
         <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
-          {(function() { var pos = {}; var vendors = {}; var whs = {}; results.forEach(function(r) { if (r.poNumber) pos[r.poNumber] = 1; if (r.vendorSource) vendors[r.vendorSource] = 1; if (r.warehouse) whs[r.warehouse] = 1; }); var poList = Object.keys(pos); var vendorList = Object.keys(vendors); var whList = Object.keys(whs); return <>{poList.length > 0 && <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#8A8279", textTransform: "uppercase", fontWeight: 600 }}>PO #</div><div style={{ fontSize: 20, fontWeight: 700, color: TOOL_COLOR, marginTop: 4 }}>{poList.join(", ")}</div></div>}{vendorList.length > 0 && <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#8A8279", textTransform: "uppercase", fontWeight: 600 }}>Vendor</div><div style={{ fontSize: 18, fontWeight: 700, color: "#2C2825", marginTop: 4 }}>{vendorList.join(", ")}</div></div>}{whList.length > 0 && <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#8A8279", textTransform: "uppercase", fontWeight: 600 }}>Warehouse</div><div style={{ fontSize: 20, fontWeight: 700, color: "#2C2825", marginTop: 4 }}>{whList.join(", ")}</div></div>}</>; })()}
-          <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#8A8279", textTransform: "uppercase", fontWeight: 600 }}>Total Items</div><div style={{ fontSize: 24, fontWeight: 700, color: "#2C2825", marginTop: 4 }}>{results.length}</div></div>
-          <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#8A8279", textTransform: "uppercase", fontWeight: 600 }}>In OData</div><div style={{ fontSize: 24, fontWeight: 700, color: "#059669", marginTop: 4 }}>{foundCount}</div></div>
-          <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#8A8279", textTransform: "uppercase", fontWeight: 600 }}>Not in OData</div><div style={{ fontSize: 24, fontWeight: 700, color: notFoundCount > 0 ? "#DC2626" : "#059669", marginTop: 4 }}>{notFoundCount}</div></div>
-          {vendor === "mckesson" && <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#8A8279", textTransform: "uppercase", fontWeight: 600 }}>Qty Edited</div><div style={{ fontSize: 24, fontWeight: 700, color: qtyMismatchCount > 0 ? "#D97706" : "#059669", marginTop: 4 }}>{qtyMismatchCount}</div></div>}
-          {mckWarnings.length > 0 && <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#8A8279", textTransform: "uppercase", fontWeight: 600 }}>MCK Warnings</div><div style={{ fontSize: 24, fontWeight: 700, color: "#D97706", marginTop: 4 }}>{mckWarnings.length}</div></div>}
+          {(function() { var pos = {}; var vendors = {}; var whs = {}; results.forEach(function(r) { if (r.poNumber) pos[r.poNumber] = 1; if (r.vendorSource) vendors[r.vendorSource] = 1; if (r.warehouse) whs[r.warehouse] = 1; }); var poList = Object.keys(pos); var vendorList = Object.keys(vendors); var whList = Object.keys(whs); return <>{poList.length > 0 && <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>PO #</div><div style={{ fontSize: 20, fontWeight: 700, color: TOOL_COLOR, marginTop: 4 }}>{poList.join(", ")}</div></div>}{vendorList.length > 0 && <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Vendor</div><div style={{ fontSize: 18, fontWeight: 700, color: "#1F2937", marginTop: 4 }}>{vendorList.join(", ")}</div></div>}{whList.length > 0 && <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Warehouse</div><div style={{ fontSize: 20, fontWeight: 700, color: "#1F2937", marginTop: 4 }}>{whList.join(", ")}</div></div>}</>; })()}
+          <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Total Items</div><div style={{ fontSize: 24, fontWeight: 700, color: "#1F2937", marginTop: 4 }}>{results.length}</div></div>
+          <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>In OData</div><div style={{ fontSize: 24, fontWeight: 700, color: "#059669", marginTop: 4 }}>{foundCount}</div></div>
+          <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Not in OData</div><div style={{ fontSize: 24, fontWeight: 700, color: notFoundCount > 0 ? "#DC2626" : "#059669", marginTop: 4 }}>{notFoundCount}</div></div>
+          {vendor === "mckesson" && <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Qty Edited</div><div style={{ fontSize: 24, fontWeight: 700, color: qtyMismatchCount > 0 ? "#D97706" : "#059669", marginTop: 4 }}>{qtyMismatchCount}</div></div>}
+          {mckWarnings.length > 0 && <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>MCK Warnings</div><div style={{ fontSize: 24, fontWeight: 700, color: "#D97706", marginTop: 4 }}>{mckWarnings.length}</div></div>}
         </div>
 
         <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto" })}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", borderBottom: "1px solid #E8E4DE" }}>
-            <span style={{ fontSize: 14, fontWeight: 600, color: "#2C2825" }}>NDC Validation Results</span>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", borderBottom: "1px solid #E5E7EB" }}>
+            <span style={{ fontSize: 14, fontWeight: 600, color: "#1F2937" }}>NDC Validation Results</span>
             <div style={{ display: "flex", gap: 8 }}>
               <button onClick={reset} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}><IconTrash /> Clear</button>
               <button onClick={downloadCSV} style={Object.assign({}, S.btn(), { padding: "6px 14px", fontSize: 12 })}><IconCSV /> Download CSV</button>
@@ -1682,16 +1682,16 @@ function POImportTool(props) {
               return <tr key={i} style={{ background: (qtyChanged || priceChanged) ? "rgba(245,158,11,0.06)" : (r.ndcFound ? "transparent" : "rgba(239,68,68,0.04)") }}>
                 <td style={S.td}><span style={S.badge(r.ndcFound ? "success" : "danger")}>{r.ndcFound ? <><IconCheck /> Match</> : <><IconAlert /> Missing</>}</span></td>
                 <td style={S.td}>{r.ndc}</td>
-                <td style={Object.assign({}, S.td, { color: r.inventoryId ? "#059669" : "#A69E95" })}>{r.inventoryId || "\u2014"}</td>
+                <td style={Object.assign({}, S.td, { color: r.inventoryId ? "#059669" : "#9CA3AF" })}>{r.inventoryId || "\u2014"}</td>
                 <td style={Object.assign({}, S.td, { maxWidth: 220, wordBreak: "break-word" })}>{r.acumaticaDesc || "\u2014"}</td>
-                <td style={Object.assign({}, S.td, { color: r.uom ? "#06B6D4" : "#A69E95" })}>{r.uom || "\u2014"}</td>
-                <td style={Object.assign({}, S.td, { color: "#8A8279", maxWidth: 200, wordBreak: "break-word" })}>{r.drugName || "\u2014"}</td>
+                <td style={Object.assign({}, S.td, { color: r.uom ? "#06B6D4" : "#9CA3AF" })}>{r.uom || "\u2014"}</td>
+                <td style={Object.assign({}, S.td, { color: "#6B7280", maxWidth: 200, wordBreak: "break-word" })}>{r.drugName || "\u2014"}</td>
                 <td style={S.td}>{r.vendorSource || "\u2014"}</td>
-                <td style={Object.assign({}, S.td, { textAlign: "center" })}><input style={Object.assign({}, S.inp, { width: 70, padding: "6px 8px", textAlign: "center", color: qtyChanged ? "#D97706" : "#4A4541", background: qtyChanged ? "rgba(245,158,11,0.1)" : "#FAFAF8" })} type="number" value={screenshotQtys[r.ndc] != null ? screenshotQtys[r.ndc] : (r.qty || "")} onChange={function(e) { var updated = Object.assign({}, screenshotQtys); updated[r.ndc] = e.target.value; setScreenshotQtys(updated); }} /></td>
-                <td style={Object.assign({}, S.td, { textAlign: "right" })}><input style={Object.assign({}, S.inp, { width: 90, padding: "6px 8px", textAlign: "right", color: priceChanged ? "#D97706" : "#059669", background: priceChanged ? "rgba(245,158,11,0.1)" : "#FAFAF8" })} type="number" step="0.01" value={editedPrices[r.ndc] != null ? editedPrices[r.ndc] : (r.unitPrice || "")} onChange={function(e) { var updated = Object.assign({}, editedPrices); updated[r.ndc] = e.target.value; setEditedPrices(updated); }} /></td>
+                <td style={Object.assign({}, S.td, { textAlign: "center" })}><input style={Object.assign({}, S.inp, { width: 70, padding: "6px 8px", textAlign: "center", color: qtyChanged ? "#D97706" : "#374151", background: qtyChanged ? "rgba(245,158,11,0.1)" : "#F8F9FB" })} type="number" value={screenshotQtys[r.ndc] != null ? screenshotQtys[r.ndc] : (r.qty || "")} onChange={function(e) { var updated = Object.assign({}, screenshotQtys); updated[r.ndc] = e.target.value; setScreenshotQtys(updated); }} /></td>
+                <td style={Object.assign({}, S.td, { textAlign: "right" })}><input style={Object.assign({}, S.inp, { width: 90, padding: "6px 8px", textAlign: "right", color: priceChanged ? "#D97706" : "#059669", background: priceChanged ? "rgba(245,158,11,0.1)" : "#F8F9FB" })} type="number" step="0.01" value={editedPrices[r.ndc] != null ? editedPrices[r.ndc] : (r.unitPrice || "")} onChange={function(e) { var updated = Object.assign({}, editedPrices); updated[r.ndc] = e.target.value; setEditedPrices(updated); }} /></td>
                 <td style={Object.assign({}, S.td, { textAlign: "right" })}>{extCost ? "$" + extCost.toLocaleString(undefined, { minimumFractionDigits: 2 }) : "\u2014"}</td>
                 {vendor === "mckesson" && <td style={S.td}>{r.vendorItemNum || "\u2014"}</td>}
-                <td style={Object.assign({}, S.td, { color: "#A69E95" })}>{(r.sourceFile || "").split("/").pop()}</td>
+                <td style={Object.assign({}, S.td, { color: "#9CA3AF" })}>{(r.sourceFile || "").split("/").pop()}</td>
               </tr>;
             })}</tbody>
           </table>
@@ -1785,22 +1785,22 @@ export default function Hub() {
     tableCols: [{ key: "#", label: "#" }, { key: "Description", label: "Product Description" }, { key: "InventoryID", label: "Inventory ID (Mfr No.)" }, { key: "RecoveryDate", label: "Recovery Date", highlightColor: "#3B82F6" }],
   }; }, []);
 
-  if (credLoading) return <div style={{ fontFamily: "sans-serif", background: "#FAFAF8", color: "#4A4541", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}><Spinner color="#3B82F6" size={24} /><style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style></div>;
+  if (credLoading) return <div style={{ fontFamily: "sans-serif", background: "#F8F9FB", color: "#374151", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}><Spinner color="#3B82F6" size={24} /><style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style></div>;
 
   if (!ok) return (
-    <div style={{ fontFamily: "'Varela Round',sans-serif", background: "#FAFAF8", color: "#4A4541", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
+    <div style={{ fontFamily: "'Varela Round',sans-serif", background: "#F8F9FB", color: "#374151", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Varela+Round&display=swap');*{box-sizing:border-box;margin:0;padding:0}@keyframes spin{to{transform:rotate(360deg)}}@keyframes slideUp{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}button:hover{filter:brightness(1.12)}input:focus{border-color:#3B82F6!important;box-shadow:0 0 0 2px rgba(59,130,246,0.15)}`}</style>
-      <div style={{ background: "#FFFFFF", border: "1px solid #E8E4DE", borderRadius: 16, padding: 40, width: 420, textAlign: "center" }}>
+      <div style={{ background: "#FFFFFF", border: "1px solid #E5E7EB", borderRadius: 16, padding: 40, width: 420, textAlign: "center" }}>
         <div style={{ width: 64, height: 64, borderRadius: 16, background: "rgba(59,130,246,0.15)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px" }}><IconKey /></div>
-        <h1 style={{ fontSize: 24, fontWeight: 700, color: "#2C2825", margin: "0 0 4px" }}>Inventory Hub</h1>
-        <p style={{ fontSize: 11, color: "#8A8279", fontWeight: 500, letterSpacing: "1.5px", textTransform: "uppercase", margin: "0 0 32px" }}>Vetcove Tools</p>
+        <h1 style={{ fontSize: 24, fontWeight: 700, color: "#1F2937", margin: "0 0 4px" }}>Inventory Hub</h1>
+        <p style={{ fontSize: 11, color: "#6B7280", fontWeight: 500, letterSpacing: "1.5px", textTransform: "uppercase", margin: "0 0 32px" }}>Vetcove Tools</p>
         <div style={{ textAlign: "left", display: "flex", flexDirection: "column", gap: 14 }}>
-          <div><label style={{ fontSize: 12, color: "#8A8279", fontWeight: 500, display: "block", marginBottom: 6 }}>Acumatica Username</label><input style={{ background: "#FAFAF8", border: "1px solid #E8E4DE", borderRadius: 8, padding: "10px 14px", color: "#4A4541", fontSize: 14, outline: "none", width: "100%" }} value={cred.username} onChange={function(e) { setCred({ username: e.target.value, password: cred.password }); }} placeholder="your.username" /></div>
-          <div><label style={{ fontSize: 12, color: "#8A8279", fontWeight: 500, display: "block", marginBottom: 6 }}>Acumatica Password</label><input style={{ background: "#FAFAF8", border: "1px solid #E8E4DE", borderRadius: 8, padding: "10px 14px", color: "#4A4541", fontSize: 14, outline: "none", width: "100%" }} type="password" value={cred.password} onChange={function(e) { setCred({ username: cred.username, password: e.target.value }); }} placeholder={"\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"} onKeyDown={function(e) { if (e.key === "Enter") login(); }} /></div>
+          <div><label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 6 }}>Acumatica Username</label><input style={{ background: "#F8F9FB", border: "1px solid #E5E7EB", borderRadius: 8, padding: "10px 14px", color: "#374151", fontSize: 14, outline: "none", width: "100%" }} value={cred.username} onChange={function(e) { setCred({ username: e.target.value, password: cred.password }); }} placeholder="your.username" /></div>
+          <div><label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 6 }}>Acumatica Password</label><input style={{ background: "#F8F9FB", border: "1px solid #E5E7EB", borderRadius: 8, padding: "10px 14px", color: "#374151", fontSize: 14, outline: "none", width: "100%" }} type="password" value={cred.password} onChange={function(e) { setCred({ username: cred.username, password: e.target.value }); }} placeholder={"\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"} onKeyDown={function(e) { if (e.key === "Enter") login(); }} /></div>
           <button onClick={login} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", background: "#3B82F6", color: "#fff", border: "none", borderRadius: 8, padding: "12px 16px", fontSize: 14, fontWeight: 600, cursor: "pointer", marginTop: 8 }}><IconKey /> Sign In</button>
         </div>
       </div>
-      {toast && <div style={{ position: "fixed", bottom: 24, right: 24, padding: "12px 20px", borderRadius: 10, fontSize: 13, fontWeight: 500, zIndex: 999, background: toast.t === "success" ? "#059669" : toast.t === "error" ? "#DC2626" : "#FFFFFF", color: toast.t === "success" || toast.t === "error" ? "#fff" : "#2C2825", border: "1px solid " + (toast.t === "success" ? "#059669" : toast.t === "error" ? "#DC2626" : "#E8E4DE"), boxShadow: "0 4px 20px rgba(44,40,37,0.12)", animation: "slideUp 0.3s ease" }}>{toast.m}</div>}
+      {toast && <div style={{ position: "fixed", bottom: 24, right: 24, padding: "12px 20px", borderRadius: 10, fontSize: 13, fontWeight: 500, zIndex: 999, background: toast.t === "success" ? "#059669" : toast.t === "error" ? "#DC2626" : "#FFFFFF", color: toast.t === "success" || toast.t === "error" ? "#fff" : "#1F2937", border: "1px solid " + (toast.t === "success" ? "#059669" : toast.t === "error" ? "#DC2626" : "#E5E7EB"), boxShadow: "0 4px 20px rgba(44,40,37,0.12)", animation: "slideUp 0.3s ease" }}>{toast.m}</div>}
     </div>
   );
 
@@ -1810,92 +1810,92 @@ export default function Hub() {
 
   function SideLink(p) {
     var active = page === p.id && !showLogin;
-    return <div onClick={function() { setPagePersist(p.id); setShowLogin(false); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 24px", fontSize: 14, cursor: "pointer", transition: "all 0.15s", fontWeight: active ? 600 : 400, color: active ? "#2C2825" : "#8A8279", background: active ? p.color + "15" : "transparent", borderRight: active ? "2px solid " + p.color : "2px solid transparent" }}><Dot color={p.color} />{p.label}</div>;
+    return <div onClick={function() { setPagePersist(p.id); setShowLogin(false); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", margin: "1px 12px", fontSize: 13, cursor: "pointer", transition: "all 0.15s", fontWeight: active ? 500 : 400, color: active ? "#93bbfc" : "rgba(255,255,255,0.55)", background: active ? "rgba(96,165,250,0.15)" : "transparent", borderRadius: 8 }}><Dot color={p.color} />{p.label}</div>;
   }
 
   return (
-    <div style={{ fontFamily: "'Varela Round',sans-serif", background: "#FAFAF8", color: "#4A4541", minHeight: "100vh", display: "flex" }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Varela+Round&display=swap');*{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:#FAFAF8}::-webkit-scrollbar-thumb{background:#E8E4DE;border-radius:3px}@keyframes spin{to{transform:rotate(360deg)}}@keyframes slideUp{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}button:hover{filter:brightness(1.12)}input:focus,select:focus{border-color:#3B82F6!important;box-shadow:0 0 0 2px rgba(59,130,246,0.15)}tr:hover td{background:rgba(59,130,246,0.04)}`}</style>
+    <div style={{ fontFamily: "'Varela Round',sans-serif", background: "#F8F9FB", color: "#374151", minHeight: "100vh", display: "flex" }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Varela+Round&display=swap');*{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:#F8F9FB}::-webkit-scrollbar-thumb{background:#E5E7EB;border-radius:3px}@keyframes spin{to{transform:rotate(360deg)}}@keyframes slideUp{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}button:hover{filter:brightness(1.08)}input:focus,select:focus{border-color:#3B82F6!important;box-shadow:0 0 0 2px rgba(59,130,246,0.12)}tr:hover td{background:rgba(59,130,246,0.02)}`}</style>
 
-      <div style={{ width: 240, background: "#FFFFFF", borderRight: "1px solid #E8E4DE", display: "flex", flexDirection: "column", padding: "20px 0", flexShrink: 0 }}>
-        <div style={{ padding: "0 24px 24px", borderBottom: "1px solid #E8E4DE", marginBottom: 12 }}>
-          <p style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-0.5px", color: "#2C2825", margin: 0 }}>Inventory Hub</p>
-          <p style={{ fontSize: 11, color: "#8A8279", fontWeight: 500, letterSpacing: "1.5px", textTransform: "uppercase", marginTop: 4 }}>Vetcove Tools</p>
+      <div style={{ width: 230, background: "#1A1F2E", display: "flex", flexDirection: "column", padding: "20px 0", flexShrink: 0 }}>
+        <div style={{ padding: "0 20px 20px", borderBottom: "1px solid rgba(255,255,255,0.08)", marginBottom: 12 }}>
+          <p style={{ fontSize: 18, fontWeight: 700, letterSpacing: "-0.5px", color: "#FFFFFF", margin: 0 }}>Inventory Hub</p>
+          <p style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", fontWeight: 500, letterSpacing: "1.5px", textTransform: "uppercase", marginTop: 4 }}>Vetcove Tools</p>
         </div>
-        <div style={{ padding: "0 12px", marginBottom: 4 }}><div style={{ fontSize: 10, fontWeight: 600, color: "#A69E95", textTransform: "uppercase", letterSpacing: "1px", padding: "8px 12px" }}>PO Tools</div></div>
+        <div style={{ padding: "0 12px", marginBottom: 4 }}><div style={{ fontSize: 10, fontWeight: 500, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "1px", padding: "8px 12px" }}>PO Tools</div></div>
         {Object.entries(WH).map(function(e) { return <SideLink key={e[0]} id={e[0]} label={e[1].full} color={e[1].color} />; })}
-        <div style={{ padding: "12px 12px 4px", marginTop: 4, borderTop: "1px solid #E8E4DE" }}><div style={{ fontSize: 10, fontWeight: 600, color: "#A69E95", textTransform: "uppercase", letterSpacing: "1px", padding: "8px 12px" }}>Generic PO Tools</div></div>
+        <div style={{ padding: "12px 12px 4px", marginTop: 4, borderTop: "1px solid rgba(255,255,255,0.06)" }}><div style={{ fontSize: 10, fontWeight: 500, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "1px", padding: "8px 12px" }}>Generic PO Tools</div></div>
         <SideLink id="po-import" label="PO NDC Validator" color="#06B6D4" />
         <SideLink id="cycle-count" label="Cycle Counting" color="#14B8A6" />
-        <div style={{ padding: "12px 12px 4px", marginTop: 4, borderTop: "1px solid #E8E4DE" }}><div style={{ fontSize: 10, fontWeight: 600, color: "#A69E95", textTransform: "uppercase", letterSpacing: "1px", padding: "8px 12px" }}>Inventory Tools</div></div>
+        <div style={{ padding: "12px 12px 4px", marginTop: 4, borderTop: "1px solid rgba(255,255,255,0.06)" }}><div style={{ fontSize: 10, fontWeight: 500, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "1px", padding: "8px 12px" }}>Inventory Tools</div></div>
         <SideLink id="short-dating" label="Short-Dating" color="#E879F9" />
         <SideLink id="backorder" label="Backorders" color="#F97316" />
-        <div style={{ padding: "12px 12px 4px", marginTop: 4, borderTop: "1px solid #E8E4DE" }}><div style={{ fontSize: 10, fontWeight: 600, color: "#A69E95", textTransform: "uppercase", letterSpacing: "1px", padding: "8px 12px" }}>Settings</div></div>
-        <div onClick={function() { setPagePersist("rules"); setShowLogin(false); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 24px", fontSize: 14, cursor: "pointer", fontWeight: page === "rules" && !showLogin ? 600 : 400, color: page === "rules" && !showLogin ? "#2C2825" : "#8A8279", background: page === "rules" && !showLogin ? "rgba(59,130,246,0.1)" : "transparent", borderRight: page === "rules" && !showLogin ? "2px solid #3B82F6" : "2px solid transparent" }}><IconTruck /> Shipping Rules</div>
+        <div style={{ padding: "12px 12px 4px", marginTop: 4, borderTop: "1px solid rgba(255,255,255,0.06)" }}><div style={{ fontSize: 10, fontWeight: 500, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "1px", padding: "8px 12px" }}>Settings</div></div>
+        <div onClick={function() { setPagePersist("rules"); setShowLogin(false); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", margin: "1px 12px", fontSize: 13, cursor: "pointer", fontWeight: page === "rules" && !showLogin ? 500 : 400, color: page === "rules" && !showLogin ? "#93bbfc" : "rgba(255,255,255,0.55)", background: page === "rules" && !showLogin ? "rgba(96,165,250,0.15)" : "transparent", borderRadius: 8 }}><IconTruck /> Shipping Rules</div>
         <div style={{ flex: 1 }} />
-        <div style={{ padding: "0 16px" }}>
-          <div style={{ padding: "12px 16px", background: ok ? "rgba(16,185,129,0.08)" : "rgba(239,68,68,0.08)", borderRadius: 10, border: "1px solid " + (ok ? "rgba(16,185,129,0.2)" : "rgba(239,68,68,0.2)") }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}><Dot color={ok ? "#059669" : "#DC2626"} /><span style={{ fontSize: 12, color: ok ? "#059669" : "#DC2626", fontWeight: 500 }}>{ok ? "Connected" : "Not Connected"}</span></div>
-            {ok && cred.username && <div style={{ fontSize: 11, color: "#8A8279", marginTop: 4, paddingLeft: 16 }}>{cred.username}</div>}
+        <div style={{ padding: "0 12px" }}>
+          <div style={{ padding: "12px 14px", background: ok ? "rgba(16,185,129,0.1)" : "rgba(239,68,68,0.1)", borderRadius: 10, border: "1px solid " + (ok ? "rgba(16,185,129,0.15)" : "rgba(239,68,68,0.15)") }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}><Dot color={ok ? "#34D399" : "#F87171"} /><span style={{ fontSize: 12, color: ok ? "#34D399" : "#F87171", fontWeight: 500 }}>{ok ? "Connected" : "Not Connected"}</span></div>
+            {ok && cred.username && <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 4, paddingLeft: 16 }}>{cred.username}</div>}
             <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-              <button onClick={function() { setShowLogin(true); }} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, flex: 1, background: "transparent", color: "#8A8279", border: "1px solid #E8E4DE", borderRadius: 8, padding: "4px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer" }}><IconKey /> {ok ? "Update" : "Login"}</button>
-              {ok && <button onClick={logout} style={{ background: "transparent", color: "#8A8279", border: "1px solid #E8E4DE", borderRadius: 8, padding: "4px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Logout</button>}
+              <button onClick={function() { setShowLogin(true); }} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, flex: 1, background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.6)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "4px 10px", fontSize: 11, fontWeight: 500, cursor: "pointer" }}><IconKey /> {ok ? "Update" : "Login"}</button>
+              {ok && <button onClick={logout} style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.6)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "4px 10px", fontSize: 11, fontWeight: 500, cursor: "pointer" }}>Logout</button>}
             </div>
           </div>
-          <div style={{ padding: "12px 16px", marginTop: 8, background: gmail ? "rgba(59,130,246,0.08)" : "rgba(100,116,139,0.08)", borderRadius: 10, border: "1px solid " + (gmail ? "rgba(59,130,246,0.2)" : "rgba(100,116,139,0.2)") }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}><IconGmail /><span style={{ fontSize: 12, color: gmail ? "#2563EB" : "#8A8279", fontWeight: 500 }}>{gmail ? "Gmail Connected" : "Gmail Not Connected"}</span></div>
-            {gmail && gmail.email && <div style={{ fontSize: 11, color: "#8A8279", marginTop: 4, paddingLeft: 22 }}>{gmail.email}</div>}
+          <div style={{ padding: "12px 14px", marginTop: 8, background: gmail ? "rgba(59,130,246,0.1)" : "rgba(100,116,139,0.08)", borderRadius: 10, border: "1px solid " + (gmail ? "rgba(59,130,246,0.15)" : "rgba(100,116,139,0.1)") }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}><IconGmail /><span style={{ fontSize: 12, color: gmail ? "#60A5FA" : "rgba(255,255,255,0.4)", fontWeight: 500 }}>{gmail ? "Gmail Connected" : "Gmail Not Connected"}</span></div>
+            {gmail && gmail.email && <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 4, paddingLeft: 22 }}>{gmail.email}</div>}
             <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-              <button onClick={connectGmail} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, flex: 1, background: "transparent", color: "#8A8279", border: "1px solid #E8E4DE", borderRadius: 8, padding: "4px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer" }}><IconGmail /> {gmail ? "Reconnect" : "Connect"}</button>
-              {gmail && <button onClick={disconnectGmail} style={{ background: "transparent", color: "#8A8279", border: "1px solid #E8E4DE", borderRadius: 8, padding: "4px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Disconnect</button>}
+              <button onClick={connectGmail} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, flex: 1, background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.6)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "4px 10px", fontSize: 11, fontWeight: 500, cursor: "pointer" }}><IconGmail /> {gmail ? "Reconnect" : "Connect"}</button>
+              {gmail && <button onClick={disconnectGmail} style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.6)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "4px 10px", fontSize: 11, fontWeight: 500, cursor: "pointer" }}>Disconnect</button>}
             </div>
           </div>
         </div>
       </div>
 
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "auto" }}>
-        <div style={{ padding: "16px 32px", borderBottom: "1px solid #E8E4DE", display: "flex", alignItems: "center", justifyContent: "space-between", background: "#F5F3EF" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>{!showLogin && <Dot color={activeColor} />}<span style={{ fontSize: 18, fontWeight: 600, color: "#2C2825" }}>{showLogin ? "Acumatica Login" : activeLabel}</span>{isWH && !showLogin && <span style={{ fontSize: 12, background: activeColor + "20", color: activeColor, padding: "3px 10px", borderRadius: 6, fontWeight: 600 }}>{page}</span>}</div>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>{!ok && !showLogin && <span style={{ fontSize: 12, color: "#DC2626", display: "flex", alignItems: "center", gap: 4 }}><IconLock /> View only</span>}<span style={{ fontSize: 12, color: "#8A8279" }}>{new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</span></div>
+        <div style={{ padding: "16px 32px", borderBottom: "0.5px solid #E5E7EB", display: "flex", alignItems: "center", justifyContent: "space-between", background: "#FFFFFF" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>{!showLogin && <Dot color={activeColor} />}<span style={{ fontSize: 18, fontWeight: 500, color: "#1F2937" }}>{showLogin ? "Acumatica Login" : activeLabel}</span>{isWH && !showLogin && <span style={{ fontSize: 11, background: activeColor + "15", color: activeColor, padding: "3px 10px", borderRadius: 6, fontWeight: 500 }}>{page}</span>}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>{!ok && !showLogin && <span style={{ fontSize: 12, color: "#DC2626", display: "flex", alignItems: "center", gap: 4 }}><IconLock /> View only</span>}<span style={{ fontSize: 12, color: "#6B7280" }}>{new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</span></div>
         </div>
         <div style={{ padding: 32, flex: 1 }}>
-          {showLogin && <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 400 }}><div style={{ background: "#FFFFFF", border: "1px solid #E8E4DE", borderRadius: 12, padding: 32, width: 400, textAlign: "center" }}><div style={{ width: 56, height: 56, borderRadius: 14, background: "rgba(59,130,246,0.15)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}><IconKey /></div><h2 style={{ fontSize: 20, fontWeight: 700, color: "#2C2825", margin: "0 0 4px" }}>Acumatica Login</h2><p style={{ color: "#A69E95", fontSize: 11, margin: "0 0 24px" }}>Shared across all tools</p><div style={{ textAlign: "left", display: "flex", flexDirection: "column", gap: 12 }}><div><label style={{ fontSize: 12, color: "#8A8279", fontWeight: 500, display: "block", marginBottom: 4 }}>Username</label><input style={{ background: "#FAFAF8", border: "1px solid #E8E4DE", borderRadius: 8, padding: "8px 12px", color: "#4A4541", fontSize: 13, outline: "none", width: "100%" }} value={cred.username} onChange={function(e) { setCred({ username: e.target.value, password: cred.password }); }} placeholder="your.username" /></div><div><label style={{ fontSize: 12, color: "#8A8279", fontWeight: 500, display: "block", marginBottom: 4 }}>Password</label><input style={{ background: "#FAFAF8", border: "1px solid #E8E4DE", borderRadius: 8, padding: "8px 12px", color: "#4A4541", fontSize: 13, outline: "none", width: "100%" }} type="password" value={cred.password} onChange={function(e) { setCred({ username: cred.username, password: e.target.value }); }} placeholder="\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" /></div><button onClick={login} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, width: "100%", background: "#3B82F6", color: "#fff", border: "none", borderRadius: 8, padding: "10px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer", marginTop: 8 }}>Connect</button></div></div></div>}
+          {showLogin && <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 400 }}><div style={{ background: "#FFFFFF", border: "1px solid #E5E7EB", borderRadius: 12, padding: 32, width: 400, textAlign: "center" }}><div style={{ width: 56, height: 56, borderRadius: 14, background: "rgba(59,130,246,0.15)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}><IconKey /></div><h2 style={{ fontSize: 20, fontWeight: 700, color: "#1F2937", margin: "0 0 4px" }}>Acumatica Login</h2><p style={{ color: "#9CA3AF", fontSize: 11, margin: "0 0 24px" }}>Shared across all tools</p><div style={{ textAlign: "left", display: "flex", flexDirection: "column", gap: 12 }}><div><label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 4 }}>Username</label><input style={{ background: "#F8F9FB", border: "1px solid #E5E7EB", borderRadius: 8, padding: "8px 12px", color: "#374151", fontSize: 13, outline: "none", width: "100%" }} value={cred.username} onChange={function(e) { setCred({ username: e.target.value, password: cred.password }); }} placeholder="your.username" /></div><div><label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 4 }}>Password</label><input style={{ background: "#F8F9FB", border: "1px solid #E5E7EB", borderRadius: 8, padding: "8px 12px", color: "#374151", fontSize: 13, outline: "none", width: "100%" }} type="password" value={cred.password} onChange={function(e) { setCred({ username: cred.username, password: e.target.value }); }} placeholder="\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" /></div><button onClick={login} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, width: "100%", background: "#3B82F6", color: "#fff", border: "none", borderRadius: 8, padding: "10px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer", marginTop: 8 }}>Connect</button></div></div></div>}
 
           {page === "rules" && !showLogin && <div>
-            <p style={{ color: "#8A8279", fontSize: 13, marginBottom: 16 }}>Vendor shipping rules for PO warehouses. Rules are saved to your browser.</p>
-            <div style={{ background: "#FFFFFF", border: "1px solid #E8E4DE", borderRadius: 12, overflow: "auto", marginBottom: 16 }}>
+            <p style={{ color: "#6B7280", fontSize: 13, marginBottom: 16 }}>Vendor shipping rules for PO warehouses. Rules are saved to your browser.</p>
+            <div style={{ background: "#FFFFFF", border: "1px solid #E5E7EB", borderRadius: 12, overflow: "auto", marginBottom: 16 }}>
               <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
                 <thead><tr>
-                  <th style={{ padding: "12px 14px", textAlign: "left", background: "#F5F3EF", color: "#9A928A", fontWeight: 600, fontSize: 13, textTransform: "uppercase", borderBottom: "2px solid #E8E4DE" }}>Vendor</th>
-                  <th style={{ padding: "12px 14px", textAlign: "left", background: "#F5F3EF", color: "#9A928A", fontWeight: 600, fontSize: 13, textTransform: "uppercase", borderBottom: "2px solid #E8E4DE" }}>Rule</th>
-                  <th style={{ padding: "12px 14px", textAlign: "center", background: "#F5F3EF", color: "#9A928A", fontWeight: 600, fontSize: 13, textTransform: "uppercase", borderBottom: "2px solid #E8E4DE", width: 60 }}></th>
+                  <th style={{ padding: "12px 14px", textAlign: "left", background: "#F9FAFB", color: "#9CA3AF", fontWeight: 600, fontSize: 13, textTransform: "uppercase", borderBottom: "2px solid #E5E7EB" }}>Vendor</th>
+                  <th style={{ padding: "12px 14px", textAlign: "left", background: "#F9FAFB", color: "#9CA3AF", fontWeight: 600, fontSize: 13, textTransform: "uppercase", borderBottom: "2px solid #E5E7EB" }}>Rule</th>
+                  <th style={{ padding: "12px 14px", textAlign: "center", background: "#F9FAFB", color: "#9CA3AF", fontWeight: 600, fontSize: 13, textTransform: "uppercase", borderBottom: "2px solid #E5E7EB", width: 60 }}></th>
                 </tr></thead>
                 <tbody>{Object.entries(shipRules).sort(function(a, b) { return a[0].localeCompare(b[0]); }).map(function(e) {
                   return <tr key={e[0]}>
-                    <td style={{ padding: "10px 14px", borderBottom: "1px solid #F0EDE8", color: "#4A4541", fontSize: 14 }}>{e[0]}</td>
-                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8" }}>
-                      <input style={{ background: "#F8F6F3", border: "1px solid #E8E4DE", borderRadius: 8, padding: "8px 12px", color: "#4A4541", fontSize: 13, outline: "none", width: "100%", fontFamily: "'Varela Round', sans-serif" }} value={e[1]} onChange={function(ev) { var updated = Object.assign({}, shipRules); updated[e[0]] = ev.target.value; updateShipRules(updated); }} />
+                    <td style={{ padding: "10px 14px", borderBottom: "1px solid #F3F4F6", color: "#374151", fontSize: 14 }}>{e[0]}</td>
+                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #F3F4F6" }}>
+                      <input style={{ background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 8, padding: "8px 12px", color: "#374151", fontSize: 13, outline: "none", width: "100%", fontFamily: "'Varela Round', sans-serif" }} value={e[1]} onChange={function(ev) { var updated = Object.assign({}, shipRules); updated[e[0]] = ev.target.value; updateShipRules(updated); }} />
                     </td>
-                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #F0EDE8", textAlign: "center" }}>
-                      <button onClick={function() { var updated = Object.assign({}, shipRules); delete updated[e[0]]; updateShipRules(updated); showToast("Removed " + e[0]); }} style={{ background: "transparent", border: "1px solid #E8E4DE", borderRadius: 6, padding: "4px 8px", fontSize: 11, color: "#DC2626", cursor: "pointer" }}>{"\u2715"}</button>
+                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #F3F4F6", textAlign: "center" }}>
+                      <button onClick={function() { var updated = Object.assign({}, shipRules); delete updated[e[0]]; updateShipRules(updated); showToast("Removed " + e[0]); }} style={{ background: "transparent", border: "1px solid #E5E7EB", borderRadius: 6, padding: "4px 8px", fontSize: 11, color: "#DC2626", cursor: "pointer" }}>{"\u2715"}</button>
                     </td>
                   </tr>;
                 })}</tbody>
               </table>
             </div>
-            <div style={{ background: "#FFFFFF", border: "1px solid #E8E4DE", borderRadius: 12, padding: 20, display: "flex", gap: 12, alignItems: "flex-end" }}>
+            <div style={{ background: "#FFFFFF", border: "1px solid #E5E7EB", borderRadius: 12, padding: 20, display: "flex", gap: 12, alignItems: "flex-end" }}>
               <div style={{ flex: 1 }}>
-                <label style={{ fontSize: 12, color: "#8A8279", fontWeight: 500, display: "block", marginBottom: 4 }}>Vendor Name</label>
-                <input id="new-vendor-name" style={{ background: "#F8F6F3", border: "1px solid #E8E4DE", borderRadius: 8, padding: "8px 12px", color: "#4A4541", fontSize: 14, outline: "none", width: "100%", fontFamily: "'Varela Round', sans-serif" }} placeholder="e.g. Zoetis US LLC" />
+                <label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 4 }}>Vendor Name</label>
+                <input id="new-vendor-name" style={{ background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 8, padding: "8px 12px", color: "#374151", fontSize: 14, outline: "none", width: "100%", fontFamily: "'Varela Round', sans-serif" }} placeholder="e.g. Zoetis US LLC" />
               </div>
               <div style={{ flex: 2 }}>
-                <label style={{ fontSize: 12, color: "#8A8279", fontWeight: 500, display: "block", marginBottom: 4 }}>Rule</label>
-                <input id="new-vendor-rule" style={{ background: "#F8F6F3", border: "1px solid #E8E4DE", borderRadius: 8, padding: "8px 12px", color: "#4A4541", fontSize: 14, outline: "none", width: "100%", fontFamily: "'Varela Round', sans-serif" }} placeholder="e.g. min:5000; message:Free Shipping; else:Not Free Shipping" />
+                <label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 4 }}>Rule</label>
+                <input id="new-vendor-rule" style={{ background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 8, padding: "8px 12px", color: "#374151", fontSize: 14, outline: "none", width: "100%", fontFamily: "'Varela Round', sans-serif" }} placeholder="e.g. min:5000; message:Free Shipping; else:Not Free Shipping" />
               </div>
               <button onClick={function() { var nameEl = document.getElementById("new-vendor-name"); var ruleEl = document.getElementById("new-vendor-rule"); var name = (nameEl.value || "").trim(); var rule = (ruleEl.value || "").trim(); if (!name) { showToast("Enter a vendor name", "error"); return; } if (!rule) { showToast("Enter a rule", "error"); return; } var updated = Object.assign({}, shipRules); updated[name] = rule; updateShipRules(updated); nameEl.value = ""; ruleEl.value = ""; showToast("Added " + name); }} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "10px 18px", borderRadius: 10, border: "none", fontSize: 14, fontWeight: 600, cursor: "pointer", background: "#3B82F6", color: "#fff", flexShrink: 0 }}>+ Add</button>
             </div>
             <div style={{ marginTop: 16, display: "flex", gap: 10 }}>
-              <button onClick={function() { updateShipRules(Object.assign({}, DEFAULT_SHIP_RULES)); showToast("Reset to defaults"); }} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 8, border: "1px solid #E8E4DE", fontSize: 13, fontWeight: 600, cursor: "pointer", background: "transparent", color: "#8A8279" }}>Reset to Defaults</button>
+              <button onClick={function() { updateShipRules(Object.assign({}, DEFAULT_SHIP_RULES)); showToast("Reset to defaults"); }} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 8, border: "1px solid #E5E7EB", fontSize: 13, fontWeight: 600, cursor: "pointer", background: "transparent", color: "#6B7280" }}>Reset to Defaults</button>
               <span style={{ fontSize: 12, color: "#B5AEA5", alignSelf: "center" }}>{Object.keys(shipRules).length} vendors</span>
             </div>
           </div>}
@@ -1908,7 +1908,7 @@ export default function Hub() {
         </div>
       </div>
 
-      {toast && <div style={{ position: "fixed", bottom: 24, right: 24, padding: "12px 20px", borderRadius: 10, fontSize: 13, fontWeight: 500, zIndex: 999, background: toast.t === "success" ? "#059669" : toast.t === "error" ? "#DC2626" : "#FFFFFF", color: toast.t === "success" || toast.t === "error" ? "#fff" : "#2C2825", border: "1px solid " + (toast.t === "success" ? "#059669" : toast.t === "error" ? "#DC2626" : "#E8E4DE"), boxShadow: "0 4px 20px rgba(44,40,37,0.12)", animation: "slideUp 0.3s ease" }}>{toast.m}</div>}
+      {toast && <div style={{ position: "fixed", bottom: 24, right: 24, padding: "12px 20px", borderRadius: 10, fontSize: 13, fontWeight: 500, zIndex: 999, background: toast.t === "success" ? "#059669" : toast.t === "error" ? "#DC2626" : "#FFFFFF", color: toast.t === "success" || toast.t === "error" ? "#fff" : "#1F2937", border: "1px solid " + (toast.t === "success" ? "#059669" : toast.t === "error" ? "#DC2626" : "#E5E7EB"), boxShadow: "0 4px 20px rgba(44,40,37,0.12)", animation: "slideUp 0.3s ease" }}>{toast.m}</div>}
     </div>
   );
 }
