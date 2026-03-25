@@ -528,21 +528,21 @@ function WHT(props) {
         var resp = await fetch("/api/kv?key=" + encodeURIComponent(kvKey));
         var json = await resp.json();
         if (m && json.data && json.data.data && json.data.data.length > 0) {
-          console.log("[KV Load]", kvKey, "got", json.data.data.length, "rows, runBy:", json.data.runBy, "runTime:", json.data.runTime);
           setData(json.data.data); setEmailSent(json.data.emailSent || false); setRunBy(json.data.runBy || null); setRunTime(json.data.runTime || null); setShipNotes(json.data.shipNotes || {}); setSubPage("data");
+          if (m) setKvStatus("loaded-kv:" + json.data.data.length);
           loaded = true;
         } else {
-          console.log("[KV Load]", kvKey, "empty or no data. json.data:", json.data ? "exists" : "null");
+          if (m) setKvStatus("kv-empty");
         }
-      } catch (e) { console.warn("[KV Load Error]", kvKey, e.message); }
+      } catch (e) { if (m) setKvStatus("kv-error:" + e.message); }
       // Fall back to localStorage if KV had nothing
       if (!loaded && m) {
         var s = sGet("wh-data-" + whKey);
         if (s && s.data && s.data.length > 0) {
-          console.log("[LS Load]", whKey, "got", s.data.length, "rows from localStorage");
           setData(s.data); setEmailSent(s.emailSent || false); setRunBy(s.runBy || null); setRunTime(s.runTime || null); setShipNotes(s.shipNotes || {}); setSubPage("data");
+          if (m) setKvStatus("loaded-ls:" + s.data.length);
         } else {
-          console.log("[LS Load]", whKey, "no localStorage data");
+          if (m) setKvStatus("no-data");
         }
       }
       if (m) setInitLoading(false);
@@ -572,6 +572,8 @@ function WHT(props) {
     return function() { m = false; clearInterval(poll); };
   }, [kvKey, runTime, shipNotes, emailSent]);
 
+  var _kvSt = useState(""), kvStatus = _kvSt[0], setKvStatus = _kvSt[1];
+
   var persist = useCallback(async function(d, es, by, time, sn) {
     var payload = { data: d, emailSent: es, runBy: by, runTime: time, shipNotes: sn || {} };
     // Save to localStorage as cache
@@ -580,8 +582,9 @@ function WHT(props) {
     try {
       var resp = await fetch("/api/kv", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: kvKey, value: payload }) });
       var json = await resp.json();
-      if (!resp.ok || json.error) console.warn("[KV Save Failed]", kvKey, json.error || resp.status);
-    } catch (e) { console.warn("[KV Save Error]", kvKey, e.message); }
+      if (!resp.ok || json.error) { setKvStatus("save-fail:" + (json.error || resp.status)); }
+      else { setKvStatus("saved"); }
+    } catch (e) { setKvStatus("save-error:" + e.message); }
   }, [kvKey, whKey]);
   var fetchData = useCallback(function() {
     if (!ok) { lp(); return; } setLoading(true); setEmailSent(false); setConfirmClear(false);
@@ -650,6 +653,7 @@ function WHT(props) {
       </div>
       <div style={{ flex: 1 }} />
       {runTime && <span style={{ fontSize: 11, color: "#A69E95" }}>Last: {runTime}{runBy ? " by " + runBy : ""}</span>}
+      {kvStatus && <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 4, background: kvStatus.startsWith("saved") || kvStatus.startsWith("loaded-kv") ? "rgba(5,150,105,0.1)" : kvStatus.startsWith("loaded-ls") ? "rgba(245,158,11,0.1)" : "rgba(239,68,68,0.1)", color: kvStatus.startsWith("saved") || kvStatus.startsWith("loaded-kv") ? "#059669" : kvStatus.startsWith("loaded-ls") ? "#D97706" : "#DC2626" }}>{kvStatus.startsWith("saved") ? "KV synced" : kvStatus.startsWith("loaded-kv") ? "from KV" : kvStatus.startsWith("loaded-ls") ? "local only" : kvStatus}</span>}
       {data.length > 0 && <span style={S.badge(emailSent ? "success" : "default")}>{emailSent ? <><IconCheck /> Sent</> : data.length + " lines"}</span>}
       {data.length > 0 && (confirmClear ? <div style={{ display: "flex", gap: 8, alignItems: "center" }}><span style={{ fontSize: 12, color: "#DC2626" }}>Clear?</span><button onClick={clearAll} style={Object.assign({}, S.btn("danger"), { padding: "6px 14px", fontSize: 12 })}>Yes</button><button onClick={function() { setConfirmClear(false); }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}>No</button></div> : <Gate ok={ok} prompt={lp} onClick={function() { setConfirmClear(true); }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12, color: "#8A8279" })}><IconTrash /> Clear</Gate>)}
     </div>
