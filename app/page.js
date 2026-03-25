@@ -525,7 +525,7 @@ function WHT(props) {
       var loaded = false;
       // Try KV first
       try {
-        var resp = await fetch("/api/kv?key=" + encodeURIComponent(kvKey));
+        var resp = await fetch("/api/kv?key=" + encodeURIComponent(kvKey) + "&_t=" + Date.now(), { cache: "no-store" });
         var json = await resp.json();
         if (m && json.data && json.data.data && json.data.data.length > 0) {
           setData(json.data.data); setEmailSent(json.data.emailSent || false); setRunBy(json.data.runBy || null); setRunTime(json.data.runTime || null); setShipNotes(json.data.shipNotes || {}); setSubPage("data");
@@ -557,7 +557,7 @@ function WHT(props) {
     var m = true;
     var poll = setInterval(async function() {
       try {
-        var resp = await fetch("/api/kv?key=" + encodeURIComponent(kvKey));
+        var resp = await fetch("/api/kv?key=" + encodeURIComponent(kvKey) + "&_t=" + Date.now(), { cache: "no-store" });
         var json = await resp.json();
         if (!m || !json.data) return;
         var remote = json.data;
@@ -588,7 +588,7 @@ function WHT(props) {
       var json = await resp.json();
       if (!resp.ok || json.error) { setKvStatus("save-fail:" + sizeKB + "KB " + (json.error || resp.status)); return; }
       // Verify: read it back immediately
-      var vResp = await fetch("/api/kv?key=" + encodeURIComponent(kvKey));
+      var vResp = await fetch("/api/kv?key=" + encodeURIComponent(kvKey) + "&_t=" + Date.now(), { cache: "no-store" });
       var vJson = await vResp.json();
       if (vJson.data && vJson.data.data && vJson.data.data.length > 0) {
         setKvStatus("verified:" + sizeKB + "KB," + vJson.data.data.length + "rows");
