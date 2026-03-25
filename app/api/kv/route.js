@@ -1,9 +1,16 @@
-// /app/api/kv/route.js — Shared state via Upstash Redis
+// /app/api/kv/route.js — Shared state via Upstash Redis (secured)
 export const runtime = "edge";
 export const dynamic = "force-dynamic";
 
 const KV_URL = process.env.KV_REST_API_URL;
 const KV_TOKEN = process.env.KV_REST_API_TOKEN;
+const KV_SECRET = process.env.NEXT_PUBLIC_KV_SECRET;
+
+function checkAuth(request) {
+  if (!KV_SECRET) return true; // no secret configured = skip check
+  const auth = request.headers.get("x-kv-secret");
+  return auth === KV_SECRET;
+}
 
 async function kvGet(key) {
   if (!KV_URL || !KV_TOKEN) return null;
@@ -38,6 +45,7 @@ async function kvSet(key, value) {
 }
 
 export async function GET(request) {
+  if (!checkAuth(request)) return Response.json({ error: "Unauthorized" }, { status: 401 });
   try {
     const { searchParams } = new URL(request.url);
     const key = searchParams.get("key");
@@ -52,6 +60,7 @@ export async function GET(request) {
 }
 
 export async function POST(request) {
+  if (!checkAuth(request)) return Response.json({ error: "Unauthorized" }, { status: 401 });
   try {
     const body = await request.json();
     const { key, value } = body;
