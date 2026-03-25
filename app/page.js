@@ -527,6 +527,8 @@ function WHT(props) {
   var _sn = useState({}), shipNotes = _sn[0], setShipNotes = _sn[1];
   var _rb = useState(null), runBy = _rb[0], setRunBy = _rb[1];
   var _rt = useState(null), runTime = _rt[0], setRunTime = _rt[1];
+  var _pck = useState(null), priceCheckKey = _pck[0], setPriceCheckKey = _pck[1];
+  var _pcc = useState({}), priceChecked = _pcc[0], setPriceChecked = _pcc[1];
   var _il = useState(true), initLoading = _il[0], setInitLoading = _il[1];
   var S = useMemo(function() { return makeStyles(cfg.color); }, [cfg.color]);
   var kvKey = "po:" + whKey;
@@ -717,11 +719,71 @@ function WHT(props) {
     {subPage === "shipping" && <div>
       {data.length > 0 ? <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto" })}>
         <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
-          <thead><tr><th style={S.th}>Vendor</th><th style={Object.assign({}, S.th, { width: 140 })}>PO #</th><th style={Object.assign({}, S.th, { textAlign: "right" })}>Total</th><th style={S.th}>Shipping</th><th style={Object.assign({}, S.th, { width: 200 })}>Vendor Reference</th></tr></thead>
-          <tbody>{Object.keys(vendorGroups).sort().map(function(key) { var parts = key.split(" || "), v = parts[0], po = parts[1] || ""; var t = vendorTotals[key], rl = SHIP_RULES[v] || "", st = rl ? evalShip(rl, t) : "No Rule", isFree = st === "Free Shipping"; var sn = shipNotes[key] || {}; var vl = getVendorLabel(v); return <tr key={key}><td style={Object.assign({}, S.td, { color: "#2C2825" })}><div>{v}</div>{vl && <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 10, background: vl === "Truecommerce" ? "#EFF6FF" : "#FFF7ED", color: vl === "Truecommerce" ? "#2563EB" : "#C2410C", fontWeight: 600, display: "inline-block", marginTop: 4 }}>{vl}</span>}</td><td style={Object.assign({}, S.td, { color: "#4A4541" })}>{po || <input style={Object.assign({}, S.inp, { padding: "6px 10px" })} placeholder="Paste PO #" value={sn.po || ""} onChange={function(e) { var updated = Object.assign({}, shipNotes); updated[key] = Object.assign({}, sn, { po: e.target.value }); setShipNotes(updated); persist(data, emailSent, runBy, runTime, updated); }} />}</td><td style={Object.assign({}, S.td, { textAlign: "right" })}>${t.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td><td style={S.td}><span style={S.badge(isFree ? "success" : "danger")}>{isFree ? <IconCheck /> : <IconAlert />}{st}</span></td><td style={S.td}><input style={Object.assign({}, S.inp, { padding: "6px 10px" })} placeholder="Paste PO #..." value={sn.notes || ""} onChange={function(e) { var updated = Object.assign({}, shipNotes); updated[key] = Object.assign({}, sn, { notes: e.target.value }); setShipNotes(updated); persist(data, emailSent, runBy, runTime, updated); }} /></td></tr>; })}</tbody>
+          <thead><tr><th style={S.th}>Vendor</th><th style={Object.assign({}, S.th, { width: 140 })}>PO #</th><th style={Object.assign({}, S.th, { textAlign: "right" })}>Total</th><th style={S.th}>Shipping</th><th style={Object.assign({}, S.th, { width: 200 })}>Vendor Reference</th><th style={Object.assign({}, S.th, { width: 100 })}>Price Check</th></tr></thead>
+          <tbody>{Object.keys(vendorGroups).sort().map(function(key) { var parts = key.split(" || "), v = parts[0], po = parts[1] || ""; var t = vendorTotals[key], rl = SHIP_RULES[v] || "", st = rl ? evalShip(rl, t) : "No Rule", isFree = st === "Free Shipping"; var sn = shipNotes[key] || {}; var vl = getVendorLabel(v); var rows = vendorGroups[key] || []; var checkedCount = rows.filter(function(r) { return priceChecked[key + ":" + r.SKUNDC]; }).length; return <tr key={key}><td style={Object.assign({}, S.td, { color: "#2C2825" })}><div>{v}</div>{vl && <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 10, background: vl === "Truecommerce" ? "#EFF6FF" : "#FFF7ED", color: vl === "Truecommerce" ? "#2563EB" : "#C2410C", fontWeight: 600, display: "inline-block", marginTop: 4 }}>{vl}</span>}</td><td style={Object.assign({}, S.td, { color: "#4A4541" })}>{po || <input style={Object.assign({}, S.inp, { padding: "6px 10px" })} placeholder="Paste PO #" value={sn.po || ""} onChange={function(e) { var updated = Object.assign({}, shipNotes); updated[key] = Object.assign({}, sn, { po: e.target.value }); setShipNotes(updated); persist(data, emailSent, runBy, runTime, updated); }} />}</td><td style={Object.assign({}, S.td, { textAlign: "right" })}>${t.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td><td style={S.td}><span style={S.badge(isFree ? "success" : "danger")}>{isFree ? <IconCheck /> : <IconAlert />}{st}</span></td><td style={S.td}><input style={Object.assign({}, S.inp, { padding: "6px 10px" })} placeholder="Paste PO #..." value={sn.notes || ""} onChange={function(e) { var updated = Object.assign({}, shipNotes); updated[key] = Object.assign({}, sn, { notes: e.target.value }); setShipNotes(updated); persist(data, emailSent, runBy, runTime, updated); }} /></td><td style={Object.assign({}, S.td, { textAlign: "center" })}><button onClick={function() { setPriceCheckKey(key); }} style={Object.assign({}, S.btn("ghost"), { padding: "4px 10px", fontSize: 11 })}>{checkedCount === rows.length && rows.length > 0 ? <><IconCheck /> All</> : checkedCount > 0 ? checkedCount + "/" + rows.length : "Review"}</button></td></tr>; })}</tbody>
         </table>
       </div> : <div style={Object.assign({}, S.card, { textAlign: "center", padding: 48, color: "#A69E95" })}>Run fetch first.</div>}
     </div>}
+
+    {/* Price Check Modal */}
+    {priceCheckKey && (function() {
+      var parts = priceCheckKey.split(" || ");
+      var vendorName = parts[0], poNum = parts[1] || "";
+      var rows = vendorGroups[priceCheckKey] || [];
+      var total = rows.reduce(function(s, r) { return s + (r.TotalPrice || 0); }, 0);
+      var allChecked = rows.length > 0 && rows.every(function(r) { return priceChecked[priceCheckKey + ":" + r.SKUNDC]; });
+      var checkedCount = rows.filter(function(r) { return priceChecked[priceCheckKey + ":" + r.SKUNDC]; }).length;
+      var uncheckedItems = rows.filter(function(r) { return !priceChecked[priceCheckKey + ":" + r.SKUNDC]; });
+      return <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.4)", zIndex: 999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }} onClick={function(e) { if (e.target === e.currentTarget) setPriceCheckKey(null); }}>
+        <div style={{ background: "#FFFFFF", borderRadius: 16, maxWidth: 900, width: "100%", maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 25px 50px rgba(0,0,0,0.15)" }}>
+          <div style={{ padding: "20px 24px", borderBottom: "1px solid #E8E4DE", display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "#2C2825" }}>Price Check — {vendorName}</div>
+              <div style={{ fontSize: 12, color: "#8A8279", marginTop: 2 }}>{poNum && "PO: " + poNum + " · "}{rows.length} items · Total: ${total.toLocaleString(undefined, { minimumFractionDigits: 2 })} · Checked: {checkedCount}/{rows.length}</div>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={function() { var updated = Object.assign({}, priceChecked); rows.forEach(function(r) { updated[priceCheckKey + ":" + r.SKUNDC] = !allChecked; }); setPriceChecked(updated); }} style={Object.assign({}, S.btn(allChecked ? "ghost" : "default"), { padding: "6px 14px", fontSize: 11 })}>{allChecked ? "Uncheck All" : "Check All"}</button>
+              <button onClick={function() { setPriceCheckKey(null); }} style={{ background: "transparent", border: "none", cursor: "pointer", fontSize: 20, color: "#8A8279", padding: "0 4px" }}>{"\u00D7"}</button>
+            </div>
+          </div>
+          <div style={{ overflow: "auto", flex: 1 }}>
+            <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
+              <thead><tr>
+                <th style={Object.assign({}, S.th, { width: 40, textAlign: "center" })}>{"\u2713"}</th>
+                <th style={S.th}>SKU</th>
+                <th style={Object.assign({}, S.th, { minWidth: 200 })}>Description</th>
+                <th style={Object.assign({}, S.th, { textAlign: "right" })}>Qty</th>
+                <th style={Object.assign({}, S.th, { textAlign: "right" })}>Unit Price</th>
+                <th style={Object.assign({}, S.th, { textAlign: "right" })}>Total</th>
+              </tr></thead>
+              <tbody>{rows.map(function(r, i) {
+                var ck = priceChecked[priceCheckKey + ":" + r.SKUNDC] || false;
+                return <tr key={i} style={{ background: ck ? "rgba(5,150,105,0.04)" : "transparent" }}>
+                  <td style={Object.assign({}, S.td, { textAlign: "center" })}>
+                    <input type="checkbox" checked={ck} onChange={function() {
+                      var updated = Object.assign({}, priceChecked);
+                      updated[priceCheckKey + ":" + r.SKUNDC] = !ck;
+                      setPriceChecked(updated);
+                    }} style={{ cursor: "pointer", width: 16, height: 16, accentColor: cfg.color }} />
+                  </td>
+                  <td style={Object.assign({}, S.td, { fontFamily: "monospace", color: ck ? "#059669" : "#4A4541" })}>{r.SKUNDC}</td>
+                  <td style={Object.assign({}, S.td, { color: ck ? "#059669" : "#4A4541" })}>{r.Description}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "right", color: ck ? "#059669" : "#4A4541" })}>{r.OrderQty}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "right", color: ck ? "#059669" : "#4A4541" })}>${r.Price.toFixed(2)}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "right", fontWeight: 600, color: ck ? "#059669" : "#2C2825" })}>${r.TotalPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                </tr>;
+              })}</tbody>
+            </table>
+          </div>
+          {uncheckedItems.length > 0 && uncheckedItems.length < rows.length && <div style={{ padding: "12px 24px", borderTop: "1px solid #E8E4DE", background: "rgba(245,158,11,0.06)", fontSize: 12, color: "#D97706" }}>
+            <strong>{uncheckedItems.length} item{uncheckedItems.length > 1 ? "s" : ""} unchecked:</strong> {uncheckedItems.map(function(r) { return r.SKUNDC; }).join(", ")}
+          </div>}
+          {allChecked && <div style={{ padding: "12px 24px", borderTop: "1px solid #E8E4DE", background: "rgba(5,150,105,0.06)", fontSize: 12, color: "#059669", fontWeight: 600 }}>
+            {"\u2713"} All prices verified
+          </div>}
+        </div>
+      </div>;
+    })()}
 
     {subPage === "email" && <div>
       {emailBlocked && <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 10, padding: "14px 20px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}><IconAlert /><span style={{ fontSize: 13, color: "#DC2626" }}><strong>{flagCount} flagged item{flagCount > 1 ? "s" : ""}</strong>{flags.s.length > 0 ? " (" + flags.s.length + " short-dating)" : ""}{flags.so.length > 0 ? " (" + flags.so.length + " sell-off)" : ""} must be removed from the PO before sending.</span></div>}
