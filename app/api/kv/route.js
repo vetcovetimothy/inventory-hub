@@ -1,5 +1,6 @@
 // /app/api/kv/route.js — Shared state via Upstash Redis
 export const runtime = "edge";
+export const dynamic = "force-dynamic";
 
 const KV_URL = process.env.KV_REST_API_URL;
 const KV_TOKEN = process.env.KV_REST_API_TOKEN;
@@ -8,6 +9,7 @@ async function kvGet(key) {
   if (!KV_URL || !KV_TOKEN) return null;
   const resp = await fetch(`${KV_URL}/get/${encodeURIComponent(key)}`, {
     headers: { Authorization: `Bearer ${KV_TOKEN}` },
+    cache: "no-store",
   });
   if (!resp.ok) { console.error("[KV GET error]", resp.status, await resp.text()); return null; }
   const json = await resp.json();
@@ -22,6 +24,7 @@ async function kvSet(key, value) {
     method: "POST",
     headers: { Authorization: `Bearer ${KV_TOKEN}`, "Content-Type": "application/json" },
     body: body,
+    cache: "no-store",
   });
   if (!resp.ok) {
     const errText = await resp.text();
@@ -37,7 +40,9 @@ export async function GET(request) {
     const key = searchParams.get("key");
     if (!key) return Response.json({ error: "Missing key" }, { status: 400 });
     const data = await kvGet(key);
-    return Response.json({ data });
+    return Response.json({ data }, {
+      headers: { "Cache-Control": "no-store, no-cache, must-revalidate", "Pragma": "no-cache" },
+    });
   } catch (err) {
     return Response.json({ error: err.message }, { status: 500 });
   }
