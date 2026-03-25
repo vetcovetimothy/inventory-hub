@@ -529,6 +529,7 @@ function WHT(props) {
   var _rt = useState(null), runTime = _rt[0], setRunTime = _rt[1];
   var _pck = useState(null), priceCheckKey = _pck[0], setPriceCheckKey = _pck[1];
   var _pcc = useState({}), priceChecked = _pcc[0], setPriceChecked = _pcc[1];
+  var _pcr = useState({}), pcReported = _pcr[0], setPcReported = _pcr[1];
   var _il = useState(true), initLoading = _il[0], setInitLoading = _il[1];
   var S = useMemo(function() { return makeStyles(cfg.color); }, [cfg.color]);
   var kvKey = "po:" + whKey;
@@ -735,7 +736,7 @@ function WHT(props) {
       var checkedCount = rows.filter(function(r) { return priceChecked[priceCheckKey + ":" + r.SKUNDC]; }).length;
       var uncheckedItems = rows.filter(function(r) { return !priceChecked[priceCheckKey + ":" + r.SKUNDC]; });
       return <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.35)", zIndex: 999, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }} onClick={function(e) { if (e.target === e.currentTarget) setPriceCheckKey(null); }}>
-        <div style={{ background: "#FFFFFF", borderRadius: 20, maxWidth: 960, width: "100%", maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 25px 60px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.04)" }}>
+        <div style={{ background: "#FFFFFF", borderRadius: 20, maxWidth: 1100, width: "100%", maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 25px 60px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.04)" }}>
           {/* Header */}
           <div style={{ padding: "24px 32px 20px", borderBottom: "1px solid #F3F4F6" }}>
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
@@ -759,19 +760,44 @@ function WHT(props) {
               <div style={{ height: "100%", width: rows.length > 0 ? (checkedCount / rows.length * 100) + "%" : "0%", background: allChecked ? "#059669" : "#D97706", borderRadius: 2, transition: "width 0.3s ease" }} />
             </div>
           </div>
+          {/* Column headers */}
+          <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "10px 32px", background: "#F9FAFB", borderBottom: "1px solid #F3F4F6", fontSize: 10, fontWeight: 500, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+            <div style={{ width: 22 }}></div>
+            <div style={{ minWidth: 110 }}>SKU</div>
+            <div style={{ flex: 1 }}>Description</div>
+            <div style={{ textAlign: "right", minWidth: 40 }}>Qty</div>
+            <div style={{ textAlign: "right", minWidth: 75 }}>Unit Price</div>
+            <div style={{ textAlign: "right", minWidth: 95 }}>Total</div>
+            <div style={{ width: 1, height: 14, background: "#E5E7EB", margin: "0 4px" }}></div>
+            <div style={{ textAlign: "right", minWidth: 90 }}>Reported</div>
+            <div style={{ textAlign: "right", minWidth: 75 }}>Unit Diff</div>
+          </div>
           {/* Item list */}
-          <div style={{ overflow: "auto", flex: 1, padding: "8px 16px" }}>
+          <div style={{ overflow: "auto", flex: 1, padding: "4px 16px" }}>
             {rows.map(function(r, i) {
               var ck = priceChecked[priceCheckKey + ":" + r.SKUNDC] || false;
-              return <div key={i} onClick={function() { var updated = Object.assign({}, priceChecked); updated[priceCheckKey + ":" + r.SKUNDC] = !ck; setPriceChecked(updated); }} style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", margin: "4px 0", borderRadius: 12, cursor: "pointer", transition: "all 0.15s", background: ck ? "rgba(5,150,105,0.05)" : "transparent", border: ck ? "1px solid rgba(5,150,105,0.15)" : "1px solid transparent" }}>
-                <div style={{ width: 22, height: 22, borderRadius: 6, border: ck ? "2px solid #059669" : "2px solid #D5D0CA", background: ck ? "#059669" : "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, transition: "all 0.15s" }}>
+              var rKey = priceCheckKey + ":" + r.SKUNDC;
+              var reported = pcReported[rKey] || "";
+              var reportedNum = parseFloat(String(reported).replace(/[$,]/g, ""));
+              var reportedUnit = !isNaN(reportedNum) && r.OrderQty > 0 ? reportedNum / r.OrderQty : null;
+              var diff = reportedUnit !== null ? reportedUnit - r.Price : null;
+              var diffColor = diff === null ? "#9CA3AF" : Math.abs(diff) < 0.01 ? "#059669" : diff > 0 ? "#DC2626" : "#D97706";
+              return <div key={i} style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 16px", margin: "2px 0", borderRadius: 10, cursor: "pointer", transition: "all 0.15s", background: ck ? "rgba(5,150,105,0.04)" : "transparent", border: ck ? "1px solid rgba(5,150,105,0.12)" : "1px solid transparent" }}>
+                <div onClick={function() { var updated = Object.assign({}, priceChecked); updated[rKey] = !ck; setPriceChecked(updated); }} style={{ width: 22, height: 22, borderRadius: 6, border: ck ? "2px solid #059669" : "2px solid #D1D5DB", background: ck ? "#059669" : "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, transition: "all 0.15s", cursor: "pointer" }}>
                   {ck && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}
                 </div>
-                <div style={{ minWidth: 110, fontFamily: "monospace", fontSize: 13, color: ck ? "#059669" : "#374151", fontWeight: 500 }}>{r.SKUNDC}</div>
-                <div style={{ flex: 1, fontSize: 13, color: ck ? "#059669" : "#374151", lineHeight: 1.4 }}>{r.Description}</div>
-                <div style={{ textAlign: "right", minWidth: 50, fontSize: 13, color: ck ? "#059669" : "#6B7280" }}>{r.OrderQty}</div>
-                <div style={{ textAlign: "right", minWidth: 80, fontSize: 13, color: ck ? "#059669" : "#374151" }}>${r.Price.toFixed(2)}</div>
-                <div style={{ textAlign: "right", minWidth: 100, fontSize: 14, fontWeight: 700, color: ck ? "#059669" : "#1F2937" }}>${r.TotalPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+                <div style={{ minWidth: 110, fontFamily: "monospace", fontSize: 12, color: ck ? "#059669" : "#374151", fontWeight: 500 }}>{r.SKUNDC}</div>
+                <div onClick={function() { var updated = Object.assign({}, priceChecked); updated[rKey] = !ck; setPriceChecked(updated); }} style={{ flex: 1, fontSize: 13, color: ck ? "#059669" : "#374151", lineHeight: 1.4, cursor: "pointer" }}>{r.Description}</div>
+                <div style={{ textAlign: "right", minWidth: 40, fontSize: 13, color: ck ? "#059669" : "#6B7280" }}>{r.OrderQty}</div>
+                <div style={{ textAlign: "right", minWidth: 75, fontSize: 13, color: ck ? "#059669" : "#374151" }}>${r.Price.toFixed(2)}</div>
+                <div style={{ textAlign: "right", minWidth: 95, fontSize: 13, fontWeight: 600, color: ck ? "#059669" : "#1F2937" }}>${r.TotalPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+                <div style={{ width: 1, height: 28, background: "#F3F4F6", margin: "0 4px", flexShrink: 0 }}></div>
+                <div style={{ minWidth: 90 }} onClick={function(e) { e.stopPropagation(); }}>
+                  <input value={reported} onChange={function(e) { var u = Object.assign({}, pcReported); u[rKey] = e.target.value; setPcReported(u); }} placeholder="$0.00" style={{ width: 85, padding: "5px 8px", borderRadius: 6, border: "1px solid #E5E7EB", fontSize: 12, textAlign: "right", outline: "none", background: reported ? "#FFFFFF" : "#F9FAFB", color: "#374151" }} />
+                </div>
+                <div style={{ textAlign: "right", minWidth: 75, fontSize: 12, fontWeight: 600, color: diffColor }}>
+                  {reportedUnit !== null ? (Math.abs(diff) < 0.01 ? "\u2713 Match" : (diff > 0 ? "+" : "") + "$" + diff.toFixed(2)) : "\u2014"}
+                </div>
               </div>;
             })}
           </div>
