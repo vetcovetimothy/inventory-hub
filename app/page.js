@@ -97,10 +97,11 @@ const DEFAULT_SHIP_RULES = {
 function evalShip(rule, total) {
   if (!rule || !rule.trim()) return "Free Shipping";
   const parts = rule.split(";").map(p => p.trim());
-  let result = "", meetsMin = true, matchedRange = false, fb = "Free Shipping";
+  let result = "", meetsMin = true, matchedRange = false, fb = "Free Shipping", minVal = null;
   for (const p of parts) {
     if (p.startsWith("min:")) {
-      if (total < parseFloat(p.replace("min:", ""))) meetsMin = false;
+      minVal = parseFloat(p.replace("min:", ""));
+      if (total < minVal) meetsMin = false;
     } else if (p.startsWith("range:")) {
       const [rp, cp] = p.replace("range:", "").split("=");
       const [mn, mx] = rp.split("-").map(x => parseFloat(x));
@@ -114,7 +115,14 @@ function evalShip(rule, total) {
       if (!meetsMin && !matchedRange && !result) result = p.replace("else:", "").trim();
     }
   }
-  return result || (meetsMin ? fb : "Will not ship");
+  var status = result || (meetsMin ? fb : "Will not ship");
+  if (status !== "Free Shipping" && minVal != null) {
+    var minStr = "$" + minVal.toLocaleString();
+    if (status === "Will not ship" || status.toLowerCase().includes("not ship")) return "Not Shipping: " + minStr + " minimum";
+    if (status === "Not Free Shipping" || status.toLowerCase().includes("not free")) return "Not Free Shipping: " + minStr + " minimum";
+    return status + ": " + minStr + " minimum";
+  }
+  return status;
 }
 
 /* ═══════ CONSTANTS ═══════ */
