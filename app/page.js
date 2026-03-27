@@ -1300,6 +1300,30 @@ function POImportTool(props) {
   var _error = useState(null), error = _error[0], setError = _error[1];
   var _ndcMap = useState(null), ndcMap = _ndcMap[0], setNdcMap = _ndcMap[1];
   var _ndcLoading = useState(false), ndcLoading = _ndcLoading[0], setNdcLoading = _ndcLoading[1];
+  var _activeFileTab = useState(null), activeFileTab = _activeFileTab[0], setActiveFileTab = _activeFileTab[1];
+  // Persist results separately per vendor type so switching doesn't lose data
+  var otherCache = useRef({ pdfs: [], results: [], editedPrices: {}, screenshotQtys: {}, error: null });
+  var mckCache = useRef({ pdfs: [], results: [], mckPaste: "", mckParsed: null, mckFile: null, mckPortalPrices: {}, editedPrices: {}, screenshotQtys: {}, mckWarnings: [], error: null });
+
+  function switchVendor(newVendor) {
+    if (newVendor === vendor) return;
+    // Save current state to cache
+    if (vendor === "other") {
+      otherCache.current = { pdfs: pdfs, results: results, editedPrices: editedPrices, screenshotQtys: screenshotQtys, error: error };
+    } else {
+      mckCache.current = { pdfs: pdfs, results: results, mckPaste: mckPaste, mckParsed: mckParsed, mckFile: mckFile, mckPortalPrices: mckPortalPrices, editedPrices: editedPrices, screenshotQtys: screenshotQtys, mckWarnings: mckWarnings, error: error };
+    }
+    // Restore from cache
+    if (newVendor === "other") {
+      var c = otherCache.current;
+      setPdfs(c.pdfs); setResults(c.results); setEditedPrices(c.editedPrices); setScreenshotQtys(c.screenshotQtys); setError(c.error);
+      setMckWarnings([]);
+    } else {
+      var m = mckCache.current;
+      setPdfs(m.pdfs); setResults(m.results); setMckPaste(m.mckPaste); setMckParsed(m.mckParsed); setMckFile(m.mckFile); setMckPortalPrices(m.mckPortalPrices); setEditedPrices(m.editedPrices); setScreenshotQtys(m.screenshotQtys); setMckWarnings(m.mckWarnings); setError(m.error);
+    }
+    setVendor(newVendor);
+  }
 
   function fileToBase64(file) {
     return new Promise(function(resolve, reject) {
@@ -1564,6 +1588,12 @@ function POImportTool(props) {
       }
 
       setResults(matched);
+      // Auto-select first file tab for "other" vendor
+      if (vendor === "other" && matched.length > 0) {
+        var files = {}; matched.forEach(function(r) { if (r.sourceFile) files[r.sourceFile] = 1; });
+        var fileList = Object.keys(files);
+        if (fileList.length > 0) setActiveFileTab(fileList[0]);
+      }
       setMckWarnings(warnings);
       var foundCount = matched.filter(function(r) { return r.ndcFound; }).length;
       toast("Validated " + matched.length + " items: " + foundCount + " matched in OData, " + (matched.length - foundCount) + " not found");
@@ -1573,9 +1603,10 @@ function POImportTool(props) {
     } finally { setLoading(false); }
   }
 
-  function downloadCSV() {
+  function downloadCSV(rows) {
+    var csvRows = rows || results;
     var header = "Status,Inventory ID,Warehouse,Description (Acumatica),UOM,Drug Name (PO),Alternate ID,Vendor,Order Qty.,Unit Cost,Ext. Cost,PO#,Source File\r\n";
-    var lines = results.map(function(r) {
+    var lines = csvRows.map(function(r) {
       var editedQty = screenshotQtys[r.ndc] != null ? parseInt(screenshotQtys[r.ndc]) : r.qty;
       var editedPrice = editedPrices[r.ndc] != null ? parseFloat(editedPrices[r.ndc]) : r.unitPrice;
       var extCost = (editedQty && editedPrice) ? (editedQty * editedPrice).toFixed(2) : (r.totalPrice || "");
@@ -1590,7 +1621,7 @@ function POImportTool(props) {
     var d = new Date();
     var dateStr = (d.getMonth() + 1) + "." + d.getDate() + "." + String(d.getFullYear()).slice(2);
     var vendors = {}; var pos = {}; var whs = {};
-    results.forEach(function(r) { if (r.vendorSource) vendors[r.vendorSource] = 1; if (r.poNumber) pos[r.poNumber] = 1; if (r.warehouse) whs[r.warehouse] = 1; });
+    csvRows.forEach(function(r) { if (r.vendorSource) vendors[r.vendorSource] = 1; if (r.poNumber) pos[r.poNumber] = 1; if (r.warehouse) whs[r.warehouse] = 1; });
     var vendorStr = Object.keys(vendors).join(" ") || "Unknown";
     var poStr = Object.keys(pos).map(function(p) { return "#" + p; }).join(" ") || "";
     var whStr = Object.keys(whs).join(" ");
@@ -1600,13 +1631,15 @@ function POImportTool(props) {
   }
 
   function reset() {
-    setPdfs([]); setMckPaste(""); setMckParsed(null); setMckFile(null); setMckPortalPrices({}); setScreenshotQtys({}); setEditedPrices({}); setResults([]); setMckWarnings([]); setError(null);
+    setPdfs([]); setMckPaste(""); setMckParsed(null); setMckFile(null); setMckPortalPrices({}); setScreenshotQtys({}); setEditedPrices({}); setResults([]); setMckWarnings([]); setError(null); setActiveFileTab(null);
   }
 
   var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
-  var foundCount = results.filter(function(r) { return r.ndcFound; }).length;
-  var notFoundCount = results.length - foundCount;
-  var qtyMismatchCount = results.filter(function(r) { return screenshotQtys[r.ndc] != null && parseInt(screenshotQtys[r.ndc]) !== r.qty; }).length;
+  var fileList = useMemo(function() { if (vendor !== "other" || results.length === 0) return []; var f = {}; results.forEach(function(r) { if (r.sourceFile) f[r.sourceFile] = (f[r.sourceFile] || 0) + 1; }); return Object.keys(f).map(function(name) { return { name: name, count: f[name] }; }); }, [results, vendor]);
+  var activeResults = useMemo(function() { if (vendor !== "other" || !activeFileTab || fileList.length <= 1) return results; return results.filter(function(r) { return r.sourceFile === activeFileTab; }); }, [results, vendor, activeFileTab, fileList]);
+  var foundCount = activeResults.filter(function(r) { return r.ndcFound; }).length;
+  var notFoundCount = activeResults.length - foundCount;
+  var qtyMismatchCount = activeResults.filter(function(r) { return screenshotQtys[r.ndc] != null && parseInt(screenshotQtys[r.ndc]) !== r.qty; }).length;
 
   return (
     <div>
@@ -1617,7 +1650,7 @@ function POImportTool(props) {
           <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, marginBottom: 8 }}>Vendor Type</div>
           <div style={{ display: "flex", gap: 10 }}>
             {[["other", "Keysource / Anda / Bloodworth"], ["mckesson", "McKesson"]].map(function(v) {
-              return <button key={v[0]} onClick={function() { setVendor(v[0]); reset(); }}
+              return <button key={v[0]} onClick={function() { switchVendor(v[0]); }}
                 style={{ padding: "8px 18px", borderRadius: 8, border: "1px solid " + (vendor === v[0] ? TOOL_COLOR : "#E5E7EB"), background: vendor === v[0] ? TOOL_COLOR + "20" : "transparent", color: vendor === v[0] ? TOOL_COLOR : "#6B7280", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>{v[1]}</button>;
             })}
           </div>
@@ -1686,9 +1719,13 @@ function POImportTool(props) {
       </div>}
 
       {results.length > 0 && <div>
+        {/* File tabs for "other" vendor with multiple files */}
+        {vendor === "other" && fileList.length > 1 && <div style={{ display: "flex", gap: 4, marginBottom: 16, background: "#FFFFFF", borderRadius: 10, padding: 3, border: "0.5px solid #E5E7EB", overflowX: "auto" }}>
+          {fileList.map(function(f) { var isActive = activeFileTab === f.name; return <button key={f.name} onClick={function() { setActiveFileTab(f.name); }} style={{ padding: "8px 16px", borderRadius: 8, fontSize: 12, fontWeight: 500, border: "none", cursor: "pointer", transition: "all 0.15s", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 6, background: isActive ? TOOL_COLOR : "transparent", color: isActive ? "#fff" : "#6B7280" }}>{f.name.replace(".pdf", "")}<span style={{ fontSize: 10, background: isActive ? "rgba(255,255,255,0.25)" : "rgba(100,116,139,0.15)", padding: "1px 6px", borderRadius: 4 }}>{f.count}</span></button>; })}
+        </div>}
         <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
-          {(function() { var pos = {}; var vendors = {}; var whs = {}; results.forEach(function(r) { if (r.poNumber) pos[r.poNumber] = 1; if (r.vendorSource) vendors[r.vendorSource] = 1; if (r.warehouse) whs[r.warehouse] = 1; }); var poList = Object.keys(pos); var vendorList = Object.keys(vendors); var whList = Object.keys(whs); function copyVal(val) { navigator.clipboard.writeText(val).then(function() { toast("Copied: " + val); }).catch(function() {}); } return <>{poList.length > 0 && <div onClick={function() { copyVal(poList.join(", ")); }} style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0, cursor: "pointer", transition: "all 0.15s" })} title="Click to copy"><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>PO #</div><div style={{ fontSize: 20, fontWeight: 700, color: TOOL_COLOR, marginTop: 4 }}>{poList.join(", ")}</div></div>}{vendorList.length > 0 && <div onClick={function() { copyVal(vendorList.join(", ")); }} style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0, cursor: "pointer", transition: "all 0.15s" })} title="Click to copy"><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Vendor</div><div style={{ fontSize: 18, fontWeight: 700, color: "#1F2937", marginTop: 4 }}>{vendorList.join(", ")}</div></div>}{whList.length > 0 && <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Warehouse</div><div style={{ fontSize: 20, fontWeight: 700, color: "#1F2937", marginTop: 4 }}>{whList.join(", ")}</div></div>}</>; })()}
-          <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Total Items</div><div style={{ fontSize: 24, fontWeight: 700, color: "#1F2937", marginTop: 4 }}>{results.length}</div></div>
+          {(function() { var pos = {}; var vendors = {}; var whs = {}; activeResults.forEach(function(r) { if (r.poNumber) pos[r.poNumber] = 1; if (r.vendorSource) vendors[r.vendorSource] = 1; if (r.warehouse) whs[r.warehouse] = 1; }); var poList = Object.keys(pos); var vendorList = Object.keys(vendors); var whList = Object.keys(whs); function copyVal(val) { navigator.clipboard.writeText(val).then(function() { toast("Copied: " + val); }).catch(function() {}); } return <>{poList.length > 0 && <div onClick={function() { copyVal(poList.join(", ")); }} style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0, cursor: "pointer", transition: "all 0.15s" })} title="Click to copy"><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>PO #</div><div style={{ fontSize: 20, fontWeight: 700, color: TOOL_COLOR, marginTop: 4 }}>{poList.join(", ")}</div></div>}{vendorList.length > 0 && <div onClick={function() { copyVal(vendorList.join(", ")); }} style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0, cursor: "pointer", transition: "all 0.15s" })} title="Click to copy"><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Vendor</div><div style={{ fontSize: 18, fontWeight: 700, color: "#1F2937", marginTop: 4 }}>{vendorList.join(", ")}</div></div>}{whList.length > 0 && <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Warehouse</div><div style={{ fontSize: 20, fontWeight: 700, color: "#1F2937", marginTop: 4 }}>{whList.join(", ")}</div></div>}</>; })()}
+          <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Total Items</div><div style={{ fontSize: 24, fontWeight: 700, color: "#1F2937", marginTop: 4 }}>{activeResults.length}</div></div>
           <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>In OData</div><div style={{ fontSize: 24, fontWeight: 700, color: "#059669", marginTop: 4 }}>{foundCount}</div></div>
           <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Not in OData</div><div style={{ fontSize: 24, fontWeight: 700, color: notFoundCount > 0 ? "#DC2626" : "#059669", marginTop: 4 }}>{notFoundCount}</div></div>
           {vendor === "mckesson" && <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Qty Edited</div><div style={{ fontSize: 24, fontWeight: 700, color: qtyMismatchCount > 0 ? "#D97706" : "#059669", marginTop: 4 }}>{qtyMismatchCount}</div></div>}
@@ -1700,7 +1737,8 @@ function POImportTool(props) {
             <span style={{ fontSize: 14, fontWeight: 600, color: "#1F2937" }}>NDC Validation Results</span>
             <div style={{ display: "flex", gap: 8 }}>
               <button onClick={reset} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}><IconTrash /> Clear</button>
-              <button onClick={downloadCSV} style={Object.assign({}, S.btn(), { padding: "6px 14px", fontSize: 12 })}><IconCSV /> Download CSV</button>
+              {vendor === "other" && fileList.length > 1 && <button onClick={function() { downloadCSV(activeResults); }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}><IconCSV /> Download Tab</button>}
+              <button onClick={function() { downloadCSV(results); }} style={Object.assign({}, S.btn(), { padding: "6px 14px", fontSize: 12 })}><IconCSV /> {vendor === "other" && fileList.length > 1 ? "Download All" : "Download CSV"}</button>
             </div>
           </div>
           <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
@@ -1718,7 +1756,7 @@ function POImportTool(props) {
               {vendor === "mckesson" && <th style={S.th}>MCK Item #</th>}
               <th style={S.th}>Source</th>
             </tr></thead>
-            <tbody>{results.map(function(r, i) {
+            <tbody>{activeResults.map(function(r, i) {
               var editedQty = screenshotQtys[r.ndc] != null ? parseInt(screenshotQtys[r.ndc]) : r.qty;
               var qtyChanged = screenshotQtys[r.ndc] != null && parseInt(screenshotQtys[r.ndc]) !== r.qty;
               var editedPrice = editedPrices[r.ndc] != null ? parseFloat(editedPrices[r.ndc]) : r.unitPrice;
