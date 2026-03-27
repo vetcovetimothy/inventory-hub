@@ -726,6 +726,12 @@ function WHT(props) {
     </div>}
 
     {subPage === "shipping" && <div>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+        <a href="https://docs.google.com/spreadsheets/d/1jZ6DLCpinlhUlNEnPkKTO65PQt_33G7hLqbiaI3LXKw/edit?gid=1331205333#gid=1331205333" target="_blank" rel="noopener noreferrer" style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 6 })}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></svg>
+          Inventory Tracker
+        </a>
+      </div>
       {data.length > 0 ? <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto" })}>
         <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
           <thead><tr><th style={S.th}>Vendor</th><th style={Object.assign({}, S.th, { width: 140 })}>PO #</th><th style={Object.assign({}, S.th, { textAlign: "right" })}>Total</th><th style={S.th}>Shipping</th><th style={Object.assign({}, S.th, { width: 200 })}>Vendor Reference</th><th style={Object.assign({}, S.th, { width: 100 })}>Price Check</th></tr></thead>
@@ -1733,6 +1739,121 @@ function POImportTool(props) {
   );
 }
 
+/* ═══════ FUZE TRACKER ═══════ */
+function FuzeTracker(props) {
+  var toast = props.toast;
+  var TOOL_COLOR = "#F59E0B";
+  var _wh = useState("TP-NY"), whTab = _wh[0], setWhTab = _wh[1];
+  var _d = useState([]), data = _d[0], setData = _d[1];
+  var _ld = useState(false), loading = _ld[0], setLoading = _ld[1];
+  var _q = useState(""), search = _q[0], setSearch = _q[1];
+  var _vf = useState("all"), vendorFilter = _vf[0], setVendorFilter = _vf[1];
+  var _sf = useState("all"), statusFilter = _sf[0], setStatusFilter = _sf[1];
+  var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
+
+  var fetchSheet = useCallback(function(wh) {
+    setLoading(true);
+    fetch("/api/sheets?wh=" + encodeURIComponent(wh) + "&_t=" + Date.now(), { cache: "no-store" })
+      .then(function(r) { return r.json(); })
+      .then(function(json) {
+        if (json.error) { toast(json.error, "error"); setData([]); }
+        else { setData(json.data || []); toast("Loaded " + (json.count || 0) + " items for " + wh); }
+      })
+      .catch(function(err) { toast("Error: " + err.message, "error"); })
+      .finally(function() { setLoading(false); });
+  }, [toast]);
+
+  useEffect(function() { fetchSheet(whTab); }, [whTab]);
+
+  var uniqueVendors = useMemo(function() { return Array.from(new Set(data.map(function(r) { return r["Supplier"]; }).filter(Boolean))).sort(); }, [data]);
+
+  var filtered = useMemo(function() {
+    var d = data.slice();
+    if (search) { var s = search.toLowerCase(); d = d.filter(function(r) { return (r["Supplier"] || "").toLowerCase().indexOf(s) >= 0 || (r["NDC"] || "").toLowerCase().indexOf(s) >= 0 || (r["Product Description"] || "").toLowerCase().indexOf(s) >= 0 || (r["PO No."] || "").toLowerCase().indexOf(s) >= 0 || (r["Tracking #"] || "").toLowerCase().indexOf(s) >= 0; }); }
+    if (vendorFilter !== "all") d = d.filter(function(r) { return r["Supplier"] === vendorFilter; });
+    if (statusFilter === "pending") d = d.filter(function(r) { return r["Received?**"] !== "TRUE" && r["Received?**"] !== "true"; });
+    if (statusFilter === "received") d = d.filter(function(r) { return r["Received?**"] === "TRUE" || r["Received?**"] === "true"; });
+    if (statusFilter === "landed") d = d.filter(function(r) { return r["Landed Onsite?"] === "TRUE" || r["Landed Onsite?"] === "true"; });
+    return d;
+  }, [data, search, vendorFilter, statusFilter]);
+
+  var stats = useMemo(function() {
+    var total = data.length;
+    var received = data.filter(function(r) { return r["Received?**"] === "TRUE" || r["Received?**"] === "true"; }).length;
+    var landed = data.filter(function(r) { return r["Landed Onsite?"] === "TRUE" || r["Landed Onsite?"] === "true"; }).length;
+    var pending = total - received;
+    return { total: total, received: received, landed: landed, pending: pending };
+  }, [data]);
+
+  var whTabs = [{ id: "TP-NY", label: "Brooklyn" }, { id: "TP-OH", label: "Seven Hills" }, { id: "TP-CA", label: "Hayward" }];
+
+  return <div>
+    {/* Warehouse tabs */}
+    <div style={{ display: "flex", gap: 4, marginBottom: 20, background: "#FFFFFF", borderRadius: 10, padding: 3, width: "fit-content", border: "0.5px solid #E5E7EB" }}>
+      {whTabs.map(function(t) { return <button key={t.id} onClick={function() { setWhTab(t.id); setSearch(""); setVendorFilter("all"); setStatusFilter("all"); }} style={S.pill(whTab === t.id, TOOL_COLOR)}>{t.label}{whTab === t.id && data.length > 0 && <span style={{ fontSize: 10, background: "rgba(255,255,255,0.25)", padding: "1px 6px", borderRadius: 4, marginLeft: 4 }}>{data.length}</span>}</button>; })}
+    </div>
+
+    {/* Stat cards */}
+    {data.length > 0 && <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 20 }}>
+      <div style={Object.assign({}, S.statCard, { background: "#EEF4FF" })}><div style={{ fontSize: 11, color: "#6B8ABF", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>Total Items</div><div style={{ fontSize: 28, fontWeight: 500, color: "#2563EB", marginTop: 6 }}>{stats.total}</div></div>
+      <div style={Object.assign({}, S.statCard, { background: "#FEF7EC" })}><div style={{ fontSize: 11, color: "#B08A4A", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>Pending</div><div style={{ fontSize: 28, fontWeight: 500, color: "#D97706", marginTop: 6 }}>{stats.pending}</div></div>
+      <div style={Object.assign({}, S.statCard, { background: "#F0FDF4" })}><div style={{ fontSize: 11, color: "#6B9E8A", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>Received</div><div style={{ fontSize: 28, fontWeight: 500, color: "#059669", marginTop: 6 }}>{stats.received}</div></div>
+      <div style={Object.assign({}, S.statCard, { background: "#EEF4FF" })}><div style={{ fontSize: 11, color: "#6B8ABF", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>Landed</div><div style={{ fontSize: 28, fontWeight: 500, color: "#3B82F6", marginTop: 6 }}>{stats.landed}</div></div>
+    </div>}
+
+    {/* Toolbar */}
+    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+      <input style={Object.assign({}, S.inp, { maxWidth: 220 })} placeholder="Search..." value={search} onChange={function(e) { setSearch(e.target.value); }} />
+      <select style={S.sel} value={vendorFilter} onChange={function(e) { setVendorFilter(e.target.value); }}><option value="all">All Suppliers</option>{uniqueVendors.map(function(v) { return <option key={v} value={v}>{v}</option>; })}</select>
+      <select style={S.sel} value={statusFilter} onChange={function(e) { setStatusFilter(e.target.value); }}>
+        <option value="all">All Statuses</option>
+        <option value="pending">Pending</option>
+        <option value="received">Received</option>
+        <option value="landed">Landed</option>
+      </select>
+      <div style={{ flex: 1 }} />
+      <button onClick={function() { fetchSheet(whTab); }} disabled={loading} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}>{loading ? <><Spinner color={TOOL_COLOR} size={14} /> Refreshing...</> : <><IconRefresh /> Refresh</>}</button>
+      <span style={{ fontSize: 12, color: "#6B7280" }}>{filtered.length}/{data.length}</span>
+    </div>
+
+    {/* Table */}
+    {data.length > 0 ? <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto", maxHeight: "calc(100vh - 320px)" })}>
+      <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
+        <thead><tr>
+          <th style={S.th}>Supplier</th>
+          <th style={S.th}>NDC</th>
+          <th style={Object.assign({}, S.th, { minWidth: 200 })}>Product Description</th>
+          <th style={Object.assign({}, S.th, { textAlign: "right" })}>Pkg Qty</th>
+          <th style={Object.assign({}, S.th, { textAlign: "right" })}>Expected BOH</th>
+          <th style={S.th}>PO No.</th>
+          <th style={S.th}>Order Date</th>
+          <th style={S.th}>Expected Arrival</th>
+          <th style={S.th}>Tracking #</th>
+          <th style={S.th}>Received</th>
+          <th style={S.th}>Landed</th>
+        </tr></thead>
+        <tbody>{filtered.map(function(r, i) {
+          var isReceived = r["Received?**"] === "TRUE" || r["Received?**"] === "true";
+          var isLanded = r["Landed Onsite?"] === "TRUE" || r["Landed Onsite?"] === "true";
+          return <tr key={i}>
+            <td style={Object.assign({}, S.td, { color: "#1F2937", fontWeight: 500 })}>{r["Supplier"]}</td>
+            <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, whiteSpace: "nowrap" })}>{r["NDC"]}</td>
+            <td style={S.td}>{r["Product Description"]}</td>
+            <td style={Object.assign({}, S.td, { textAlign: "right" })}>{r["Pkg Qty"]}</td>
+            <td style={Object.assign({}, S.td, { textAlign: "right" })}>{r["Expected BOH Increase"]}</td>
+            <td style={S.td}>{r["PO No."]}</td>
+            <td style={Object.assign({}, S.td, { whiteSpace: "nowrap" })}>{r["Order Date"]}</td>
+            <td style={Object.assign({}, S.td, { whiteSpace: "nowrap" })}>{r["Expected Arrival"]}</td>
+            <td style={Object.assign({}, S.td, { fontSize: 11, maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })}>{r["Tracking #"]}</td>
+            <td style={Object.assign({}, S.td, { textAlign: "center" })}><span style={S.badge(isReceived ? "success" : "warning")}>{isReceived ? "Yes" : "No"}</span></td>
+            <td style={Object.assign({}, S.td, { textAlign: "center" })}><span style={S.badge(isLanded ? "success" : "default")}>{isLanded ? "Yes" : "No"}</span></td>
+          </tr>;
+        })}</tbody>
+      </table>
+    </div> : <div style={Object.assign({}, S.card, { textAlign: "center", padding: 60, color: "#9CA3AF" })}>{loading ? <Spinner color={TOOL_COLOR} size={20} /> : "No data loaded. Check that the sheet URLs are configured."}</div>}
+  </div>;
+}
+
 /* ═══════ MAIN HUB ═══════ */
 export default function Hub() {
   var _p = useState(function() { var s = sGet("active-page"); return s || "TP-NY"; }), page = _p[0], setPage = _p[1];
@@ -1837,8 +1958,8 @@ export default function Hub() {
   );
 
   var isWH = page in WH;
-  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "po-import" ? "#06B6D4" : page === "cycle-count" ? "#14B8A6" : "#3B82F6";
-  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "po-import" ? "PO NDC Validator" : page === "cycle-count" ? "Cycle Counting" : showLogin ? "Login" : "Shipping Rules";
+  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "po-import" ? "#06B6D4" : page === "cycle-count" ? "#14B8A6" : page === "fuze-tracker" ? "#F59E0B" : "#3B82F6";
+  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "po-import" ? "PO NDC Validator" : page === "cycle-count" ? "Cycle Counting" : page === "fuze-tracker" ? "Fuze Tracker" : showLogin ? "Login" : "Shipping Rules";
 
   function SideLink(p) {
     var active = page === p.id && !showLogin;
@@ -1862,6 +1983,8 @@ export default function Hub() {
         <div style={{ padding: "12px 12px 4px", marginTop: 4, borderTop: "1px solid rgba(255,255,255,0.06)" }}><div style={{ fontSize: 10, fontWeight: 500, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "1px", padding: "8px 12px" }}>Inventory Tools</div></div>
         <SideLink id="short-dating" label="Short-Dating" color="#E879F9" />
         <SideLink id="backorder" label="Backorders" color="#F97316" />
+        <div style={{ padding: "12px 12px 4px", marginTop: 4, borderTop: "1px solid rgba(255,255,255,0.06)" }}><div style={{ fontSize: 10, fontWeight: 500, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "1px", padding: "8px 12px" }}>Tracking</div></div>
+        <SideLink id="fuze-tracker" label="Fuze Tracker" color="#F59E0B" />
         <div style={{ padding: "12px 12px 4px", marginTop: 4, borderTop: "1px solid rgba(255,255,255,0.06)" }}><div style={{ fontSize: 10, fontWeight: 500, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "1px", padding: "8px 12px" }}>Settings</div></div>
         <div onClick={function() { setPagePersist("rules"); setShowLogin(false); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", margin: "1px 12px", fontSize: 13, cursor: "pointer", fontWeight: page === "rules" && !showLogin ? 500 : 400, color: page === "rules" && !showLogin ? "#93bbfc" : "rgba(255,255,255,0.55)", background: page === "rules" && !showLogin ? "rgba(96,165,250,0.15)" : "transparent", borderRadius: 8 }}><IconTruck /> Shipping Rules</div>
         <div style={{ flex: 1 }} />
@@ -1937,6 +2060,7 @@ export default function Hub() {
           {!showLogin && page === "backorder" && <TrackerTool toolKey="backorder" toolLabel="Backorder Tracker" toolColor="#F97316" demoData={BKO_DEMO} columns={bkoColumns} emailConfig={bkoEmail} skipVendors={BKO_SKIP} toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} />}
           {!showLogin && page === "po-import" && <POImportTool toast={showToast} cred={cred} ok={ok} lp={promptLogin} />}
           {!showLogin && page === "cycle-count" && <CycleCountTool toast={showToast} />}
+          {!showLogin && page === "fuze-tracker" && <FuzeTracker toast={showToast} />}
         </div>
       </div>
 
