@@ -737,8 +737,8 @@ function WHT(props) {
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#3B82F6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /><polyline points="10 9 9 9 8 9" /></svg>
         </div>
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: "#1E40AF" }}>Inventory Tracker</div>
-          <div style={{ fontSize: 12, color: "#6B8ABF", marginTop: 1 }}>Open receiving tracker in Google Sheets</div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: "#1E40AF" }}>SFTP EDI PO Export Tool</div>
+          <div style={{ fontSize: 12, color: "#6B8ABF", marginTop: 1 }}>Open in Google Sheets</div>
         </div>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#93BBFC" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></svg>
       </a>
