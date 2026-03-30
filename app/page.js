@@ -951,6 +951,7 @@ function DropZone(props) {
 function CycleCountTool(props) {
   var toast = props.toast;
   var TOOL_COLOR = props.toolColor || "#14B8A6";
+  var isSftp = props.sftp || false;
   var _ndcText = useState(""), ndcText = _ndcText[0], setNdcText = _ndcText[1];
   var _vendorFile = useState(null), vendorFile = _vendorFile[0], setVendorFile = _vendorFile[1];
   var _vendorRows = useState(null), vendorRows = _vendorRows[0], setVendorRows = _vendorRows[1];
@@ -958,6 +959,8 @@ function CycleCountTool(props) {
   var _csvWhSelected = useState(""), csvWhSelected = _csvWhSelected[0], setCsvWhSelected = _csvWhSelected[1];
   var _csvWhCounts = useState({}), csvWhCounts = _csvWhCounts[0], setCsvWhCounts = _csvWhCounts[1];
   var _stockFile = useState(null), stockFile = _stockFile[0], setStockFile = _stockFile[1];
+  var _sftpFile = useState(null), sftpFile = _sftpFile[0], setSftpFile = _sftpFile[1];
+  var _sftpRows = useState(null), sftpRows = _sftpRows[0], setSftpRows = _sftpRows[1];
   var _stockRows = useState(null), stockRows = _stockRows[0], setStockRows = _stockRows[1];
   var _stockMeta = useState(null), stockMeta = _stockMeta[0], setStockMeta = _stockMeta[1];
   var _stockLoading = useState(false), stockLoading = _stockLoading[0], setStockLoading = _stockLoading[1];
@@ -1009,6 +1012,28 @@ function CycleCountTool(props) {
       toast("Failed to parse Stock Items: " + err.message, "error");
       setStockLoading(false);
     });
+  }
+  // SFTP BOH report handler
+  function handleSftpUpload(file) {
+    if (!file) return;
+    setSftpFile(file);
+    var reader = new FileReader();
+    reader.onload = function(e) {
+      var text = e.target.result;
+      var lines = text.split("\n").map(function(l) { return l.trim(); }).filter(function(l) { return l.length > 0; });
+      if (lines.length < 2) { toast("SFTP file appears empty", "error"); return; }
+      var headers = lines[0].split(",").map(function(h) { return h.trim(); });
+      var rows = [];
+      for (var i = 1; i < lines.length; i++) {
+        var vals = lines[i].split(",");
+        var obj = {};
+        headers.forEach(function(h, idx) { obj[h] = (vals[idx] || "").trim(); });
+        rows.push(obj);
+      }
+      setSftpRows(rows);
+      toast("SFTP BOH loaded: " + rows.length + " items", "success");
+    };
+    reader.readAsText(file);
   }
   var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
 
@@ -1083,6 +1108,7 @@ function CycleCountTool(props) {
     if (!ndcText.trim()) { toast("Paste the NDC list first", "error"); return; }
     if (!vendorRows || vendorRows.length === 0) { toast("Upload the Vendor Inventory CSV", "error"); return; }
     if (!csvWhSelected) { toast("Select a warehouse from the CSV", "error"); return; }
+    if (isSftp && (!sftpRows || sftpRows.length === 0)) { toast("Upload the SFTP BOH Report CSV", "error"); return; }
     if (!stockRows || stockRows.length === 0) { toast("Upload the Stock Items XLSX first", "error"); return; }
     if (!warehouse.trim()) { toast("Enter a warehouse code for output", "error"); return; }
 
@@ -1119,6 +1145,23 @@ function CycleCountTool(props) {
         if (sku) skuMap[sku] = r;
       });
 
+      // Build SFTP NDC → reported qty map (if SFTP mode)
+      var sftpMap = {};
+      if (isSftp && sftpRows) {
+        var sftpWhMap = { "TP-CA": "CA01", "TP-NY": "NY01", "TP-OH": "OH01" };
+        var sftpWhCode = sftpWhMap[csvWhSelected] || sftpWhMap[wh] || "";
+        sftpRows.forEach(function(r) {
+          // Filter by warehouse if we have a mapping
+          if (sftpWhCode && (r["Warehouse Code"] || "").trim() !== sftpWhCode) return;
+          var ndc = (r["NDC_SKU"] || "").replace(/-/g, "").trim();
+          if (ndc) {
+            var initialQty = parseFloat(r["Initial Sales Quantity On Hand"]) || 0;
+            var holdQty = parseFloat(r["Sales Quantity On Hold"]) || 0;
+            sftpMap[ndc] = initialQty - holdQty;
+          }
+        });
+      }
+
       // Build Inventory ID → Sales Unit map from cached stock items
       var salesUnitMap = {};
       stockRows.forEach(function(r) {
@@ -1142,7 +1185,7 @@ function CycleCountTool(props) {
         }
 
         var invId = (vendorRow["Manufacturer Number"] || "").trim();
-        var reportedQty = parseFloat(vendorRow["Reported Qty"]) || 0;
+        var reportedQty = isSftp && sftpMap.hasOwnProperty(ndcClean) ? sftpMap[ndcClean] : (parseFloat(vendorRow["Reported Qty"]) || 0);
         var stockQty = parseFloat(vendorRow["Stock Qty"]) || 0;
         var quantity = reportedQty - stockQty;
 
@@ -1226,7 +1269,18 @@ function CycleCountTool(props) {
           </div>}
           {csvWarehouses.length === 1 && <p style={{ color: TOOL_COLOR, fontSize: 12, marginTop: 4 }}>Warehouse: {csvWhSelected} ({(csvWhCounts[csvWhSelected] || 0).toLocaleString()} rows)</p>}
 
-          <div style={{ fontSize: 14, color: "#374151", fontWeight: 600, marginBottom: 8, marginTop: 20, display: "flex", alignItems: "center", gap: 6 }}>4. Stock Items XLSX <InfoTip text="Before uploading, make sure to delete all tabs except the one labeled 'Data' in the Excel file." /></div>
+          {isSftp && <div>
+            <div style={{ fontSize: 14, color: "#374151", fontWeight: 600, marginBottom: 8, marginTop: 20 }}>4. SFTP BOH Report CSV</div>
+            <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 6 }}>Upload the Fuze SFTP BOH report. Reported Qty = Initial Sales Qty On Hand − Sales Qty On Hold</div>
+            {sftpFile && sftpRows ? <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(5,150,105,0.06)", border: "1px solid rgba(5,150,105,0.2)", borderRadius: 10 }}>
+                <span style={{ color: "#059669", fontSize: 13 }}>{"\u2713"} {sftpFile.name} — {sftpRows.length.toLocaleString()} items</span>
+                <button onClick={function() { setSftpFile(null); setSftpRows(null); }} style={{ background: "transparent", border: "none", color: "#9CA3AF", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 4px" }}>{"\u00D7"}</button>
+              </div>
+            </div> : <DropZone accept=".csv" label="SFTP BOH Report" sublabel="Drop CSV or click to browse" icon="spreadsheet" color={TOOL_COLOR} onFiles={function(files) { handleSftpUpload(files[0]); }} />}
+          </div>}
+
+          <div style={{ fontSize: 14, color: "#374151", fontWeight: 600, marginBottom: 8, marginTop: 20, display: "flex", alignItems: "center", gap: 6 }}>{isSftp ? "5" : "4"}. Stock Items XLSX <InfoTip text="Before uploading, make sure to delete all tabs except the one labeled 'Data' in the Excel file." /></div>
           <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 6 }}>Contains Inventory ID and Sales Unit for UOM lookup</div>
           {stockRows && stockMeta ? <div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(5,150,105,0.06)", border: "1px solid rgba(5,150,105,0.2)", borderRadius: 10 }}>
@@ -1249,7 +1303,7 @@ function CycleCountTool(props) {
         </button>
         {results.length > 0 && <button onClick={downloadCSV} style={Object.assign({}, S.btn("ghost"), { padding: "10px 16px" })}><IconDL /> Download CSV</button>}
         {results.length > 0 && <span style={{ fontSize: 12, color: "#6B7280" }}>{results.length} items</span>}
-        {(ndcText.trim() || vendorFile || results.length > 0) && <button onClick={function() { setNdcText(""); setVendorFile(null); setVendorRows(null); setCsvWarehouses([]); setCsvWhSelected(""); setCsvWhCounts({}); setWarehouse(""); setResults([]); setErrors([]); }} style={Object.assign({}, S.btn("ghost"), { padding: "10px 16px", marginLeft: "auto" })}><IconTrash /> Clear</button>}
+        {(ndcText.trim() || vendorFile || results.length > 0) && <button onClick={function() { setNdcText(""); setVendorFile(null); setVendorRows(null); setCsvWarehouses([]); setCsvWhSelected(""); setCsvWhCounts({}); setWarehouse(""); setResults([]); setErrors([]); setSftpFile(null); setSftpRows(null); }} style={Object.assign({}, S.btn("ghost"), { padding: "10px 16px", marginLeft: "auto" })}><IconTrash /> Clear</button>}
       </div>
     </div>
 
@@ -2126,7 +2180,7 @@ export default function Hub() {
           {!showLogin && page === "backorder" && <TrackerTool toolKey="backorder" toolLabel="Backorder Tracker" toolColor="#F97316" demoData={BKO_DEMO} columns={bkoColumns} emailConfig={bkoEmail} skipVendors={BKO_SKIP} toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} />}
           {!showLogin && page === "po-import" && <POImportTool toast={showToast} cred={cred} ok={ok} lp={promptLogin} />}
           {!showLogin && page === "cycle-count" && <CycleCountTool key="cc-standard" toast={showToast} />}
-          {!showLogin && page === "cycle-count-sftp" && <CycleCountTool key="cc-sftp" toast={showToast} toolColor="#0EA5E9" />}
+          {!showLogin && page === "cycle-count-sftp" && <CycleCountTool key="cc-sftp" toast={showToast} toolColor="#0EA5E9" sftp />}
           {!showLogin && page === "fuze-tracker" && <FuzeTracker toast={showToast} />}
         </div>
       </div>
