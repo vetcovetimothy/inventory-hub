@@ -950,7 +950,7 @@ function DropZone(props) {
 /* ═══════ CYCLE COUNTING TOOL ═══════ */
 function CycleCountTool(props) {
   var toast = props.toast;
-  var TOOL_COLOR = "#14B8A6";
+  var TOOL_COLOR = props.toolColor || "#14B8A6";
   var _ndcText = useState(""), ndcText = _ndcText[0], setNdcText = _ndcText[1];
   var _vendorFile = useState(null), vendorFile = _vendorFile[0], setVendorFile = _vendorFile[1];
   var _vendorRows = useState(null), vendorRows = _vendorRows[0], setVendorRows = _vendorRows[1];
@@ -2023,8 +2023,8 @@ export default function Hub() {
   );
 
   var isWH = page in WH;
-  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "po-import" ? "#06B6D4" : page === "cycle-count" ? "#14B8A6" : page === "fuze-tracker" ? "#F59E0B" : "#3B82F6";
-  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "po-import" ? "PO NDC Validator" : page === "cycle-count" ? "Cycle Counting" : page === "fuze-tracker" ? "Fuze Tracker" : showLogin ? "Login" : "Shipping Rules";
+  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "po-import" ? "#06B6D4" : page === "cycle-count" ? "#14B8A6" : page === "cycle-count-sftp" ? "#0EA5E9" : page === "fuze-tracker" ? "#F59E0B" : "#3B82F6";
+  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "po-import" ? "PO NDC Validator" : page === "cycle-count" ? "Cycle Counting" : page === "cycle-count-sftp" ? "Cycle Counting SFTP" : page === "fuze-tracker" ? "Fuze Tracker" : showLogin ? "Login" : "Shipping Rules";
 
   function SideLink(p) {
     var active = page === p.id && !showLogin;
@@ -2045,6 +2045,7 @@ export default function Hub() {
         <div style={{ padding: "12px 12px 4px", marginTop: 4, borderTop: "1px solid rgba(255,255,255,0.06)" }}><div style={{ fontSize: 10, fontWeight: 500, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "1px", padding: "8px 12px" }}>Generic PO Tools</div></div>
         <SideLink id="po-import" label="PO NDC Validator" color="#06B6D4" />
         <SideLink id="cycle-count" label="Cycle Counting" color="#14B8A6" />
+        <SideLink id="cycle-count-sftp" label="Cycle Counting SFTP" color="#0EA5E9" />
         <div style={{ padding: "12px 12px 4px", marginTop: 4, borderTop: "1px solid rgba(255,255,255,0.06)" }}><div style={{ fontSize: 10, fontWeight: 500, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "1px", padding: "8px 12px" }}>Inventory Tools</div></div>
         <SideLink id="short-dating" label="Short-Dating" color="#E879F9" />
         <SideLink id="backorder" label="Backorders" color="#F97316" />
@@ -2124,7 +2125,8 @@ export default function Hub() {
           {!showLogin && page === "short-dating" && <TrackerTool toolKey="short-dating" toolLabel="Short-Dating Tracker" toolColor="#E879F9" demoData={SD_DEMO} columns={sdColumns} emailConfig={sdEmail} toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} />}
           {!showLogin && page === "backorder" && <TrackerTool toolKey="backorder" toolLabel="Backorder Tracker" toolColor="#F97316" demoData={BKO_DEMO} columns={bkoColumns} emailConfig={bkoEmail} skipVendors={BKO_SKIP} toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} />}
           {!showLogin && page === "po-import" && <POImportTool toast={showToast} cred={cred} ok={ok} lp={promptLogin} />}
-          {!showLogin && page === "cycle-count" && <CycleCountTool toast={showToast} />}
+          {!showLogin && page === "cycle-count" && <CycleCountTool key="cc-standard" toast={showToast} />}
+          {!showLogin && page === "cycle-count-sftp" && <CycleCountTool key="cc-sftp" toast={showToast} toolColor="#0EA5E9" />}
           {!showLogin && page === "fuze-tracker" && <FuzeTracker toast={showToast} />}
         </div>
       </div>
