@@ -1148,8 +1148,15 @@ function CycleCountTool(props) {
       // Build SFTP NDC → reported qty map (if SFTP mode)
       var sftpMap = {};
       if (isSftp && sftpRows) {
-        var sftpWhMap = { "TP-CA": "CA01", "TP-NY": "NY01", "TP-OH": "OH01" };
+        var sftpWhMap = { "TP-CA": "CA01", "TP-NY": "NY01", "TP-OH": "OH01", "TRUEPILL_BROOKLYN": "NY01", "TRUEPILL_SEVEN_HILLS": "OH01", "TRUEPILL_HAYWARD": "CA01" };
         var sftpWhCode = sftpWhMap[csvWhSelected] || sftpWhMap[wh] || "";
+        if (!sftpWhCode) {
+          // Try partial match
+          var csvLower = (csvWhSelected || "").toLowerCase();
+          if (csvLower.indexOf("brooklyn") >= 0 || csvLower.indexOf("ny") >= 0) sftpWhCode = "NY01";
+          else if (csvLower.indexOf("seven") >= 0 || csvLower.indexOf("oh") >= 0) sftpWhCode = "OH01";
+          else if (csvLower.indexOf("hayward") >= 0 || csvLower.indexOf("ca") >= 0) sftpWhCode = "CA01";
+        }
         sftpRows.forEach(function(r) {
           // Filter by warehouse if we have a mapping
           if (sftpWhCode && (r["Warehouse Code"] || "").trim() !== sftpWhCode) return;
