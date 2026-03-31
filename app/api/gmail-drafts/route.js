@@ -136,10 +136,33 @@ export async function POST(request) {
     }
 
     const accessToken = await getAccessToken(refreshToken);
+
+    // Fetch user's Gmail signature (look for "Vetcove" signature)
+    let signature = "";
+    try {
+      const sigResp = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/settings/sendAs", {
+        headers: { "Authorization": "Bearer " + accessToken },
+      });
+      if (sigResp.ok) {
+        const sigData = await sigResp.json();
+        const sendAs = sigData.sendAs || [];
+        const vcSig = sendAs.find(s =>
+          (s.displayName && s.displayName.includes("Vetcove")) ||
+          (s.signature && s.signature.includes("Vetcove"))
+        );
+        if (vcSig && vcSig.signature) signature = vcSig.signature;
+      }
+    } catch (sigErr) {
+      console.warn("Could not fetch Gmail signature:", sigErr.message);
+    }
+
     const results = [];
 
     for (const draft of drafts) {
-      const raw = base64url(buildMimeMessage(draft));
+      // Append signature to HTML body if available
+      var finalHtmlBody = draft.htmlBody || "";
+      if (signature) finalHtmlBody = finalHtmlBody + signature;
+      const raw = base64url(buildMimeMessage(Object.assign({}, draft, { htmlBody: finalHtmlBody })));
 
       const resp = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/drafts", {
         method: "POST",
