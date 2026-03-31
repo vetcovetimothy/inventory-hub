@@ -863,7 +863,7 @@ function WHT(props) {
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <div style={{ display: "flex", gap: 8 }}><span style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, width: 50 }}>To:</span><span style={{ fontSize: 13, color: "#374151" }}>{cfg.emailTo}</span></div>
           <div style={{ display: "flex", gap: 8 }}><span style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, width: 50 }}>Subject:</span><span style={{ fontSize: 13, color: "#1F2937", fontWeight: 600 }}>{cfg.subjectFn(todayStr)}</span></div>
-          <div style={{ borderTop: "1px solid #E5E7EB", paddingTop: 16, marginTop: 4, fontSize: 13, color: "#374151", lineHeight: 1.7 }}>Good morning,<br /><br />Attached are today&apos;s POs.<br /><br />Thanks in advance,<br /><br /><span style={{ color: "#6B7280", fontStyle: "italic" }}>[Vetcove Signature]</span></div>
+          <div style={{ borderTop: "1px solid #E5E7EB", paddingTop: 16, marginTop: 4, fontSize: 13, color: "#374151", lineHeight: 1.7 }}>Good morning,<br /><br />Attached are today&apos;s POs.<br /><br />Thanks in advance,<br /><br /><span style={{ color: "#9CA3AF", fontSize: 11, fontStyle: "italic" }}>Your Vetcove Gmail signature will be appended automatically</span></div>
         </div>
         <div style={{ marginTop: 20, borderTop: "1px solid #E5E7EB", paddingTop: 16 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
@@ -888,7 +888,7 @@ function WHT(props) {
             try {
               var toLine = cfg.emailTo;
               var subject = cfg.subjectFn(todayStr);
-              var htmlBody = "<p>Good morning,</p><p>Attached are today's POs.</p><p>Thanks in advance,</p>";
+              var htmlBody = "<p>Good morning,</p><p>Attached are today's POs.</p><p>Thanks in advance,</p><br>";
               var xlsCols = ["SKU", "Description", "Qty", "Vendor", "PO #", "Reorder", "Max", "Lead", "Min", "Avail", "Price", "Total"];
               var attachments = selectedVendors.map(function(v) {
                 var rows = data.filter(function(r) { return r.VendorName === v; }).map(function(r) {
