@@ -552,7 +552,10 @@ function WHT(props) {
         var resp = await kvGet(kvKey);
         var json = await resp.json();
         if (m && json.data && json.data.data && json.data.data.length > 0) {
-          setData(json.data.data); setEmailSent(json.data.emailSent || false); setRunBy(json.data.runBy || null); setRunTime(json.data.runTime || null); setShipNotes(json.data.shipNotes || {}); setSubPage("data");
+          setData(json.data.data); setEmailSent(json.data.emailSent || false); setRunBy(json.data.runBy || null); setRunTime(json.data.runTime || null); setSubPage("data");
+          // Load shipNotes: prefer separate storage, fall back to KV bundled notes
+          var savedNotes = sGet("ship-notes-" + whKey);
+          setShipNotes(savedNotes || json.data.shipNotes || {});
           if (m) setKvStatus("loaded-kv:" + json.data.data.length);
           loaded = true;
         } else {
@@ -565,7 +568,9 @@ function WHT(props) {
       if (!loaded && m) {
         var s = sGet("wh-data-" + whKey);
         if (s && s.data && s.data.length > 0) {
-          setData(s.data); setEmailSent(s.emailSent || false); setRunBy(s.runBy || null); setRunTime(s.runTime || null); setShipNotes(s.shipNotes || {}); setSubPage("data");
+          setData(s.data); setEmailSent(s.emailSent || false); setRunBy(s.runBy || null); setRunTime(s.runTime || null); setSubPage("data");
+          var savedNotes = sGet("ship-notes-" + whKey);
+          setShipNotes(savedNotes || s.shipNotes || {});
           if (m) setKvStatus("loaded-ls:" + s.data.length);
         } else {
           if (m) setKvStatus("no-data");
@@ -602,6 +607,8 @@ function WHT(props) {
 
   var persist = useCallback(async function(d, es, by, time, sn) {
     var payload = { data: d, emailSent: es, runBy: by, runTime: time, shipNotes: sn || {} };
+    // Save shipNotes separately so they survive re-fetch
+    sSet("ship-notes-" + whKey, sn || {});
     // Save to localStorage as cache
     sSet("wh-data-" + whKey, payload);
     // Save to KV for sharing with other users
@@ -658,14 +665,31 @@ function WHT(props) {
 
         var now = new Date().toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
         var who = cred && cred.username ? cred.username : "You";
-        setData(rows); setRunBy(who); setRunTime(now); setLoading(false); setSubPage("data"); persist(rows, false, who, now, {}); setShipNotes({}); toast(cfg.label + ": Fetched " + rows.length + " lines");
+        // Carry over existing shipNotes to new data — match by vendor name
+        var prevNotes = Object.assign({}, sGet("ship-notes-" + whKey) || {}, shipNotes);
+        var newGroups = {};
+        rows.forEach(function(r) { var k = r.VendorName + " || " + (r.OrderNbr || ""); newGroups[k] = 1; });
+        var carried = {};
+        Object.keys(newGroups).forEach(function(newKey) {
+          // Exact match first
+          if (prevNotes[newKey]) { carried[newKey] = prevNotes[newKey]; return; }
+          // Try matching by vendor name only (PO# may have changed)
+          var newVendor = newKey.split(" || ")[0];
+          Object.keys(prevNotes).forEach(function(oldKey) {
+            var oldVendor = oldKey.split(" || ")[0];
+            if (oldVendor === newVendor && prevNotes[oldKey] && (prevNotes[oldKey].po || prevNotes[oldKey].notes) && !carried[newKey]) {
+              carried[newKey] = prevNotes[oldKey];
+            }
+          });
+        });
+        setData(rows); setRunBy(who); setRunTime(now); setLoading(false); setSubPage("data"); setShipNotes(carried); persist(rows, false, who, now, carried); toast(cfg.label + ": Fetched " + rows.length + " lines");
       } catch (err) {
         setLoading(false);
         toast("Error: " + err.message, "error");
       }
     })();
   }, [whKey, cred, cfg.label, toast, ok, lp, persist]);
-  var clearAll = useCallback(async function() { if (!ok) { lp(); return; } setData([]); setSearch(""); setVendorFilter("all"); setFlagsOnly(false); setEmailSent(false); setConfirmClear(false); setRunBy(null); setRunTime(null); setSubPage("overview"); setShipNotes({}); sDel("wh-data-" + whKey); try { await kvPost(kvKey, {}); } catch (e) {} toast(cfg.label + ": Cleared"); }, [cfg.label, toast, ok, lp, kvKey, whKey]);
+  var clearAll = useCallback(async function() { if (!ok) { lp(); return; } setData([]); setSearch(""); setVendorFilter("all"); setFlagsOnly(false); setEmailSent(false); setConfirmClear(false); setRunBy(null); setRunTime(null); setSubPage("overview"); setShipNotes({}); sDel("wh-data-" + whKey); sDel("ship-notes-" + whKey); try { await kvPost(kvKey, {}); } catch (e) {} toast(cfg.label + ": Cleared"); }, [cfg.label, toast, ok, lp, kvKey, whKey]);
 
   var vendorGroups = useMemo(function() { var g = {}; data.forEach(function(r) { var key = r.VendorName + " || " + (r.OrderNbr || ""); if (!g[key]) g[key] = []; g[key].push(r); }); return g; }, [data]);
   var vendorTotals = useMemo(function() { var t = {}; Object.entries(vendorGroups).forEach(function(e) { t[e[0]] = e[1].reduce(function(s, r) { return s + r.TotalPrice; }, 0); }); return t; }, [vendorGroups]);
@@ -1164,7 +1188,7 @@ function CycleCountTool(props) {
           if (ndc) {
             var initialQty = parseFloat(r["Initial Sales Quantity On Hand"]) || 0;
             var holdQty = parseFloat(r["Sales Quantity On Hold"]) || 0;
-            sftpMap[ndc] = initialQty - holdQty;
+            sftpMap[ndc] = Math.round((initialQty - holdQty) * 10) / 10;
           }
         });
       }
@@ -1192,9 +1216,9 @@ function CycleCountTool(props) {
         }
 
         var invId = (vendorRow["Manufacturer Number"] || "").trim();
-        var reportedQty = isSftp && sftpMap.hasOwnProperty(ndcClean) ? sftpMap[ndcClean] : (parseFloat(vendorRow["Reported Qty"]) || 0);
-        var stockQty = parseFloat(vendorRow["Stock Qty"]) || 0;
-        var quantity = reportedQty - stockQty;
+        var reportedQty = Math.round((isSftp && sftpMap.hasOwnProperty(ndcClean) ? sftpMap[ndcClean] : (parseFloat(vendorRow["Reported Qty"]) || 0)) * 10) / 10;
+        var stockQty = Math.round((parseFloat(vendorRow["Stock Qty"]) || 0) * 10) / 10;
+        var quantity = Math.round((reportedQty - stockQty) * 10) / 10;
 
         // Location: GEN- or UNV- items use NDC without dashes, others use warehouse code
         var location = (invId.startsWith("GEN-") || invId.startsWith("UNV-")) ? ndcClean : wh;
@@ -1330,11 +1354,11 @@ function CycleCountTool(props) {
             <td style={Object.assign({}, S.td, { color: r.inventoryId.startsWith("GEN-") ? "#059669" : r.inventoryId.startsWith("UNV-") ? "#2563EB" : "#374151" })}>{r.inventoryId}</td>
             <td style={S.td}>{r.warehouse}</td>
             <td style={S.td}>{r.location}</td>
-            <td style={Object.assign({}, S.td, { color: r.quantity < 0 ? "#DC2626" : "#374151" })}>{r.quantity}</td>
+            <td style={Object.assign({}, S.td, { color: r.quantity < 0 ? "#DC2626" : "#374151" })}>{r.quantity.toFixed(1)}</td>
             <td style={S.td}>{r.uom}</td>
             <td style={Object.assign({}, S.td, { color: "#6B7280" })}>{r.ndc}</td>
-            <td style={Object.assign({}, S.td, { color: "#6B7280" })}>{r.reportedQty}</td>
-            <td style={Object.assign({}, S.td, { color: "#6B7280" })}>{r.stockQty}</td>
+            <td style={Object.assign({}, S.td, { color: "#6B7280" })}>{r.reportedQty.toFixed(1)}</td>
+            <td style={Object.assign({}, S.td, { color: "#6B7280" })}>{r.stockQty.toFixed(1)}</td>
           </tr>;
         })}</tbody>
       </table>
