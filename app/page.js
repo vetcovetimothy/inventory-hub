@@ -538,6 +538,7 @@ function WHT(props) {
   var _pck = useState(null), priceCheckKey = _pck[0], setPriceCheckKey = _pck[1];
   var _pcc = useState({}), priceChecked = _pcc[0], setPriceChecked = _pcc[1];
   var _pcr = useState({}), pcReported = _pcr[0], setPcReported = _pcr[1];
+  var _esel = useState(null), emailSelected = _esel[0], setEmailSelected = _esel[1];
   var _il = useState(true), initLoading = _il[0], setInitLoading = _il[1];
   var S = useMemo(function() { return makeStyles(cfg.color); }, [cfg.color]);
   var kvKey = "po:" + whKey;
@@ -865,21 +866,31 @@ function WHT(props) {
           <div style={{ borderTop: "1px solid #E5E7EB", paddingTop: 16, marginTop: 4, fontSize: 13, color: "#374151", lineHeight: 1.7 }}>Good morning,<br /><br />Attached are today&apos;s POs.<br /><br />Thanks in advance,<br /><br /><span style={{ color: "#6B7280", fontStyle: "italic" }}>[Vetcove Signature]</span></div>
         </div>
         <div style={{ marginTop: 20, borderTop: "1px solid #E5E7EB", paddingTop: 16 }}>
-          <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, marginBottom: 10, textTransform: "uppercase" }}>Attachments ({uniqueVendors.length})</div>
-          {uniqueVendors.map(function(v) { var count = data.filter(function(r) { return r.VendorName === v; }).length; return <div key={v} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: "#F8F9FB", borderRadius: 8, marginBottom: 4 }}><IconDL /><span style={{ fontSize: 12, color: "#4B5563" }}>{v} PO Data - {whKey}.xlsx</span><div style={{ flex: 1 }} /><span style={{ fontSize: 11, color: "#9CA3AF" }}>{count} rows</span></div>; })}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+            <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, textTransform: "uppercase" }}>Attachments ({(function() { var sel = emailSelected || {}; var count = uniqueVendors.filter(function(v) { return emailSelected === null || sel[v] !== false; }).length; return count; })()}/{uniqueVendors.length})</div>
+            <button onClick={function() { var allSelected = emailSelected === null || uniqueVendors.every(function(v) { return emailSelected[v] !== false; }); var updated = {}; uniqueVendors.forEach(function(v) { updated[v] = allSelected ? false : true; }); setEmailSelected(allSelected ? updated : null); }} style={Object.assign({}, S.btn("ghost"), { padding: "4px 12px", fontSize: 11 })}>{emailSelected === null || uniqueVendors.every(function(v) { return emailSelected[v] !== false; }) ? "Deselect All" : "Select All"}</button>
+          </div>
+          {uniqueVendors.map(function(v) { var count = data.filter(function(r) { return r.VendorName === v; }).length; var isChecked = emailSelected === null || emailSelected[v] !== false; return <div key={v} onClick={function() { var updated = Object.assign({}, emailSelected || {}); if (emailSelected === null) { uniqueVendors.forEach(function(uv) { updated[uv] = true; }); } updated[v] = !isChecked; setEmailSelected(updated); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: isChecked ? "#F8F9FB" : "transparent", borderRadius: 8, marginBottom: 4, cursor: "pointer", border: isChecked ? "1px solid #E5E7EB" : "1px solid transparent", transition: "all 0.15s", opacity: isChecked ? 1 : 0.5 }}>
+            <div style={{ width: 18, height: 18, borderRadius: 4, border: isChecked ? "2px solid " + cfg.color : "2px solid #D1D5DB", background: isChecked ? cfg.color : "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, transition: "all 0.15s" }}>
+              {isChecked && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}
+            </div>
+            <IconDL /><span style={{ fontSize: 12, color: isChecked ? "#4B5563" : "#9CA3AF" }}>{v} PO Data - {whKey}.xlsx</span><div style={{ flex: 1 }} /><span style={{ fontSize: 11, color: "#9CA3AF" }}>{count} rows</span>
+          </div>; })}
         </div>
         <div style={{ marginTop: 20, display: "flex", gap: 10 }}>
           <div title={emailBlocked ? "Short-dated/Sell-Off Items Detected" : undefined}>
           <Gate ok={ok} prompt={lp} style={Object.assign({}, S.btn(), { padding: "10px 24px", opacity: (emailSent || emailLoading || emailBlocked) ? 0.5 : 1, cursor: emailBlocked ? "not-allowed" : undefined })} onClick={async function() {
             if (emailBlocked) { toast("Remove all flagged items (short-dating / sell-off) before sending email", "error"); return; }
             if (!gmail || !gmail.token) { toast("Please connect your Gmail account first (bottom-left)", "error"); return; }
+            var selectedVendors = uniqueVendors.filter(function(v) { return emailSelected === null || emailSelected[v] !== false; });
+            if (selectedVendors.length === 0) { toast("Select at least one vendor attachment", "error"); return; }
             setEmailLoading(true);
             try {
               var toLine = cfg.emailTo;
               var subject = cfg.subjectFn(todayStr);
               var htmlBody = "<p>Good morning,</p><p>Attached are today's POs.</p><p>Thanks in advance,</p>";
               var xlsCols = ["SKU", "Description", "Qty", "Vendor", "PO #", "Reorder", "Max", "Lead", "Min", "Avail", "Price", "Total"];
-              var attachments = uniqueVendors.map(function(v) {
+              var attachments = selectedVendors.map(function(v) {
                 var rows = data.filter(function(r) { return r.VendorName === v; }).map(function(r) {
                   return [r.SKUNDC, r.Description, r.OrderQty, r.VendorName, r.OrderNbr, r.ReorderPoint, r.MaxQty, r.LeadTime, r.MinOrderQty, r.QtyAvailable, r.Price, r.TotalPrice];
                 });
@@ -888,7 +899,7 @@ function WHT(props) {
               var draftPayloads = [{ to: toLine, subject: subject, htmlBody: htmlBody, attachments: attachments }];
               var result = await postGmailDrafts(draftPayloads, gmail.token);
               if (result.failed > 0) throw new Error("Some drafts failed to create");
-              setEmailSent(true); persist(data, true, runBy, runTime, shipNotes); toast(cfg.label + ": Draft created in Gmail");
+              setEmailSent(true); persist(data, true, runBy, runTime, shipNotes); toast(cfg.label + ": Draft created with " + selectedVendors.length + " attachment" + (selectedVendors.length > 1 ? "s" : ""));
             } catch (err) {
               toast("Gmail error: " + err.message, "error");
             } finally { setEmailLoading(false); }
