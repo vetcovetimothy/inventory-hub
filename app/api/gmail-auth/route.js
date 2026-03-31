@@ -22,7 +22,7 @@ export async function GET(request) {
     client_id: CLIENT_ID,
     redirect_uri: REDIRECT_URI,
     response_type: "code",
-    scope: "https://www.googleapis.com/auth/gmail.compose https://www.googleapis.com/auth/userinfo.email",
+    scope: "https://www.googleapis.com/auth/gmail.compose https://www.googleapis.com/auth/gmail.settings.basic https://www.googleapis.com/auth/userinfo.email",
     access_type: "offline",
     prompt: "consent",
     state: origin,
