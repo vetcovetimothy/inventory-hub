@@ -143,6 +143,7 @@ const WH = {
   "TP-OH": { label: "Ohio", full: "Ohio", color: "#059669", emailTo: "nigel.white@fuzehealth.com, anna.wilson@fuzehealth.com, trudie.selby@fuzehealth.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Ohio " + d; } },
   "TP-CA": { label: "Hayward", full: "Hayward, CA", color: "#D97706", emailTo: "nigel.white@fuzehealth.com, anna.wilson@fuzehealth.com, trudie.selby@fuzehealth.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Hayward " + d; } },
   "GGM-KY": { label: "GoGoMeds", full: "GoGoMeds, KY", color: "#8B5CF6", emailTo: "p.pocsatko@gogomeds.com, m.shull@gogomeds.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Weekly Replenishment Orders " + d; } },
+  "GGM-AZ": { label: "GoGoMeds AZ", full: "GoGoMeds, AZ", color: "#EC4899", emailTo: "r.aldrich@gogomeds.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Weekly Replenishment Orders " + d; } },
 };
 
 /* ═══════ VENDOR CONTACTS ═══════ */
@@ -199,6 +200,10 @@ const PO_DEMO = {
     { SKUNDC: "54771-2320-01", Description: "Apoquel Tablets: [16mg] 100ct Bottle", OrderQty: 10, VendorName: "Zoetis US LLC", OrderNbr: "PO007220", Warehouse: "GGM-KY", ReorderPoint: 4, MaxQty: 14, LeadTime: 5, MinOrderQty: 2, QtyAvailable: 2, Price: 245.00, MovementClass: "" },
     { SKUNDC: "00061-4110-01", Description: "Heartgard Plus Chewable: [Brown 51-100lbs] 6ct", OrderQty: 18, VendorName: "Boehringer Ingelheim Animal Health", OrderNbr: "PO007221", Warehouse: "GGM-KY", ReorderPoint: 8, MaxQty: 24, LeadTime: 3, MinOrderQty: 6, QtyAvailable: 3, Price: 32.99, MovementClass: "" },
     { SKUNDC: "86078-0110-02", Description: "Bravecto Chewable: [1000mg] 44-88lbs 1ct", OrderQty: 20, VendorName: "Merck Animal Health", OrderNbr: "PO007222", Warehouse: "GGM-KY", ReorderPoint: 8, MaxQty: 24, LeadTime: 6, MinOrderQty: 10, QtyAvailable: 5, Price: 52.75, MovementClass: "" },
+  ],
+  "GGM-AZ": [
+    { SKUNDC: "54771-2320-01", Description: "Apoquel Tablets: [16mg] 100ct Bottle", OrderQty: 6, VendorName: "Zoetis US LLC", OrderNbr: "PO007230", Warehouse: "GGM-AZ", ReorderPoint: 3, MaxQty: 10, LeadTime: 5, MinOrderQty: 2, QtyAvailable: 1, Price: 245.00, MovementClass: "" },
+    { SKUNDC: "00061-4110-01", Description: "Heartgard Plus Chewable: [Brown 51-100lbs] 6ct", OrderQty: 12, VendorName: "Boehringer Ingelheim Animal Health", OrderNbr: "PO007231", Warehouse: "GGM-AZ", ReorderPoint: 5, MaxQty: 16, LeadTime: 3, MinOrderQty: 6, QtyAvailable: 2, Price: 32.99, MovementClass: "" },
   ],
 };
 
@@ -523,6 +528,7 @@ function TrackerTool(props) {
 /* ═══════ PO WAREHOUSE TOOL ═══════ */
 function WHT(props) {
   var whKey = props.whKey, cfg = props.cfg, toast = props.toast, ok = props.ok, lp = props.lp, cred = props.cred, gmail = props.gmail, SHIP_RULES = props.shipRules || {};
+  var isGGM = whKey.indexOf("GGM") === 0;
   var _sp = useState("overview"), subPage = _sp[0], setSubPage = _sp[1];
   var _d = useState([]), data = _d[0], setData = _d[1];
   var _ld = useState(false), loading = _ld[0], setLoading = _ld[1];
@@ -634,11 +640,11 @@ function WHT(props) {
       try {
         var raw;
         if (cred && cred.username && cred.password) {
-          raw = await fetchAcumatica(whKey === "GGM-KY" ? "po-ggm" : "po", whKey, cred.username, cred.password);
+          raw = await fetchAcumatica(isGGM ? "po-ggm" : "po", whKey, cred.username, cred.password);
         } else {
           raw = PO_DEMO[whKey] || [];
         }
-        var excluded = whKey === "GGM-KY" ? EXCLUDED.filter(function(ex) { return ex !== "vetcove generics"; }) : EXCLUDED;
+        var excluded = isGGM ? EXCLUDED.filter(function(ex) { return ex !== "vetcove generics"; }) : EXCLUDED;
         var rows = raw.filter(function(r) { return r.SKUNDC && (r.Warehouse || "").trim() === whKey && !excluded.some(function(ex) { return (r.VendorName || "").toLowerCase().indexOf(ex) >= 0; }); }).map(function(r) { return Object.assign({}, r, { Price: Number(r.Price) || 0, OrderQty: Number(r.OrderQty) || 0, TotalPrice: +((Number(r.Price) || 0) * (Number(r.OrderQty) || 0)).toFixed(2) }); });
 
         // Fetch default prices from cross reference for items with $0 price
@@ -698,7 +704,7 @@ function WHT(props) {
   var totalVal = useMemo(function() { return data.reduce(function(s, r) { return s + r.TotalPrice; }, 0); }, [data]);
   var flags = useMemo(function() { var f = { s: [], so: [] }; data.forEach(function(r, i) { var mc = (r.MovementClass || "").toLowerCase().trim(); if (mc === "short-dating") f.s.push(i); if (mc === "sell-off item") f.so.push(i); }); return f; }, [data]);
   var flagCount = flags.s.length + flags.so.length;
-  var emailBlocked = whKey !== "GGM-KY" && (flags.s.length > 0 || flags.so.length > 0);
+  var emailBlocked = !isGGM && (flags.s.length > 0 || flags.so.length > 0);
   var getFlag = function(r) { var mc = (r.MovementClass || "").toLowerCase().trim(); if (mc === "short-dating") return "short"; if (mc === "sell-off item") return "selloff"; return null; };
   var filtered = useMemo(function() { var d = data.slice(); if (search) { var s = search.toLowerCase(); d = d.filter(function(r) { return r.SKUNDC.toLowerCase().indexOf(s) >= 0 || r.Description.toLowerCase().indexOf(s) >= 0 || r.VendorName.toLowerCase().indexOf(s) >= 0; }); } if (vendorFilter !== "all") d = d.filter(function(r) { return r.VendorName === vendorFilter; }); if (flagsOnly) { var fi = new Set(flags.s.concat(flags.so)); d = d.filter(function(r) { return fi.has(data.indexOf(r)); }); } d.sort(function(a, b) { var fa = getFlag(a) ? 0 : 1; var fb = getFlag(b) ? 0 : 1; return fa - fb; }); return d; }, [data, search, vendorFilter, flagsOnly, flags]);
   var todayStr = new Date().toLocaleDateString("en-US", { month: "numeric", day: "numeric" });
@@ -744,8 +750,8 @@ function WHT(props) {
       </div>
       {data.length > 0 ? <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto", maxHeight: "calc(100vh - 260px)" })}>
         <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
-          <thead><tr>{["SKU", "Description", "Qty", "Vendor", "PO #"].concat(whKey !== "GGM-KY" ? ["Reorder", "Max", "Lead", "Min", "Avail"] : []).concat(["Price", "Total", "Flag"]).map(function(h) { return <th key={h} style={S.th}>{h}</th>; })}</tr></thead>
-          <tbody>{filtered.map(function(r, i) { var f = getFlag(r); var bg = f === "short" ? "rgba(220,38,38,0.04)" : f === "selloff" ? "rgba(217,119,6,0.04)" : "transparent"; var tc = f === "short" ? "#DC2626" : f === "selloff" ? "#D97706" : "#374151"; var fmt = function(v) { var n = parseFloat(v); if (isNaN(n)) return v; return n % 1 === 0 ? String(Math.round(n)) : n.toFixed(2); }; return <tr key={i} style={{ background: bg }}><td style={Object.assign({}, S.td, { color: tc, minWidth: 120, whiteSpace: "nowrap" })}>{r.SKUNDC}</td><td style={Object.assign({}, S.td, { color: tc, minWidth: 180, maxWidth: 350 })}><CopyCell text={r.Description} toast={toast} color={tc} accentColor={cfg.color} /></td><td style={Object.assign({}, S.td, { color: tc })}>{fmt(r.OrderQty)}</td><td style={Object.assign({}, S.td, { color: tc })}>{r.VendorName}</td><td style={Object.assign({}, S.td, { color: tc })}>{r.OrderNbr}</td>{whKey !== "GGM-KY" && <><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.ReorderPoint)}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.MaxQty)}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.LeadTime)}d</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.MinOrderQty)}</td><td style={Object.assign({}, S.td, { color: r.QtyAvailable < 0 ? "#DC2626" : tc, textAlign: "right" })}>{fmt(r.QtyAvailable)}</td></>}<td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>${r.Price.toFixed(2)}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>${r.TotalPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td><td style={S.td}>{f ? <span style={S.badge(f === "short" ? "danger" : "warning")}>{f === "short" ? "Short" : "Sell-Off"}</span> : "\u2014"}</td></tr>; })}</tbody>
+          <thead><tr>{["SKU", "Description", "Qty", "Vendor", "PO #"].concat(!isGGM ? ["Reorder", "Max", "Lead", "Min", "Avail"] : []).concat(["Price", "Total", "Flag"]).map(function(h) { return <th key={h} style={S.th}>{h}</th>; })}</tr></thead>
+          <tbody>{filtered.map(function(r, i) { var f = getFlag(r); var bg = f === "short" ? "rgba(220,38,38,0.04)" : f === "selloff" ? "rgba(217,119,6,0.04)" : "transparent"; var tc = f === "short" ? "#DC2626" : f === "selloff" ? "#D97706" : "#374151"; var fmt = function(v) { var n = parseFloat(v); if (isNaN(n)) return v; return n % 1 === 0 ? String(Math.round(n)) : n.toFixed(2); }; return <tr key={i} style={{ background: bg }}><td style={Object.assign({}, S.td, { color: tc, minWidth: 120, whiteSpace: "nowrap" })}>{r.SKUNDC}</td><td style={Object.assign({}, S.td, { color: tc, minWidth: 180, maxWidth: 350 })}><CopyCell text={r.Description} toast={toast} color={tc} accentColor={cfg.color} /></td><td style={Object.assign({}, S.td, { color: tc })}>{fmt(r.OrderQty)}</td><td style={Object.assign({}, S.td, { color: tc })}>{r.VendorName}</td><td style={Object.assign({}, S.td, { color: tc })}>{r.OrderNbr}</td>{!isGGM && <><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.ReorderPoint)}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.MaxQty)}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.LeadTime)}d</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.MinOrderQty)}</td><td style={Object.assign({}, S.td, { color: r.QtyAvailable < 0 ? "#DC2626" : tc, textAlign: "right" })}>{fmt(r.QtyAvailable)}</td></>}<td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>${r.Price.toFixed(2)}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>${r.TotalPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td><td style={S.td}>{f ? <span style={S.badge(f === "short" ? "danger" : "warning")}>{f === "short" ? "Short" : "Sell-Off"}</span> : "\u2014"}</td></tr>; })}</tbody>
         </table>
       </div> : <div style={Object.assign({}, S.card, { textAlign: "center", padding: 48, color: "#9CA3AF" })}>Run fetch first.</div>}
     </div>}
