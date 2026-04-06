@@ -19,6 +19,7 @@ const ENDPOINTS = {
   "item-xref":     "ITEM%20-%20Non-Stock%20Cross%20Reference",
   "short-dating":  "INV%20-%20Short-Dating%20Tracker",
   "backorder":     "INV%20-%20Backorder%20Item%20Review",
+  "hills-pawtree": "PURCH%20-%20Open%20Hills%20and%20Pawtree",
 };
 
 // Which columns to extract for each type (keyGroup = possible OData field names)
@@ -92,6 +93,12 @@ const COLUMN_MAP = {
     { label: "OpenQty",         keys: ["OpenQty", "OpenQtyBackordered"] },
     { label: "RecoveryDate",    keys: ["RecoveryDate", "EstimatedRecoveryDate"] },
   ],
+  "hills-pawtree": [
+    { label: "PONumber",        keys: ["PONumber", "OrderNbr", "PONbr", "PO Number"] },
+    { label: "DateOrdered",     keys: ["DateOrdered", "Date", "OrderDate", "Date Ordered"] },
+    { label: "Vendor",          keys: ["Vendor", "VendorID", "VendorName"] },
+    { label: "Warehouse",       keys: ["Warehouse", "WarehouseID"] },
+  ],
 };
 
 export async function POST(request) {
@@ -100,7 +107,7 @@ export async function POST(request) {
     const { type, warehouse, username, password, useServiceAccount } = body;
 
     if (!type || !ENDPOINTS[type]) {
-      return Response.json({ error: "Invalid type. Use: po, po-ggm, ndc-lookup, item-xref, short-dating, backorder" }, { status: 400 });
+      return Response.json({ error: "Invalid type. Use: po, po-ggm, ndc-lookup, item-xref, short-dating, backorder, hills-pawtree" }, { status: 400 });
     }
 
     // Use service account credentials from env vars, or user-provided credentials
