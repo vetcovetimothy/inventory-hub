@@ -2187,6 +2187,8 @@ export default function Hub() {
   var _cl = useState(true), credLoading = _cl[0], setCredLoading = _cl[1];
   var _gm = useState(null), gmail = _gm[0], setGmail = _gm[1];
   var _sr = useState(function() { var saved = sGet("shipping-rules-v2"); return saved || Object.assign({}, DEFAULT_SHIP_RULES); }), shipRules = _sr[0], setShipRules = _sr[1];
+  var _sideCol = useState(function() { return sGet("sidebar-collapsed") || {}; }), sideCollapsed = _sideCol[0], setSideCollapsed = _sideCol[1];
+  function toggleSection(key) { var u = Object.assign({}, sideCollapsed); u[key] = !u[key]; setSideCollapsed(u); sSet("sidebar-collapsed", u); }
   function updateShipRules(newRules) { setShipRules(newRules); sSet("shipping-rules-v2", newRules); }
 
   var showToast = useCallback(function(m, t) { setToast({ m: m, t: t || "success" }); setTimeout(function() { setToast(null); }, 3500); }, []);
@@ -2312,24 +2314,33 @@ export default function Hub() {
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Varela+Round&display=swap');*{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:#F8F9FB}::-webkit-scrollbar-thumb{background:#E5E7EB;border-radius:3px}@keyframes spin{to{transform:rotate(360deg)}}@keyframes slideUp{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}button:hover{filter:brightness(1.08)}input:focus,select:focus{border-color:#3B82F6!important;box-shadow:0 0 0 2px rgba(59,130,246,0.12)}tr:hover td{background:rgba(59,130,246,0.02)}`}</style>
 
       <div style={{ width: 230, background: "#1A1F2E", display: "flex", flexDirection: "column", padding: "20px 0", flexShrink: 0 }}>
-        <div style={{ padding: "0 20px 20px", borderBottom: "1px solid rgba(255,255,255,0.08)", marginBottom: 12 }}>
+        <div style={{ padding: "0 20px 20px", borderBottom: "1px solid rgba(255,255,255,0.08)", marginBottom: 8 }}>
           <p style={{ fontSize: 18, fontWeight: 700, letterSpacing: "-0.5px", color: "#FFFFFF", margin: 0 }}>Inventory Hub</p>
           <p style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", fontWeight: 500, letterSpacing: "1.5px", textTransform: "uppercase", marginTop: 4 }}>Vetcove Tools</p>
         </div>
-        <div style={{ padding: "0 12px", marginBottom: 4 }}><div style={{ fontSize: 10, fontWeight: 500, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "1px", padding: "8px 12px" }}>PO Tools</div></div>
-        {Object.entries(WH).map(function(e) { return <SideLink key={e[0]} id={e[0]} label={e[1].full} color={e[1].color} />; })}
-        <div style={{ padding: "12px 12px 4px", marginTop: 4, borderTop: "1px solid rgba(255,255,255,0.06)" }}><div style={{ fontSize: 10, fontWeight: 500, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "1px", padding: "8px 12px" }}>Generic PO Tools</div></div>
-        <SideLink id="po-import" label="PO NDC Validator" color="#06B6D4" />
-        <SideLink id="cycle-count" label="Cycle Counting" color="#14B8A6" />
-        <SideLink id="cycle-count-sftp" label="Cycle Counting SFTP" color="#0EA5E9" />
-        <div style={{ padding: "12px 12px 4px", marginTop: 4, borderTop: "1px solid rgba(255,255,255,0.06)" }}><div style={{ fontSize: 10, fontWeight: 500, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "1px", padding: "8px 12px" }}>Inventory Tools</div></div>
-        <SideLink id="short-dating" label="Short-Dating" color="#E879F9" />
-        <SideLink id="backorder" label="Backorders" color="#F97316" />
-        <div style={{ padding: "12px 12px 4px", marginTop: 4, borderTop: "1px solid rgba(255,255,255,0.06)" }}><div style={{ fontSize: 10, fontWeight: 500, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "1px", padding: "8px 12px" }}>Tracking</div></div>
-        <SideLink id="fuze-tracker" label="Fuze Tracker" color="#F59E0B" />
-        <SideLink id="hills-pawtree" label="Hills & Pawtree" color="#10B981" />
-        <div style={{ padding: "12px 12px 4px", marginTop: 4, borderTop: "1px solid rgba(255,255,255,0.06)" }}><div style={{ fontSize: 10, fontWeight: 500, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "1px", padding: "8px 12px" }}>Settings</div></div>
-        <div onClick={function() { setPagePersist("rules"); setShowLogin(false); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", margin: "1px 12px", fontSize: 13, cursor: "pointer", fontWeight: page === "rules" && !showLogin ? 500 : 400, color: page === "rules" && !showLogin ? "#93bbfc" : "rgba(255,255,255,0.55)", background: page === "rules" && !showLogin ? "rgba(96,165,250,0.15)" : "transparent", borderRadius: 8 }}><IconTruck /> Shipping Rules</div>
+        {(function() {
+          var sections = [
+            { key: "po", label: "PO Tools", items: Object.entries(WH).map(function(e) { return { id: e[0], label: e[1].full, color: e[1].color }; }) },
+            { key: "generic", label: "Generic PO Tools", items: [{ id: "po-import", label: "PO NDC Validator", color: "#06B6D4" }, { id: "cycle-count", label: "Cycle Counting", color: "#14B8A6" }, { id: "cycle-count-sftp", label: "Cycle Counting SFTP", color: "#0EA5E9" }] },
+            { key: "tracking", label: "Tracking", items: [{ id: "fuze-tracker", label: "Fuze Tracker", color: "#F59E0B" }, { id: "hills-pawtree", label: "Hills & Pawtree", color: "#10B981" }] },
+            { key: "inventory", label: "Inventory Tools", items: [{ id: "short-dating", label: "Short-Dating", color: "#E879F9" }, { id: "backorder", label: "Backorders", color: "#F97316" }] },
+          ];
+          return sections.map(function(sec, si) {
+            var hasActive = sec.items.some(function(item) { return page === item.id && !showLogin; });
+            var isCollapsed = sideCollapsed[sec.key] && !hasActive;
+            return <div key={sec.key} style={{ borderTop: si > 0 ? "1px solid rgba(255,255,255,0.06)" : "none", paddingTop: si > 0 ? 8 : 0 }}>
+              <div onClick={function() { toggleSection(sec.key); }} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 20px", cursor: "pointer", userSelect: "none" }}>
+                <span style={{ fontSize: 10, fontWeight: 500, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "1px" }}>{sec.label}</span>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.25)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transition: "transform 0.2s", transform: isCollapsed ? "rotate(-90deg)" : "rotate(0deg)" }}><polyline points="6 9 12 15 18 9" /></svg>
+              </div>
+              {!isCollapsed && <div style={{ paddingBottom: 4 }}>{sec.items.map(function(item) { return <SideLink key={item.id} id={item.id} label={item.label} color={item.color} />; })}</div>}
+            </div>;
+          });
+        })()}
+        <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 8 }}>
+          <div style={{ padding: "8px 20px" }}><span style={{ fontSize: 10, fontWeight: 500, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "1px" }}>Settings</span></div>
+          <div onClick={function() { setPagePersist("rules"); setShowLogin(false); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", margin: "1px 12px", fontSize: 13, cursor: "pointer", fontWeight: page === "rules" && !showLogin ? 500 : 400, color: page === "rules" && !showLogin ? "#93bbfc" : "rgba(255,255,255,0.55)", background: page === "rules" && !showLogin ? "rgba(96,165,250,0.15)" : "transparent", borderRadius: 8 }}><IconTruck /> Shipping Rules</div>
+        </div>
         <div style={{ flex: 1 }} />
         <div style={{ padding: "0 12px" }}>
           <div style={{ padding: "12px 14px", background: ok ? "rgba(16,185,129,0.1)" : "rgba(239,68,68,0.1)", borderRadius: 10, border: "1px solid " + (ok ? "rgba(16,185,129,0.15)" : "rgba(239,68,68,0.15)") }}>
