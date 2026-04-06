@@ -1913,12 +1913,24 @@ function HillsTracker(props) {
     try {
       var rows = await fetchAcumatica("hills-pawtree", null, cred.username, cred.password);
       setData(rows);
+      sSet("hills-pawtree-data", { rows: rows, fetchedAt: Date.now() });
       toast("Hills & Pawtree: Loaded " + rows.length + " POs");
     } catch (err) { toast("Error: " + err.message, "error"); }
     finally { setLoading(false); }
   }, [ok, lp, cred, toast]);
 
-  useEffect(function() { if (ok && cred && cred.username) fetchData(); }, [ok]);
+  useEffect(function() {
+    if (!ok || !cred || !cred.username) return;
+    var cached = sGet("hills-pawtree-data");
+    if (cached && cached.rows && cached.rows.length > 0) {
+      setData(cached.rows);
+      // Check if last fetch was more than 24 hours ago
+      var age = Date.now() - (cached.fetchedAt || 0);
+      if (age > 24 * 60 * 60 * 1000) fetchData();
+    } else {
+      fetchData();
+    }
+  }, [ok]);
 
   function simplifyWarehouse(wh, vendor) {
     var w = (wh || "").trim();
@@ -1998,6 +2010,7 @@ function HillsTracker(props) {
     <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
       <Gate ok={ok} prompt={lp} style={Object.assign({}, S.btn(), { padding: "10px 20px" })} onClick={fetchData} disabled={loading}>{loading ? <><Spinner /> Fetching...</> : <><IconRefresh /> {data.length > 0 ? "Refresh" : "Load Data"}</>}</Gate>
       {data.length > 0 && <span style={{ fontSize: 12, color: "#6B7280" }}>{data.length} open POs</span>}
+      {data.length > 0 && (function() { var cached = sGet("hills-pawtree-data"); if (cached && cached.fetchedAt) { var d = new Date(cached.fetchedAt); return <span style={{ fontSize: 11, color: "#9CA3AF" }}>Last refreshed: {d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>; } return null; })()}
     </div>
 
     {data.length > 0 && <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 20 }}>
