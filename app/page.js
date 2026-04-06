@@ -143,7 +143,7 @@ const WH = {
   "TP-OH": { label: "Ohio", full: "Ohio", color: "#059669", emailTo: "nigel.white@fuzehealth.com, anna.wilson@fuzehealth.com, trudie.selby@fuzehealth.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Ohio " + d; } },
   "TP-CA": { label: "Hayward", full: "Hayward, CA", color: "#D97706", emailTo: "nigel.white@fuzehealth.com, anna.wilson@fuzehealth.com, trudie.selby@fuzehealth.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Hayward " + d; } },
   "GGM-KY": { label: "GoGoMeds", full: "GoGoMeds, KY", color: "#8B5CF6", emailTo: "p.pocsatko@gogomeds.com, m.shull@gogomeds.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Weekly Replenishment Orders " + d; } },
-  "GGM-AZ": { label: "GoGoMeds AZ", full: "GoGoMeds, AZ", color: "#EC4899", emailTo: "r.aldrich@gogomeds.com, d.jackson@gogomeds.com, p.pocsatko@gogomeds.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Weekly Replenishment Orders " + d; } },
+  "GGM-AZ": { label: "GoGoMeds AZ", full: "GoGoMeds, AZ", color: "#EC4899", emailTo: "r.aldrich@gogomeds.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Weekly Replenishment Orders " + d; } },
 };
 
 /* ═══════ VENDOR CONTACTS ═══════ */
@@ -1887,6 +1887,167 @@ function POImportTool(props) {
   );
 }
 
+/* ═══════ HILLS & PAWTREE TRACKER ═══════ */
+function HillsTracker(props) {
+  var toast = props.toast, ok = props.ok, lp = props.lp, cred = props.cred;
+  var TOOL_COLOR = "#10B981";
+  var _d = useState([]), data = _d[0], setData = _d[1];
+  var _ld = useState(false), loading = _ld[0], setLoading = _ld[1];
+  var _meta = useState({}), meta = _meta[0], setMeta = _meta[1];
+  var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
+
+  // Persist ETA and Notes in localStorage
+  var storageKey = "hills-pawtree-meta";
+  useEffect(function() { var saved = sGet(storageKey); if (saved) setMeta(saved); }, []);
+  function updateMeta(po, field, value) {
+    var updated = Object.assign({}, meta);
+    if (!updated[po]) updated[po] = {};
+    updated[po][field] = value;
+    setMeta(updated);
+    sSet(storageKey, updated);
+  }
+
+  var fetchData = useCallback(async function() {
+    if (!ok) { lp(); return; }
+    setLoading(true);
+    try {
+      var rows = await fetchAcumatica("hills-pawtree", null, cred.username, cred.password);
+      setData(rows);
+      toast("Hills & Pawtree: Loaded " + rows.length + " POs");
+    } catch (err) { toast("Error: " + err.message, "error"); }
+    finally { setLoading(false); }
+  }, [ok, lp, cred, toast]);
+
+  useEffect(function() { if (ok && cred && cred.username) fetchData(); }, [ok]);
+
+  function simplifyWarehouse(wh, vendor) {
+    var w = (wh || "").trim();
+    var v = (vendor || "").trim();
+    if (v === "VID0040" || v.toLowerCase().indexOf("pawtree") >= 0) return "CA - Pawtree";
+    if (w.indexOf("CP-CA") >= 0) return "CA";
+    if (w.indexOf("CP-NJ") >= 0) return "NJ";
+    return w.replace("HILL-", "");
+  }
+
+  function parseDate(d) {
+    if (!d) return null;
+    var s = String(d);
+    if (s.indexOf("T") >= 0) s = s.split("T")[0];
+    var parts = s.split(/[-\/]/);
+    if (parts.length === 3) {
+      var yr = parts[0].length === 4 ? parseInt(parts[0]) : parseInt(parts[2]);
+      var mo = parts[0].length === 4 ? parseInt(parts[1]) - 1 : parseInt(parts[0]) - 1;
+      var dy = parts[0].length === 4 ? parseInt(parts[2]) : parseInt(parts[1]);
+      var dt = new Date(yr, mo, dy);
+      if (!isNaN(dt.getTime())) return dt;
+    }
+    var fallback = new Date(d);
+    return isNaN(fallback.getTime()) ? null : fallback;
+  }
+
+  function businessDaysSince(date) {
+    if (!date) return 0;
+    var now = new Date(); now.setHours(0,0,0,0);
+    var d = new Date(date); d.setHours(0,0,0,0);
+    if (d >= now) return 0;
+    var count = 0;
+    var cur = new Date(d);
+    while (cur < now) {
+      cur.setDate(cur.getDate() + 1);
+      var day = cur.getDay();
+      if (day !== 0 && day !== 6) count++;
+    }
+    return count;
+  }
+
+  function isDatePast(dateStr) {
+    var d = parseDate(dateStr);
+    if (!d) return false;
+    var now = new Date(); now.setHours(0,0,0,0);
+    return d < now;
+  }
+
+  function formatDate(d) {
+    var dt = parseDate(d);
+    if (!dt) return "";
+    return (dt.getMonth() + 1) + "/" + dt.getDate() + "/" + dt.getFullYear();
+  }
+
+  // Sort: NJ first, then CA, then CA - Pawtree
+  var sorted = useMemo(function() {
+    return data.slice().sort(function(a, b) {
+      var wa = simplifyWarehouse(a.Warehouse, a.Vendor);
+      var wb = simplifyWarehouse(b.Warehouse, b.Vendor);
+      var order = { "NJ": 0, "CA": 1, "CA - Pawtree": 2 };
+      var oa = order[wa] != null ? order[wa] : 3;
+      var ob = order[wb] != null ? order[wb] : 3;
+      if (oa !== ob) return oa - ob;
+      return (a.PONumber || "").localeCompare(b.PONumber || "");
+    });
+  }, [data]);
+
+  var stats = useMemo(function() {
+    var total = data.length;
+    var overdue = data.filter(function(r) { return businessDaysSince(parseDate(r.DateOrdered)) >= 14; }).length;
+    var withEta = data.filter(function(r) { return meta[r.PONumber] && meta[r.PONumber].eta; }).length;
+    var pastEta = data.filter(function(r) { var m = meta[r.PONumber]; return m && m.eta && isDatePast(m.eta); }).length;
+    return { total: total, overdue: overdue, withEta: withEta, pastEta: pastEta };
+  }, [data, meta]);
+
+  return <div>
+    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
+      <Gate ok={ok} prompt={lp} style={Object.assign({}, S.btn(), { padding: "10px 20px" })} onClick={fetchData} disabled={loading}>{loading ? <><Spinner /> Fetching...</> : <><IconRefresh /> {data.length > 0 ? "Refresh" : "Load Data"}</>}</Gate>
+      {data.length > 0 && <span style={{ fontSize: 12, color: "#6B7280" }}>{data.length} open POs</span>}
+    </div>
+
+    {data.length > 0 && <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 20 }}>
+      <div style={Object.assign({}, S.statCard, { background: "#EEF4FF" })}><div style={{ fontSize: 11, color: "#6B8ABF", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>Open POs</div><div style={{ fontSize: 28, fontWeight: 500, color: "#2563EB", marginTop: 6 }}>{stats.total}</div></div>
+      <div style={Object.assign({}, S.statCard, { background: stats.overdue > 0 ? "#FEF2F2" : "#ECFDF5" })}><div style={{ fontSize: 11, color: stats.overdue > 0 ? "#C47070" : "#6B9E8A", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>Overdue (14+ days)</div><div style={{ fontSize: 28, fontWeight: 500, color: stats.overdue > 0 ? "#DC2626" : "#059669", marginTop: 6 }}>{stats.overdue}</div></div>
+      <div style={Object.assign({}, S.statCard, { background: "#FEF7EC" })}><div style={{ fontSize: 11, color: "#B08A4A", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>ETA Set</div><div style={{ fontSize: 28, fontWeight: 500, color: "#D97706", marginTop: 6 }}>{stats.withEta}</div></div>
+      <div style={Object.assign({}, S.statCard, { background: stats.pastEta > 0 ? "#FEF2F2" : "#ECFDF5" })}><div style={{ fontSize: 11, color: stats.pastEta > 0 ? "#C47070" : "#6B9E8A", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>Past ETA</div><div style={{ fontSize: 28, fontWeight: 500, color: stats.pastEta > 0 ? "#DC2626" : "#059669", marginTop: 6 }}>{stats.pastEta}</div></div>
+    </div>}
+
+    {data.length > 0 ? <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto" })}>
+      <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 13 }}>
+        <thead><tr>
+          <th style={S.th}>PO</th>
+          <th style={S.th}>Warehouse</th>
+          <th style={S.th}>PO Ordered</th>
+          <th style={Object.assign({}, S.th, { minWidth: 140 })}>PO ETA</th>
+          <th style={Object.assign({}, S.th, { minWidth: 200 })}>Notes</th>
+        </tr></thead>
+        <tbody>{sorted.map(function(r, i) {
+          var po = r.PONumber || "";
+          var wh = simplifyWarehouse(r.Warehouse, r.Vendor);
+          var orderedDate = parseDate(r.DateOrdered);
+          var bDays = businessDaysSince(orderedDate);
+          var isOverdue = bDays >= 14;
+          var poMeta = meta[po] || {};
+          var etaPast = poMeta.eta && isDatePast(poMeta.eta);
+
+          return <tr key={i}>
+            <td style={Object.assign({}, S.td, { fontWeight: 600, color: "#1F2937" })}>{po}</td>
+            <td style={S.td}><span style={Object.assign({}, S.badge(wh === "NJ" ? "blue" : wh.indexOf("Pawtree") >= 0 ? "purple" : "default"))}>{wh}</span></td>
+            <td style={Object.assign({}, S.td, { position: "relative" })}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ color: isOverdue ? "#DC2626" : "#374151" }}>{formatDate(r.DateOrdered)}</span>
+                {isOverdue && <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 10, background: "#FEF2F2", color: "#DC2626", fontWeight: 600 }}>{bDays}d overdue</span>}
+              </div>
+            </td>
+            <td style={S.td}>
+              <input type="text" value={poMeta.eta || ""} onChange={function(e) { updateMeta(po, "eta", e.target.value); }} placeholder="mm/dd/yyyy" style={Object.assign({}, S.inp, { padding: "6px 10px", background: etaPast ? "rgba(220,38,38,0.06)" : "#F9FAFB", borderColor: etaPast ? "rgba(220,38,38,0.3)" : "#E5E7EB", color: etaPast ? "#DC2626" : "#374151" })} />
+              {etaPast && <div style={{ fontSize: 10, color: "#DC2626", marginTop: 2, fontWeight: 500 }}>Should be delivered</div>}
+            </td>
+            <td style={S.td}>
+              <input type="text" value={poMeta.notes || ""} onChange={function(e) { updateMeta(po, "notes", e.target.value); }} placeholder="Add notes..." style={Object.assign({}, S.inp, { padding: "6px 10px" })} />
+            </td>
+          </tr>;
+        })}</tbody>
+      </table>
+    </div> : !loading && <div style={Object.assign({}, S.card, { textAlign: "center", padding: 60, color: "#9CA3AF" })}>Click <strong>Load Data</strong> to fetch open Hills & Pawtree POs from Acumatica.</div>}
+  </div>;
+}
+
 /* ═══════ FUZE TRACKER ═══════ */
 function FuzeTracker(props) {
   var toast = props.toast;
@@ -2125,8 +2286,8 @@ export default function Hub() {
   );
 
   var isWH = page in WH;
-  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "po-import" ? "#06B6D4" : page === "cycle-count" ? "#14B8A6" : page === "cycle-count-sftp" ? "#0EA5E9" : page === "fuze-tracker" ? "#F59E0B" : "#3B82F6";
-  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "po-import" ? "PO NDC Validator" : page === "cycle-count" ? "Cycle Counting" : page === "cycle-count-sftp" ? "Cycle Counting SFTP" : page === "fuze-tracker" ? "Fuze Tracker" : showLogin ? "Login" : "Shipping Rules";
+  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "po-import" ? "#06B6D4" : page === "cycle-count" ? "#14B8A6" : page === "cycle-count-sftp" ? "#0EA5E9" : page === "fuze-tracker" ? "#F59E0B" : page === "hills-pawtree" ? "#10B981" : "#3B82F6";
+  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "po-import" ? "PO NDC Validator" : page === "cycle-count" ? "Cycle Counting" : page === "cycle-count-sftp" ? "Cycle Counting SFTP" : page === "fuze-tracker" ? "Fuze Tracker" : page === "hills-pawtree" ? "Hills & Pawtree Tracker" : showLogin ? "Login" : "Shipping Rules";
 
   function SideLink(p) {
     var active = page === p.id && !showLogin;
@@ -2153,6 +2314,7 @@ export default function Hub() {
         <SideLink id="backorder" label="Backorders" color="#F97316" />
         <div style={{ padding: "12px 12px 4px", marginTop: 4, borderTop: "1px solid rgba(255,255,255,0.06)" }}><div style={{ fontSize: 10, fontWeight: 500, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "1px", padding: "8px 12px" }}>Tracking</div></div>
         <SideLink id="fuze-tracker" label="Fuze Tracker" color="#F59E0B" />
+        <SideLink id="hills-pawtree" label="Hills & Pawtree" color="#10B981" />
         <div style={{ padding: "12px 12px 4px", marginTop: 4, borderTop: "1px solid rgba(255,255,255,0.06)" }}><div style={{ fontSize: 10, fontWeight: 500, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "1px", padding: "8px 12px" }}>Settings</div></div>
         <div onClick={function() { setPagePersist("rules"); setShowLogin(false); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", margin: "1px 12px", fontSize: 13, cursor: "pointer", fontWeight: page === "rules" && !showLogin ? 500 : 400, color: page === "rules" && !showLogin ? "#93bbfc" : "rgba(255,255,255,0.55)", background: page === "rules" && !showLogin ? "rgba(96,165,250,0.15)" : "transparent", borderRadius: 8 }}><IconTruck /> Shipping Rules</div>
         <div style={{ flex: 1 }} />
@@ -2230,6 +2392,7 @@ export default function Hub() {
           {!showLogin && page === "cycle-count" && <CycleCountTool key="cc-standard" toast={showToast} />}
           {!showLogin && page === "cycle-count-sftp" && <CycleCountTool key="cc-sftp" toast={showToast} toolColor="#0EA5E9" sftp />}
           {!showLogin && page === "fuze-tracker" && <FuzeTracker toast={showToast} />}
+          {!showLogin && page === "hills-pawtree" && <HillsTracker toast={showToast} ok={ok} lp={promptLogin} cred={cred} />}
         </div>
       </div>
 
