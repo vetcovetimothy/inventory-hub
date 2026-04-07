@@ -2301,8 +2301,8 @@ export default function Hub() {
   );
 
   var isWH = page in WH;
-  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "po-import" ? "#06B6D4" : page === "cycle-count" ? "#14B8A6" : page === "cycle-count-sftp" ? "#0EA5E9" : page === "fuze-tracker" ? "#F59E0B" : page === "hills-pawtree" ? "#10B981" : "#3B82F6";
-  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "po-import" ? "PO NDC Validator" : page === "cycle-count" ? "Cycle Counting" : page === "cycle-count-sftp" ? "Cycle Counting SFTP" : page === "fuze-tracker" ? "Fuze Tracker" : page === "hills-pawtree" ? "Hills & Pawtree Tracker" : showLogin ? "Login" : "Shipping Rules";
+  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "po-import" ? "#06B6D4" : page === "cycle-count" ? "#14B8A6" : page === "fuze-tracker" ? "#F59E0B" : page === "hills-pawtree" ? "#10B981" : "#3B82F6";
+  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "po-import" ? "PO NDC Validator" : page === "cycle-count" ? "Cycle Counting" : page === "fuze-tracker" ? "Fuze Tracker" : page === "hills-pawtree" ? "Hills & Pawtree Tracker" : showLogin ? "Login" : "Shipping Rules";
 
   function SideLink(p) {
     var active = page === p.id && !showLogin;
@@ -2321,7 +2321,7 @@ export default function Hub() {
         {(function() {
           var sections = [
             { key: "po", label: "PO Tools", items: Object.entries(WH).map(function(e) { return { id: e[0], label: e[1].full, color: e[1].color }; }) },
-            { key: "generic", label: "Generic PO Tools", items: [{ id: "po-import", label: "PO NDC Validator", color: "#06B6D4" }, { id: "cycle-count", label: "Cycle Counting", color: "#14B8A6" }, { id: "cycle-count-sftp", label: "Cycle Counting SFTP", color: "#0EA5E9" }] },
+            { key: "generic", label: "Generic PO Tools", items: [{ id: "po-import", label: "PO NDC Validator", color: "#06B6D4" }, { id: "cycle-count", label: "Cycle Counting", color: "#14B8A6" }] },
             { key: "tracking", label: "Tracking", items: [{ id: "fuze-tracker", label: "Fuze Tracker", color: "#F59E0B" }, { id: "hills-pawtree", label: "Hills & Pawtree", color: "#10B981" }] },
             { key: "inventory", label: "Inventory Tools", items: [{ id: "short-dating", label: "Short-Dating", color: "#E879F9" }, { id: "backorder", label: "Backorders", color: "#F97316" }] },
           ];
@@ -2414,7 +2414,6 @@ export default function Hub() {
           {!showLogin && page === "backorder" && <TrackerTool toolKey="backorder" toolLabel="Backorder Tracker" toolColor="#F97316" demoData={BKO_DEMO} columns={bkoColumns} emailConfig={bkoEmail} skipVendors={BKO_SKIP} toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} />}
           {!showLogin && page === "po-import" && <POImportTool toast={showToast} cred={cred} ok={ok} lp={promptLogin} />}
           {!showLogin && page === "cycle-count" && <CycleCountTool key="cc-standard" toast={showToast} />}
-          {!showLogin && page === "cycle-count-sftp" && <CycleCountTool key="cc-sftp" toast={showToast} toolColor="#0EA5E9" sftp />}
           {!showLogin && page === "fuze-tracker" && <FuzeTracker toast={showToast} />}
           {!showLogin && page === "hills-pawtree" && <HillsTracker toast={showToast} ok={ok} lp={promptLogin} cred={cred} />}
         </div>
