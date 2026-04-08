@@ -1896,15 +1896,59 @@ function HillsTracker(props) {
   var _meta = useState({}), meta = _meta[0], setMeta = _meta[1];
   var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
 
-  // Persist ETA and Notes in localStorage
+  // Persist ETA and Notes in KV (shared) + localStorage (cache)
   var storageKey = "hills-pawtree-meta";
-  useEffect(function() { var saved = sGet(storageKey); if (saved) setMeta(saved); }, []);
+  var kvMetaKey = "hills-pawtree-meta";
+  var metaRef = useRef(meta);
+  metaRef.current = meta;
+
+  useEffect(function() {
+    var m = true;
+    (async function() {
+      // Try KV first
+      try {
+        var resp = await kvGet(kvMetaKey);
+        var json = await resp.json();
+        if (m && json.data && typeof json.data === "object" && Object.keys(json.data).length > 0) {
+          setMeta(json.data);
+          sSet(storageKey, json.data);
+          return;
+        }
+      } catch (e) {}
+      // Fall back to localStorage
+      if (m) { var saved = sGet(storageKey); if (saved) setMeta(saved); }
+    })();
+    return function() { m = false; };
+  }, []);
+
+  // Poll KV every 10 seconds for changes from other users
+  useEffect(function() {
+    var m = true;
+    var poll = setInterval(async function() {
+      try {
+        var resp = await kvGet(kvMetaKey);
+        var json = await resp.json();
+        if (!m || !json.data || typeof json.data !== "object") return;
+        var remote = json.data;
+        if (JSON.stringify(remote) !== JSON.stringify(metaRef.current)) {
+          // Merge: remote wins for fields the local user hasn't touched recently
+          var merged = Object.assign({}, remote);
+          setMeta(merged);
+          sSet(storageKey, merged);
+        }
+      } catch (e) {}
+    }, 10000);
+    return function() { m = false; clearInterval(poll); };
+  }, []);
+
   function updateMeta(po, field, value) {
     var updated = Object.assign({}, meta);
     if (!updated[po]) updated[po] = {};
     updated[po][field] = value;
     setMeta(updated);
     sSet(storageKey, updated);
+    // Save to KV for sharing
+    kvPost(kvMetaKey, updated).catch(function() {});
   }
 
   var fetchData = useCallback(async function() {
