@@ -2221,6 +2221,112 @@ function FuzeTracker(props) {
 }
 
 /* ═══════ TRUCKLOADER ═══════ */
+var TRUCK_COLORS = [
+  "#d9ead3", "#cfe2f3", "#fff2cc", "#f4cccc", "#ead1dc", "#d9d2e9", "#fce5cd", "#d0e0e3",
+  "#ccddff", "#ccffcc", "#ffe5cc", "#e5ccff", "#ccffff", "#e5ffcc"
+];
+var TRUCK_TEXT_COLORS = [
+  "#1e6823", "#1a4d7a", "#7a6500", "#8b1a1a", "#6b2a4d", "#3d2a6b", "#7a4400", "#2a5a5a",
+  "#1a3d7a", "#1a6b1a", "#7a3d00", "#4d1a7a", "#1a5a5a", "#3d6b1a"
+];
+
+function runTruckAlgorithm(data) {
+  var TARGET = 42500 * 100; // integer scaling to prevent float errors
+
+  var availableItems = [];
+  var errorItems = [];
+
+  for (var i = 0; i < data.length; i++) {
+    var r = data[i];
+    var weight = Math.round(r.TotalLbs * 100);
+    if (!weight || weight <= 0) continue;
+
+    if (weight > TARGET) {
+      // ONE-SPLIT RULE: split into exactly 2 pieces by pallet
+      var palletWeight = Math.round(r.LbsPerPallet * 100);
+      var palletCount = Math.round(r.PalletCount);
+      if (palletWeight > 0 && palletCount > 0) {
+        var maxPals = Math.floor(TARGET / palletWeight);
+        var remPals = palletCount - maxPals;
+        var chunk1 = maxPals * palletWeight;
+        var chunk2 = remPals * palletWeight;
+        if (chunk2 > TARGET) {
+          errorItems.push({ _idx: r._idx, reason: "Too massive — requires 2+ splits" });
+        } else if (maxPals === 0) {
+          errorItems.push({ _idx: r._idx, reason: "Single pallet exceeds 42,500 lbs" });
+        } else {
+          availableItems.push({ weight: chunk1, _idx: r._idx, isSplit: true, splitPals: maxPals });
+          availableItems.push({ weight: chunk2, _idx: r._idx, isSplit: true, splitPals: remPals });
+        }
+      } else {
+        errorItems.push({ _idx: r._idx, reason: "Missing pallet info for split" });
+      }
+    } else {
+      availableItems.push({ weight: weight, _idx: r._idx, isSplit: false });
+    }
+  }
+
+  // Sort heaviest to lightest
+  availableItems.sort(function(a, b) { return b.weight - a.weight; });
+
+  // Best-Fit Decreasing
+  var trucks = [];
+  availableItems.forEach(function(item) {
+    var bestIdx = -1, minGap = TARGET + 1;
+    for (var t = 0; t < trucks.length; t++) {
+      var gap = TARGET - (trucks[t].total + item.weight);
+      if (gap >= 0 && gap < minGap) { bestIdx = t; minGap = gap; }
+    }
+    if (bestIdx !== -1) {
+      trucks[bestIdx].items.push(item);
+      trucks[bestIdx].total += item.weight;
+    } else {
+      trucks.push({ items: [item], total: item.weight });
+    }
+  });
+
+  // Build assignment map: _idx -> { label, truckNums: [{truckNum, pals}], color, textColor }
+  var assignments = {};
+  trucks.forEach(function(truck, ti) {
+    var truckNum = ti + 1;
+    var color = TRUCK_COLORS[ti % TRUCK_COLORS.length];
+    var textColor = TRUCK_TEXT_COLORS[ti % TRUCK_TEXT_COLORS.length];
+    truck.items.forEach(function(item) {
+      if (!assignments[item._idx]) {
+        assignments[item._idx] = { trucks: [], color: color, textColor: textColor };
+      }
+      if (item.isSplit) {
+        assignments[item._idx].trucks.push({ num: truckNum, pals: item.splitPals });
+        // For splits spanning 2 trucks, keep first truck's color
+      } else {
+        assignments[item._idx].trucks.push({ num: truckNum, pals: null });
+      }
+    });
+  });
+
+  // Build labels
+  Object.keys(assignments).forEach(function(idx) {
+    var a = assignments[idx];
+    if (a.trucks.length === 1 && a.trucks[0].pals === null) {
+      a.label = "Truck " + a.trucks[0].num;
+    } else {
+      a.label = a.trucks.map(function(t) {
+        return "Truck " + t.num + (t.pals != null ? " (" + t.pals + " pals)" : "");
+      }).join(", ");
+    }
+  });
+
+  // Truck summaries
+  var summaries = trucks.map(function(truck, ti) {
+    var actualLbs = truck.total / 100;
+    var remaining = (TARGET - truck.total) / 100;
+    var pct = (truck.total / TARGET * 100).toFixed(1);
+    return { num: ti + 1, totalLbs: actualLbs, remaining: remaining, pct: parseFloat(pct), itemCount: truck.items.length, color: TRUCK_COLORS[ti % TRUCK_COLORS.length], textColor: TRUCK_TEXT_COLORS[ti % TRUCK_TEXT_COLORS.length] };
+  });
+
+  return { assignments: assignments, summaries: summaries, errors: errorItems };
+}
+
 function TruckLoader(props) {
   var toast = props.toast, ok = props.ok, lp = props.lp, cred = props.cred;
   var TOOL_COLOR = "#6366F1";
@@ -2229,31 +2335,28 @@ function TruckLoader(props) {
   var _wh = useState(function() { return sGet("truckloader-wh") || "HILL-CP-CA"; }), warehouse = _wh[0], setWarehouse = _wh[1];
   var _sort = useState({ col: null, dir: "asc" }), sort = _sort[0], setSort = _sort[1];
   var _search = useState(""), search = _search[0], setSearch = _search[1];
+  var _result = useState(null), result = _result[0], setResult = _result[1];
+  var _filter = useState("all"), truckFilter = _filter[0], setTruckFilter = _filter[1];
   var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
 
-  function changeWH(w) { setWarehouse(w); sSet("truckloader-wh", w); setData([]); }
+  function changeWH(w) { setWarehouse(w); sSet("truckloader-wh", w); setData([]); setResult(null); setTruckFilter("all"); }
 
   var fetchData = useCallback(async function() {
     if (!ok) { lp(); return; }
     setLoading(true);
+    setResult(null); setTruckFilter("all");
     try {
       var rows = await fetchAcumatica("truckloader", warehouse, cred.username, cred.password);
-      // Parse numeric fields
       var parsed = rows.map(function(r, idx) {
-        var oq = parseFloat(r.OrderQty) || 0;
-        var tl = parseFloat(r.TotalLbs) || 0;
-        var lpp = parseFloat(r.LbsPerPallet) || 0;
-        var pc = parseFloat(r.PalletCount) || 0;
-        var cpp = parseFloat(r.CasesPerPallet) || 0;
         return {
           _idx: idx,
           InventoryID: (r.InventoryID || "").toString().trim(),
           Description: r.Description || "",
-          OrderQty: oq,
-          TotalLbs: tl,
-          LbsPerPallet: lpp,
-          PalletCount: pc,
-          CasesPerPallet: cpp,
+          OrderQty: parseFloat(r.OrderQty) || 0,
+          TotalLbs: parseFloat(r.TotalLbs) || 0,
+          LbsPerPallet: parseFloat(r.LbsPerPallet) || 0,
+          PalletCount: parseFloat(r.PalletCount) || 0,
+          CasesPerPallet: parseFloat(r.CasesPerPallet) || 0,
           VendorName: r.VendorName || "",
           OrderNbr: r.OrderNbr || "",
           Warehouse: r.Warehouse || warehouse,
@@ -2266,22 +2369,78 @@ function TruckLoader(props) {
     finally { setLoading(false); }
   }, [ok, lp, cred, toast, warehouse]);
 
-  // Load cached data on mount or warehouse change
   useEffect(function() {
     if (!ok || !cred || !cred.username) return;
     var cached = sGet("truckloader-data-" + warehouse);
-    if (cached && cached.rows && cached.rows.length > 0) {
-      setData(cached.rows);
-    }
+    if (cached && cached.rows && cached.rows.length > 0) { setData(cached.rows); }
   }, [ok, warehouse]);
+
+  // Run algorithm
+  function loadTrucks() {
+    if (data.length === 0) { toast("No data to load", "error"); return; }
+    var res = runTruckAlgorithm(data);
+    setResult(res);
+    setTruckFilter("all");
+    var truckCount = res.summaries.length;
+    var errCount = res.errors.length;
+    toast("Loaded into " + truckCount + " truck" + (truckCount !== 1 ? "s" : "") + (errCount > 0 ? " (" + errCount + " error" + (errCount !== 1 ? "s" : "") + ")" : ""));
+  }
+
+  function clearTrucks() { setResult(null); setTruckFilter("all"); toast("Truck assignments cleared", "info"); }
+
+  // CSV export
+  function exportCSVs() {
+    if (!result || !result.summaries.length) return;
+    var now = new Date();
+    var mo = now.getMonth() + 1;
+    var dy = ("0" + now.getDate()).slice(-2);
+    var yr = now.getFullYear().toString().slice(-2);
+    var dateStr = mo + "." + dy + "." + yr;
+    var shortWH = warehouse === "HILL-CP-CA" ? "CA" : "NJ";
+
+    // Build truck -> items map
+    var truckItems = {};
+    result.summaries.forEach(function(s) { truckItems[s.num] = []; });
+    data.forEach(function(row) {
+      var a = result.assignments[row._idx];
+      if (!a) return;
+      a.trucks.forEach(function(t) {
+        var qty;
+        if (t.pals != null) {
+          qty = row.CasesPerPallet > 0 ? t.pals * row.CasesPerPallet : t.pals;
+        } else {
+          qty = row.OrderQty;
+        }
+        truckItems[t.num].push({ invId: row.InventoryID, qty: Math.round(qty) });
+      });
+    });
+
+    // Download each CSV
+    var truckNums = Object.keys(truckItems).sort(function(a, b) { return parseInt(a) - parseInt(b); });
+    var delay = 0;
+    truckNums.forEach(function(num) {
+      var items = truckItems[num];
+      var lines = ["Inventory ID,Warehouse,Order Qty."];
+      items.forEach(function(item) { lines.push(item.invId + "," + warehouse + "," + item.qty); });
+      var csv = lines.join("\n");
+      var fileName = shortWH + " " + dateStr + " Truck " + num + ".csv";
+
+      setTimeout(function() {
+        var blob = new Blob([csv], { type: "text/csv" });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement("a");
+        a.href = url; a.download = fileName; document.body.appendChild(a); a.click();
+        document.body.removeChild(a); URL.revokeObjectURL(url);
+      }, delay);
+      delay += 300;
+    });
+    toast("Downloading " + truckNums.length + " CSV file" + (truckNums.length !== 1 ? "s" : "") + "...");
+  }
 
   // Sorting
   function toggleSort(col) {
-    if (sort.col === col) {
-      setSort({ col: col, dir: sort.dir === "asc" ? "desc" : "asc" });
-    } else {
-      setSort({ col: col, dir: "asc" });
-    }
+    if (sort.col === col) { setSort({ col: col, dir: sort.dir === "asc" ? "desc" : "asc" }); }
+    else { setSort({ col: col, dir: "asc" }); }
   }
 
   // Filter + Sort
@@ -2299,11 +2458,8 @@ function TruckLoader(props) {
     if (sort.col) {
       rows = rows.slice().sort(function(a, b) {
         var va = a[sort.col], vb = b[sort.col];
-        if (typeof va === "number" && typeof vb === "number") {
-          return sort.dir === "asc" ? va - vb : vb - va;
-        }
-        va = String(va || "").toLowerCase();
-        vb = String(vb || "").toLowerCase();
+        if (typeof va === "number" && typeof vb === "number") return sort.dir === "asc" ? va - vb : vb - va;
+        va = String(va || "").toLowerCase(); vb = String(vb || "").toLowerCase();
         return sort.dir === "asc" ? va.localeCompare(vb) : vb.localeCompare(va);
       });
     }
@@ -2314,27 +2470,36 @@ function TruckLoader(props) {
   var stats = useMemo(function() {
     var totalWeight = 0, totalItems = data.length, totalQty = 0, totalPallets = 0;
     data.forEach(function(r) { totalWeight += r.TotalLbs; totalQty += r.OrderQty; totalPallets += r.PalletCount; });
-    var truckCap = 42500;
-    var estTrucks = totalWeight > 0 ? Math.ceil(totalWeight / truckCap) : 0;
+    var estTrucks = totalWeight > 0 ? Math.ceil(totalWeight / 42500) : 0;
     return { totalItems: totalItems, totalWeight: totalWeight, totalQty: totalQty, totalPallets: totalPallets, estTrucks: estTrucks };
   }, [data]);
 
   var columns = [
-    { key: "InventoryID", label: "Inventory ID", width: 140 },
-    { key: "Description", label: "Description", width: 260 },
-    { key: "OrderQty", label: "Order Qty", width: 90, num: true },
-    { key: "TotalLbs", label: "Total Lbs", width: 100, num: true },
-    { key: "LbsPerPallet", label: "Lbs / Pallet", width: 105, num: true },
-    { key: "PalletCount", label: "Pallet Count", width: 105, num: true },
-    { key: "CasesPerPallet", label: "Cases / Pallet", width: 110, num: true },
-    { key: "VendorName", label: "Vendor", width: 160 },
-    { key: "OrderNbr", label: "PO #", width: 110 },
+    { key: "InventoryID", label: "Inventory ID", width: 130 },
+    { key: "Description", label: "Description", width: 220 },
+    { key: "OrderQty", label: "Order Qty", width: 80, num: true },
+    { key: "TotalLbs", label: "Total Lbs", width: 95, num: true },
+    { key: "LbsPerPallet", label: "Lbs/Pallet", width: 90, num: true },
+    { key: "PalletCount", label: "Pallets", width: 75, num: true },
+    { key: "CasesPerPallet", label: "Cases/Pallet", width: 95, num: true },
+    { key: "VendorName", label: "Vendor", width: 140 },
+    { key: "OrderNbr", label: "PO #", width: 100 },
   ];
+  // Add truck assignment column when results exist
+  if (result) columns.push({ key: "_truck", label: "Truck Assignment", width: 170 });
 
   function fmtNum(v) { if (!v && v !== 0) return "—"; return Number(v).toLocaleString("en-US", { maximumFractionDigits: 1 }); }
   function fmtLbs(v) { if (!v && v !== 0) return "—"; return Number(v).toLocaleString("en-US", { maximumFractionDigits: 0 }) + " lbs"; }
-
   var whLabel = warehouse === "HILL-CP-CA" ? "California" : "New Jersey";
+
+  // Check if a row belongs to the currently filtered truck
+  function rowMatchesFilter(row) {
+    if (truckFilter === "all") return true;
+    var a = result && result.assignments[row._idx];
+    if (!a) return false;
+    var filterNum = parseInt(truckFilter.replace("Truck ", ""));
+    return a.trucks.some(function(t) { return t.num === filterNum; });
+  }
 
   return <div>
     {/* Header bar */}
@@ -2348,7 +2513,10 @@ function TruckLoader(props) {
         </div>
         <span style={{ fontSize: 12, color: "#9CA3AF" }}>{warehouse}</span>
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        {data.length > 0 && !result && <button onClick={loadTrucks} style={Object.assign({}, S.btn(), { background: "#059669" })}><IconTruck /> Load Trucks</button>}
+        {result && <button onClick={clearTrucks} style={S.btn("ghost")}><IconTrash /> Clear</button>}
+        {result && <button onClick={exportCSVs} style={Object.assign({}, S.btn(), { background: "#D97706" })}><IconDL /> Export CSVs</button>}
         <Gate ok={ok} prompt={lp} style={S.btn()} onClick={fetchData} disabled={loading}>
           {loading ? <><Spinner color="#fff" size={14} /> Fetching...</> : <><IconRefresh /> Fetch Orders</>}
         </Gate>
@@ -2370,8 +2538,8 @@ function TruckLoader(props) {
         <div style={{ fontSize: 26, fontWeight: 700, color: "#059669", marginTop: 4 }}>{fmtNum(stats.totalPallets)}</div>
       </div>
       <div style={Object.assign({}, S.statCard, { background: "#EEF2FF", border: "1px solid #C7D2FE" })}>
-        <div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Est. Trucks</div>
-        <div style={{ fontSize: 26, fontWeight: 700, color: "#4338CA", marginTop: 4 }}>{stats.estTrucks}</div>
+        <div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>{result ? "Actual Trucks" : "Est. Trucks"}</div>
+        <div style={{ fontSize: 26, fontWeight: 700, color: "#4338CA", marginTop: 4 }}>{result ? result.summaries.length : stats.estTrucks}</div>
         <div style={{ fontSize: 10, color: "#9CA3AF", marginTop: 2 }}>@ 42,500 lb cap</div>
       </div>
       <div style={Object.assign({}, S.statCard, { background: "#F5F3FF", border: "1px solid #DDD6FE" })}>
@@ -2380,7 +2548,56 @@ function TruckLoader(props) {
       </div>
     </div>}
 
-    {/* Search */}
+    {/* Errors */}
+    {result && result.errors.length > 0 && <div style={Object.assign({}, S.card, { background: "#FEF2F2", border: "1px solid #FECACA", padding: "16px 20px", marginBottom: 16 })}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}><IconAlert /><span style={{ fontSize: 13, fontWeight: 600, color: "#DC2626" }}>{result.errors.length} item{result.errors.length !== 1 ? "s" : ""} could not be assigned</span></div>
+      {result.errors.map(function(err, ei) {
+        var row = data.find(function(r) { return r._idx === err._idx; });
+        return <div key={ei} style={{ fontSize: 12, color: "#7F1D1D", padding: "4px 0", display: "flex", gap: 8 }}>
+          <span style={{ fontFamily: "monospace", fontWeight: 600 }}>{row ? row.InventoryID : "?"}</span>
+          <span>{row ? row.Description : ""}</span>
+          <span style={{ color: "#DC2626", fontWeight: 500 }}>— {err.reason}</span>
+        </div>;
+      })}
+    </div>}
+
+    {/* Truck Summary Panel */}
+    {result && result.summaries.length > 0 && <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden", marginBottom: 16 })}>
+      <div style={{ padding: "14px 20px", background: "#F9FAFB", borderBottom: "1px solid #E5E7EB", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>Truck Summary</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 12, color: "#6B7280" }}>Filter:</span>
+          <select value={truckFilter} onChange={function(e) { setTruckFilter(e.target.value); }} style={Object.assign({}, S.sel, { padding: "6px 10px", fontSize: 12, minWidth: 120 })}>
+            <option value="all">Show All</option>
+            {result.summaries.map(function(s) { return <option key={s.num} value={"Truck " + s.num}>Truck {s.num}</option>; })}
+          </select>
+        </div>
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 0 }}>
+        {result.summaries.map(function(s) {
+          var isFiltered = truckFilter !== "all" && truckFilter !== "Truck " + s.num;
+          return <div key={s.num} onClick={function() { setTruckFilter(truckFilter === "Truck " + s.num ? "all" : "Truck " + s.num); }}
+            style={{ flex: "1 1 180px", padding: "14px 18px", borderRight: "1px solid #F3F4F6", borderBottom: "1px solid #F3F4F6", cursor: "pointer", transition: "all 0.15s", opacity: isFiltered ? 0.35 : 1, background: truckFilter === "Truck " + s.num ? s.color : "#FFFFFF" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <span style={{ fontSize: 14, fontWeight: 700, color: s.textColor }}>Truck {s.num}</span>
+              <span style={{ fontSize: 11, color: "#9CA3AF" }}>{s.itemCount} item{s.itemCount !== 1 ? "s" : ""}</span>
+            </div>
+            <div style={{ marginBottom: 6 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 3 }}>
+                <span style={{ color: "#6B7280" }}>{fmtLbs(s.totalLbs)}</span>
+                <span style={{ color: s.pct > 95 ? "#DC2626" : s.pct > 80 ? "#D97706" : "#059669", fontWeight: 600 }}>{s.pct}%</span>
+              </div>
+              <div style={{ height: 6, background: "#F3F4F6", borderRadius: 3, overflow: "hidden" }}>
+                <div style={{ height: "100%", borderRadius: 3, width: Math.min(s.pct, 100) + "%", background: s.pct > 95 ? "#DC2626" : s.pct > 80 ? "#D97706" : "#059669", transition: "width 0.4s ease" }} />
+              </div>
+            </div>
+            <div style={{ fontSize: 11, color: "#9CA3AF" }}>Remaining: <strong style={{ color: "#374151" }}>{fmtLbs(s.remaining)}</strong></div>
+          </div>;
+        })}
+      </div>
+    </div>}
+
+    {/* Search + filter bar */}
     {data.length > 0 && <div style={{ marginBottom: 16, display: "flex", gap: 12, alignItems: "center" }}>
       <div style={{ position: "relative", flex: 1, maxWidth: 360 }}>
         <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search by ID, description, vendor, or PO #..." style={Object.assign({}, S.inp, { paddingLeft: 36 })} />
@@ -2392,11 +2609,11 @@ function TruckLoader(props) {
     {/* Table */}
     {data.length > 0 ? <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden" })}>
       <div style={{ overflowX: "auto", maxHeight: 600 }}>
-        <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, minWidth: 1100 }}>
+        <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, minWidth: result ? 1280 : 1100 }}>
           <thead>
             <tr>{columns.map(function(col) {
               var isSorted = sort.col === col.key;
-              return <th key={col.key} onClick={function() { toggleSort(col.key); }} style={Object.assign({}, S.th, { cursor: "pointer", userSelect: "none", width: col.width, whiteSpace: "nowrap" })}>
+              return <th key={col.key} onClick={col.key !== "_truck" ? function() { toggleSort(col.key); } : undefined} style={Object.assign({}, S.th, { cursor: col.key !== "_truck" ? "pointer" : "default", userSelect: "none", width: col.width, whiteSpace: "nowrap" })}>
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
                   {col.label}
                   {isSorted && <span style={{ color: TOOL_COLOR, fontSize: 10 }}>{sort.dir === "asc" ? "▲" : "▼"}</span>}
@@ -2406,17 +2623,35 @@ function TruckLoader(props) {
           </thead>
           <tbody>
             {displayed.map(function(row, ri) {
+              var a = result ? result.assignments[row._idx] : null;
+              var isError = result ? result.errors.some(function(e) { return e._idx === row._idx; }) : false;
+              var matchesFilter = result ? rowMatchesFilter(row) : true;
+              var dimmed = result && truckFilter !== "all" && !matchesFilter;
+              var rowBg = isError ? "#FEF2F2" : a ? a.color : (ri % 2 === 0 ? "#FFFFFF" : "#FAFBFC");
               var overweight = row.TotalLbs > 42500;
-              return <tr key={row._idx} style={{ background: overweight ? "#FEF2F2" : ri % 2 === 0 ? "#FFFFFF" : "#FAFBFC" }}>
+
+              return <tr key={row._idx} style={{ background: rowBg, opacity: dimmed ? 0.3 : 1, transition: "opacity 0.15s" }}>
                 {columns.map(function(col) {
                   var val = row[col.key];
                   var cellStyle = Object.assign({}, S.td, { width: col.width });
 
+                  if (col.key === "_truck") {
+                    if (isError) {
+                      var errObj = result.errors.find(function(e) { return e._idx === row._idx; });
+                      return <td key={col.key} style={Object.assign({}, cellStyle, { fontWeight: 600, color: "#DC2626", fontSize: 12 })}>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><IconAlert /> ERROR</span>
+                      </td>;
+                    }
+                    if (a) {
+                      return <td key={col.key} style={Object.assign({}, cellStyle, { fontWeight: 600, color: a.textColor, fontSize: 12 })}>{a.label}</td>;
+                    }
+                    return <td key={col.key} style={Object.assign({}, cellStyle, { color: "#9CA3AF", fontSize: 12 })}>—</td>;
+                  }
                   if (col.key === "InventoryID") {
-                    return <td key={col.key} style={Object.assign({}, cellStyle, { fontFamily: "monospace", fontWeight: 600, fontSize: 12, color: TOOL_COLOR })}>{val}</td>;
+                    return <td key={col.key} style={Object.assign({}, cellStyle, { fontFamily: "monospace", fontWeight: 600, fontSize: 12, color: isError ? "#DC2626" : TOOL_COLOR })}>{val}</td>;
                   }
                   if (col.key === "Description") {
-                    return <td key={col.key} style={Object.assign({}, cellStyle, { fontSize: 12, color: "#4B5563", maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })} title={val}>{val}</td>;
+                    return <td key={col.key} style={Object.assign({}, cellStyle, { fontSize: 12, color: "#4B5563", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })} title={val}>{val}</td>;
                   }
                   if (col.key === "TotalLbs") {
                     return <td key={col.key} style={Object.assign({}, cellStyle, { fontWeight: 600, color: overweight ? "#DC2626" : "#374151" })}>
@@ -2434,7 +2669,6 @@ function TruckLoader(props) {
           </tbody>
         </table>
       </div>
-      {/* Table footer */}
       <div style={{ padding: "12px 16px", background: "#F9FAFB", borderTop: "1px solid #E5E7EB", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <span style={{ fontSize: 12, color: "#6B7280" }}>{displayed.length} item{displayed.length !== 1 ? "s" : ""}{search ? " (filtered)" : ""}</span>
         <span style={{ fontSize: 12, color: "#9CA3AF" }}>
