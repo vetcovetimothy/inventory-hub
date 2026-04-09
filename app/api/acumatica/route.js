@@ -20,6 +20,7 @@ const ENDPOINTS = {
   "short-dating":  "INV%20-%20Short-Dating%20Tracker",
   "backorder":     "INV%20-%20Backorder%20Item%20Review",
   "hills-pawtree": "PURCH%20-%20Open%20Hills%20and%20Pawtree",
+  "truckloader":   "PURCH%20-%20Hills%20Pawtree%20Truckloader",
 };
 
 // Which columns to extract for each type (keyGroup = possible OData field names)
@@ -99,6 +100,18 @@ const COLUMN_MAP = {
     { label: "Vendor",          keys: ["Vendor", "VendorID", "VendorName"] },
     { label: "Warehouse",       keys: ["Warehouse", "WarehouseID"] },
   ],
+  "truckloader": [
+    { label: "InventoryID",       keys: ["InventoryID", "InventoryCd", "InventoryCD", "Inventory ID", "ItemID"] },
+    { label: "Description",       keys: ["Description", "Descr", "ItemDescription", "LineDescription"] },
+    { label: "OrderQty",          keys: ["OrderQty", "Order Qty", "Order Qty.", "Qty", "Quantity", "OpenQty"] },
+    { label: "TotalLbs",          keys: ["TotalLbs", "Total Lbs", "TotalWeight", "Weight", "ExtWeight"] },
+    { label: "LbsPerPallet",      keys: ["LbsPerPallet", "Lbs per Pallet", "PalletWeight", "WeightPerPallet"] },
+    { label: "PalletCount",       keys: ["PalletCount", "Rounded Pallet Count", "RoundedPalletCount", "Pallets", "PalletQty"] },
+    { label: "CasesPerPallet",    keys: ["CasesPerPallet", "Cases per Pallet", "CasesPer", "UnitsPerPallet"] },
+    { label: "VendorName",        keys: ["VendorName", "Vendor", "Vendor Name"] },
+    { label: "OrderNbr",          keys: ["OrderNbr", "PONumber", "PONbr", "PO Number", "Order Nbr."] },
+    { label: "Warehouse",         keys: ["Warehouse", "WarehouseID", "SiteID"] },
+  ],
 };
 
 export async function POST(request) {
@@ -107,7 +120,7 @@ export async function POST(request) {
     const { type, warehouse, username, password, useServiceAccount } = body;
 
     if (!type || !ENDPOINTS[type]) {
-      return Response.json({ error: "Invalid type. Use: po, po-ggm, ndc-lookup, item-xref, short-dating, backorder, hills-pawtree" }, { status: 400 });
+      return Response.json({ error: "Invalid type. Use: po, po-ggm, ndc-lookup, item-xref, short-dating, backorder, hills-pawtree, truckloader" }, { status: 400 });
     }
 
     // Use service account credentials from env vars, or user-provided credentials
@@ -131,6 +144,11 @@ export async function POST(request) {
 
     // For PO fetches, filter by warehouse in OData
     if ((type === "po" || type === "po-ggm") && warehouse) {
+      url += `?$filter=Warehouse eq '${warehouse}'`;
+    }
+
+    // For truckloader, filter by warehouse
+    if (type === "truckloader" && warehouse) {
       url += `?$filter=Warehouse eq '${warehouse}'`;
     }
 

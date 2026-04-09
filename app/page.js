@@ -2220,6 +2220,241 @@ function FuzeTracker(props) {
   </div>;
 }
 
+/* ═══════ TRUCKLOADER ═══════ */
+function TruckLoader(props) {
+  var toast = props.toast, ok = props.ok, lp = props.lp, cred = props.cred;
+  var TOOL_COLOR = "#6366F1";
+  var _d = useState([]), data = _d[0], setData = _d[1];
+  var _ld = useState(false), loading = _ld[0], setLoading = _ld[1];
+  var _wh = useState(function() { return sGet("truckloader-wh") || "HILL-CP-CA"; }), warehouse = _wh[0], setWarehouse = _wh[1];
+  var _sort = useState({ col: null, dir: "asc" }), sort = _sort[0], setSort = _sort[1];
+  var _search = useState(""), search = _search[0], setSearch = _search[1];
+  var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
+
+  function changeWH(w) { setWarehouse(w); sSet("truckloader-wh", w); setData([]); }
+
+  var fetchData = useCallback(async function() {
+    if (!ok) { lp(); return; }
+    setLoading(true);
+    try {
+      var rows = await fetchAcumatica("truckloader", warehouse, cred.username, cred.password);
+      // Parse numeric fields
+      var parsed = rows.map(function(r, idx) {
+        var oq = parseFloat(r.OrderQty) || 0;
+        var tl = parseFloat(r.TotalLbs) || 0;
+        var lpp = parseFloat(r.LbsPerPallet) || 0;
+        var pc = parseFloat(r.PalletCount) || 0;
+        var cpp = parseFloat(r.CasesPerPallet) || 0;
+        return {
+          _idx: idx,
+          InventoryID: (r.InventoryID || "").toString().trim(),
+          Description: r.Description || "",
+          OrderQty: oq,
+          TotalLbs: tl,
+          LbsPerPallet: lpp,
+          PalletCount: pc,
+          CasesPerPallet: cpp,
+          VendorName: r.VendorName || "",
+          OrderNbr: r.OrderNbr || "",
+          Warehouse: r.Warehouse || warehouse,
+        };
+      }).filter(function(r) { return r.InventoryID; });
+      setData(parsed);
+      sSet("truckloader-data-" + warehouse, { rows: parsed, fetchedAt: Date.now() });
+      toast("Truckloader: Loaded " + parsed.length + " line items for " + warehouse);
+    } catch (err) { toast("Error: " + err.message, "error"); }
+    finally { setLoading(false); }
+  }, [ok, lp, cred, toast, warehouse]);
+
+  // Load cached data on mount or warehouse change
+  useEffect(function() {
+    if (!ok || !cred || !cred.username) return;
+    var cached = sGet("truckloader-data-" + warehouse);
+    if (cached && cached.rows && cached.rows.length > 0) {
+      setData(cached.rows);
+    }
+  }, [ok, warehouse]);
+
+  // Sorting
+  function toggleSort(col) {
+    if (sort.col === col) {
+      setSort({ col: col, dir: sort.dir === "asc" ? "desc" : "asc" });
+    } else {
+      setSort({ col: col, dir: "asc" });
+    }
+  }
+
+  // Filter + Sort
+  var displayed = useMemo(function() {
+    var rows = data;
+    if (search.trim()) {
+      var q = search.toLowerCase();
+      rows = rows.filter(function(r) {
+        return r.InventoryID.toLowerCase().indexOf(q) >= 0 ||
+               r.Description.toLowerCase().indexOf(q) >= 0 ||
+               r.VendorName.toLowerCase().indexOf(q) >= 0 ||
+               r.OrderNbr.toLowerCase().indexOf(q) >= 0;
+      });
+    }
+    if (sort.col) {
+      rows = rows.slice().sort(function(a, b) {
+        var va = a[sort.col], vb = b[sort.col];
+        if (typeof va === "number" && typeof vb === "number") {
+          return sort.dir === "asc" ? va - vb : vb - va;
+        }
+        va = String(va || "").toLowerCase();
+        vb = String(vb || "").toLowerCase();
+        return sort.dir === "asc" ? va.localeCompare(vb) : vb.localeCompare(va);
+      });
+    }
+    return rows;
+  }, [data, search, sort]);
+
+  // Stats
+  var stats = useMemo(function() {
+    var totalWeight = 0, totalItems = data.length, totalQty = 0, totalPallets = 0;
+    data.forEach(function(r) { totalWeight += r.TotalLbs; totalQty += r.OrderQty; totalPallets += r.PalletCount; });
+    var truckCap = 42500;
+    var estTrucks = totalWeight > 0 ? Math.ceil(totalWeight / truckCap) : 0;
+    return { totalItems: totalItems, totalWeight: totalWeight, totalQty: totalQty, totalPallets: totalPallets, estTrucks: estTrucks };
+  }, [data]);
+
+  var columns = [
+    { key: "InventoryID", label: "Inventory ID", width: 140 },
+    { key: "Description", label: "Description", width: 260 },
+    { key: "OrderQty", label: "Order Qty", width: 90, num: true },
+    { key: "TotalLbs", label: "Total Lbs", width: 100, num: true },
+    { key: "LbsPerPallet", label: "Lbs / Pallet", width: 105, num: true },
+    { key: "PalletCount", label: "Pallet Count", width: 105, num: true },
+    { key: "CasesPerPallet", label: "Cases / Pallet", width: 110, num: true },
+    { key: "VendorName", label: "Vendor", width: 160 },
+    { key: "OrderNbr", label: "PO #", width: 110 },
+  ];
+
+  function fmtNum(v) { if (!v && v !== 0) return "—"; return Number(v).toLocaleString("en-US", { maximumFractionDigits: 1 }); }
+  function fmtLbs(v) { if (!v && v !== 0) return "—"; return Number(v).toLocaleString("en-US", { maximumFractionDigits: 0 }) + " lbs"; }
+
+  var whLabel = warehouse === "HILL-CP-CA" ? "California" : "New Jersey";
+
+  return <div>
+    {/* Header bar */}
+    <div style={Object.assign({}, S.card, { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 24px", marginBottom: 16 })}>
+      <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+        <div style={{ display: "flex", gap: 4 }}>
+          {[["HILL-CP-CA", "California"], ["HILL-CP-NJ", "New Jersey"]].map(function(w) {
+            var active = warehouse === w[0];
+            return <button key={w[0]} onClick={function() { changeWH(w[0]); }} style={S.pill(active, TOOL_COLOR)}>{w[1]}</button>;
+          })}
+        </div>
+        <span style={{ fontSize: 12, color: "#9CA3AF" }}>{warehouse}</span>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <Gate ok={ok} prompt={lp} style={S.btn()} onClick={fetchData} disabled={loading}>
+          {loading ? <><Spinner color="#fff" size={14} /> Fetching...</> : <><IconRefresh /> Fetch Orders</>}
+        </Gate>
+      </div>
+    </div>
+
+    {/* Stat cards */}
+    {data.length > 0 && <div style={{ display: "flex", gap: 12, marginBottom: 20 }}>
+      <div style={Object.assign({}, S.statCard, { background: TOOL_COLOR + "10", border: "1px solid " + TOOL_COLOR + "20" })}>
+        <div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Line Items</div>
+        <div style={{ fontSize: 26, fontWeight: 700, color: TOOL_COLOR, marginTop: 4 }}>{stats.totalItems}</div>
+      </div>
+      <div style={Object.assign({}, S.statCard, { background: "#FEF3C7", border: "1px solid #FDE68A" })}>
+        <div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Total Weight</div>
+        <div style={{ fontSize: 26, fontWeight: 700, color: "#D97706", marginTop: 4 }}>{fmtLbs(stats.totalWeight)}</div>
+      </div>
+      <div style={Object.assign({}, S.statCard, { background: "#ECFDF5", border: "1px solid #A7F3D0" })}>
+        <div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Total Pallets</div>
+        <div style={{ fontSize: 26, fontWeight: 700, color: "#059669", marginTop: 4 }}>{fmtNum(stats.totalPallets)}</div>
+      </div>
+      <div style={Object.assign({}, S.statCard, { background: "#EEF2FF", border: "1px solid #C7D2FE" })}>
+        <div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Est. Trucks</div>
+        <div style={{ fontSize: 26, fontWeight: 700, color: "#4338CA", marginTop: 4 }}>{stats.estTrucks}</div>
+        <div style={{ fontSize: 10, color: "#9CA3AF", marginTop: 2 }}>@ 42,500 lb cap</div>
+      </div>
+      <div style={Object.assign({}, S.statCard, { background: "#F5F3FF", border: "1px solid #DDD6FE" })}>
+        <div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Total Order Qty</div>
+        <div style={{ fontSize: 26, fontWeight: 700, color: "#7C3AED", marginTop: 4 }}>{fmtNum(stats.totalQty)}</div>
+      </div>
+    </div>}
+
+    {/* Search */}
+    {data.length > 0 && <div style={{ marginBottom: 16, display: "flex", gap: 12, alignItems: "center" }}>
+      <div style={{ position: "relative", flex: 1, maxWidth: 360 }}>
+        <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search by ID, description, vendor, or PO #..." style={Object.assign({}, S.inp, { paddingLeft: 36 })} />
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      </div>
+      {search && <span style={{ fontSize: 12, color: "#6B7280" }}>{displayed.length} of {data.length} items</span>}
+    </div>}
+
+    {/* Table */}
+    {data.length > 0 ? <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden" })}>
+      <div style={{ overflowX: "auto", maxHeight: 600 }}>
+        <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, minWidth: 1100 }}>
+          <thead>
+            <tr>{columns.map(function(col) {
+              var isSorted = sort.col === col.key;
+              return <th key={col.key} onClick={function() { toggleSort(col.key); }} style={Object.assign({}, S.th, { cursor: "pointer", userSelect: "none", width: col.width, whiteSpace: "nowrap" })}>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                  {col.label}
+                  {isSorted && <span style={{ color: TOOL_COLOR, fontSize: 10 }}>{sort.dir === "asc" ? "▲" : "▼"}</span>}
+                </span>
+              </th>;
+            })}</tr>
+          </thead>
+          <tbody>
+            {displayed.map(function(row, ri) {
+              var overweight = row.TotalLbs > 42500;
+              return <tr key={row._idx} style={{ background: overweight ? "#FEF2F2" : ri % 2 === 0 ? "#FFFFFF" : "#FAFBFC" }}>
+                {columns.map(function(col) {
+                  var val = row[col.key];
+                  var cellStyle = Object.assign({}, S.td, { width: col.width });
+
+                  if (col.key === "InventoryID") {
+                    return <td key={col.key} style={Object.assign({}, cellStyle, { fontFamily: "monospace", fontWeight: 600, fontSize: 12, color: TOOL_COLOR })}>{val}</td>;
+                  }
+                  if (col.key === "Description") {
+                    return <td key={col.key} style={Object.assign({}, cellStyle, { fontSize: 12, color: "#4B5563", maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })} title={val}>{val}</td>;
+                  }
+                  if (col.key === "TotalLbs") {
+                    return <td key={col.key} style={Object.assign({}, cellStyle, { fontWeight: 600, color: overweight ? "#DC2626" : "#374151" })}>
+                      {fmtNum(val)}
+                      {overweight && <span style={Object.assign({}, S.badge("danger"), { marginLeft: 6, fontSize: 10 })}>OVER</span>}
+                    </td>;
+                  }
+                  if (col.num) {
+                    return <td key={col.key} style={Object.assign({}, cellStyle, { fontVariantNumeric: "tabular-nums" })}>{fmtNum(val)}</td>;
+                  }
+                  return <td key={col.key} style={cellStyle}>{val || "—"}</td>;
+                })}
+              </tr>;
+            })}
+          </tbody>
+        </table>
+      </div>
+      {/* Table footer */}
+      <div style={{ padding: "12px 16px", background: "#F9FAFB", borderTop: "1px solid #E5E7EB", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span style={{ fontSize: 12, color: "#6B7280" }}>{displayed.length} item{displayed.length !== 1 ? "s" : ""}{search ? " (filtered)" : ""}</span>
+        <span style={{ fontSize: 12, color: "#9CA3AF" }}>
+          Total: <strong style={{ color: "#374151" }}>{fmtLbs(displayed.reduce(function(s, r) { return s + r.TotalLbs; }, 0))}</strong>
+          {" · "}
+          Pallets: <strong style={{ color: "#374151" }}>{fmtNum(displayed.reduce(function(s, r) { return s + r.PalletCount; }, 0))}</strong>
+        </span>
+      </div>
+    </div> : <div style={Object.assign({}, S.card, { textAlign: "center", padding: 60 })}>
+      {loading ? <div><Spinner color={TOOL_COLOR} size={24} /><div style={{ marginTop: 12, color: "#6B7280", fontSize: 13 }}>Fetching orders from Acumatica...</div></div> :
+      <div>
+        <div style={{ width: 56, height: 56, borderRadius: 14, background: TOOL_COLOR + "15", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px", color: TOOL_COLOR }}><IconTruck /></div>
+        <div style={{ fontSize: 16, fontWeight: 600, color: "#374151", marginBottom: 6 }}>No orders loaded</div>
+        <div style={{ fontSize: 13, color: "#9CA3AF", marginBottom: 20 }}>Select a warehouse and fetch orders from Acumatica to get started.</div>
+        <Gate ok={ok} prompt={lp} style={S.btn()} onClick={fetchData} disabled={loading}><IconRefresh /> Fetch {whLabel} Orders</Gate>
+      </div>}
+    </div>}
+  </div>;
+}
+
 /* ═══════ MAIN HUB ═══════ */
 export default function Hub() {
   var _p = useState(function() { var s = sGet("active-page"); return s || "TP-NY"; }), page = _p[0], setPage = _p[1];
@@ -2345,8 +2580,8 @@ export default function Hub() {
   );
 
   var isWH = page in WH;
-  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "po-import" ? "#06B6D4" : page === "cycle-count" ? "#14B8A6" : page === "fuze-tracker" ? "#F59E0B" : page === "hills-pawtree" ? "#10B981" : "#3B82F6";
-  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "po-import" ? "PO NDC Validator" : page === "cycle-count" ? "Cycle Counting" : page === "fuze-tracker" ? "Fuze Tracker" : page === "hills-pawtree" ? "Hills & Pawtree Tracker" : showLogin ? "Login" : "Shipping Rules";
+  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "po-import" ? "#06B6D4" : page === "cycle-count" ? "#14B8A6" : page === "fuze-tracker" ? "#F59E0B" : page === "hills-pawtree" ? "#10B981" : page === "truckloader" ? "#6366F1" : "#3B82F6";
+  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "po-import" ? "PO NDC Validator" : page === "cycle-count" ? "Cycle Counting" : page === "fuze-tracker" ? "Fuze Tracker" : page === "hills-pawtree" ? "Hills & Pawtree Tracker" : page === "truckloader" ? "Truckloader" : showLogin ? "Login" : "Shipping Rules";
 
   function SideLink(p) {
     var active = page === p.id && !showLogin;
@@ -2367,6 +2602,7 @@ export default function Hub() {
             { key: "po", label: "PO Tools", items: Object.entries(WH).map(function(e) { return { id: e[0], label: e[1].full, color: e[1].color }; }) },
             { key: "generic", label: "Generic PO Tools", items: [{ id: "po-import", label: "PO NDC Validator", color: "#06B6D4" }, { id: "cycle-count", label: "Cycle Counting", color: "#14B8A6" }] },
             { key: "tracking", label: "Tracking", items: [{ id: "hills-pawtree", label: "Hills & Pawtree", color: "#10B981" }, { id: "fuze-tracker", label: "Fuze Tracker", color: "#F59E0B" }] },
+            { key: "logistics", label: "Logistics", items: [{ id: "truckloader", label: "Truckloader", color: "#6366F1" }] },
             { key: "inventory", label: "Inventory Tools", items: [{ id: "short-dating", label: "Short-Dating", color: "#E879F9" }, { id: "backorder", label: "Backorders", color: "#F97316" }] },
           ];
           return sections.map(function(sec, si) {
@@ -2460,6 +2696,7 @@ export default function Hub() {
           {!showLogin && page === "cycle-count" && <CycleCountTool key="cc-standard" toast={showToast} />}
           {!showLogin && page === "fuze-tracker" && <FuzeTracker toast={showToast} />}
           {!showLogin && page === "hills-pawtree" && <HillsTracker toast={showToast} ok={ok} lp={promptLogin} cred={cred} />}
+          {!showLogin && page === "truckloader" && <TruckLoader toast={showToast} ok={ok} lp={promptLogin} cred={cred} />}
         </div>
       </div>
 
