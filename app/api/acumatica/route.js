@@ -147,9 +147,10 @@ export async function POST(request) {
       url += `?$filter=Warehouse eq '${warehouse}'`;
     }
 
-    // For replenishment needs, filter by warehouse
-    if (type === "replenishment-needs" && warehouse) {
-      url += `?$filter=Warehouse eq '${warehouse}'`;
+    // For replenishment needs, fetch all and let client filter by warehouse
+    // (GI parameters don't work with OData $filter — they need to be optional)
+    if (type === "replenishment-needs") {
+      url += `?$top=5000`;
     }
 
     // For cross reference, get all records

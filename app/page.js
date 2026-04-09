@@ -2313,10 +2313,12 @@ function TruckloaderTool(props) {
     setStep("order");
     setFillSuggestions(null);
     try {
-      var rows = await fetchAcumatica("replenishment-needs", warehouse, cred.username, cred.password);
+      var rows = await fetchAcumatica("replenishment-needs", null, cred.username, cred.password);
       setReplenData(rows);
+      // Filter by warehouse client-side (GI params don't pass through OData)
+      var whRows = rows.filter(function(r) { return String(r.Warehouse || "").trim() === warehouse; });
       // Filter: QtyAvail + OnPO <= ReorderPoint (match Prepare Replenishment)
-      var filtered = rows.filter(function(r) {
+      var filtered = whRows.filter(function(r) {
         var avail = parseFloat(r.QtyAvailable) || 0;
         var onPO = parseFloat(r.OnPO) || 0;
         var reorder = parseFloat(r.ReorderPoint) || 0;
