@@ -2230,6 +2230,37 @@ var TRUCK_TEXT_COLORS = [
   "#1a3d7a", "#1a6b1a", "#7a3d00", "#4d1a7a", "#1a5a5a", "#3d6b1a"
 ];
 
+// Column resolver — flexibly matches Hills Master column names
+var TRUCKLOADER_COL_MAP = [
+  { label: "InventoryID",    keys: ["Inventory ID", "InventoryID", "InventoryCd", "ItemID", "Item ID", "SKU"] },
+  { label: "Description",    keys: ["Description", "Descr", "Item Description", "Product", "Product Description"] },
+  { label: "OrderQty",       keys: ["Order Qty.", "Order Qty", "OrderQty", "Qty", "Quantity", "Order Quantity"] },
+  { label: "TotalLbs",       keys: ["Total Lbs", "TotalLbs", "Total Weight", "Weight", "Ext Weight", "Total Lbs."] },
+  { label: "LbsPerPallet",   keys: ["Lbs per Pallet", "LbsPerPallet", "Pallet Weight", "Weight per Pallet", "Lbs/Pallet"] },
+  { label: "PalletCount",    keys: ["Rounded Pallet Count", "PalletCount", "Pallet Count", "Pallets", "Pallet Qty", "# Pallets"] },
+  { label: "CasesPerPallet", keys: ["Cases per Pallet", "CasesPerPallet", "Cases/Pallet", "Units per Pallet", "Case Count"] },
+];
+
+function resolveColumns(sampleRow) {
+  var rowKeys = Object.keys(sampleRow);
+  return TRUCKLOADER_COL_MAP.map(function(col) {
+    var match = null;
+    // Try exact match first
+    for (var i = 0; i < col.keys.length; i++) {
+      if (rowKeys.indexOf(col.keys[i]) >= 0) { match = col.keys[i]; break; }
+    }
+    // Try case-insensitive
+    if (!match) {
+      var lower = col.keys.map(function(k) { return k.toLowerCase(); });
+      for (var j = 0; j < rowKeys.length; j++) {
+        var idx = lower.indexOf(rowKeys[j].toLowerCase());
+        if (idx >= 0) { match = rowKeys[j]; break; }
+      }
+    }
+    return { label: col.label, sourceKey: match };
+  });
+}
+
 function runTruckAlgorithm(data) {
   var TARGET = 42500 * 100; // integer scaling to prevent float errors
 
@@ -2285,7 +2316,7 @@ function runTruckAlgorithm(data) {
     }
   });
 
-  // Build assignment map: _idx -> { label, truckNums: [{truckNum, pals}], color, textColor }
+  // Build assignment map: _idx -> { label, truckNums, color, textColor }
   var assignments = {};
   trucks.forEach(function(truck, ti) {
     var truckNum = ti + 1;
@@ -2297,7 +2328,6 @@ function runTruckAlgorithm(data) {
       }
       if (item.isSplit) {
         assignments[item._idx].trucks.push({ num: truckNum, pals: item.splitPals });
-        // For splits spanning 2 trucks, keep first truck's color
       } else {
         assignments[item._idx].trucks.push({ num: truckNum, pals: null });
       }
@@ -2328,52 +2358,129 @@ function runTruckAlgorithm(data) {
 }
 
 function TruckLoader(props) {
-  var toast = props.toast, ok = props.ok, lp = props.lp, cred = props.cred;
+  var toast = props.toast;
   var TOOL_COLOR = "#6366F1";
   var _d = useState([]), data = _d[0], setData = _d[1];
-  var _ld = useState(false), loading = _ld[0], setLoading = _ld[1];
   var _wh = useState(function() { return sGet("truckloader-wh") || "HILL-CP-CA"; }), warehouse = _wh[0], setWarehouse = _wh[1];
   var _sort = useState({ col: null, dir: "asc" }), sort = _sort[0], setSort = _sort[1];
   var _search = useState(""), search = _search[0], setSearch = _search[1];
   var _result = useState(null), result = _result[0], setResult = _result[1];
   var _filter = useState("all"), truckFilter = _filter[0], setTruckFilter = _filter[1];
+  var _fileMeta = useState(null), fileMeta = _fileMeta[0], setFileMeta = _fileMeta[1];
+  var _uploading = useState(false), uploading = _uploading[0], setUploading = _uploading[1];
+  var _colWarnings = useState([]), colWarnings = _colWarnings[0], setColWarnings = _colWarnings[1];
   var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
 
-  function changeWH(w) { setWarehouse(w); sSet("truckloader-wh", w); setData([]); setResult(null); setTruckFilter("all"); }
+  function changeWH(w) { setWarehouse(w); sSet("truckloader-wh", w); }
 
-  var fetchData = useCallback(async function() {
-    if (!ok) { lp(); return; }
-    setLoading(true);
-    setResult(null); setTruckFilter("all");
-    try {
-      var rows = await fetchAcumatica("truckloader", warehouse, cred.username, cred.password);
-      var parsed = rows.map(function(r, idx) {
-        return {
-          _idx: idx,
-          InventoryID: (r.InventoryID || "").toString().trim(),
-          Description: r.Description || "",
-          OrderQty: parseFloat(r.OrderQty) || 0,
-          TotalLbs: parseFloat(r.TotalLbs) || 0,
-          LbsPerPallet: parseFloat(r.LbsPerPallet) || 0,
-          PalletCount: parseFloat(r.PalletCount) || 0,
-          CasesPerPallet: parseFloat(r.CasesPerPallet) || 0,
-          VendorName: r.VendorName || "",
-          OrderNbr: r.OrderNbr || "",
-          Warehouse: r.Warehouse || warehouse,
-        };
-      }).filter(function(r) { return r.InventoryID; });
-      setData(parsed);
-      sSet("truckloader-data-" + warehouse, { rows: parsed, fetchedAt: Date.now() });
-      toast("Truckloader: Loaded " + parsed.length + " line items for " + warehouse);
-    } catch (err) { toast("Error: " + err.message, "error"); }
-    finally { setLoading(false); }
-  }, [ok, lp, cred, toast, warehouse]);
+  // Parse uploaded file
+  function handleFileUpload(files) {
+    var file = files[0];
+    if (!file) return;
+    setUploading(true);
+    setResult(null);
+    setTruckFilter("all");
+    setColWarnings([]);
 
-  useEffect(function() {
-    if (!ok || !cred || !cred.username) return;
-    var cached = sGet("truckloader-data-" + warehouse);
-    if (cached && cached.rows && cached.rows.length > 0) { setData(cached.rows); }
-  }, [ok, warehouse]);
+    var name = file.name.toLowerCase();
+    if (name.endsWith(".xlsx") || name.endsWith(".xls")) {
+      // Parse via server
+      var formData = new FormData();
+      formData.append("file", file);
+      fetch("/api/parse-xlsx", { method: "POST", body: formData }).then(function(resp) {
+        return resp.json();
+      }).then(function(json) {
+        if (json.error) { toast("Parse error: " + json.error, "error"); setUploading(false); return; }
+        processRows(json.rows, file.name);
+        setUploading(false);
+      }).catch(function(err) {
+        toast("Failed to parse file: " + err.message, "error");
+        setUploading(false);
+      });
+    } else if (name.endsWith(".csv")) {
+      // Parse client-side
+      var reader = new FileReader();
+      reader.onload = function(e) {
+        var text = e.target.result;
+        var lines = text.split("\n").map(function(l) { return l.replace(/\r/g, "").trim(); }).filter(function(l) { return l; });
+        if (lines.length < 2) { toast("File appears empty", "error"); setUploading(false); return; }
+        var headers = [];
+        var inQ = false, cur = "";
+        for (var c = 0; c < lines[0].length; c++) {
+          var ch = lines[0][c];
+          if (ch === '"') { inQ = !inQ; }
+          else if (ch === ',' && !inQ) { headers.push(cur.trim()); cur = ""; }
+          else { cur += ch; }
+        }
+        headers.push(cur.trim());
+        var rows = [];
+        for (var i = 1; i < lines.length; i++) {
+          var vals = []; var iq = false; var cell = "";
+          for (var j = 0; j < lines[i].length; j++) {
+            var ch2 = lines[i][j];
+            if (ch2 === '"') { iq = !iq; }
+            else if (ch2 === ',' && !iq) { vals.push(cell.trim()); cell = ""; }
+            else { cell += ch2; }
+          }
+          vals.push(cell.trim());
+          var obj = {};
+          headers.forEach(function(h, idx) { obj[h] = vals[idx] || ""; });
+          rows.push(obj);
+        }
+        processRows(rows, file.name);
+        setUploading(false);
+      };
+      reader.readAsText(file);
+    } else {
+      toast("Unsupported file type. Upload .xlsx or .csv", "error");
+      setUploading(false);
+    }
+  }
+
+  function processRows(rawRows, fileName) {
+    if (!rawRows || rawRows.length === 0) { toast("No data found in file", "error"); return; }
+
+    // Resolve columns
+    var resolved = resolveColumns(rawRows[0]);
+    var warnings = [];
+    var getCol = {};
+    resolved.forEach(function(r) {
+      getCol[r.label] = r.sourceKey;
+      if (!r.sourceKey && r.label !== "Description") {
+        warnings.push(r.label + " column not found");
+      }
+    });
+    setColWarnings(warnings);
+
+    // Map rows
+    var parsed = rawRows.map(function(r, idx) {
+      var invId = (getCol.InventoryID ? (r[getCol.InventoryID] || "") : "").toString().trim();
+      if (!invId) return null;
+      var oq = parseFloat(getCol.OrderQty ? r[getCol.OrderQty] : 0) || 0;
+      var tl = parseFloat(getCol.TotalLbs ? r[getCol.TotalLbs] : 0) || 0;
+      var lpp = parseFloat(getCol.LbsPerPallet ? r[getCol.LbsPerPallet] : 0) || 0;
+      var pc = parseFloat(getCol.PalletCount ? r[getCol.PalletCount] : 0) || 0;
+      var cpp = parseFloat(getCol.CasesPerPallet ? r[getCol.CasesPerPallet] : 0) || 0;
+      var desc = getCol.Description ? (r[getCol.Description] || "") : "";
+      return {
+        _idx: idx,
+        InventoryID: invId,
+        Description: desc,
+        OrderQty: oq,
+        TotalLbs: tl,
+        LbsPerPallet: lpp,
+        PalletCount: pc,
+        CasesPerPallet: cpp,
+        VendorName: "",
+        OrderNbr: "",
+        Warehouse: warehouse,
+      };
+    }).filter(function(r) { return r !== null; });
+
+    setData(parsed);
+    setFileMeta({ name: fileName, count: parsed.length, date: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) });
+    toast("Loaded " + parsed.length + " items from " + fileName);
+  }
 
   // Run algorithm
   function loadTrucks() {
@@ -2388,6 +2495,8 @@ function TruckLoader(props) {
 
   function clearTrucks() { setResult(null); setTruckFilter("all"); toast("Truck assignments cleared", "info"); }
 
+  function clearAll() { setData([]); setResult(null); setTruckFilter("all"); setFileMeta(null); setColWarnings([]); toast("All data cleared", "info"); }
+
   // CSV export
   function exportCSVs() {
     if (!result || !result.summaries.length) return;
@@ -2398,7 +2507,6 @@ function TruckLoader(props) {
     var dateStr = mo + "." + dy + "." + yr;
     var shortWH = warehouse === "HILL-CP-CA" ? "CA" : "NJ";
 
-    // Build truck -> items map
     var truckItems = {};
     result.summaries.forEach(function(s) { truckItems[s.num] = []; });
     data.forEach(function(row) {
@@ -2415,7 +2523,6 @@ function TruckLoader(props) {
       });
     });
 
-    // Download each CSV
     var truckNums = Object.keys(truckItems).sort(function(a, b) { return parseInt(a) - parseInt(b); });
     var delay = 0;
     truckNums.forEach(function(num) {
@@ -2424,7 +2531,6 @@ function TruckLoader(props) {
       items.forEach(function(item) { lines.push(item.invId + "," + warehouse + "," + item.qty); });
       var csv = lines.join("\n");
       var fileName = shortWH + " " + dateStr + " Truck " + num + ".csv";
-
       setTimeout(function() {
         var blob = new Blob([csv], { type: "text/csv" });
         var url = URL.createObjectURL(blob);
@@ -2450,9 +2556,7 @@ function TruckLoader(props) {
       var q = search.toLowerCase();
       rows = rows.filter(function(r) {
         return r.InventoryID.toLowerCase().indexOf(q) >= 0 ||
-               r.Description.toLowerCase().indexOf(q) >= 0 ||
-               r.VendorName.toLowerCase().indexOf(q) >= 0 ||
-               r.OrderNbr.toLowerCase().indexOf(q) >= 0;
+               r.Description.toLowerCase().indexOf(q) >= 0;
       });
     }
     if (sort.col) {
@@ -2482,17 +2586,13 @@ function TruckLoader(props) {
     { key: "LbsPerPallet", label: "Lbs/Pallet", width: 90, num: true },
     { key: "PalletCount", label: "Pallets", width: 75, num: true },
     { key: "CasesPerPallet", label: "Cases/Pallet", width: 95, num: true },
-    { key: "VendorName", label: "Vendor", width: 140 },
-    { key: "OrderNbr", label: "PO #", width: 100 },
   ];
-  // Add truck assignment column when results exist
   if (result) columns.push({ key: "_truck", label: "Truck Assignment", width: 170 });
 
   function fmtNum(v) { if (!v && v !== 0) return "—"; return Number(v).toLocaleString("en-US", { maximumFractionDigits: 1 }); }
   function fmtLbs(v) { if (!v && v !== 0) return "—"; return Number(v).toLocaleString("en-US", { maximumFractionDigits: 0 }) + " lbs"; }
   var whLabel = warehouse === "HILL-CP-CA" ? "California" : "New Jersey";
 
-  // Check if a row belongs to the currently filtered truck
   function rowMatchesFilter(row) {
     if (truckFilter === "all") return true;
     var a = result && result.assignments[row._idx];
@@ -2515,13 +2615,46 @@ function TruckLoader(props) {
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         {data.length > 0 && !result && <button onClick={loadTrucks} style={Object.assign({}, S.btn(), { background: "#059669" })}><IconTruck /> Load Trucks</button>}
-        {result && <button onClick={clearTrucks} style={S.btn("ghost")}><IconTrash /> Clear</button>}
+        {result && <button onClick={clearTrucks} style={S.btn("ghost")}><IconTrash /> Clear Assignments</button>}
         {result && <button onClick={exportCSVs} style={Object.assign({}, S.btn(), { background: "#D97706" })}><IconDL /> Export CSVs</button>}
-        <Gate ok={ok} prompt={lp} style={S.btn()} onClick={fetchData} disabled={loading}>
-          {loading ? <><Spinner color="#fff" size={14} /> Fetching...</> : <><IconRefresh /> Fetch Orders</>}
-        </Gate>
+        {data.length > 0 && <button onClick={clearAll} style={S.btn("danger")}><IconTrash /> Clear All</button>}
       </div>
     </div>
+
+    {/* File upload zone — shown when no data loaded */}
+    {data.length === 0 && <div style={Object.assign({}, S.card, { padding: 32 })}>
+      <div style={{ maxWidth: 480, margin: "0 auto" }}>
+        {fileMeta === null && <div style={{ textAlign: "center", marginBottom: 20 }}>
+          <div style={{ width: 56, height: 56, borderRadius: 14, background: TOOL_COLOR + "15", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px", color: TOOL_COLOR }}><IconTruck /></div>
+          <div style={{ fontSize: 16, fontWeight: 600, color: "#374151", marginBottom: 4 }}>Upload Hills Master</div>
+          <div style={{ fontSize: 13, color: "#9CA3AF" }}>Drop your Hills Master spreadsheet to load order data for truck assignments.</div>
+        </div>}
+        {uploading ? <div style={{ textAlign: "center", padding: 24 }}><Spinner color={TOOL_COLOR} size={24} /><div style={{ marginTop: 12, color: "#6B7280", fontSize: 13 }}>Parsing file...</div></div>
+        : <DropZone
+            onFiles={handleFileUpload}
+            accept=".xlsx,.xls,.csv"
+            label="Drop Hills Master file here"
+            sublabel=".xlsx or .csv"
+            icon="spreadsheet"
+            color={TOOL_COLOR}
+          />}
+      </div>
+    </div>}
+
+    {/* File info badge */}
+    {fileMeta && data.length > 0 && <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+      <span style={Object.assign({}, S.badge("blue"), { fontSize: 11 })}>
+        <IconCSV /> {fileMeta.name}
+      </span>
+      <span style={{ fontSize: 11, color: "#9CA3AF" }}>{fileMeta.count} items · uploaded {fileMeta.date}</span>
+    </div>}
+
+    {/* Column warnings */}
+    {colWarnings.length > 0 && <div style={Object.assign({}, S.card, { background: "#FFFBEB", border: "1px solid #FDE68A", padding: "12px 16px", marginBottom: 16 })}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#92400E" }}>
+        <IconAlert /> Missing columns: {colWarnings.join(", ")} — those fields will show as 0.
+      </div>
+    </div>}
 
     {/* Stat cards */}
     {data.length > 0 && <div style={{ display: "flex", gap: 12, marginBottom: 20 }}>
@@ -2597,19 +2730,19 @@ function TruckLoader(props) {
       </div>
     </div>}
 
-    {/* Search + filter bar */}
+    {/* Search */}
     {data.length > 0 && <div style={{ marginBottom: 16, display: "flex", gap: 12, alignItems: "center" }}>
       <div style={{ position: "relative", flex: 1, maxWidth: 360 }}>
-        <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search by ID, description, vendor, or PO #..." style={Object.assign({}, S.inp, { paddingLeft: 36 })} />
+        <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search by ID or description..." style={Object.assign({}, S.inp, { paddingLeft: 36 })} />
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
       </div>
       {search && <span style={{ fontSize: 12, color: "#6B7280" }}>{displayed.length} of {data.length} items</span>}
     </div>}
 
     {/* Table */}
-    {data.length > 0 ? <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden" })}>
+    {data.length > 0 && <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden" })}>
       <div style={{ overflowX: "auto", maxHeight: 600 }}>
-        <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, minWidth: result ? 1280 : 1100 }}>
+        <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, minWidth: result ? 1100 : 900 }}>
           <thead>
             <tr>{columns.map(function(col) {
               var isSorted = sort.col === col.key;
@@ -2637,7 +2770,6 @@ function TruckLoader(props) {
 
                   if (col.key === "_truck") {
                     if (isError) {
-                      var errObj = result.errors.find(function(e) { return e._idx === row._idx; });
                       return <td key={col.key} style={Object.assign({}, cellStyle, { fontWeight: 600, color: "#DC2626", fontSize: 12 })}>
                         <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><IconAlert /> ERROR</span>
                       </td>;
@@ -2677,14 +2809,6 @@ function TruckLoader(props) {
           Pallets: <strong style={{ color: "#374151" }}>{fmtNum(displayed.reduce(function(s, r) { return s + r.PalletCount; }, 0))}</strong>
         </span>
       </div>
-    </div> : <div style={Object.assign({}, S.card, { textAlign: "center", padding: 60 })}>
-      {loading ? <div><Spinner color={TOOL_COLOR} size={24} /><div style={{ marginTop: 12, color: "#6B7280", fontSize: 13 }}>Fetching orders from Acumatica...</div></div> :
-      <div>
-        <div style={{ width: 56, height: 56, borderRadius: 14, background: TOOL_COLOR + "15", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px", color: TOOL_COLOR }}><IconTruck /></div>
-        <div style={{ fontSize: 16, fontWeight: 600, color: "#374151", marginBottom: 6 }}>No orders loaded</div>
-        <div style={{ fontSize: 13, color: "#9CA3AF", marginBottom: 20 }}>Select a warehouse and fetch orders from Acumatica to get started.</div>
-        <Gate ok={ok} prompt={lp} style={S.btn()} onClick={fetchData} disabled={loading}><IconRefresh /> Fetch {whLabel} Orders</Gate>
-      </div>}
     </div>}
   </div>;
 }
@@ -2930,7 +3054,7 @@ export default function Hub() {
           {!showLogin && page === "cycle-count" && <CycleCountTool key="cc-standard" toast={showToast} />}
           {!showLogin && page === "fuze-tracker" && <FuzeTracker toast={showToast} />}
           {!showLogin && page === "hills-pawtree" && <HillsTracker toast={showToast} ok={ok} lp={promptLogin} cred={cred} />}
-          {!showLogin && page === "truckloader" && <TruckLoader toast={showToast} ok={ok} lp={promptLogin} cred={cred} />}
+          {!showLogin && page === "truckloader" && <TruckLoader toast={showToast} />}
         </div>
       </div>
 
