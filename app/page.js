@@ -2220,599 +2220,548 @@ function FuzeTracker(props) {
   </div>;
 }
 
-/* ═══════ TRUCKLOADER ═══════ */
-var TRUCK_COLORS = [
-  "#d9ead3", "#cfe2f3", "#fff2cc", "#f4cccc", "#ead1dc", "#d9d2e9", "#fce5cd", "#d0e0e3",
-  "#ccddff", "#ccffcc", "#ffe5cc", "#e5ccff", "#ccffff", "#e5ffcc"
-];
-var TRUCK_TEXT_COLORS = [
-  "#1e6823", "#1a4d7a", "#7a6500", "#8b1a1a", "#6b2a4d", "#3d2a6b", "#7a4400", "#2a5a5a",
-  "#1a3d7a", "#1a6b1a", "#7a3d00", "#4d1a7a", "#1a5a5a", "#3d6b1a"
-];
-
-// Column resolver — flexibly matches Hills Master column names
-var TRUCKLOADER_COL_MAP = [
-  { label: "InventoryID",    keys: ["Inventory ID", "InventoryID", "InventoryCd", "ItemID", "Item ID", "SKU"] },
-  { label: "Description",    keys: ["Description", "Descr", "Item Description", "Product", "Product Description"] },
-  { label: "OrderQty",       keys: ["Order Qty.", "Order Qty", "OrderQty", "Qty", "Quantity", "Order Quantity"] },
-  { label: "TotalLbs",       keys: ["Total Lbs", "TotalLbs", "Total Weight", "Weight", "Ext Weight", "Total Lbs."] },
-  { label: "LbsPerPallet",   keys: ["Lbs per Pallet", "LbsPerPallet", "Pallet Weight", "Weight per Pallet", "Lbs/Pallet"] },
-  { label: "PalletCount",    keys: ["Rounded Pallet Count", "PalletCount", "Pallet Count", "Pallets", "Pallet Qty", "# Pallets"] },
-  { label: "CasesPerPallet", keys: ["Cases per Pallet", "CasesPerPallet", "Cases/Pallet", "Units per Pallet", "Case Count"] },
-];
-
-function resolveColumns(sampleRow) {
-  var rowKeys = Object.keys(sampleRow);
-  return TRUCKLOADER_COL_MAP.map(function(col) {
-    var match = null;
-    // Try exact match first
-    for (var i = 0; i < col.keys.length; i++) {
-      if (rowKeys.indexOf(col.keys[i]) >= 0) { match = col.keys[i]; break; }
-    }
-    // Try case-insensitive
-    if (!match) {
-      var lower = col.keys.map(function(k) { return k.toLowerCase(); });
-      for (var j = 0; j < rowKeys.length; j++) {
-        var idx = lower.indexOf(rowKeys[j].toLowerCase());
-        if (idx >= 0) { match = rowKeys[j]; break; }
-      }
-    }
-    return { label: col.label, sourceKey: match };
-  });
-}
-
-function runTruckAlgorithm(data) {
-  var TARGET = 42500 * 100; // integer scaling to prevent float errors
-
-  var availableItems = [];
-  var errorItems = [];
-
-  for (var i = 0; i < data.length; i++) {
-    var r = data[i];
-    var weight = Math.round(r.TotalLbs * 100);
-    if (!weight || weight <= 0) continue;
-
-    if (weight > TARGET) {
-      // ONE-SPLIT RULE: split into exactly 2 pieces by pallet
-      var palletWeight = Math.round(r.LbsPerPallet * 100);
-      var palletCount = Math.round(r.PalletCount);
-      if (palletWeight > 0 && palletCount > 0) {
-        var maxPals = Math.floor(TARGET / palletWeight);
-        var remPals = palletCount - maxPals;
-        var chunk1 = maxPals * palletWeight;
-        var chunk2 = remPals * palletWeight;
-        if (chunk2 > TARGET) {
-          errorItems.push({ _idx: r._idx, reason: "Too massive — requires 2+ splits" });
-        } else if (maxPals === 0) {
-          errorItems.push({ _idx: r._idx, reason: "Single pallet exceeds 42,500 lbs" });
-        } else {
-          availableItems.push({ weight: chunk1, _idx: r._idx, isSplit: true, splitPals: maxPals });
-          availableItems.push({ weight: chunk2, _idx: r._idx, isSplit: true, splitPals: remPals });
-        }
-      } else {
-        errorItems.push({ _idx: r._idx, reason: "Missing pallet info for split" });
-      }
-    } else {
-      availableItems.push({ weight: weight, _idx: r._idx, isSplit: false });
-    }
-  }
-
-  // Sort heaviest to lightest
-  availableItems.sort(function(a, b) { return b.weight - a.weight; });
-
-  // Best-Fit Decreasing
-  var trucks = [];
-  availableItems.forEach(function(item) {
-    var bestIdx = -1, minGap = TARGET + 1;
-    for (var t = 0; t < trucks.length; t++) {
-      var gap = TARGET - (trucks[t].total + item.weight);
-      if (gap >= 0 && gap < minGap) { bestIdx = t; minGap = gap; }
-    }
-    if (bestIdx !== -1) {
-      trucks[bestIdx].items.push(item);
-      trucks[bestIdx].total += item.weight;
-    } else {
-      trucks.push({ items: [item], total: item.weight });
-    }
-  });
-
-  // Build assignment map: _idx -> { label, truckNums, color, textColor }
-  var assignments = {};
-  trucks.forEach(function(truck, ti) {
-    var truckNum = ti + 1;
-    var color = TRUCK_COLORS[ti % TRUCK_COLORS.length];
-    var textColor = TRUCK_TEXT_COLORS[ti % TRUCK_TEXT_COLORS.length];
-    truck.items.forEach(function(item) {
-      if (!assignments[item._idx]) {
-        assignments[item._idx] = { trucks: [], color: color, textColor: textColor };
-      }
-      if (item.isSplit) {
-        assignments[item._idx].trucks.push({ num: truckNum, pals: item.splitPals });
-      } else {
-        assignments[item._idx].trucks.push({ num: truckNum, pals: null });
-      }
-    });
-  });
-
-  // Build labels
-  Object.keys(assignments).forEach(function(idx) {
-    var a = assignments[idx];
-    if (a.trucks.length === 1 && a.trucks[0].pals === null) {
-      a.label = "Truck " + a.trucks[0].num;
-    } else {
-      a.label = a.trucks.map(function(t) {
-        return "Truck " + t.num + (t.pals != null ? " (" + t.pals + " pals)" : "");
-      }).join(", ");
-    }
-  });
-
-  // Truck summaries
-  var summaries = trucks.map(function(truck, ti) {
-    var actualLbs = truck.total / 100;
-    var remaining = (TARGET - truck.total) / 100;
-    var pct = (truck.total / TARGET * 100).toFixed(1);
-    return { num: ti + 1, totalLbs: actualLbs, remaining: remaining, pct: parseFloat(pct), itemCount: truck.items.length, color: TRUCK_COLORS[ti % TRUCK_COLORS.length], textColor: TRUCK_TEXT_COLORS[ti % TRUCK_TEXT_COLORS.length] };
-  });
-
-  return { assignments: assignments, summaries: summaries, errors: errorItems };
-}
-
-function TruckLoader(props) {
-  var toast = props.toast;
-  var TOOL_COLOR = "#6366F1";
-  var _d = useState([]), data = _d[0], setData = _d[1];
-  var _wh = useState(function() { return sGet("truckloader-wh") || "HILL-CP-CA"; }), warehouse = _wh[0], setWarehouse = _wh[1];
-  var _sort = useState({ col: null, dir: "asc" }), sort = _sort[0], setSort = _sort[1];
-  var _search = useState(""), search = _search[0], setSearch = _search[1];
-  var _result = useState(null), result = _result[0], setResult = _result[1];
-  var _filter = useState("all"), truckFilter = _filter[0], setTruckFilter = _filter[1];
-  var _fileMeta = useState(null), fileMeta = _fileMeta[0], setFileMeta = _fileMeta[1];
-  var _uploading = useState(false), uploading = _uploading[0], setUploading = _uploading[1];
-  var _colWarnings = useState([]), colWarnings = _colWarnings[0], setColWarnings = _colWarnings[1];
+/* ═══════ TRUCKLOADER TOOL ═══════ */
+function TruckloaderTool(props) {
+  var toast = props.toast, ok = props.ok, lp = props.lp, cred = props.cred;
+  var TOOL_COLOR = "#D97706";
+  var TARGET = 42500;
+  var MIN_WEIGHT = 35000;
+  var TRUCK_COLORS = ["#d9ead3","#cfe2f3","#fff2cc","#f4cccc","#ead1dc","#d9d2e9","#fce5cd","#d0e0e3","#ccddff","#ccffcc","#ffe5cc","#e5ccff"];
   var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
 
-  function changeWH(w) { setWarehouse(w); sSet("truckloader-wh", w); }
+  var _wh = useState("HILL-CP-CA"), warehouse = _wh[0], setWarehouse = _wh[1];
+  var _hm = useState(null), hillsMaster = _hm[0], setHillsMaster = _hm[1];
+  var _hmLoad = useState(true), hmLoading = _hmLoad[0], setHmLoading = _hmLoad[1];
+  var _replen = useState([]), replenData = _replen[0], setReplenData = _replen[1];
+  var _rLoad = useState(false), replenLoading = _rLoad[0], setReplenLoading = _rLoad[1];
+  var _order = useState([]), orderItems = _order[0], setOrderItems = _order[1];
+  var _trucks = useState(null), truckGroups = _trucks[0], setTruckGroups = _trucks[1];
+  var _step = useState("order"), step = _step[0], setStep = _step[1];
+  var _nsDoh = useState(null), netstockDoh = _nsDoh[0], setNetstockDoh = _nsDoh[1];
+  var _fills = useState(null), fillSuggestions = _fills[0], setFillSuggestions = _fills[1];
+  var _highlight = useState("all"), highlightTruck = _highlight[0], setHighlightTruck = _highlight[1];
+  var fileRef = useRef(null);
+  var nsFileRef = useRef(null);
 
-  // Parse uploaded file
-  function handleFileUpload(files) {
-    var file = files[0];
+  // Load Hills Master from KV on mount
+  useEffect(function() {
+    var m = true;
+    (async function() {
+      try {
+        var resp = await kvGet("hills-master");
+        var json = await resp.json();
+        if (m && json.data && json.data.items && json.data.items.length > 0) {
+          setHillsMaster(json.data);
+          sSet("hills-master", json.data);
+          if (m) setHmLoading(false);
+          return;
+        }
+      } catch (e) {}
+      if (m) {
+        var saved = sGet("hills-master");
+        if (saved && saved.items) setHillsMaster(saved);
+        setHmLoading(false);
+      }
+    })();
+    return function() { m = false; };
+  }, []);
+
+  // Parse Hills Master xlsx
+  function handleHillsUpload(e) {
+    var file = e.target.files && e.target.files[0];
     if (!file) return;
-    setUploading(true);
-    setResult(null);
-    setTruckFilter("all");
-    setColWarnings([]);
-
-    var name = file.name.toLowerCase();
-    if (name.endsWith(".xlsx") || name.endsWith(".xls")) {
-      // Parse via server
-      var formData = new FormData();
-      formData.append("file", file);
-      fetch("/api/parse-xlsx", { method: "POST", body: formData }).then(function(resp) {
-        return resp.json();
-      }).then(function(json) {
-        if (json.error) { toast("Parse error: " + json.error, "error"); setUploading(false); return; }
-        processRows(json.rows, file.name);
-        setUploading(false);
-      }).catch(function(err) {
-        toast("Failed to parse file: " + err.message, "error");
-        setUploading(false);
-      });
-    } else if (name.endsWith(".csv")) {
-      // Parse client-side
-      var reader = new FileReader();
-      reader.onload = function(e) {
-        var text = e.target.result;
-        var lines = text.split("\n").map(function(l) { return l.replace(/\r/g, "").trim(); }).filter(function(l) { return l; });
-        if (lines.length < 2) { toast("File appears empty", "error"); setUploading(false); return; }
-        var headers = [];
-        var inQ = false, cur = "";
-        for (var c = 0; c < lines[0].length; c++) {
-          var ch = lines[0][c];
-          if (ch === '"') { inQ = !inQ; }
-          else if (ch === ',' && !inQ) { headers.push(cur.trim()); cur = ""; }
-          else { cur += ch; }
-        }
-        headers.push(cur.trim());
-        var rows = [];
-        for (var i = 1; i < lines.length; i++) {
-          var vals = []; var iq = false; var cell = "";
-          for (var j = 0; j < lines[i].length; j++) {
-            var ch2 = lines[i][j];
-            if (ch2 === '"') { iq = !iq; }
-            else if (ch2 === ',' && !iq) { vals.push(cell.trim()); cell = ""; }
-            else { cell += ch2; }
-          }
-          vals.push(cell.trim());
-          var obj = {};
-          headers.forEach(function(h, idx) { obj[h] = vals[idx] || ""; });
-          rows.push(obj);
-        }
-        processRows(rows, file.name);
-        setUploading(false);
-      };
-      reader.readAsText(file);
-    } else {
-      toast("Unsupported file type. Upload .xlsx or .csv", "error");
-      setUploading(false);
-    }
+    var reader = new FileReader();
+    reader.onload = function(ev) {
+      try {
+        var XLSX = require("xlsx");
+        var wb = XLSX.read(ev.target.result, { type: "array" });
+        var ws = wb.Sheets[wb.SheetNames[0]];
+        var rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
+        if (rows.length === 0) { toast("No data found in file", "error"); return; }
+        var items = rows.map(function(r) {
+          var id = String(r["Inventory ID"] || r["InventoryID"] || r["inventory id"] || "").trim();
+          var utp = parseFloat(r["Units to Pallet"] || r["UnitsToPallet"] || 0);
+          var pgw = parseFloat(r["Pallet Gross Weight"] || r["PalletGrossWeight"] || 0);
+          var desc = r["Description"] || r["Descr"] || "";
+          return { id: id, unitsPerPallet: utp, palletWeight: pgw, description: desc };
+        }).filter(function(x) { return x.id && x.palletWeight > 0; });
+        var data = { items: items, uploadedAt: Date.now(), fileName: file.name };
+        setHillsMaster(data);
+        sSet("hills-master", data);
+        kvPost("hills-master", data).catch(function() {});
+        toast("Hills Master loaded: " + items.length + " items");
+      } catch (err) { toast("Error parsing file: " + err.message, "error"); }
+    };
+    reader.readAsArrayBuffer(file);
+    e.target.value = "";
   }
 
-  function processRows(rawRows, fileName) {
-    if (!rawRows || rawRows.length === 0) { toast("No data found in file", "error"); return; }
+  // Build Hills Master lookup
+  var hmLookup = useMemo(function() {
+    if (!hillsMaster || !hillsMaster.items) return {};
+    var m = {};
+    hillsMaster.items.forEach(function(it) { m[it.id] = it; });
+    return m;
+  }, [hillsMaster]);
 
-    // Resolve columns
-    var resolved = resolveColumns(rawRows[0]);
-    var warnings = [];
-    var getCol = {};
-    resolved.forEach(function(r) {
-      getCol[r.label] = r.sourceKey;
-      if (!r.sourceKey && r.label !== "Description") {
-        warnings.push(r.label + " column not found");
+  // Fetch replenishment needs from GI
+  var fetchReplen = useCallback(async function() {
+    if (!ok) { lp(); return; }
+    if (!hillsMaster) { toast("Upload Hills Master first", "error"); return; }
+    setReplenLoading(true);
+    setTruckGroups(null);
+    setStep("order");
+    setFillSuggestions(null);
+    try {
+      var rows = await fetchAcumatica("replenishment-needs", warehouse, cred.username, cred.password);
+      setReplenData(rows);
+      // Filter: QtyAvail + OnPO <= ReorderPoint (match Prepare Replenishment)
+      var filtered = rows.filter(function(r) {
+        var avail = parseFloat(r.QtyAvailable) || 0;
+        var onPO = parseFloat(r.OnPO) || 0;
+        var reorder = parseFloat(r.ReorderPoint) || 0;
+        return (avail + onPO) <= reorder && reorder > 0;
+      });
+      // Build order items with Hills Master lookup
+      var items = filtered.map(function(r) {
+        var id = String(r.InventoryID || "").trim();
+        var hm = hmLookup[id] || {};
+        var maxQty = parseFloat(r.MaxQty) || 0;
+        var avail = parseFloat(r.QtyAvailable) || 0;
+        var caseNeed = Math.max(0, Math.round(maxQty - avail));
+        var casesPerPallet = hm.unitsPerPallet || 0;
+        var lbsPerPallet = hm.palletWeight || 0;
+        var palletCount = casesPerPallet > 0 ? caseNeed / casesPerPallet : 0;
+        var roundedPallets = Math.ceil(palletCount);
+        var orderQty = roundedPallets * (casesPerPallet || 1);
+        var totalLbs = roundedPallets * lbsPerPallet;
+        return {
+          inventoryID: id,
+          description: r.Description || hm.description || "",
+          caseNeed: caseNeed,
+          casesPerPallet: casesPerPallet,
+          roundedPallets: roundedPallets,
+          orderQty: orderQty,
+          lbsPerPallet: lbsPerPallet,
+          totalLbs: totalLbs,
+          qtyAvail: parseFloat(r.QtyAvailable) || 0,
+          onPO: parseFloat(r.OnPO) || 0,
+          reorderPt: parseFloat(r.ReorderPoint) || 0,
+          maxQty: maxQty,
+          inHillsMaster: !!hm.unitsPerPallet,
+        };
+      }).filter(function(x) { return x.caseNeed > 0; });
+      setOrderItems(items);
+      toast("Loaded " + items.length + " items to order for " + warehouse);
+    } catch (err) { toast("Error: " + err.message, "error"); }
+    setReplenLoading(false);
+  }, [ok, lp, cred, warehouse, hillsMaster, hmLookup, toast]);
+
+  // Recalculate a single order item when user edits caseNeed
+  function updateCaseNeed(idx, val) {
+    var items = orderItems.slice();
+    var it = Object.assign({}, items[idx]);
+    it.caseNeed = Math.max(0, parseInt(val) || 0);
+    var cpp = it.casesPerPallet || 1;
+    it.roundedPallets = Math.ceil(it.caseNeed / cpp);
+    it.orderQty = it.roundedPallets * cpp;
+    it.totalLbs = it.roundedPallets * it.lbsPerPallet;
+    items[idx] = it;
+    setOrderItems(items);
+    setTruckGroups(null);
+  }
+
+  function removeItem(idx) {
+    var items = orderItems.slice();
+    items.splice(idx, 1);
+    setOrderItems(items);
+    setTruckGroups(null);
+  }
+
+  // Bin-packing truck optimizer
+  function optimizeTrucks() {
+    if (orderItems.length === 0) { toast("No items to optimize", "error"); return; }
+    var target = TARGET * 100;
+    var minW = MIN_WEIGHT * 100;
+    var available = [];
+    var errors = [];
+    orderItems.forEach(function(item, idx) {
+      var weight = Math.round(item.totalLbs * 100);
+      if (weight <= 0) return;
+      if (weight > target) {
+        if (item.lbsPerPallet > 0 && item.roundedPallets > 0) {
+          var maxPals = Math.floor(target / Math.round(item.lbsPerPallet * 100));
+          var remainder = item.roundedPallets - maxPals;
+          if (maxPals === 0) { errors.push({ idx: idx, reason: "Single pallet > 42,500 lbs" }); return; }
+          var c1 = maxPals * Math.round(item.lbsPerPallet * 100);
+          var c2 = remainder * Math.round(item.lbsPerPallet * 100);
+          if (c2 > target) { errors.push({ idx: idx, reason: "Too large, needs 2+ splits" }); return; }
+          available.push({ weight: c1, idx: idx, isSplit: true, splitPals: maxPals });
+          available.push({ weight: c2, idx: idx, isSplit: true, splitPals: remainder });
+        } else { errors.push({ idx: idx, reason: "Missing pallet info for split" }); }
+      } else {
+        available.push({ weight: weight, idx: idx, isSplit: false });
       }
     });
-    setColWarnings(warnings);
-
-    // Map rows
-    var parsed = rawRows.map(function(r, idx) {
-      var invId = (getCol.InventoryID ? (r[getCol.InventoryID] || "") : "").toString().trim();
-      if (!invId) return null;
-      var oq = parseFloat(getCol.OrderQty ? r[getCol.OrderQty] : 0) || 0;
-      var tl = parseFloat(getCol.TotalLbs ? r[getCol.TotalLbs] : 0) || 0;
-      var lpp = parseFloat(getCol.LbsPerPallet ? r[getCol.LbsPerPallet] : 0) || 0;
-      var pc = parseFloat(getCol.PalletCount ? r[getCol.PalletCount] : 0) || 0;
-      var cpp = parseFloat(getCol.CasesPerPallet ? r[getCol.CasesPerPallet] : 0) || 0;
-      var desc = getCol.Description ? (r[getCol.Description] || "") : "";
-      return {
-        _idx: idx,
-        InventoryID: invId,
-        Description: desc,
-        OrderQty: oq,
-        TotalLbs: tl,
-        LbsPerPallet: lpp,
-        PalletCount: pc,
-        CasesPerPallet: cpp,
-        VendorName: "",
-        OrderNbr: "",
-        Warehouse: warehouse,
-      };
-    }).filter(function(r) { return r !== null; });
-
-    setData(parsed);
-    setFileMeta({ name: fileName, count: parsed.length, date: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) });
-    toast("Loaded " + parsed.length + " items from " + fileName);
+    available.sort(function(a, b) { return b.weight - a.weight; });
+    var groups = [];
+    available.forEach(function(item) {
+      var bestIdx = -1, minGap = target + 1;
+      for (var i = 0; i < groups.length; i++) {
+        var gap = target - (groups[i].total + item.weight);
+        if (gap >= 0 && gap < minGap) { bestIdx = i; minGap = gap; }
+      }
+      if (bestIdx !== -1) { groups[bestIdx].items.push(item); groups[bestIdx].total += item.weight; }
+      else { groups.push({ items: [item], total: item.weight }); }
+    });
+    // Build truck assignments
+    var trucks = groups.map(function(g, ti) {
+      var totalLbs = g.total / 100;
+      var remaining = (target - g.total) / 100;
+      var needsFill = g.total < minW;
+      var assignments = g.items.map(function(it) {
+        var oi = orderItems[it.idx];
+        return { inventoryID: oi.inventoryID, description: oi.description, orderQty: it.isSplit ? it.splitPals * oi.casesPerPallet : oi.orderQty, pallets: it.isSplit ? it.splitPals : oi.roundedPallets, lbs: it.weight / 100, isSplit: it.isSplit, idx: it.idx };
+      });
+      return { label: "Truck " + (ti + 1), totalLbs: totalLbs, remaining: remaining, needsFill: needsFill, color: TRUCK_COLORS[ti % TRUCK_COLORS.length], assignments: assignments, errors: [] };
+    });
+    // Add errors to a virtual truck
+    if (errors.length > 0) {
+      var errAssign = errors.map(function(e) { return { inventoryID: orderItems[e.idx].inventoryID, description: orderItems[e.idx].description, error: e.reason, idx: e.idx }; });
+      trucks.push({ label: "Errors", totalLbs: 0, remaining: 0, needsFill: false, color: "#ff9999", assignments: errAssign, errors: errors, isError: true });
+    }
+    setTruckGroups(trucks);
+    setStep("trucks");
+    var underFill = trucks.filter(function(t) { return t.needsFill; }).length;
+    if (underFill > 0) toast(trucks.length + " trucks created. " + underFill + " flagged to fill (<35k lbs)", "info");
+    else toast(trucks.length + " trucks optimized!");
   }
 
-  // Run algorithm
-  function loadTrucks() {
-    if (data.length === 0) { toast("No data to load", "error"); return; }
-    var res = runTruckAlgorithm(data);
-    setResult(res);
-    setTruckFilter("all");
-    var truckCount = res.summaries.length;
-    var errCount = res.errors.length;
-    toast("Loaded into " + truckCount + " truck" + (truckCount !== 1 ? "s" : "") + (errCount > 0 ? " (" + errCount + " error" + (errCount !== 1 ? "s" : "") + ")" : ""));
-  }
-
-  function clearTrucks() { setResult(null); setTruckFilter("all"); toast("Truck assignments cleared", "info"); }
-
-  function clearAll() { setData([]); setResult(null); setTruckFilter("all"); setFileMeta(null); setColWarnings([]); toast("All data cleared", "info"); }
-
-  // CSV export
-  function exportCSVs() {
-    if (!result || !result.summaries.length) return;
+  // CSV export for a single truck
+  function exportTruckCSV(truck, whShort) {
     var now = new Date();
-    var mo = now.getMonth() + 1;
-    var dy = ("0" + now.getDate()).slice(-2);
-    var yr = now.getFullYear().toString().slice(-2);
-    var dateStr = mo + "." + dy + "." + yr;
-    var shortWH = warehouse === "HILL-CP-CA" ? "CA" : "NJ";
-
-    var truckItems = {};
-    result.summaries.forEach(function(s) { truckItems[s.num] = []; });
-    data.forEach(function(row) {
-      var a = result.assignments[row._idx];
-      if (!a) return;
-      a.trucks.forEach(function(t) {
-        var qty;
-        if (t.pals != null) {
-          qty = row.CasesPerPallet > 0 ? t.pals * row.CasesPerPallet : t.pals;
-        } else {
-          qty = row.OrderQty;
-        }
-        truckItems[t.num].push({ invId: row.InventoryID, qty: Math.round(qty) });
-      });
+    var dateStr = (now.getMonth() + 1) + "." + ("0" + now.getDate()).slice(-2) + "." + String(now.getFullYear()).slice(-2);
+    var shortCode = warehouse === "HILL-CP-CA" ? "CA" : "NJ";
+    var fileName = shortCode + " " + dateStr + " " + truck.label + ".csv";
+    var lines = ["Inventory ID,Warehouse,Order Qty."];
+    truck.assignments.forEach(function(a) {
+      if (!a.error) {
+        var qty = Number.isInteger(a.orderQty) ? a.orderQty : Math.round(a.orderQty);
+        lines.push(a.inventoryID + "," + warehouse + "," + qty);
+      }
     });
+    var blob = new Blob([lines.join("\n")], { type: "text/csv" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url; a.download = fileName;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast("Downloaded " + fileName);
+  }
 
-    var truckNums = Object.keys(truckItems).sort(function(a, b) { return parseInt(a) - parseInt(b); });
-    var delay = 0;
-    truckNums.forEach(function(num) {
-      var items = truckItems[num];
-      var lines = ["Inventory ID,Warehouse,Order Qty."];
-      items.forEach(function(item) { lines.push(item.invId + "," + warehouse + "," + item.qty); });
-      var csv = lines.join("\n");
-      var fileName = shortWH + " " + dateStr + " Truck " + num + ".csv";
-      setTimeout(function() {
-        var blob = new Blob([csv], { type: "text/csv" });
-        var url = URL.createObjectURL(blob);
-        var a = document.createElement("a");
-        a.href = url; a.download = fileName; document.body.appendChild(a); a.click();
-        document.body.removeChild(a); URL.revokeObjectURL(url);
-      }, delay);
-      delay += 300;
+  function exportAllCSVs() {
+    if (!truckGroups) return;
+    var idx = 0;
+    function next() {
+      if (idx >= truckGroups.length) return;
+      var t = truckGroups[idx];
+      if (!t.isError) exportTruckCSV(t);
+      idx++;
+      setTimeout(next, 400);
+    }
+    next();
+  }
+
+  // Parse Netstock DOH upload
+  function handleNetstockUpload(e) {
+    var file = e.target.files && e.target.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function(ev) {
+      try {
+        var XLSX = require("xlsx");
+        var wb = XLSX.read(ev.target.result, { type: "array" });
+        var ws = wb.Sheets[wb.SheetNames[0]];
+        var rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
+        var items = rows.map(function(r) {
+          return {
+            productCode: String(r["Product code"] || r["ProductCode"] || "").trim(),
+            description: r["Product description"] || r["Description"] || "",
+            location: String(r["Location code"] || r["LocationCode"] || "").trim(),
+            onHand: parseFloat(r["On hand"] || 0),
+            doh: parseFloat(r["Days on hand"] || 0),
+            onOrder: parseFloat(r["On order"] || 0),
+            doo: parseFloat(r["Days on order"] || 0),
+            velocity: r["Velocity"] || "",
+            netClass: r["Class"] || "",
+            avgSales: parseFloat(r["Avg sales units (3m)"] || 0),
+          };
+        }).filter(function(x) { return x.productCode; });
+        setNetstockDoh({ items: items, fileName: file.name });
+        toast("Netstock DOH loaded: " + items.length + " items");
+      } catch (err) { toast("Error parsing Netstock file: " + err.message, "error"); }
+    };
+    reader.readAsArrayBuffer(file);
+    e.target.value = "";
+  }
+
+  // Build fill suggestions
+  function buildFillSuggestions() {
+    if (!netstockDoh || !hillsMaster) { toast("Upload both Netstock DOH and Hills Master first", "error"); return; }
+    var orderedIds = {};
+    orderItems.forEach(function(it) { orderedIds[it.inventoryID] = true; });
+    // Get all GI data (not just filtered) to check replenishment status
+    // For now, use replenData which has all items from the GI
+    var replenLookup = {};
+    replenData.forEach(function(r) { replenLookup[String(r.InventoryID || "").trim()] = r; });
+    var candidates = netstockDoh.items.filter(function(ns) {
+      if (ns.location !== warehouse) return false;
+      if (orderedIds[ns.productCode]) return false;
+      return true;
+    }).map(function(ns) {
+      var hm = hmLookup[ns.productCode] || {};
+      var combined = ns.doh + ns.doo;
+      return {
+        productCode: ns.productCode,
+        description: ns.description || hm.description || "",
+        doh: ns.doh,
+        doo: ns.doo,
+        combined: combined,
+        onHand: ns.onHand,
+        onOrder: ns.onOrder,
+        velocity: ns.velocity,
+        netClass: ns.netClass,
+        avgSales: ns.avgSales,
+        palletWeight: hm.palletWeight || 0,
+        unitsPerPallet: hm.unitsPerPallet || 0,
+      };
     });
-    toast("Downloading " + truckNums.length + " CSV file" + (truckNums.length !== 1 ? "s" : "") + "...");
+    candidates.sort(function(a, b) { return a.combined - b.combined; });
+    setFillSuggestions(candidates);
+    toast("Found " + candidates.length + " fill candidates for " + warehouse);
   }
 
-  // Sorting
-  function toggleSort(col) {
-    if (sort.col === col) { setSort({ col: col, dir: sort.dir === "asc" ? "desc" : "asc" }); }
-    else { setSort({ col: col, dir: "asc" }); }
-  }
+  // Summary stats
+  var totalWeight = useMemo(function() { return orderItems.reduce(function(s, it) { return s + it.totalLbs; }, 0); }, [orderItems]);
+  var totalPallets = useMemo(function() { return orderItems.reduce(function(s, it) { return s + it.roundedPallets; }, 0); }, [orderItems]);
+  var missingHM = useMemo(function() { return orderItems.filter(function(it) { return !it.inHillsMaster; }).length; }, [orderItems]);
 
-  // Filter + Sort
-  var displayed = useMemo(function() {
-    var rows = data;
-    if (search.trim()) {
-      var q = search.toLowerCase();
-      rows = rows.filter(function(r) {
-        return r.InventoryID.toLowerCase().indexOf(q) >= 0 ||
-               r.Description.toLowerCase().indexOf(q) >= 0;
-      });
-    }
-    if (sort.col) {
-      rows = rows.slice().sort(function(a, b) {
-        var va = a[sort.col], vb = b[sort.col];
-        if (typeof va === "number" && typeof vb === "number") return sort.dir === "asc" ? va - vb : vb - va;
-        va = String(va || "").toLowerCase(); vb = String(vb || "").toLowerCase();
-        return sort.dir === "asc" ? va.localeCompare(vb) : vb.localeCompare(va);
-      });
-    }
-    return rows;
-  }, [data, search, sort]);
-
-  // Stats
-  var stats = useMemo(function() {
-    var totalWeight = 0, totalItems = data.length, totalQty = 0, totalPallets = 0;
-    data.forEach(function(r) { totalWeight += r.TotalLbs; totalQty += r.OrderQty; totalPallets += r.PalletCount; });
-    var estTrucks = totalWeight > 0 ? Math.ceil(totalWeight / 42500) : 0;
-    return { totalItems: totalItems, totalWeight: totalWeight, totalQty: totalQty, totalPallets: totalPallets, estTrucks: estTrucks };
-  }, [data]);
-
-  var columns = [
-    { key: "InventoryID", label: "Inventory ID", width: 130 },
-    { key: "Description", label: "Description", width: 220 },
-    { key: "OrderQty", label: "Order Qty", width: 80, num: true },
-    { key: "TotalLbs", label: "Total Lbs", width: 95, num: true },
-    { key: "LbsPerPallet", label: "Lbs/Pallet", width: 90, num: true },
-    { key: "PalletCount", label: "Pallets", width: 75, num: true },
-    { key: "CasesPerPallet", label: "Cases/Pallet", width: 95, num: true },
-  ];
-  if (result) columns.push({ key: "_truck", label: "Truck Assignment", width: 170 });
-
-  function fmtNum(v) { if (!v && v !== 0) return "—"; return Number(v).toLocaleString("en-US", { maximumFractionDigits: 1 }); }
-  function fmtLbs(v) { if (!v && v !== 0) return "—"; return Number(v).toLocaleString("en-US", { maximumFractionDigits: 0 }) + " lbs"; }
-  var whLabel = warehouse === "HILL-CP-CA" ? "California" : "New Jersey";
-
-  function rowMatchesFilter(row) {
-    if (truckFilter === "all") return true;
-    var a = result && result.assignments[row._idx];
-    if (!a) return false;
-    var filterNum = parseInt(truckFilter.replace("Truck ", ""));
-    return a.trucks.some(function(t) { return t.num === filterNum; });
-  }
+  var hasFillFlag = truckGroups && truckGroups.some(function(t) { return t.needsFill; });
 
   return <div>
-    {/* Header bar */}
-    <div style={Object.assign({}, S.card, { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 24px", marginBottom: 16 })}>
-      <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-        <div style={{ display: "flex", gap: 4 }}>
-          {[["HILL-CP-CA", "California"], ["HILL-CP-NJ", "New Jersey"]].map(function(w) {
-            var active = warehouse === w[0];
-            return <button key={w[0]} onClick={function() { changeWH(w[0]); }} style={S.pill(active, TOOL_COLOR)}>{w[1]}</button>;
-          })}
-        </div>
-        <span style={{ fontSize: 12, color: "#9CA3AF" }}>{warehouse}</span>
+    {/* HEADER CARD - Warehouse selector + Hills Master */}
+    <div style={Object.assign({}, S.card, { display: "flex", gap: 24, alignItems: "flex-start", flexWrap: "wrap" })}>
+      <div style={{ flex: 1, minWidth: 200 }}>
+        <div style={{ fontSize: 11, color: "#9CA3AF", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 6 }}>Warehouse</div>
+        <select value={warehouse} onChange={function(e) { setWarehouse(e.target.value); setOrderItems([]); setTruckGroups(null); setFillSuggestions(null); }} style={Object.assign({}, S.sel, { width: "100%", maxWidth: 280 })}>
+          <option value="HILL-CP-CA">HILL-CP-CA (California)</option>
+          <option value="HILL-CP-NJ">HILL-CP-NJ (New Jersey)</option>
+        </select>
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        {data.length > 0 && !result && <button onClick={loadTrucks} style={Object.assign({}, S.btn(), { background: "#059669" })}><IconTruck /> Load Trucks</button>}
-        {result && <button onClick={clearTrucks} style={S.btn("ghost")}><IconTrash /> Clear Assignments</button>}
-        {result && <button onClick={exportCSVs} style={Object.assign({}, S.btn(), { background: "#D97706" })}><IconDL /> Export CSVs</button>}
-        {data.length > 0 && <button onClick={clearAll} style={S.btn("danger")}><IconTrash /> Clear All</button>}
+      <div style={{ flex: 1, minWidth: 260 }}>
+        <div style={{ fontSize: 11, color: "#9CA3AF", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 6 }}>Hills Master</div>
+        {hmLoading ? <Spinner color={TOOL_COLOR} size={16} /> : hillsMaster ? <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={S.badge("success")}><IconCheck /> {hillsMaster.items.length} items loaded</span>
+          <span style={{ fontSize: 11, color: "#9CA3AF" }}>{hillsMaster.fileName || ""}</span>
+          <button onClick={function() { fileRef.current && fileRef.current.click(); }} style={{ background: "transparent", border: "1px solid #E5E7EB", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", color: "#6B7280" }}>Replace</button>
+        </div> : <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <button onClick={function() { fileRef.current && fileRef.current.click(); }} style={S.btn("ghost")}><IconUpload /> Upload Hills Master XLSX</button>
+          <span style={{ fontSize: 11, color: "#DC2626" }}>Required</span>
+        </div>}
+        <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleHillsUpload} style={{ display: "none" }} />
+      </div>
+      <div>
+        <div style={{ fontSize: 11, color: "#9CA3AF", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 6 }}>{"\u00A0"}</div>
+        <button onClick={fetchReplen} disabled={replenLoading || !hillsMaster} style={Object.assign({}, S.btn(), { opacity: replenLoading || !hillsMaster ? 0.6 : 1 })}>
+          {replenLoading ? <><Spinner color="#fff" size={14} /> Fetching...</> : <><IconRefresh /> Fetch Replenishment</>}
+        </button>
       </div>
     </div>
 
-    {/* File upload zone — shown when no data loaded */}
-    {data.length === 0 && <div style={Object.assign({}, S.card, { padding: 32 })}>
-      <div style={{ maxWidth: 480, margin: "0 auto" }}>
-        {fileMeta === null && <div style={{ textAlign: "center", marginBottom: 20 }}>
-          <div style={{ width: 56, height: 56, borderRadius: 14, background: TOOL_COLOR + "15", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px", color: TOOL_COLOR }}><IconTruck /></div>
-          <div style={{ fontSize: 16, fontWeight: 600, color: "#374151", marginBottom: 4 }}>Upload Hills Master</div>
-          <div style={{ fontSize: 13, color: "#9CA3AF" }}>Drop your Hills Master spreadsheet to load order data for truck assignments.</div>
-        </div>}
-        {uploading ? <div style={{ textAlign: "center", padding: 24 }}><Spinner color={TOOL_COLOR} size={24} /><div style={{ marginTop: 12, color: "#6B7280", fontSize: 13 }}>Parsing file...</div></div>
-        : <DropZone
-            onFiles={handleFileUpload}
-            accept=".xlsx,.xls,.csv"
-            label="Drop Hills Master file here"
-            sublabel=".xlsx or .csv"
-            icon="spreadsheet"
-            color={TOOL_COLOR}
-          />}
+    {/* STATS ROW */}
+    {orderItems.length > 0 && <div style={{ display: "flex", gap: 14, marginBottom: 20, flexWrap: "wrap" }}>
+      <div style={Object.assign({}, S.statCard, { background: TOOL_COLOR + "12", border: "1px solid " + TOOL_COLOR + "30" })}>
+        <div style={{ fontSize: 22, fontWeight: 700, color: TOOL_COLOR }}>{orderItems.length}</div>
+        <div style={{ fontSize: 11, color: "#9CA3AF", fontWeight: 500 }}>Items</div>
+      </div>
+      <div style={Object.assign({}, S.statCard, { background: "#3B82F612", border: "1px solid #3B82F630" })}>
+        <div style={{ fontSize: 22, fontWeight: 700, color: "#3B82F6" }}>{totalPallets}</div>
+        <div style={{ fontSize: 11, color: "#9CA3AF", fontWeight: 500 }}>Total Pallets</div>
+      </div>
+      <div style={Object.assign({}, S.statCard, { background: "#05966912", border: "1px solid #05966930" })}>
+        <div style={{ fontSize: 22, fontWeight: 700, color: "#059669" }}>{totalWeight.toLocaleString(undefined, { maximumFractionDigits: 0 })} lbs</div>
+        <div style={{ fontSize: 11, color: "#9CA3AF", fontWeight: 500 }}>Total Weight</div>
+      </div>
+      <div style={Object.assign({}, S.statCard, { background: "#7C3AED12", border: "1px solid #7C3AED30" })}>
+        <div style={{ fontSize: 22, fontWeight: 700, color: "#7C3AED" }}>{Math.ceil(totalWeight / TARGET)}</div>
+        <div style={{ fontSize: 11, color: "#9CA3AF", fontWeight: 500 }}>Est. Trucks</div>
+      </div>
+      {missingHM > 0 && <div style={Object.assign({}, S.statCard, { background: "#DC262612", border: "1px solid #DC262630" })}>
+        <div style={{ fontSize: 22, fontWeight: 700, color: "#DC2626" }}>{missingHM}</div>
+        <div style={{ fontSize: 11, color: "#9CA3AF", fontWeight: 500 }}>Missing from Hills Master</div>
+      </div>}
+    </div>}
+
+    {/* TAB PILLS */}
+    {orderItems.length > 0 && <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
+      <button onClick={function() { setStep("order"); }} style={S.pill(step === "order", TOOL_COLOR)}>Order Table</button>
+      <button onClick={function() { if (truckGroups) setStep("trucks"); else toast("Run Optimize Trucks first", "info"); }} style={S.pill(step === "trucks", "#059669")}>Truck Assignments{truckGroups ? " (" + truckGroups.filter(function(t) { return !t.isError; }).length + ")" : ""}</button>
+      {hasFillFlag && <button onClick={function() { setStep("fill"); }} style={S.pill(step === "fill", "#7C3AED")}>Fill Suggestions</button>}
+    </div>}
+
+    {/* ORDER TABLE */}
+    {step === "order" && orderItems.length > 0 && <div style={S.card}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <span style={{ fontWeight: 600, color: "#374151" }}>Order Table — {warehouse}</span>
+        <button onClick={optimizeTrucks} style={S.btn()}><IconBox /> Optimize Trucks</button>
+      </div>
+      <div style={{ overflow: "auto", borderRadius: 10, border: "1px solid #E5E7EB" }}>
+        <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, minWidth: 900 }}>
+          <thead><tr>
+            {["Inventory ID", "Description", "Case Need", "Cases/Pallet", "Pallets", "Order Qty", "Lbs/Pallet", "Total Lbs", ""].map(function(h) {
+              return <th key={h} style={S.th}>{h}</th>;
+            })}
+          </tr></thead>
+          <tbody>{orderItems.map(function(it, i) {
+            var rowBg = !it.inHillsMaster ? "#FEF2F2" : i % 2 === 0 ? "#fff" : "#FAFAFA";
+            return <tr key={it.inventoryID + "-" + i}>
+              <td style={Object.assign({}, S.td, { background: rowBg, fontFamily: "monospace", fontSize: 12, fontWeight: 600 })}>{it.inventoryID}</td>
+              <td style={Object.assign({}, S.td, { background: rowBg, maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })} title={it.description}>{it.description}</td>
+              <td style={Object.assign({}, S.td, { background: rowBg, width: 90 })}>
+                <input type="number" min="0" value={it.caseNeed} onChange={function(e) { updateCaseNeed(i, e.target.value); }} style={Object.assign({}, S.inp, { width: 70, textAlign: "right", padding: "4px 8px" })} />
+              </td>
+              <td style={Object.assign({}, S.td, { background: rowBg, textAlign: "right" })}>{it.casesPerPallet || "—"}</td>
+              <td style={Object.assign({}, S.td, { background: rowBg, textAlign: "right", fontWeight: 600 })}>{it.roundedPallets}</td>
+              <td style={Object.assign({}, S.td, { background: rowBg, textAlign: "right" })}>{it.orderQty}</td>
+              <td style={Object.assign({}, S.td, { background: rowBg, textAlign: "right" })}>{it.lbsPerPallet ? it.lbsPerPallet.toLocaleString(undefined, { maximumFractionDigits: 1 }) : "—"}</td>
+              <td style={Object.assign({}, S.td, { background: rowBg, textAlign: "right", fontWeight: 600, color: it.totalLbs > TARGET ? "#DC2626" : "#374151" })}>{it.totalLbs ? it.totalLbs.toLocaleString(undefined, { maximumFractionDigits: 1 }) : "—"}</td>
+              <td style={Object.assign({}, S.td, { background: rowBg, width: 40 })}>
+                <button onClick={function() { removeItem(i); }} style={{ background: "transparent", border: "none", cursor: "pointer", color: "#DC2626", fontSize: 14 }}>{"\u2715"}</button>
+              </td>
+            </tr>;
+          })}</tbody>
+        </table>
       </div>
     </div>}
 
-    {/* File info badge */}
-    {fileMeta && data.length > 0 && <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-      <span style={Object.assign({}, S.badge("blue"), { fontSize: 11 })}>
-        <IconCSV /> {fileMeta.name}
-      </span>
-      <span style={{ fontSize: 11, color: "#9CA3AF" }}>{fileMeta.count} items · uploaded {fileMeta.date}</span>
-    </div>}
+    {/* TRUCK ASSIGNMENTS */}
+    {step === "trucks" && truckGroups && <div>
+      <div style={Object.assign({}, S.card, { display: "flex", justifyContent: "space-between", alignItems: "center" })}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <span style={{ fontWeight: 600, color: "#374151" }}>Truck Assignments</span>
+          <select value={highlightTruck} onChange={function(e) { setHighlightTruck(e.target.value); }} style={Object.assign({}, S.sel, { padding: "6px 12px", fontSize: 12 })}>
+            <option value="all">Show All</option>
+            {truckGroups.filter(function(t) { return !t.isError; }).map(function(t) { return <option key={t.label} value={t.label}>{t.label}</option>; })}
+          </select>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={function() { setStep("order"); setTruckGroups(null); }} style={S.btn("ghost")}><IconRefresh /> Re-edit Order</button>
+          <button onClick={exportAllCSVs} style={S.btn()}><IconDL /> Export All CSVs</button>
+        </div>
+      </div>
 
-    {/* Column warnings */}
-    {colWarnings.length > 0 && <div style={Object.assign({}, S.card, { background: "#FFFBEB", border: "1px solid #FDE68A", padding: "12px 16px", marginBottom: 16 })}>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#92400E" }}>
-        <IconAlert /> Missing columns: {colWarnings.join(", ")} — those fields will show as 0.
+      {/* TRUCK SUMMARY TABLE */}
+      <div style={Object.assign({}, S.card, { marginTop: 0 })}>
+        <div style={{ overflow: "auto", borderRadius: 10, border: "1px solid #E5E7EB" }}>
+          <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
+            <thead><tr>
+              <th style={Object.assign({}, S.th, { background: "#374151", color: "#fff" })}>Truck #</th>
+              <th style={Object.assign({}, S.th, { background: "#374151", color: "#fff" })}>Items</th>
+              <th style={Object.assign({}, S.th, { background: "#374151", color: "#fff" })}>Total Weight</th>
+              <th style={Object.assign({}, S.th, { background: "#374151", color: "#fff" })}>Remaining Space</th>
+              <th style={Object.assign({}, S.th, { background: "#374151", color: "#fff", width: 90 })}>Export</th>
+            </tr></thead>
+            <tbody>{truckGroups.filter(function(t) { return !t.isError; }).map(function(t, ti) {
+              return <tr key={t.label}>
+                <td style={Object.assign({}, S.td, { fontWeight: 600 })}><Dot color={t.color} />{" "}{t.label}</td>
+                <td style={S.td}>{t.assignments.length}</td>
+                <td style={Object.assign({}, S.td, { fontWeight: 600 })}>{t.totalLbs.toLocaleString(undefined, { maximumFractionDigits: 1 })} lbs</td>
+                <td style={S.td}>{t.needsFill ? <span style={Object.assign({}, S.badge("warning"))}>{"\uD83D\uDEA9"} FILL MORE ({t.remaining.toLocaleString(undefined, { maximumFractionDigits: 0 })} lbs remaining)</span> : <span style={{ color: "#059669" }}>{t.remaining.toLocaleString(undefined, { maximumFractionDigits: 1 })} lbs</span>}</td>
+                <td style={S.td}><button onClick={function() { exportTruckCSV(t); }} style={Object.assign({}, S.btn("ghost"), { padding: "4px 10px", fontSize: 11 })}><IconDL /> CSV</button></td>
+              </tr>;
+            })}</tbody>
+          </table>
+        </div>
       </div>
-    </div>}
 
-    {/* Stat cards */}
-    {data.length > 0 && <div style={{ display: "flex", gap: 12, marginBottom: 20 }}>
-      <div style={Object.assign({}, S.statCard, { background: TOOL_COLOR + "10", border: "1px solid " + TOOL_COLOR + "20" })}>
-        <div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Line Items</div>
-        <div style={{ fontSize: 26, fontWeight: 700, color: TOOL_COLOR, marginTop: 4 }}>{stats.totalItems}</div>
-      </div>
-      <div style={Object.assign({}, S.statCard, { background: "#FEF3C7", border: "1px solid #FDE68A" })}>
-        <div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Total Weight</div>
-        <div style={{ fontSize: 26, fontWeight: 700, color: "#D97706", marginTop: 4 }}>{fmtLbs(stats.totalWeight)}</div>
-      </div>
-      <div style={Object.assign({}, S.statCard, { background: "#ECFDF5", border: "1px solid #A7F3D0" })}>
-        <div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Total Pallets</div>
-        <div style={{ fontSize: 26, fontWeight: 700, color: "#059669", marginTop: 4 }}>{fmtNum(stats.totalPallets)}</div>
-      </div>
-      <div style={Object.assign({}, S.statCard, { background: "#EEF2FF", border: "1px solid #C7D2FE" })}>
-        <div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>{result ? "Actual Trucks" : "Est. Trucks"}</div>
-        <div style={{ fontSize: 26, fontWeight: 700, color: "#4338CA", marginTop: 4 }}>{result ? result.summaries.length : stats.estTrucks}</div>
-        <div style={{ fontSize: 10, color: "#9CA3AF", marginTop: 2 }}>@ 42,500 lb cap</div>
-      </div>
-      <div style={Object.assign({}, S.statCard, { background: "#F5F3FF", border: "1px solid #DDD6FE" })}>
-        <div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Total Order Qty</div>
-        <div style={{ fontSize: 26, fontWeight: 700, color: "#7C3AED", marginTop: 4 }}>{fmtNum(stats.totalQty)}</div>
-      </div>
-    </div>}
-
-    {/* Errors */}
-    {result && result.errors.length > 0 && <div style={Object.assign({}, S.card, { background: "#FEF2F2", border: "1px solid #FECACA", padding: "16px 20px", marginBottom: 16 })}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}><IconAlert /><span style={{ fontSize: 13, fontWeight: 600, color: "#DC2626" }}>{result.errors.length} item{result.errors.length !== 1 ? "s" : ""} could not be assigned</span></div>
-      {result.errors.map(function(err, ei) {
-        var row = data.find(function(r) { return r._idx === err._idx; });
-        return <div key={ei} style={{ fontSize: 12, color: "#7F1D1D", padding: "4px 0", display: "flex", gap: 8 }}>
-          <span style={{ fontFamily: "monospace", fontWeight: 600 }}>{row ? row.InventoryID : "?"}</span>
-          <span>{row ? row.Description : ""}</span>
-          <span style={{ color: "#DC2626", fontWeight: 500 }}>— {err.reason}</span>
+      {/* DETAILED ITEM LIST BY TRUCK */}
+      {truckGroups.filter(function(t) { return !t.isError && (highlightTruck === "all" || highlightTruck === t.label); }).map(function(t) {
+        return <div key={t.label} style={Object.assign({}, S.card, { borderLeft: "4px solid " + t.color })}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <span style={{ fontWeight: 600, color: "#374151" }}>{t.label} — {t.totalLbs.toLocaleString(undefined, { maximumFractionDigits: 1 })} lbs</span>
+            {t.needsFill && <span style={S.badge("warning")}>Needs Fill</span>}
+          </div>
+          <div style={{ overflow: "auto", borderRadius: 8, border: "1px solid #E5E7EB" }}>
+            <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
+              <thead><tr>
+                <th style={S.th}>Inventory ID</th>
+                <th style={S.th}>Description</th>
+                <th style={Object.assign({}, S.th, { textAlign: "right" })}>Order Qty</th>
+                <th style={Object.assign({}, S.th, { textAlign: "right" })}>Pallets</th>
+                <th style={Object.assign({}, S.th, { textAlign: "right" })}>Weight</th>
+              </tr></thead>
+              <tbody>{t.assignments.map(function(a, ai) {
+                return <tr key={ai} style={{ background: t.color + "30" }}>
+                  <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 12, fontWeight: 600 })}>{a.inventoryID}</td>
+                  <td style={Object.assign({}, S.td, { maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })} title={a.description}>{a.description}{a.isSplit ? <span style={Object.assign({}, S.badge("purple"), { marginLeft: 6, fontSize: 10 })}>SPLIT</span> : ""}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "right" })}>{a.orderQty}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "right" })}>{a.pallets}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "right", fontWeight: 600 })}>{a.lbs ? a.lbs.toLocaleString(undefined, { maximumFractionDigits: 1 }) + " lbs" : "—"}</td>
+                </tr>;
+              })}</tbody>
+            </table>
+          </div>
         </div>;
       })}
     </div>}
 
-    {/* Truck Summary Panel */}
-    {result && result.summaries.length > 0 && <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden", marginBottom: 16 })}>
-      <div style={{ padding: "14px 20px", background: "#F9FAFB", borderBottom: "1px solid #E5E7EB", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <span style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>Truck Summary</span>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 12, color: "#6B7280" }}>Filter:</span>
-          <select value={truckFilter} onChange={function(e) { setTruckFilter(e.target.value); }} style={Object.assign({}, S.sel, { padding: "6px 10px", fontSize: 12, minWidth: 120 })}>
-            <option value="all">Show All</option>
-            {result.summaries.map(function(s) { return <option key={s.num} value={"Truck " + s.num}>Truck {s.num}</option>; })}
-          </select>
-        </div>
+    {/* FILL SUGGESTIONS */}
+    {step === "fill" && <div>
+      <div style={Object.assign({}, S.card, { display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" })}>
+        <span style={{ fontWeight: 600, color: "#374151" }}>Fill Suggestions — {warehouse}</span>
+        <button onClick={function() { nsFileRef.current && nsFileRef.current.click(); }} style={S.btn("ghost")}><IconUpload /> Upload Netstock DOH</button>
+        <input ref={nsFileRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleNetstockUpload} style={{ display: "none" }} />
+        {netstockDoh && <span style={S.badge("success")}><IconCheck /> {netstockDoh.items.length} items ({netstockDoh.fileName})</span>}
+        {netstockDoh && <button onClick={buildFillSuggestions} style={S.btn()}><IconFilter /> Build Suggestions</button>}
       </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 0 }}>
-        {result.summaries.map(function(s) {
-          var isFiltered = truckFilter !== "all" && truckFilter !== "Truck " + s.num;
-          return <div key={s.num} onClick={function() { setTruckFilter(truckFilter === "Truck " + s.num ? "all" : "Truck " + s.num); }}
-            style={{ flex: "1 1 180px", padding: "14px 18px", borderRight: "1px solid #F3F4F6", borderBottom: "1px solid #F3F4F6", cursor: "pointer", transition: "all 0.15s", opacity: isFiltered ? 0.35 : 1, background: truckFilter === "Truck " + s.num ? s.color : "#FFFFFF" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-              <span style={{ fontSize: 14, fontWeight: 700, color: s.textColor }}>Truck {s.num}</span>
-              <span style={{ fontSize: 11, color: "#9CA3AF" }}>{s.itemCount} item{s.itemCount !== 1 ? "s" : ""}</span>
-            </div>
-            <div style={{ marginBottom: 6 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 3 }}>
-                <span style={{ color: "#6B7280" }}>{fmtLbs(s.totalLbs)}</span>
-                <span style={{ color: s.pct > 95 ? "#DC2626" : s.pct > 80 ? "#D97706" : "#059669", fontWeight: 600 }}>{s.pct}%</span>
-              </div>
-              <div style={{ height: 6, background: "#F3F4F6", borderRadius: 3, overflow: "hidden" }}>
-                <div style={{ height: "100%", borderRadius: 3, width: Math.min(s.pct, 100) + "%", background: s.pct > 95 ? "#DC2626" : s.pct > 80 ? "#D97706" : "#059669", transition: "width 0.4s ease" }} />
-              </div>
-            </div>
-            <div style={{ fontSize: 11, color: "#9CA3AF" }}>Remaining: <strong style={{ color: "#374151" }}>{fmtLbs(s.remaining)}</strong></div>
-          </div>;
-        })}
-      </div>
-    </div>}
-
-    {/* Search */}
-    {data.length > 0 && <div style={{ marginBottom: 16, display: "flex", gap: 12, alignItems: "center" }}>
-      <div style={{ position: "relative", flex: 1, maxWidth: 360 }}>
-        <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search by ID or description..." style={Object.assign({}, S.inp, { paddingLeft: 36 })} />
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-      </div>
-      {search && <span style={{ fontSize: 12, color: "#6B7280" }}>{displayed.length} of {data.length} items</span>}
-    </div>}
-
-    {/* Table */}
-    {data.length > 0 && <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden" })}>
-      <div style={{ overflowX: "auto", maxHeight: 600 }}>
-        <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, minWidth: result ? 1100 : 900 }}>
-          <thead>
-            <tr>{columns.map(function(col) {
-              var isSorted = sort.col === col.key;
-              return <th key={col.key} onClick={col.key !== "_truck" ? function() { toggleSort(col.key); } : undefined} style={Object.assign({}, S.th, { cursor: col.key !== "_truck" ? "pointer" : "default", userSelect: "none", width: col.width, whiteSpace: "nowrap" })}>
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                  {col.label}
-                  {isSorted && <span style={{ color: TOOL_COLOR, fontSize: 10 }}>{sort.dir === "asc" ? "▲" : "▼"}</span>}
-                </span>
-              </th>;
-            })}</tr>
-          </thead>
-          <tbody>
-            {displayed.map(function(row, ri) {
-              var a = result ? result.assignments[row._idx] : null;
-              var isError = result ? result.errors.some(function(e) { return e._idx === row._idx; }) : false;
-              var matchesFilter = result ? rowMatchesFilter(row) : true;
-              var dimmed = result && truckFilter !== "all" && !matchesFilter;
-              var rowBg = isError ? "#FEF2F2" : a ? a.color : (ri % 2 === 0 ? "#FFFFFF" : "#FAFBFC");
-              var overweight = row.TotalLbs > 42500;
-
-              return <tr key={row._idx} style={{ background: rowBg, opacity: dimmed ? 0.3 : 1, transition: "opacity 0.15s" }}>
-                {columns.map(function(col) {
-                  var val = row[col.key];
-                  var cellStyle = Object.assign({}, S.td, { width: col.width });
-
-                  if (col.key === "_truck") {
-                    if (isError) {
-                      return <td key={col.key} style={Object.assign({}, cellStyle, { fontWeight: 600, color: "#DC2626", fontSize: 12 })}>
-                        <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><IconAlert /> ERROR</span>
-                      </td>;
-                    }
-                    if (a) {
-                      return <td key={col.key} style={Object.assign({}, cellStyle, { fontWeight: 600, color: a.textColor, fontSize: 12 })}>{a.label}</td>;
-                    }
-                    return <td key={col.key} style={Object.assign({}, cellStyle, { color: "#9CA3AF", fontSize: 12 })}>—</td>;
-                  }
-                  if (col.key === "InventoryID") {
-                    return <td key={col.key} style={Object.assign({}, cellStyle, { fontFamily: "monospace", fontWeight: 600, fontSize: 12, color: isError ? "#DC2626" : TOOL_COLOR })}>{val}</td>;
-                  }
-                  if (col.key === "Description") {
-                    return <td key={col.key} style={Object.assign({}, cellStyle, { fontSize: 12, color: "#4B5563", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })} title={val}>{val}</td>;
-                  }
-                  if (col.key === "TotalLbs") {
-                    return <td key={col.key} style={Object.assign({}, cellStyle, { fontWeight: 600, color: overweight ? "#DC2626" : "#374151" })}>
-                      {fmtNum(val)}
-                      {overweight && <span style={Object.assign({}, S.badge("danger"), { marginLeft: 6, fontSize: 10 })}>OVER</span>}
-                    </td>;
-                  }
-                  if (col.num) {
-                    return <td key={col.key} style={Object.assign({}, cellStyle, { fontVariantNumeric: "tabular-nums" })}>{fmtNum(val)}</td>;
-                  }
-                  return <td key={col.key} style={cellStyle}>{val || "—"}</td>;
-                })}
+      {fillSuggestions && fillSuggestions.length > 0 && <div style={Object.assign({}, S.card, { marginTop: 0 })}>
+        <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 12 }}>Sorted by Days on Hand + Days on Order (lowest = most urgent). {fillSuggestions.length} items.</div>
+        <div style={{ overflow: "auto", borderRadius: 10, border: "1px solid #E5E7EB", maxHeight: 500 }}>
+          <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, minWidth: 800 }}>
+            <thead><tr>
+              {["Product Code", "Description", "Class", "Velocity", "DOH", "DOO", "DOH+DOO", "On Hand", "Pallet Wt"].map(function(h) {
+                return <th key={h} style={S.th}>{h}</th>;
+              })}
+            </tr></thead>
+            <tbody>{fillSuggestions.slice(0, 100).map(function(f, fi) {
+              var urgencyBg = f.combined === 0 ? "#FEF2F2" : f.combined <= 14 ? "#FFF7ED" : f.combined <= 30 ? "#FFFBEB" : "#F0FDF4";
+              var urgencyColor = f.combined === 0 ? "#DC2626" : f.combined <= 14 ? "#EA580C" : f.combined <= 30 ? "#CA8A04" : "#16A34A";
+              return <tr key={fi}>
+                <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 12, fontWeight: 600 })}>{f.productCode}</td>
+                <td style={Object.assign({}, S.td, { maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })} title={f.description}>{f.description}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "center", fontWeight: 600 })}>{f.netClass}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "center" })}>{f.velocity}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right" })}>{f.doh}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right" })}>{f.doo}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right", fontWeight: 700, background: urgencyBg, color: urgencyColor })}>{f.combined}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right" })}>{f.onHand}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right" })}>{f.palletWeight ? f.palletWeight.toLocaleString(undefined, { maximumFractionDigits: 1 }) : "—"}</td>
               </tr>;
-            })}
-          </tbody>
-        </table>
-      </div>
-      <div style={{ padding: "12px 16px", background: "#F9FAFB", borderTop: "1px solid #E5E7EB", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <span style={{ fontSize: 12, color: "#6B7280" }}>{displayed.length} item{displayed.length !== 1 ? "s" : ""}{search ? " (filtered)" : ""}</span>
-        <span style={{ fontSize: 12, color: "#9CA3AF" }}>
-          Total: <strong style={{ color: "#374151" }}>{fmtLbs(displayed.reduce(function(s, r) { return s + r.TotalLbs; }, 0))}</strong>
-          {" · "}
-          Pallets: <strong style={{ color: "#374151" }}>{fmtNum(displayed.reduce(function(s, r) { return s + r.PalletCount; }, 0))}</strong>
-        </span>
-      </div>
+            })}</tbody>
+          </table>
+        </div>
+      </div>}
+      {fillSuggestions && fillSuggestions.length === 0 && <div style={Object.assign({}, S.card, { textAlign: "center", padding: 40, color: "#9CA3AF" })}>No fill candidates found for {warehouse}.</div>}
+    </div>}
+
+    {/* EMPTY STATE */}
+    {orderItems.length === 0 && !replenLoading && <div style={Object.assign({}, S.card, { textAlign: "center", padding: 60, color: "#9CA3AF" })}>
+      <IconBox /><br /><br />
+      {hillsMaster ? "Select warehouse and click Fetch Replenishment to load items." : "Upload Hills Master XLSX to get started."}
     </div>}
   </div>;
 }
-
 /* ═══════ MAIN HUB ═══════ */
 export default function Hub() {
   var _p = useState(function() { var s = sGet("active-page"); return s || "TP-NY"; }), page = _p[0], setPage = _p[1];
@@ -2938,7 +2887,7 @@ export default function Hub() {
   );
 
   var isWH = page in WH;
-  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "po-import" ? "#06B6D4" : page === "cycle-count" ? "#14B8A6" : page === "fuze-tracker" ? "#F59E0B" : page === "hills-pawtree" ? "#10B981" : page === "truckloader" ? "#6366F1" : "#3B82F6";
+  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "po-import" ? "#06B6D4" : page === "cycle-count" ? "#14B8A6" : page === "fuze-tracker" ? "#F59E0B" : page === "hills-pawtree" ? "#10B981" : page === "truckloader" ? "#D97706" : "#3B82F6";
   var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "po-import" ? "PO NDC Validator" : page === "cycle-count" ? "Cycle Counting" : page === "fuze-tracker" ? "Fuze Tracker" : page === "hills-pawtree" ? "Hills & Pawtree Tracker" : page === "truckloader" ? "Truckloader" : showLogin ? "Login" : "Shipping Rules";
 
   function SideLink(p) {
@@ -2960,7 +2909,7 @@ export default function Hub() {
             { key: "po", label: "PO Tools", items: Object.entries(WH).map(function(e) { return { id: e[0], label: e[1].full, color: e[1].color }; }) },
             { key: "generic", label: "Generic PO Tools", items: [{ id: "po-import", label: "PO NDC Validator", color: "#06B6D4" }, { id: "cycle-count", label: "Cycle Counting", color: "#14B8A6" }] },
             { key: "tracking", label: "Tracking", items: [{ id: "hills-pawtree", label: "Hills & Pawtree", color: "#10B981" }, { id: "fuze-tracker", label: "Fuze Tracker", color: "#F59E0B" }] },
-            { key: "logistics", label: "Logistics", items: [{ id: "truckloader", label: "Truckloader", color: "#6366F1" }] },
+            { key: "hills", label: "Hills Tools", items: [{ id: "truckloader", label: "Truckloader", color: "#D97706" }] },
             { key: "inventory", label: "Inventory Tools", items: [{ id: "short-dating", label: "Short-Dating", color: "#E879F9" }, { id: "backorder", label: "Backorders", color: "#F97316" }] },
           ];
           return sections.map(function(sec, si) {
@@ -3054,7 +3003,7 @@ export default function Hub() {
           {!showLogin && page === "cycle-count" && <CycleCountTool key="cc-standard" toast={showToast} />}
           {!showLogin && page === "fuze-tracker" && <FuzeTracker toast={showToast} />}
           {!showLogin && page === "hills-pawtree" && <HillsTracker toast={showToast} ok={ok} lp={promptLogin} cred={cred} />}
-          {!showLogin && page === "truckloader" && <TruckLoader toast={showToast} />}
+          {!showLogin && page === "truckloader" && <TruckloaderTool toast={showToast} ok={ok} lp={promptLogin} cred={cred} />}
         </div>
       </div>
 

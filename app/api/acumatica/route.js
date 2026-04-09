@@ -20,7 +20,7 @@ const ENDPOINTS = {
   "short-dating":  "INV%20-%20Short-Dating%20Tracker",
   "backorder":     "INV%20-%20Backorder%20Item%20Review",
   "hills-pawtree": "PURCH%20-%20Open%20Hills%20and%20Pawtree",
-  "truckloader":   "PURCH%20-%20Hills%20Pawtree%20Truckloader",
+  "replenishment-needs": "PURCH%20-%20Replenishment%20Needs%20-%20Hills",
 };
 
 // Which columns to extract for each type (keyGroup = possible OData field names)
@@ -100,17 +100,17 @@ const COLUMN_MAP = {
     { label: "Vendor",          keys: ["Vendor", "VendorID", "VendorName"] },
     { label: "Warehouse",       keys: ["Warehouse", "WarehouseID"] },
   ],
-  "truckloader": [
-    { label: "InventoryID",       keys: ["InventoryID", "InventoryCd", "InventoryCD", "Inventory ID", "ItemID"] },
-    { label: "Description",       keys: ["Description", "Descr", "ItemDescription", "LineDescription"] },
-    { label: "OrderQty",          keys: ["OrderQty", "Order Qty", "Order Qty.", "Qty", "Quantity", "OpenQty"] },
-    { label: "TotalLbs",          keys: ["TotalLbs", "Total Lbs", "TotalWeight", "Weight", "ExtWeight"] },
-    { label: "LbsPerPallet",      keys: ["LbsPerPallet", "Lbs per Pallet", "PalletWeight", "WeightPerPallet"] },
-    { label: "PalletCount",       keys: ["PalletCount", "Rounded Pallet Count", "RoundedPalletCount", "Pallets", "PalletQty"] },
-    { label: "CasesPerPallet",    keys: ["CasesPerPallet", "Cases per Pallet", "CasesPer", "UnitsPerPallet"] },
-    { label: "VendorName",        keys: ["VendorName", "Vendor", "Vendor Name"] },
-    { label: "OrderNbr",          keys: ["OrderNbr", "PONumber", "PONbr", "PO Number", "Order Nbr."] },
-    { label: "Warehouse",         keys: ["Warehouse", "WarehouseID", "SiteID"] },
+  "replenishment-needs": [
+    { label: "InventoryID",     keys: ["InventoryID", "InventoryCd", "InventoryCD", "Inventory_ID", "Inventory ID"] },
+    { label: "Description",     keys: ["Description", "Descr"] },
+    { label: "Warehouse",       keys: ["Warehouse", "SiteID", "WarehouseID"] },
+    { label: "QtyAvailable",    keys: ["QtyAvailable", "Qty_Available", "QtyAvail", "Qty Available"] },
+    { label: "ReorderPoint",    keys: ["ReorderPoint", "Reorder_Point", "MinQty", "Reorder Point"] },
+    { label: "MaxQty",          keys: ["MaxQty", "Max_Qty", "Max Qty"] },
+    { label: "SafetyStock",     keys: ["SafetyStock", "Safety_Stock", "Safety Stock"] },
+    { label: "OnSupply",        keys: ["OnSupply", "On_Supply", "QtyINAssemblySupply", "On Supply"] },
+    { label: "OnPO",            keys: ["OnPO", "On_PO", "QtyPOOrders", "On PO"] },
+    { label: "SODemand",        keys: ["SODemand", "SO_Demand", "QtySOBooked", "SO Demand"] },
   ],
 };
 
@@ -120,7 +120,7 @@ export async function POST(request) {
     const { type, warehouse, username, password, useServiceAccount } = body;
 
     if (!type || !ENDPOINTS[type]) {
-      return Response.json({ error: "Invalid type. Use: po, po-ggm, ndc-lookup, item-xref, short-dating, backorder, hills-pawtree, truckloader" }, { status: 400 });
+      return Response.json({ error: "Invalid type. Use: po, po-ggm, ndc-lookup, item-xref, short-dating, backorder, hills-pawtree, replenishment-needs" }, { status: 400 });
     }
 
     // Use service account credentials from env vars, or user-provided credentials
@@ -147,8 +147,8 @@ export async function POST(request) {
       url += `?$filter=Warehouse eq '${warehouse}'`;
     }
 
-    // For truckloader, filter by warehouse
-    if (type === "truckloader" && warehouse) {
+    // For replenishment needs, filter by warehouse
+    if (type === "replenishment-needs" && warehouse) {
       url += `?$filter=Warehouse eq '${warehouse}'`;
     }
 
