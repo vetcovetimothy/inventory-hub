@@ -2330,7 +2330,8 @@ function TruckloaderTool(props) {
         var hm = hmLookup[id] || {};
         var maxQty = parseFloat(r.MaxQty) || 0;
         var avail = parseFloat(r.QtyAvailable) || 0;
-        var caseNeed = Math.max(0, Math.round(maxQty - avail));
+        var onPO = parseFloat(r.OnPO) || 0;
+        var caseNeed = Math.max(0, Math.round(maxQty - avail - onPO));
         var casesPerPallet = hm.unitsPerPallet || 0;
         var lbsPerPallet = hm.palletWeight || 0;
         var palletCount = casesPerPallet > 0 ? caseNeed / casesPerPallet : 0;
