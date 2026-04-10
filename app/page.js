@@ -2521,6 +2521,9 @@ function TruckloaderTool(props) {
     var candidates = netstockDoh.items.filter(function(ns) {
       if (ns.location !== warehouse) return false;
       if (orderedIds[ns.productCode]) return false;
+      // Only stocked items: Netstock Class A, B, or C
+      var cls = (ns.netClass || "").toUpperCase().trim();
+      if (cls !== "A" && cls !== "B" && cls !== "C") return false;
       return true;
     }).map(function(ns) {
       var hm = hmLookup[ns.productCode] || {};
