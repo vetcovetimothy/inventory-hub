@@ -2622,8 +2622,8 @@ function TruckloaderTool(props) {
       <div style={{ overflow: "auto", borderRadius: 10, border: "1px solid #E5E7EB" }}>
         <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, minWidth: 900 }}>
           <thead><tr>
-            {["Inventory ID", "Description", "Case Need", "Cases/Pallet", "Pallets", "Order Qty", "Lbs/Pallet", "Total Lbs", ""].map(function(h) {
-              return <th key={h} style={S.th}>{h}</th>;
+            {["Inventory ID", "Description", "Order Qty", "Pallets", "Total Lbs", "Lbs/Pallet", "Cases/Pallet", "Case Need", ""].map(function(h) {
+              return <th key={h} style={Object.assign({}, S.th, h === "Order Qty" ? { background: "#F0FDF4", color: "#059669" } : {})}>{h}</th>;
             })}
           </tr></thead>
           <tbody>{orderItems.map(function(it, i) {
@@ -2631,14 +2631,14 @@ function TruckloaderTool(props) {
             return <tr key={it.inventoryID + "-" + i}>
               <td style={Object.assign({}, S.td, { background: rowBg, fontFamily: "monospace", fontSize: 12, fontWeight: 600 })}>{it.inventoryID}</td>
               <td style={Object.assign({}, S.td, { background: rowBg, maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })} title={it.description}>{it.description}</td>
-              <td style={Object.assign({}, S.td, { background: rowBg, width: 90 })}>
-                <input type="number" min="0" value={it.caseNeed} onChange={function(e) { updateCaseNeed(i, e.target.value); }} style={Object.assign({}, S.inp, { width: 70, textAlign: "right", padding: "4px 8px" })} />
-              </td>
-              <td style={Object.assign({}, S.td, { background: rowBg, textAlign: "right" })}>{it.casesPerPallet || "—"}</td>
+              <td style={Object.assign({}, S.td, { background: rowBg, textAlign: "right", fontSize: 15, fontWeight: 700, color: "#059669" })}>{it.orderQty}</td>
               <td style={Object.assign({}, S.td, { background: rowBg, textAlign: "right", fontWeight: 600 })}>{it.roundedPallets}</td>
-              <td style={Object.assign({}, S.td, { background: rowBg, textAlign: "right" })}>{it.orderQty}</td>
-              <td style={Object.assign({}, S.td, { background: rowBg, textAlign: "right" })}>{it.lbsPerPallet ? it.lbsPerPallet.toLocaleString(undefined, { maximumFractionDigits: 1 }) : "—"}</td>
               <td style={Object.assign({}, S.td, { background: rowBg, textAlign: "right", fontWeight: 600, color: it.totalLbs > TARGET ? "#DC2626" : "#374151" })}>{it.totalLbs ? it.totalLbs.toLocaleString(undefined, { maximumFractionDigits: 1 }) : "—"}</td>
+              <td style={Object.assign({}, S.td, { background: rowBg, textAlign: "right", color: "#9CA3AF" })}>{it.lbsPerPallet ? it.lbsPerPallet.toLocaleString(undefined, { maximumFractionDigits: 1 }) : "—"}</td>
+              <td style={Object.assign({}, S.td, { background: rowBg, textAlign: "right", color: "#9CA3AF" })}>{it.casesPerPallet || "—"}</td>
+              <td style={Object.assign({}, S.td, { background: rowBg, width: 90 })}>
+                <input type="number" min="0" value={it.caseNeed} onChange={function(e) { updateCaseNeed(i, e.target.value); }} style={Object.assign({}, S.inp, { width: 70, textAlign: "right", padding: "4px 8px", color: "#9CA3AF" })} />
+              </td>
               <td style={Object.assign({}, S.td, { background: rowBg, width: 40 })}>
                 <button onClick={function() { removeItem(i); }} style={{ background: "transparent", border: "none", cursor: "pointer", color: "#DC2626", fontSize: 14 }}>{"\u2715"}</button>
               </td>
