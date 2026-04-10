@@ -21,6 +21,7 @@ const ENDPOINTS = {
   "backorder":     "INV%20-%20Backorder%20Item%20Review",
   "hills-pawtree": "PURCH%20-%20Open%20Hills%20and%20Pawtree",
   "replenishment-needs": "PURCH%20-%20Replenishment%20Needs%20-%20Hills",
+  "whse-replenish": "Stock%20Item%20Whse%20Replenish",
 };
 
 // Which columns to extract for each type (keyGroup = possible OData field names)
@@ -112,6 +113,12 @@ const COLUMN_MAP = {
     { label: "OnPO",            keys: ["OnPO", "On_PO", "QtyPOOrders", "On PO"] },
     { label: "SODemand",        keys: ["SODemand", "SO_Demand", "QtySOBooked", "SO Demand"] },
   ],
+  "whse-replenish": [
+    { label: "InventoryID",       keys: ["InventoryID", "InventoryCd", "InventoryCD", "Inventory ID", "Inventory_ID"] },
+    { label: "Warehouse",         keys: ["Warehouse", "WarehouseID", "SiteID"] },
+    { label: "ReplenishmentClass", keys: ["ReplenishmentClass", "Replenishment_Class", "Replenishment Class", "ReplenishmentClassID"] },
+    { label: "ItemStatus",        keys: ["ItemStatus", "Item_Status", "Item Status", "Status"] },
+  ],
 };
 
 export async function POST(request) {
@@ -120,7 +127,7 @@ export async function POST(request) {
     const { type, warehouse, username, password, useServiceAccount } = body;
 
     if (!type || !ENDPOINTS[type]) {
-      return Response.json({ error: "Invalid type. Use: po, po-ggm, ndc-lookup, item-xref, short-dating, backorder, hills-pawtree, replenishment-needs" }, { status: 400 });
+      return Response.json({ error: "Invalid type. Use: po, po-ggm, ndc-lookup, item-xref, short-dating, backorder, hills-pawtree, replenishment-needs, whse-replenish" }, { status: 400 });
     }
 
     // Use service account credentials from env vars, or user-provided credentials
@@ -151,6 +158,11 @@ export async function POST(request) {
     // (GI parameters don't work with OData $filter — they need to be optional)
     if (type === "replenishment-needs") {
       url += `?$top=5000`;
+    }
+
+    // For whse replenish, fetch all (we only need 4 fields so it's lightweight)
+    if (type === "whse-replenish") {
+      url += `?$top=15000`;
     }
 
     // For cross reference, get all records

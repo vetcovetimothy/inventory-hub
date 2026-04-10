@@ -2510,42 +2510,62 @@ function TruckloaderTool(props) {
   }
 
   // Build fill suggestions
-  function buildFillSuggestions() {
+  var _fillLoading = useState(false), fillLoading = _fillLoading[0], setFillLoading = _fillLoading[1];
+
+  async function buildFillSuggestions() {
     if (!netstockDoh || !hillsMaster) { toast("Upload both Netstock DOH and Hills Master first", "error"); return; }
-    var orderedIds = {};
-    orderItems.forEach(function(it) { orderedIds[it.inventoryID] = true; });
-    // Get all GI data (not just filtered) to check replenishment status
-    // For now, use replenData which has all items from the GI
-    var replenLookup = {};
-    replenData.forEach(function(r) { replenLookup[String(r.InventoryID || "").trim()] = r; });
-    var candidates = netstockDoh.items.filter(function(ns) {
-      if (ns.location !== warehouse) return false;
-      if (orderedIds[ns.productCode]) return false;
-      // Only stocked items: Netstock Class A, B, or C
-      var cls = (ns.netClass || "").toUpperCase().trim();
-      if (cls !== "A" && cls !== "B" && cls !== "C") return false;
-      return true;
-    }).map(function(ns) {
-      var hm = hmLookup[ns.productCode] || {};
-      var combined = ns.doh + ns.doo;
-      return {
-        productCode: ns.productCode,
-        description: ns.description || hm.description || "",
-        doh: ns.doh,
-        doo: ns.doo,
-        combined: combined,
-        onHand: ns.onHand,
-        onOrder: ns.onOrder,
-        velocity: ns.velocity,
-        netClass: ns.netClass,
-        avgSales: ns.avgSales,
-        palletWeight: hm.palletWeight || 0,
-        unitsPerPallet: hm.unitsPerPallet || 0,
-      };
-    });
-    candidates.sort(function(a, b) { return a.combined - b.combined; });
-    setFillSuggestions(candidates);
-    toast("Found " + candidates.length + " fill candidates for " + warehouse);
+    if (!ok) { lp(); return; }
+    setFillLoading(true);
+    try {
+      // Fetch Whse Replenish from Acumatica for real Replenishment Class
+      var whseRows = await fetchAcumatica("whse-replenish", null, cred.username, cred.password);
+      // Build lookup: "inventoryID|warehouse" → replenishment class
+      var replenClassLookup = {};
+      whseRows.forEach(function(r) {
+        var id = String(r.InventoryID || "").trim();
+        var wh = String(r.Warehouse || "").trim();
+        var cls = String(r.ReplenishmentClass || "").trim().toUpperCase();
+        if (id && wh) replenClassLookup[id + "|" + wh] = cls;
+      });
+
+      var orderedIds = {};
+      orderItems.forEach(function(it) { orderedIds[it.inventoryID] = true; });
+
+      var candidates = netstockDoh.items.filter(function(ns) {
+        if (ns.location !== warehouse) return false;
+        if (orderedIds[ns.productCode]) return false;
+        // Only stocked items: Acumatica Replenishment Class A, B, or C
+        var key = ns.productCode + "|" + warehouse;
+        var cls = replenClassLookup[key] || "";
+        if (cls !== "A" && cls !== "B" && cls !== "C") return false;
+        return true;
+      }).map(function(ns) {
+        var hm = hmLookup[ns.productCode] || {};
+        var key = ns.productCode + "|" + warehouse;
+        var combined = ns.doh + ns.doo;
+        return {
+          productCode: ns.productCode,
+          description: ns.description || hm.description || "",
+          replenClass: replenClassLookup[key] || "",
+          doh: ns.doh,
+          doo: ns.doo,
+          combined: combined,
+          onHand: ns.onHand,
+          onOrder: ns.onOrder,
+          velocity: ns.velocity,
+          netClass: ns.netClass,
+          avgSales: ns.avgSales,
+          palletWeight: hm.palletWeight || 0,
+          unitsPerPallet: hm.unitsPerPallet || 0,
+        };
+      });
+      candidates.sort(function(a, b) { return a.combined - b.combined; });
+      setFillSuggestions(candidates);
+      toast("Found " + candidates.length + " stocked items (A/B/C) for " + warehouse);
+    } catch (err) {
+      toast("Error: " + err.message, "error");
+    }
+    setFillLoading(false);
   }
 
   // Summary stats
@@ -2729,30 +2749,31 @@ function TruckloaderTool(props) {
         <button onClick={function() { nsFileRef.current && nsFileRef.current.click(); }} style={S.btn("ghost")}><IconUpload /> Upload Netstock DOH</button>
         <input ref={nsFileRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleNetstockUpload} style={{ display: "none" }} />
         {netstockDoh && <span style={S.badge("success")}><IconCheck /> {netstockDoh.items.length} items ({netstockDoh.fileName})</span>}
-        {netstockDoh && <button onClick={buildFillSuggestions} style={S.btn()}><IconFilter /> Build Suggestions</button>}
+        {netstockDoh && <button onClick={buildFillSuggestions} disabled={fillLoading} style={Object.assign({}, S.btn(), { opacity: fillLoading ? 0.6 : 1 })}>{fillLoading ? <><Spinner color="#fff" size={14} /> Loading...</> : <><IconFilter /> Build Suggestions</>}</button>}
       </div>
       {fillSuggestions && fillSuggestions.length > 0 && <div style={Object.assign({}, S.card, { marginTop: 0 })}>
         <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 12 }}>Sorted by Days on Hand + Days on Order (lowest = most urgent). {fillSuggestions.length} items.</div>
         <div style={{ overflow: "auto", borderRadius: 10, border: "1px solid #E5E7EB", maxHeight: 500 }}>
           <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, minWidth: 800 }}>
             <thead><tr>
-              {["Product Code", "Description", "Class", "Velocity", "DOH", "DOO", "DOH+DOO", "On Hand", "Pallet Wt"].map(function(h) {
+              {["Product Code", "Description", "Replen", "NS Class", "Velocity", "DOH", "DOO", "DOH+DOO", "On Hand", "Pallet Wt"].map(function(h) {
                 return <th key={h} style={S.th}>{h}</th>;
               })}
             </tr></thead>
             <tbody>{fillSuggestions.slice(0, 100).map(function(f, fi) {
-              var urgencyBg = f.combined === 0 ? "#FEF2F2" : f.combined <= 14 ? "#FFF7ED" : f.combined <= 30 ? "#FFFBEB" : "#F0FDF4";
-              var urgencyColor = f.combined === 0 ? "#DC2626" : f.combined <= 14 ? "#EA580C" : f.combined <= 30 ? "#CA8A04" : "#16A34A";
+              var urgBg = f.combined === 0 ? "#FEF2F2" : f.combined <= 14 ? "#FFF7ED" : f.combined <= 30 ? "#FFFBEB" : "#F0FDF4";
+              var urgCol = f.combined === 0 ? "#DC2626" : f.combined <= 14 ? "#EA580C" : f.combined <= 30 ? "#CA8A04" : "#16A34A";
               return <tr key={fi}>
                 <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 12, fontWeight: 600 })}>{f.productCode}</td>
                 <td style={Object.assign({}, S.td, { maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })} title={f.description}>{f.description}</td>
-                <td style={Object.assign({}, S.td, { textAlign: "center", fontWeight: 600 })}>{f.netClass}</td>
-                <td style={Object.assign({}, S.td, { textAlign: "center" })}>{f.velocity}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "center", fontWeight: 700 })}>{f.replenClass}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "center", color: "#9CA3AF" })}>{f.netClass}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "center", color: "#9CA3AF" })}>{f.velocity}</td>
                 <td style={Object.assign({}, S.td, { textAlign: "right" })}>{f.doh}</td>
                 <td style={Object.assign({}, S.td, { textAlign: "right" })}>{f.doo}</td>
-                <td style={Object.assign({}, S.td, { textAlign: "right", fontWeight: 700, background: urgencyBg, color: urgencyColor })}>{f.combined}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right", fontWeight: 700, background: urgBg, color: urgCol })}>{f.combined}</td>
                 <td style={Object.assign({}, S.td, { textAlign: "right" })}>{f.onHand}</td>
-                <td style={Object.assign({}, S.td, { textAlign: "right" })}>{f.palletWeight ? f.palletWeight.toLocaleString(undefined, { maximumFractionDigits: 1 }) : "—"}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right" })}>{f.palletWeight ? f.palletWeight.toLocaleString(undefined, { maximumFractionDigits: 1 }) : "\u2014"}</td>
               </tr>;
             })}</tbody>
           </table>
