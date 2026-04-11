@@ -2817,8 +2817,8 @@ function TruckloaderTool(props) {
           <div style={{ overflow: "auto", borderRadius: 10, border: "1px solid #E5E7EB", maxHeight: 600 }}>
             <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
               <thead><tr>
-                {["Inventory ID", "Description", "R", "DOH+DOO", "On Hand", "Avg/3m", "Sug.", "Pallets", "Total Lbs", ""].map(function(h) {
-                  return <th key={h} style={Object.assign({}, S.th, h === "Sug." ? { color: "#7C3AED" } : {}, (h === "Pallets" || h === "Total Lbs" || h === "") ? { background: "#F0FDF4" } : {})}>{h}</th>;
+                {["Inventory ID", "Description", "R", "DOH+DOO", "On Hand", "Avg/3m", "Sug.", "Pallets", "Order Qty", "Total Lbs", ""].map(function(h) {
+                  return <th key={h} style={Object.assign({}, S.th, h === "Sug." ? { color: "#7C3AED" } : {}, (h === "Pallets" || h === "Order Qty" || h === "Total Lbs" || h === "") ? { background: "#F0FDF4" } : {})}>{h}</th>;
                 })}
               </tr></thead>
               <tbody>{fillSuggestions.slice(0, 150).map(function(f, fi) {
@@ -2838,7 +2838,8 @@ function TruckloaderTool(props) {
                   <td style={Object.assign({}, S.td, { textAlign: "right", padding: "8px 10px", fontSize: 12, color: "#9CA3AF" })}>{f.avgSales ? Math.round(f.avgSales) : "\u2014"}</td>
                   <td style={Object.assign({}, S.td, { textAlign: "center", padding: "8px 6px", color: "#7C3AED", fontWeight: 600, fontSize: 12 })}>{sugPals || "\u2014"}</td>
                   <td style={Object.assign({}, S.td, { width: 55, padding: "6px 4px" })}><input type="number" min="1" value={curPals} onChange={function(e) { var u = Object.assign({}, fillPals); u[f.productCode] = Math.max(1, parseInt(e.target.value) || 1); setFillPals(u); }} style={Object.assign({}, S.inp, { width: 45, textAlign: "center", padding: "3px 4px", fontSize: 12 })} /></td>
-                  <td style={Object.assign({}, S.td, { textAlign: "right", padding: "8px 10px", fontWeight: 600, fontSize: 12, color: "#059669" })}>{rowLbs > 0 ? rowLbs.toLocaleString(undefined, { maximumFractionDigits: 0 }) : "\u2014"}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "right", padding: "8px 10px", fontSize: 13, fontWeight: 700, color: "#059669" })}>{f.unitsPerPallet > 0 ? (curPals * f.unitsPerPallet) : "\u2014"}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "right", padding: "8px 10px", fontWeight: 600, fontSize: 12, color: "#374151" })}>{rowLbs > 0 ? rowLbs.toLocaleString(undefined, { maximumFractionDigits: 0 }) : "\u2014"}</td>
                   <td style={Object.assign({}, S.td, { width: 50, padding: "6px 4px" })}><button onClick={function() { addFillToOrder(f, fillPals[f.productCode] || sugPals || 1); }} style={{ background: "#059669", color: "#fff", border: "none", borderRadius: 6, padding: "4px 8px", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>+</button></td>
                 </tr>;
               })}</tbody>
