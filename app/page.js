@@ -2817,7 +2817,7 @@ function TruckloaderTool(props) {
           <div style={{ overflow: "auto", borderRadius: 10, border: "1px solid #E5E7EB", maxHeight: 600 }}>
             <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
               <thead><tr>
-                {["Inventory ID", "Description", "R", "DOH+DOO", "On Hand", "Daily Sales", "Pallets", "Order Qty", "Total Lbs", ""].map(function(h) {
+                {["Inventory ID", "Description", "R", "DOH+DOO", "On Hand", "Days/Pal", "Pallets", "Order Qty", "Total Lbs", ""].map(function(h) {
                   return <th key={h} style={Object.assign({}, S.th, (h === "Pallets" || h === "Order Qty" || h === "Total Lbs" || h === "") ? { background: "#F0FDF4" } : {})}>{h}</th>;
                 })}
               </tr></thead>
@@ -2835,7 +2835,7 @@ function TruckloaderTool(props) {
                   <td style={Object.assign({}, S.td, { textAlign: "center", fontWeight: 700, padding: "8px 6px", fontSize: 12 })}>{f.replenClass}</td>
                   <td style={Object.assign({}, S.td, { textAlign: "right", fontWeight: 700, color: urgCol, padding: "8px 10px" })}>{f.combined}</td>
                   <td style={Object.assign({}, S.td, { textAlign: "right", padding: "8px 10px", fontSize: 12 })}>{f.onHand}</td>
-                  <td style={Object.assign({}, S.td, { textAlign: "right", padding: "8px 10px", fontSize: 12, fontWeight: 500 })}>{dailySales > 0 ? dailySales.toFixed(1) : "\u2014"}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "right", padding: "8px 10px", fontSize: 12, fontWeight: 500 })}>{(dailySales > 0 && f.unitsPerPallet > 0) ? Math.round(f.unitsPerPallet / dailySales) : "\u2014"}</td>
                   <td style={Object.assign({}, S.td, { width: 55, padding: "6px 4px" })}><input type="number" min="1" value={curPals} onChange={function(e) { var u = Object.assign({}, fillPals); u[f.productCode] = Math.max(1, parseInt(e.target.value) || 1); setFillPals(u); }} style={Object.assign({}, S.inp, { width: 45, textAlign: "center", padding: "3px 4px", fontSize: 12 })} /></td>
                   <td style={Object.assign({}, S.td, { textAlign: "right", padding: "8px 10px", fontSize: 13, fontWeight: 700, color: "#059669" })}>{f.unitsPerPallet > 0 ? (curPals * f.unitsPerPallet) : "\u2014"}</td>
                   <td style={Object.assign({}, S.td, { textAlign: "right", padding: "8px 10px", fontWeight: 600, fontSize: 12, color: "#374151" })}>{rowLbs > 0 ? rowLbs.toLocaleString(undefined, { maximumFractionDigits: 0 }) : "\u2014"}</td>
