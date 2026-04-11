@@ -2541,6 +2541,9 @@ function TruckloaderTool(props) {
         var key = ns.productCode + "|" + warehouse;
         var cls = replenClassLookup[key] || "";
         if (cls !== "A" && cls !== "B" && cls !== "C") return false;
+        // Exclude pawTree items
+        var desc = (ns.description || "").toLowerCase();
+        if (desc.indexOf("pawtree") !== -1 || desc.indexOf("paw tree") !== -1) return false;
         return true;
       }).map(function(ns) {
         var hm = hmLookup[ns.productCode] || {};
@@ -2814,7 +2817,7 @@ function TruckloaderTool(props) {
           <div style={{ overflow: "auto", borderRadius: 10, border: "1px solid #E5E7EB", maxHeight: 600 }}>
             <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
               <thead><tr>
-                {["Code", "Description", "R", "DOH+DOO", "On Hand", "Avg/3m", "Sug.", "Pallets", "Total Lbs", ""].map(function(h) {
+                {["Inventory ID", "Description", "R", "DOH+DOO", "On Hand", "Avg/3m", "Sug.", "Pallets", "Total Lbs", ""].map(function(h) {
                   return <th key={h} style={Object.assign({}, S.th, h === "Sug." ? { color: "#7C3AED" } : {}, (h === "Pallets" || h === "Total Lbs" || h === "") ? { background: "#F0FDF4" } : {})}>{h}</th>;
                 })}
               </tr></thead>
@@ -2827,7 +2830,7 @@ function TruckloaderTool(props) {
                 var curPals = fillPals[f.productCode] || sugPals || 1;
                 var rowLbs = curPals * (f.palletWeight || 0);
                 return <tr key={fi} style={{ background: urgBg }}>
-                  <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, fontWeight: 600, padding: "8px 10px" })}>{f.productCode}</td>
+                  <td onClick={function() { navigator.clipboard.writeText(f.productCode); toast("Copied: " + f.productCode); }} style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, fontWeight: 600, padding: "8px 10px", cursor: "pointer" })} title="Click to copy">{f.productCode}</td>
                   <td style={Object.assign({}, S.td, { maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", padding: "8px 10px", fontSize: 12 })} title={f.description}>{f.description}</td>
                   <td style={Object.assign({}, S.td, { textAlign: "center", fontWeight: 700, padding: "8px 6px", fontSize: 12 })}>{f.replenClass}</td>
                   <td style={Object.assign({}, S.td, { textAlign: "right", fontWeight: 700, color: urgCol, padding: "8px 10px" })}>{f.combined}</td>
