@@ -2240,6 +2240,8 @@ function TruckloaderTool(props) {
   var _nsDoh = useState(null), netstockDoh = _nsDoh[0], setNetstockDoh = _nsDoh[1];
   var _fills = useState(null), fillSuggestions = _fills[0], setFillSuggestions = _fills[1];
   var _highlight = useState("all"), highlightTruck = _highlight[0], setHighlightTruck = _highlight[1];
+  var _fillAdded = useState([]), fillAdded = _fillAdded[0], setFillAdded = _fillAdded[1];
+  var _dohTarget = useState(45), dohTarget = _dohTarget[0], setDohTarget = _dohTarget[1];
   var fileRef = useRef(null);
   var nsFileRef = useRef(null);
 
@@ -2584,19 +2586,27 @@ function TruckloaderTool(props) {
       orderQty: orderQty,
       lbsPerPallet: lpp,
       totalLbs: totalLbs,
-      qtyAvail: 0,
-      onPO: 0,
-      reorderPt: 0,
-      maxQty: 0,
+      qtyAvail: 0, onPO: 0, reorderPt: 0, maxQty: 0,
       inHillsMaster: !!hm.unitsPerPallet,
+      isFill: true,
     };
     setOrderItems(orderItems.concat([newItem]));
     setTruckGroups(null);
-    // Remove from fill suggestions
+    setFillAdded(fillAdded.concat([{ productCode: f.productCode, description: f.description, pallets: pals, orderQty: orderQty, totalLbs: totalLbs }]));
     if (fillSuggestions) {
       setFillSuggestions(fillSuggestions.filter(function(s) { return s.productCode !== f.productCode; }));
     }
-    toast("Added " + f.productCode + " (" + pals + " pallet" + (pals > 1 ? "s" : "") + ") to order");
+    toast("Added " + f.productCode + " (" + pals + " pal) \u2192 " + totalLbs.toLocaleString(undefined, { maximumFractionDigits: 0 }) + " lbs");
+  }
+
+  function removeFillItem(productCode) {
+    setOrderItems(orderItems.filter(function(it) { return it.inventoryID !== productCode; }));
+    setTruckGroups(null);
+    var removed = fillAdded.find(function(a) { return a.productCode === productCode; });
+    setFillAdded(fillAdded.filter(function(a) { return a.productCode !== productCode; }));
+    // Add it back to suggestions if we still have them
+    // (won't restore original position but user can re-sort mentally)
+    toast("Removed " + productCode + " from order");
   }
 
   // Summary stats
@@ -2773,7 +2783,7 @@ function TruckloaderTool(props) {
       })}
     </div>}
 
-    {/* FILL SUGGESTIONS */}
+    {/* FILL SUGGESTIONS - SPLIT LAYOUT */}
     {step === "fill" && <div>
       <div style={Object.assign({}, S.card, { display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" })}>
         <span style={{ fontWeight: 600, color: "#374151" }}>Fill Suggestions — {warehouse}</span>
@@ -2782,35 +2792,86 @@ function TruckloaderTool(props) {
         {netstockDoh && <span style={S.badge("success")}><IconCheck /> {netstockDoh.items.length} items ({netstockDoh.fileName})</span>}
         {netstockDoh && <button onClick={buildFillSuggestions} disabled={fillLoading} style={Object.assign({}, S.btn(), { opacity: fillLoading ? 0.6 : 1 })}>{fillLoading ? <><Spinner color="#fff" size={14} /> Loading...</> : <><IconFilter /> Build Suggestions</>}</button>}
       </div>
-      {fillSuggestions && fillSuggestions.length > 0 && <div style={Object.assign({}, S.card, { marginTop: 0 })}>
-        <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 12 }}>Sorted by Days on Hand + Days on Order (lowest = most urgent). {fillSuggestions.length} items.</div>
-        <div style={{ overflow: "auto", borderRadius: 10, border: "1px solid #E5E7EB", maxHeight: 500 }}>
-          <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, minWidth: 800 }}>
-            <thead><tr>
-              {["Product Code", "Description", "Replen", "NS Class", "Velocity", "DOH", "DOO", "DOH+DOO", "On Hand", "Pallet Wt", "Pallets", ""].map(function(h) {
-                return <th key={h} style={Object.assign({}, S.th, h === "Pallets" || h === "" ? { background: "#F0FDF4" } : {})}>{h}</th>;
-              })}
-            </tr></thead>
-            <tbody>{fillSuggestions.slice(0, 100).map(function(f, fi) {
-              var urgBg = f.combined === 0 ? "#FEF2F2" : f.combined <= 14 ? "#FFF7ED" : f.combined <= 30 ? "#FFFBEB" : "#F0FDF4";
-              var urgCol = f.combined === 0 ? "#DC2626" : f.combined <= 14 ? "#EA580C" : f.combined <= 30 ? "#CA8A04" : "#16A34A";
-              var palInputId = "fill-pal-" + fi;
-              return <tr key={fi}>
-                <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 12, fontWeight: 600 })}>{f.productCode}</td>
-                <td style={Object.assign({}, S.td, { maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })} title={f.description}>{f.description}</td>
-                <td style={Object.assign({}, S.td, { textAlign: "center", fontWeight: 700 })}>{f.replenClass}</td>
-                <td style={Object.assign({}, S.td, { textAlign: "center", color: "#9CA3AF" })}>{f.netClass}</td>
-                <td style={Object.assign({}, S.td, { textAlign: "center", color: "#9CA3AF" })}>{f.velocity}</td>
-                <td style={Object.assign({}, S.td, { textAlign: "right" })}>{f.doh}</td>
-                <td style={Object.assign({}, S.td, { textAlign: "right" })}>{f.doo}</td>
-                <td style={Object.assign({}, S.td, { textAlign: "right", fontWeight: 700, background: urgBg, color: urgCol })}>{f.combined}</td>
-                <td style={Object.assign({}, S.td, { textAlign: "right" })}>{f.onHand}</td>
-                <td style={Object.assign({}, S.td, { textAlign: "right" })}>{f.palletWeight ? f.palletWeight.toLocaleString(undefined, { maximumFractionDigits: 1 }) : "\u2014"}</td>
-                <td style={Object.assign({}, S.td, { width: 60 })}><input id={palInputId} type="number" min="1" defaultValue="1" style={Object.assign({}, S.inp, { width: 50, textAlign: "center", padding: "4px 6px" })} /></td>
-                <td style={Object.assign({}, S.td, { width: 60 })}><button onClick={function() { var el = document.getElementById(palInputId); addFillToOrder(f, el ? el.value : 1); }} style={Object.assign({}, S.btn(), { padding: "4px 12px", fontSize: 11 })}>+ Add</button></td>
-              </tr>;
-            })}</tbody>
-          </table>
+      {fillSuggestions && fillSuggestions.length > 0 && <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
+        {/* LEFT - Suggestions table */}
+        <div style={Object.assign({}, S.card, { marginTop: 0, flex: 1, minWidth: 0 })}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+            <div style={{ fontSize: 12, color: "#9CA3AF" }}>{fillSuggestions.length} items sorted by DOH+DOO</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#6B7280" }}>
+              Target: <input type="number" min="1" max="120" value={dohTarget} onChange={function(e) { setDohTarget(parseInt(e.target.value) || 45); }} style={Object.assign({}, S.inp, { width: 50, textAlign: "center", padding: "3px 6px", fontSize: 12 })} /> days
+            </div>
+          </div>
+          <div style={{ overflow: "auto", borderRadius: 10, border: "1px solid #E5E7EB", maxHeight: 600 }}>
+            <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
+              <thead><tr>
+                {["Code", "Description", "R", "DOH+DOO", "On Hand", "Avg/3m", "Sug. Pal", "Pallets", ""].map(function(h) {
+                  return <th key={h} style={Object.assign({}, S.th, h === "Sug. Pal" ? { color: "#7C3AED" } : {}, (h === "Pallets" || h === "") ? { background: "#F0FDF4" } : {})}>{h}</th>;
+                })}
+              </tr></thead>
+              <tbody>{fillSuggestions.slice(0, 150).map(function(f, fi) {
+                var urgBg = f.combined === 0 ? "#FEF2F2" : f.combined <= 14 ? "#FFF7ED" : f.combined <= 30 ? "#FFFBEB" : "#FFFFFF";
+                var urgCol = f.combined === 0 ? "#DC2626" : f.combined <= 14 ? "#EA580C" : f.combined <= 30 ? "#CA8A04" : "#16A34A";
+                // Suggested pallets: bring to dohTarget days of stock
+                var dailySales = f.avgSales > 0 ? f.avgSales / 90 : 0;
+                var unitsForTarget = Math.max(0, (dohTarget * dailySales) - f.onHand - f.onOrder);
+                var sugPals = (f.unitsPerPallet > 0 && dailySales > 0) ? Math.max(1, Math.ceil(unitsForTarget / f.unitsPerPallet)) : "";
+                var palInputId = "fill-pal-" + fi;
+                return <tr key={fi} style={{ background: urgBg }}>
+                  <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, fontWeight: 600, padding: "8px 10px" })}>{f.productCode}</td>
+                  <td style={Object.assign({}, S.td, { maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", padding: "8px 10px", fontSize: 12 })} title={f.description}>{f.description}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "center", fontWeight: 700, padding: "8px 6px", fontSize: 12 })}>{f.replenClass}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "right", fontWeight: 700, color: urgCol, padding: "8px 10px" })}>{f.combined}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "right", padding: "8px 10px", fontSize: 12 })}>{f.onHand}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "right", padding: "8px 10px", fontSize: 12, color: "#9CA3AF" })}>{f.avgSales ? Math.round(f.avgSales) : "\u2014"}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "center", padding: "8px 6px", color: "#7C3AED", fontWeight: 600, fontSize: 12 })}>{sugPals || "\u2014"}</td>
+                  <td style={Object.assign({}, S.td, { width: 55, padding: "6px 4px" })}><input id={palInputId} type="number" min="1" defaultValue={sugPals || 1} style={Object.assign({}, S.inp, { width: 45, textAlign: "center", padding: "3px 4px", fontSize: 12 })} /></td>
+                  <td style={Object.assign({}, S.td, { width: 50, padding: "6px 4px" })}><button onClick={function() { var el = document.getElementById(palInputId); addFillToOrder(f, el ? el.value : 1); }} style={{ background: "#059669", color: "#fff", border: "none", borderRadius: 6, padding: "4px 8px", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>+</button></td>
+                </tr>;
+              })}</tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* RIGHT - Sticky order panel */}
+        <div style={{ width: 300, flexShrink: 0, position: "sticky", top: 16 }}>
+          {/* Truck status */}
+          {truckGroups && <div style={Object.assign({}, S.card, { marginTop: 0, marginBottom: 12 })}>
+            <div style={{ fontSize: 11, color: "#9CA3AF", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8 }}>Truck Status</div>
+            {truckGroups.filter(function(t) { return !t.isError; }).map(function(t) {
+              var pct = Math.min(100, (t.totalLbs / TARGET) * 100);
+              var barColor = t.needsFill ? "#F59E0B" : "#059669";
+              return <div key={t.label} style={{ marginBottom: 10 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, fontWeight: 500, color: "#374151", marginBottom: 3 }}><span>{t.label}</span><span>{t.totalLbs.toLocaleString(undefined, { maximumFractionDigits: 0 })} / {TARGET.toLocaleString()} lbs</span></div>
+                <div style={{ height: 8, background: "#F3F4F6", borderRadius: 4, overflow: "hidden" }}><div style={{ height: "100%", width: pct + "%", background: barColor, borderRadius: 4, transition: "width 0.3s" }} /></div>
+                {t.needsFill && <div style={{ fontSize: 10, color: "#D97706", marginTop: 2 }}>{t.remaining.toLocaleString(undefined, { maximumFractionDigits: 0 })} lbs remaining</div>}
+              </div>;
+            })}
+            <button onClick={optimizeTrucks} style={Object.assign({}, S.btn(), { width: "100%", justifyContent: "center", marginTop: 4, fontSize: 12, padding: "8px 12px" })}><IconBox /> Re-optimize</button>
+          </div>}
+
+          {!truckGroups && <div style={Object.assign({}, S.card, { marginTop: 0, marginBottom: 12, textAlign: "center", padding: 16 })}>
+            <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 8 }}>{orderItems.length} items, {totalWeight.toLocaleString(undefined, { maximumFractionDigits: 0 })} lbs total</div>
+            <button onClick={optimizeTrucks} style={Object.assign({}, S.btn(), { width: "100%", justifyContent: "center", fontSize: 12, padding: "8px 12px" })}><IconBox /> Optimize Trucks</button>
+          </div>}
+
+          {/* Fill items added */}
+          <div style={Object.assign({}, S.card, { marginTop: 0 })}>
+            <div style={{ fontSize: 11, color: "#9CA3AF", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8 }}>Added from Fill ({fillAdded.length})</div>
+            {fillAdded.length === 0 && <div style={{ fontSize: 12, color: "#D1D5DB", textAlign: "center", padding: "12px 0" }}>No fill items added yet</div>}
+            {fillAdded.map(function(a) {
+              return <div key={a.productCode} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: "1px solid #F3F4F6" }}>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: "#374151" }}>{a.productCode}</div>
+                  <div style={{ fontSize: 10, color: "#9CA3AF" }}>{a.pallets} pal \u00B7 {a.totalLbs.toLocaleString(undefined, { maximumFractionDigits: 0 })} lbs</div>
+                </div>
+                <button onClick={function() { removeFillItem(a.productCode); }} style={{ background: "transparent", border: "none", cursor: "pointer", color: "#DC2626", fontSize: 13, padding: "2px 6px" }}>{"\u2715"}</button>
+              </div>;
+            })}
+            {fillAdded.length > 0 && <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #E5E7EB", display: "flex", justifyContent: "space-between", fontSize: 12, fontWeight: 600 }}>
+              <span style={{ color: "#6B7280" }}>Fill weight:</span>
+              <span style={{ color: "#059669" }}>+{fillAdded.reduce(function(s, a) { return s + a.totalLbs; }, 0).toLocaleString(undefined, { maximumFractionDigits: 0 })} lbs</span>
+            </div>}
+          </div>
         </div>
       </div>}
       {fillSuggestions && fillSuggestions.length === 0 && <div style={Object.assign({}, S.card, { textAlign: "center", padding: 40, color: "#9CA3AF" })}>No fill candidates found for {warehouse}.</div>}
