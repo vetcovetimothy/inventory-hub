@@ -2568,6 +2568,37 @@ function TruckloaderTool(props) {
     setFillLoading(false);
   }
 
+  function addFillToOrder(f, pallets) {
+    var pals = Math.max(1, parseInt(pallets) || 1);
+    var hm = hmLookup[f.productCode] || {};
+    var cpp = hm.unitsPerPallet || 0;
+    var lpp = hm.palletWeight || 0;
+    var orderQty = pals * (cpp || 1);
+    var totalLbs = pals * lpp;
+    var newItem = {
+      inventoryID: f.productCode,
+      description: f.description,
+      caseNeed: orderQty,
+      casesPerPallet: cpp,
+      roundedPallets: pals,
+      orderQty: orderQty,
+      lbsPerPallet: lpp,
+      totalLbs: totalLbs,
+      qtyAvail: 0,
+      onPO: 0,
+      reorderPt: 0,
+      maxQty: 0,
+      inHillsMaster: !!hm.unitsPerPallet,
+    };
+    setOrderItems(orderItems.concat([newItem]));
+    setTruckGroups(null);
+    // Remove from fill suggestions
+    if (fillSuggestions) {
+      setFillSuggestions(fillSuggestions.filter(function(s) { return s.productCode !== f.productCode; }));
+    }
+    toast("Added " + f.productCode + " (" + pals + " pallet" + (pals > 1 ? "s" : "") + ") to order");
+  }
+
   // Summary stats
   var totalWeight = useMemo(function() { return orderItems.reduce(function(s, it) { return s + it.totalLbs; }, 0); }, [orderItems]);
   var totalPallets = useMemo(function() { return orderItems.reduce(function(s, it) { return s + it.roundedPallets; }, 0); }, [orderItems]);
@@ -2756,13 +2787,14 @@ function TruckloaderTool(props) {
         <div style={{ overflow: "auto", borderRadius: 10, border: "1px solid #E5E7EB", maxHeight: 500 }}>
           <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, minWidth: 800 }}>
             <thead><tr>
-              {["Product Code", "Description", "Replen", "NS Class", "Velocity", "DOH", "DOO", "DOH+DOO", "On Hand", "Pallet Wt"].map(function(h) {
-                return <th key={h} style={S.th}>{h}</th>;
+              {["Product Code", "Description", "Replen", "NS Class", "Velocity", "DOH", "DOO", "DOH+DOO", "On Hand", "Pallet Wt", "Pallets", ""].map(function(h) {
+                return <th key={h} style={Object.assign({}, S.th, h === "Pallets" || h === "" ? { background: "#F0FDF4" } : {})}>{h}</th>;
               })}
             </tr></thead>
             <tbody>{fillSuggestions.slice(0, 100).map(function(f, fi) {
               var urgBg = f.combined === 0 ? "#FEF2F2" : f.combined <= 14 ? "#FFF7ED" : f.combined <= 30 ? "#FFFBEB" : "#F0FDF4";
               var urgCol = f.combined === 0 ? "#DC2626" : f.combined <= 14 ? "#EA580C" : f.combined <= 30 ? "#CA8A04" : "#16A34A";
+              var palInputId = "fill-pal-" + fi;
               return <tr key={fi}>
                 <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 12, fontWeight: 600 })}>{f.productCode}</td>
                 <td style={Object.assign({}, S.td, { maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })} title={f.description}>{f.description}</td>
@@ -2774,6 +2806,8 @@ function TruckloaderTool(props) {
                 <td style={Object.assign({}, S.td, { textAlign: "right", fontWeight: 700, background: urgBg, color: urgCol })}>{f.combined}</td>
                 <td style={Object.assign({}, S.td, { textAlign: "right" })}>{f.onHand}</td>
                 <td style={Object.assign({}, S.td, { textAlign: "right" })}>{f.palletWeight ? f.palletWeight.toLocaleString(undefined, { maximumFractionDigits: 1 }) : "\u2014"}</td>
+                <td style={Object.assign({}, S.td, { width: 60 })}><input id={palInputId} type="number" min="1" defaultValue="1" style={Object.assign({}, S.inp, { width: 50, textAlign: "center", padding: "4px 6px" })} /></td>
+                <td style={Object.assign({}, S.td, { width: 60 })}><button onClick={function() { var el = document.getElementById(palInputId); addFillToOrder(f, el ? el.value : 1); }} style={Object.assign({}, S.btn(), { padding: "4px 12px", fontSize: 11 })}>+ Add</button></td>
               </tr>;
             })}</tbody>
           </table>
