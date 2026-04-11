@@ -2569,7 +2569,7 @@ function TruckloaderTool(props) {
       // Initialize pallet counts with suggested values
       var initPals = {};
       candidates.forEach(function(c) {
-        var daily = c.avgSales > 0 ? c.avgSales / 90 : 0;
+        var daily = c.avgSales > 0 ? c.avgSales / 30 : 0;
         var needed = Math.max(0, (dohTarget * daily) - c.onHand - c.onOrder);
         var sug = (c.unitsPerPallet > 0 && daily > 0) ? Math.max(1, Math.ceil(needed / c.unitsPerPallet)) : 1;
         initPals[c.productCode] = sug;
@@ -2817,14 +2817,14 @@ function TruckloaderTool(props) {
           <div style={{ overflow: "auto", borderRadius: 10, border: "1px solid #E5E7EB", maxHeight: 600 }}>
             <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
               <thead><tr>
-                {["Inventory ID", "Description", "R", "DOH+DOO", "On Hand", "Avg/3m", "Sug.", "Pallets", "Order Qty", "Total Lbs", ""].map(function(h) {
+                {["Inventory ID", "Description", "R", "DOH+DOO", "On Hand", "Avg/Mo", "Sug.", "Pallets", "Order Qty", "Total Lbs", ""].map(function(h) {
                   return <th key={h} style={Object.assign({}, S.th, h === "Sug." ? { color: "#7C3AED" } : {}, (h === "Pallets" || h === "Order Qty" || h === "Total Lbs" || h === "") ? { background: "#F0FDF4" } : {})}>{h}</th>;
                 })}
               </tr></thead>
               <tbody>{fillSuggestions.slice(0, 150).map(function(f, fi) {
                 var urgBg = f.combined === 0 ? "#FEF2F2" : f.combined <= 14 ? "#FFF7ED" : f.combined <= 30 ? "#FFFBEB" : "#FFFFFF";
                 var urgCol = f.combined === 0 ? "#DC2626" : f.combined <= 14 ? "#EA580C" : f.combined <= 30 ? "#CA8A04" : "#16A34A";
-                var dailySales = f.avgSales > 0 ? f.avgSales / 90 : 0;
+                var dailySales = f.avgSales > 0 ? f.avgSales / 30 : 0;
                 var unitsForTarget = Math.max(0, (dohTarget * dailySales) - f.onHand - f.onOrder);
                 var sugPals = (f.unitsPerPallet > 0 && dailySales > 0) ? Math.max(1, Math.ceil(unitsForTarget / f.unitsPerPallet)) : "";
                 var curPals = fillPals[f.productCode] || sugPals || 1;
