@@ -2624,6 +2624,26 @@ function TruckloaderTool(props) {
     toast("Removed " + productCode + " from order");
   }
 
+  function updateFillPallets(productCode, newPals) {
+    var pals = Math.max(1, parseInt(newPals) || 1);
+    var hm = hmLookup[productCode] || {};
+    var cpp = hm.unitsPerPallet || 0;
+    var lpp = hm.palletWeight || 0;
+    var orderQty = pals * (cpp || 1);
+    var totalLbs = pals * lpp;
+    // Update order items
+    setOrderItems(orderItems.map(function(it) {
+      if (it.inventoryID !== productCode) return it;
+      return Object.assign({}, it, { roundedPallets: pals, orderQty: orderQty, caseNeed: orderQty, totalLbs: totalLbs });
+    }));
+    // Update fill added tracker
+    setFillAdded(fillAdded.map(function(a) {
+      if (a.productCode !== productCode) return a;
+      return Object.assign({}, a, { pallets: pals, orderQty: orderQty, totalLbs: totalLbs });
+    }));
+    setTruckGroups(null);
+  }
+
   // Summary stats
   var totalWeight = useMemo(function() { return orderItems.reduce(function(s, it) { return s + it.totalLbs; }, 0); }, [orderItems]);
   var totalPallets = useMemo(function() { return orderItems.reduce(function(s, it) { return s + it.roundedPallets; }, 0); }, [orderItems]);
@@ -2879,11 +2899,16 @@ function TruckloaderTool(props) {
             {fillAdded.length === 0 && <div style={{ fontSize: 12, color: "#D1D5DB", textAlign: "center", padding: "12px 0" }}>No fill items added yet</div>}
             {fillAdded.map(function(a) {
               return <div key={a.productCode} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: "1px solid #F3F4F6" }}>
-                <div>
+                <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 12, fontWeight: 600, color: "#374151" }}>{a.productCode}</div>
-                  <div style={{ fontSize: 10, color: "#9CA3AF" }}>{a.pallets} pal \u00B7 {a.totalLbs.toLocaleString(undefined, { maximumFractionDigits: 0 })} lbs</div>
+                  <div style={{ fontSize: 10, color: "#9CA3AF" }}>{a.orderQty} qty \u00B7 {a.totalLbs.toLocaleString(undefined, { maximumFractionDigits: 0 })} lbs</div>
                 </div>
-                <button onClick={function() { removeFillItem(a.productCode); }} style={{ background: "transparent", border: "none", cursor: "pointer", color: "#DC2626", fontSize: 13, padding: "2px 6px" }}>{"\u2715"}</button>
+                <div style={{ display: "flex", alignItems: "center", gap: 3, flexShrink: 0 }}>
+                  <button onClick={function() { updateFillPallets(a.productCode, a.pallets - 1); }} disabled={a.pallets <= 1} style={{ background: "#F3F4F6", border: "none", borderRadius: 4, width: 20, height: 20, fontSize: 13, fontWeight: 700, cursor: a.pallets <= 1 ? "default" : "pointer", color: a.pallets <= 1 ? "#D1D5DB" : "#374151", display: "flex", alignItems: "center", justifyContent: "center" }}>{"\u2212"}</button>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: "#374151", minWidth: 18, textAlign: "center" }}>{a.pallets}</span>
+                  <button onClick={function() { updateFillPallets(a.productCode, a.pallets + 1); }} style={{ background: "#F3F4F6", border: "none", borderRadius: 4, width: 20, height: 20, fontSize: 13, fontWeight: 700, cursor: "pointer", color: "#374151", display: "flex", alignItems: "center", justifyContent: "center" }}>+</button>
+                  <button onClick={function() { removeFillItem(a.productCode); }} style={{ background: "transparent", border: "none", cursor: "pointer", color: "#DC2626", fontSize: 13, padding: "2px 4px", marginLeft: 4 }}>{"\u2715"}</button>
+                </div>
               </div>;
             })}
             {fillAdded.length > 0 && <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #E5E7EB", display: "flex", justifyContent: "space-between", fontSize: 12, fontWeight: 600 }}>
