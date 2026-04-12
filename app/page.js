@@ -2819,8 +2819,8 @@ function TruckloaderTool(props) {
           <div style={{ overflow: "auto", borderRadius: 10, border: "1px solid #E5E7EB", maxHeight: 600 }}>
             <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
               <thead><tr>
-                {["Inv ID", "Description", "R", "DOH+DOO", "OH", "D/Pal", "+Days", "Pal", "Order Qty", "Lbs", ""].map(function(h) {
-                  return <th key={h} style={Object.assign({}, S.th, { padding: "8px 5px", fontSize: 10 }, h === "+Days" ? { color: "#7C3AED" } : {}, (h === "Pal" || h === "Order Qty" || h === "Lbs" || h === "") ? { background: "#F0FDF4" } : {})}>{h}</th>;
+                {["Inv ID", "Description", "R", "DOH+DOO", "On Hand", "Days/Pal", "+Days", "Pallets", "Order Qty", "Total Lbs", ""].map(function(h) {
+                  return <th key={h} style={Object.assign({}, S.th, { padding: "8px 5px", fontSize: 10 }, h === "+Days" ? { color: "#7C3AED" } : {}, (h === "Pallets" || h === "Order Qty" || h === "Total Lbs" || h === "") ? { background: "#F0FDF4" } : {})}>{h}</th>;
                 })}
               </tr></thead>
               <tbody>{fillSuggestions.slice(0, 150).map(function(f, fi) {
