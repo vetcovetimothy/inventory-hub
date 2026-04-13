@@ -2254,92 +2254,208 @@ function HowToGuide(props) {
     return <div style={{ background: "var(--color-background-secondary)", borderRadius: 8, padding: "10px 14px", margin: "10px 0", fontSize: 12, color: "var(--color-text-secondary)", lineHeight: 1.6 }}>{p.children}</div>;
   }
 
+  var mockS = { wrap: { background: "var(--color-background-secondary)", borderRadius: 10, padding: 14, margin: "14px 0" }, miniTh: { padding: "5px 8px", fontSize: 10, color: "var(--color-text-secondary)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.3px", textAlign: "left", borderBottom: "0.5px solid var(--color-border-tertiary)" }, miniTd: { padding: "6px 8px", fontSize: 11, color: "var(--color-text-primary)", borderBottom: "0.5px solid var(--color-border-tertiary)" }, badge: function(bg, color, text) { return <span style={{ background: bg, color: color, padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 500 }}>{text}</span>; }, btn: function(bg, text) { return <span style={{ background: bg, color: "#fff", padding: "4px 10px", borderRadius: 6, fontSize: 10, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 4 }}>{text}</span>; }, label: function(text) { return <div style={{ fontSize: 10, color: "var(--color-text-tertiary)", textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: 500, marginBottom: 6 }}>{text}</div>; } };
+
   return <div>
     <p style={{ fontSize: 14, color: "var(--color-text-secondary)", marginBottom: 20, lineHeight: 1.6 }}>Click any section below to see how it works. All tools require an Acumatica login unless noted otherwise.</p>
 
     <Section id="po" title="PO tools (Brooklyn, Ohio, Hayward, GoGoMeds)" color="#3B82F6">
       <p style={{ marginBottom: 12 }}>Each warehouse tab shows today's purchase orders from Acumatica, grouped by vendor. This is your daily ordering dashboard.</p>
+
+      <div style={mockS.wrap}>
+        {mockS.label("What you'll see")}
+        <div style={{ background: "var(--color-background-primary)", borderRadius: 8, border: "0.5px solid var(--color-border-tertiary)", overflow: "hidden" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+            <thead><tr><th style={mockS.miniTh}>SKU/NDC</th><th style={mockS.miniTh}>Description</th><th style={mockS.miniTh}>Vendor</th><th style={mockS.miniTh}>Qty</th><th style={mockS.miniTh}>Flags</th></tr></thead>
+            <tbody>
+              <tr style={{ background: "#FEF2F2" }}><td style={mockS.miniTd}><code style={{ fontSize: 10 }}>54771-2320</code></td><td style={mockS.miniTd}>Apoquel Tablets 16mg</td><td style={mockS.miniTd}>Zoetis</td><td style={Object.assign({}, mockS.miniTd, { textAlign: "right" })}>12</td><td style={mockS.miniTd}>{mockS.badge("#FEF2F2", "#DC2626", "short-dating")}</td></tr>
+              <tr><td style={mockS.miniTd}><code style={{ fontSize: 10 }}>00061-4110</code></td><td style={mockS.miniTd}>Heartgard Plus Brown</td><td style={mockS.miniTd}>Boehringer</td><td style={Object.assign({}, mockS.miniTd, { textAlign: "right" })}>48</td><td style={mockS.miniTd}></td></tr>
+              <tr><td style={mockS.miniTd}><code style={{ fontSize: 10 }}>10668-1000</code></td><td style={mockS.miniTd}>Galliprant 20mg</td><td style={mockS.miniTd}>Elanco</td><td style={Object.assign({}, mockS.miniTd, { textAlign: "right" })}>18</td><td style={mockS.miniTd}></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center" }}>{mockS.btn("#3B82F6", "Generate Email Drafts")}<span style={{ fontSize: 10, color: "var(--color-text-tertiary)" }}>Creates one Gmail draft per vendor</span></div>
+      </div>
+
       <Step n="1" color="#3B82F6">Click a warehouse in the sidebar (e.g. Brooklyn, Ohio). The tool fetches today's POs from Acumatica via OData.</Step>
       <Step n="2" color="#3B82F6">Review the order table. Items are grouped by vendor with shipping cost status shown. Short-dating items are flagged red, sell-off items orange. Flagged items sort to the top.</Step>
       <Step n="3" color="#3B82F6">Add shipping notes per vendor if needed. These are saved and shared with your team via KV storage.</Step>
-      <Step n="4" color="#3B82F6">Click "Generate Email Drafts" to create one Gmail draft per vendor with the order details as an attached spreadsheet. Drafts appear in your Gmail ready to review and send.</Step>
-      <Note>Data syncs across devices. If someone else fetches POs, your view updates within 8 seconds. Shipping rules (free shipping thresholds, fee calculations) are configurable under Settings {">"} Shipping Rules.</Note>
-      <Note>For TP warehouses (Brooklyn, Ohio, Hayward), email is blocked when flagged items are present to prevent accidentally ordering short-dated product. GoGoMeds is exempt from this rule.</Note>
+      <Step n="4" color="#3B82F6">Click "Generate Email Drafts" to create one Gmail draft per vendor with the order details as an attached spreadsheet.</Step>
+      <Note>Data syncs across devices every 8 seconds. Shipping rules are configurable under Settings {">"} Shipping Rules. For TP warehouses, email is blocked when flagged items are present.</Note>
     </Section>
 
     <Section id="ndc" title="PO NDC validator" color="#06B6D4">
-      <p style={{ marginBottom: 12 }}>Validates purchase orders from vendor confirmations (PDFs or McKesson portal data) against Acumatica's NDC cross-reference to catch mismatches before importing.</p>
-      <Step n="1" color="#06B6D4">Select vendor type: "Other Vendors" for PDF confirmations, or "McKesson" for portal copy-paste.</Step>
-      <Step n="2" color="#06B6D4">For PDFs: drag and drop one or more vendor confirmation PDFs. The tool parses them server-side to extract NDCs and quantities. For McKesson: paste the order data from the portal or upload the confirmation file.</Step>
-      <Step n="3" color="#06B6D4">The tool cross-references each NDC against Acumatica's item cross-reference table. It shows matches, mismatches, and items not found in your system.</Step>
-      <Step n="4" color="#06B6D4">Review results, edit prices or quantities if needed, then download the validated CSV ready for Acumatica import.</Step>
-      <Note>The NDC lookup data is fetched from Acumatica each time. Upload a Stock Items export to also pull the correct Sales Unit (UoM) for each item.</Note>
+      <p style={{ marginBottom: 12 }}>Validates purchase orders from vendor confirmations against Acumatica's NDC cross-reference to catch mismatches before importing.</p>
+
+      <div style={mockS.wrap}>
+        {mockS.label("Result after validation")}
+        <div style={{ background: "var(--color-background-primary)", borderRadius: 8, border: "0.5px solid var(--color-border-tertiary)", overflow: "hidden" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+            <thead><tr><th style={mockS.miniTh}>NDC</th><th style={mockS.miniTh}>Description</th><th style={mockS.miniTh}>Qty</th><th style={mockS.miniTh}>Status</th></tr></thead>
+            <tbody>
+              <tr><td style={mockS.miniTd}><code style={{ fontSize: 10 }}>54771-2320-01</code></td><td style={mockS.miniTd}>Apoquel 16mg 100ct</td><td style={Object.assign({}, mockS.miniTd, { textAlign: "right" })}>6</td><td style={mockS.miniTd}>{mockS.badge("#ECFDF5", "#059669", "Matched")}</td></tr>
+              <tr><td style={mockS.miniTd}><code style={{ fontSize: 10 }}>00000-1234-56</code></td><td style={mockS.miniTd}>Unknown Item</td><td style={Object.assign({}, mockS.miniTd, { textAlign: "right" })}>2</td><td style={mockS.miniTd}>{mockS.badge("#FEF2F2", "#DC2626", "Not found")}</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>{mockS.btn("#06B6D4", "Download CSV")}</div>
+      </div>
+
+      <Step n="1" color="#06B6D4">Select vendor type: "Other Vendors" for PDF confirmations, or "McKesson" for portal data.</Step>
+      <Step n="2" color="#06B6D4">Upload vendor confirmation PDFs (drag and drop) or paste McKesson portal data. The tool extracts NDCs and quantities.</Step>
+      <Step n="3" color="#06B6D4">The tool cross-references each NDC against Acumatica. Matches, mismatches, and not-found items are shown with badges.</Step>
+      <Step n="4" color="#06B6D4">Edit prices or quantities if needed, then download the validated CSV for Acumatica import.</Step>
+      <Note>Upload a Stock Items export to also pull the correct Sales Unit (UoM) for each item.</Note>
     </Section>
 
     <Section id="cycle" title="Cycle counting" color="#14B8A6">
-      <p style={{ marginBottom: 12 }}>Compares physical inventory counts (from warehouse SFTP BOH reports or CSV uploads) against Acumatica stock levels to identify discrepancies.</p>
-      <Step n="1" color="#14B8A6">Upload or paste your physical count data: either an SFTP BOH report from the warehouse, or a CSV with NDCs and counted quantities.</Step>
-      <Step n="2" color="#14B8A6">Upload a Stock Items export from Acumatica (cached locally so you only need to do this once until the data changes).</Step>
-      <Step n="3" color="#14B8A6">Select the warehouse and click Process. The tool matches items by NDC and shows the variance between physical count and system quantity.</Step>
-      <Step n="4" color="#14B8A6">Download the discrepancy report as a CSV for review or adjustment in Acumatica.</Step>
+      <p style={{ marginBottom: 12 }}>Compares physical inventory counts against Acumatica stock levels to identify discrepancies.</p>
+
+      <div style={mockS.wrap}>
+        {mockS.label("Variance report")}
+        <div style={{ background: "var(--color-background-primary)", borderRadius: 8, border: "0.5px solid var(--color-border-tertiary)", overflow: "hidden" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+            <thead><tr><th style={mockS.miniTh}>NDC</th><th style={mockS.miniTh}>Physical</th><th style={mockS.miniTh}>System</th><th style={mockS.miniTh}>Variance</th></tr></thead>
+            <tbody>
+              <tr><td style={mockS.miniTd}><code style={{ fontSize: 10 }}>54771-2320</code></td><td style={Object.assign({}, mockS.miniTd, { textAlign: "right" })}>48</td><td style={Object.assign({}, mockS.miniTd, { textAlign: "right" })}>50</td><td style={Object.assign({}, mockS.miniTd, { textAlign: "right", color: "#DC2626", fontWeight: 600 })}>-2</td></tr>
+              <tr><td style={mockS.miniTd}><code style={{ fontSize: 10 }}>00061-4110</code></td><td style={Object.assign({}, mockS.miniTd, { textAlign: "right" })}>36</td><td style={Object.assign({}, mockS.miniTd, { textAlign: "right" })}>36</td><td style={Object.assign({}, mockS.miniTd, { textAlign: "right", color: "#059669", fontWeight: 600 })}>0</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <Step n="1" color="#14B8A6">Upload physical count data: SFTP BOH report or CSV with NDCs and counted quantities.</Step>
+      <Step n="2" color="#14B8A6">Upload a Stock Items export from Acumatica (cached locally, only re-upload when data changes).</Step>
+      <Step n="3" color="#14B8A6">Select warehouse and click Process. The tool matches items and shows the variance.</Step>
+      <Step n="4" color="#14B8A6">Download the discrepancy report as CSV for Acumatica adjustment.</Step>
     </Section>
 
     <Section id="trackers" title="Short-dating and backorder trackers" color="#E879F9">
-      <p style={{ marginBottom: 12 }}>These two tools work identically but pull different data from Acumatica.</p>
-      <p style={{ marginBottom: 8 }}><span style={{ fontWeight: 500, color: "var(--color-text-primary)" }}>Short-Dating</span> shows items approaching expiration with their best-known dating. Use it to identify products that need to be sold, returned, or disposed of before they expire.</p>
-      <p style={{ marginBottom: 12 }}><span style={{ fontWeight: 500, color: "var(--color-text-primary)" }}>Backorders</span> shows items that are backordered from vendors with recovery dates and open quantities. Use it to track when stock will be available again.</p>
+      <p style={{ marginBottom: 12 }}>These two tools work identically but track different data from Acumatica.</p>
+
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+        <div style={Object.assign({}, mockS.wrap, { flex: 1, minWidth: 200, margin: 0 })}>
+          {mockS.label("Short-dating")}
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{mockS.badge("#FFFBEB", "#D97706", "Best Dating: 06/2026")}{mockS.badge("#F5F3FF", "#7C3AED", "152 items")}</div>
+          <div style={{ fontSize: 11, color: "var(--color-text-secondary)", marginTop: 6 }}>Items approaching expiration. Flagged for sell-off, return, or disposal.</div>
+        </div>
+        <div style={Object.assign({}, mockS.wrap, { flex: 1, minWidth: 200, margin: 0 })}>
+          {mockS.label("Backorders")}
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{mockS.badge("#EFF6FF", "#2563EB", "Recovery: 05/15/2026")}{mockS.badge("#FEF2F2", "#DC2626", "23 items")}</div>
+          <div style={{ fontSize: 11, color: "var(--color-text-secondary)", marginTop: 6 }}>Backordered items with vendor recovery dates and open quantities.</div>
+        </div>
+      </div>
+
       <Step n="1" color="#E879F9">Click "Sync Data" to pull the latest data from Acumatica. Results are cached locally.</Step>
-      <Step n="2" color="#E879F9">Filter by vendor or search for specific items. Data is displayed in a sortable table.</Step>
-      <Step n="3" color="#E879F9">Click "Generate Email Drafts" to create vendor-specific email drafts asking about better dating availability (short-dating) or recovery ETA updates (backorders).</Step>
-      <Note>Both tools fetch from dedicated Acumatica Generic Inquiries that surface the relevant item status data.</Note>
+      <Step n="2" color="#E879F9">Filter by vendor or search for specific items.</Step>
+      <Step n="3" color="#E879F9">Click "Generate Email Drafts" to create vendor-specific drafts asking about better dating (short-dating) or recovery ETA updates (backorders).</Step>
     </Section>
 
     <Section id="hills" title="Hills and Pawtree tracker" color="#10B981">
-      <p style={{ marginBottom: 12 }}>Tracks all open purchase orders for Hill's and Pawtree vendors. Shows PO number, date ordered, vendor, and warehouse with editable ETA and notes fields that sync across your team.</p>
-      <Step n="1" color="#10B981">Data loads automatically from a dedicated Acumatica GI that shows open and pending-approval POs for Hill's (VID0024) and Pawtree (VID0040).</Step>
-      <Step n="2" color="#10B981">Add ETA dates and notes for each PO. These are saved to KV storage and sync with other users every 10 seconds.</Step>
-      <Step n="3" color="#10B981">Filter by vendor (Hills vs Pawtree) or warehouse (CA, NJ, Pawtree). The table color-codes POs by age.</Step>
-      <Note>PO age coloring: green = recent, yellow = 5+ days, orange = 10+ days, red = 15+ days since ordered.</Note>
+      <p style={{ marginBottom: 12 }}>Tracks all open purchase orders for Hill's and Pawtree vendors with shared ETA and notes.</p>
+
+      <div style={mockS.wrap}>
+        {mockS.label("PO tracking table")}
+        <div style={{ background: "var(--color-background-primary)", borderRadius: 8, border: "0.5px solid var(--color-border-tertiary)", overflow: "hidden" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+            <thead><tr><th style={mockS.miniTh}>PO #</th><th style={mockS.miniTh}>Vendor</th><th style={mockS.miniTh}>WH</th><th style={mockS.miniTh}>Date</th><th style={mockS.miniTh}>ETA</th><th style={mockS.miniTh}>Notes</th></tr></thead>
+            <tbody>
+              <tr><td style={mockS.miniTd}><span style={{ color: "#2563EB", fontWeight: 500 }}>PO008431</span></td><td style={mockS.miniTd}>Hill's</td><td style={mockS.miniTd}>CA</td><td style={mockS.miniTd}>4/8</td><td style={Object.assign({}, mockS.miniTd, { background: "#ECFDF5" })}>4/15</td><td style={mockS.miniTd}>On truck</td></tr>
+              <tr><td style={mockS.miniTd}><span style={{ color: "#2563EB", fontWeight: 500 }}>PO008445</span></td><td style={mockS.miniTd}>Pawtree</td><td style={mockS.miniTd}>CA</td><td style={mockS.miniTd}>4/10</td><td style={mockS.miniTd}></td><td style={mockS.miniTd}></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div style={{ fontSize: 10, color: "var(--color-text-tertiary)", marginTop: 6 }}>ETA and Notes fields are editable and sync across your team in real-time.</div>
+      </div>
+
+      <Step n="1" color="#10B981">Data loads automatically from Acumatica (open + pending approval POs for Hill's and Pawtree).</Step>
+      <Step n="2" color="#10B981">Add ETA dates and notes for each PO. Changes sync to other users every 10 seconds via KV storage.</Step>
+      <Step n="3" color="#10B981">Filter by vendor or warehouse. POs are color-coded by age: green (recent), yellow (5+ days), orange (10+), red (15+).</Step>
     </Section>
 
     <Section id="fuze" title="Fuze tracker" color="#F59E0B">
-      <p style={{ marginBottom: 12 }}>Tracks shipments processed by Fuze Health (your 3PL) across Brooklyn, Seven Hills, and Hayward warehouses. Shows PO details, tracking numbers, and received/landed status.</p>
-      <Step n="1" color="#F59E0B">Select a warehouse tab. Data loads from a connected Google Sheet that Fuze maintains.</Step>
-      <Step n="2" color="#F59E0B">Filter by vendor, search for specific POs or tracking numbers, or filter by status (pending, received, landed).</Step>
-      <Step n="3" color="#F59E0B">Stats cards at the top show total items, received count, landed count, and pending count for a quick overview.</Step>
-      <Note>This tool does not require Acumatica login. Data comes directly from the shared Fuze tracking sheets.</Note>
+      <p style={{ marginBottom: 12 }}>Tracks shipments processed by Fuze Health (your 3PL) across all warehouses.</p>
+
+      <div style={mockS.wrap}>
+        {mockS.label("Status overview")}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <div style={{ background: "var(--color-background-primary)", borderRadius: 8, border: "0.5px solid var(--color-border-tertiary)", padding: "8px 14px", flex: 1, minWidth: 80 }}><div style={{ fontSize: 16, fontWeight: 600, color: "#F59E0B" }}>47</div><div style={{ fontSize: 10, color: "var(--color-text-secondary)" }}>Total</div></div>
+          <div style={{ background: "var(--color-background-primary)", borderRadius: 8, border: "0.5px solid var(--color-border-tertiary)", padding: "8px 14px", flex: 1, minWidth: 80 }}><div style={{ fontSize: 16, fontWeight: 600, color: "#059669" }}>31</div><div style={{ fontSize: 10, color: "var(--color-text-secondary)" }}>Received</div></div>
+          <div style={{ background: "var(--color-background-primary)", borderRadius: 8, border: "0.5px solid var(--color-border-tertiary)", padding: "8px 14px", flex: 1, minWidth: 80 }}><div style={{ fontSize: 16, fontWeight: 600, color: "#3B82F6" }}>28</div><div style={{ fontSize: 10, color: "var(--color-text-secondary)" }}>Landed</div></div>
+          <div style={{ background: "var(--color-background-primary)", borderRadius: 8, border: "0.5px solid var(--color-border-tertiary)", padding: "8px 14px", flex: 1, minWidth: 80 }}><div style={{ fontSize: 16, fontWeight: 600, color: "#DC2626" }}>16</div><div style={{ fontSize: 10, color: "var(--color-text-secondary)" }}>Pending</div></div>
+        </div>
+      </div>
+
+      <Step n="1" color="#F59E0B">Select a warehouse tab (Brooklyn, Seven Hills, Hayward). Data loads from a connected Google Sheet.</Step>
+      <Step n="2" color="#F59E0B">Filter by vendor, search by PO or tracking number, or filter by status (pending, received, landed).</Step>
+      <Step n="3" color="#F59E0B">Stats cards show totals at a glance.</Step>
+      <Note>This tool does not require Acumatica login. Data comes directly from shared Fuze tracking sheets.</Note>
     </Section>
 
     <Section id="truck" title="Truckloader (Hills)" color="#D97706">
-      <p style={{ marginBottom: 12 }}>Automates the entire Hill's truck ordering workflow: pull replenishment needs from Acumatica, calculate pallet quantities, optimize items into 42,500 lb trucks, find fill items from Netstock, and export CSVs for import.</p>
+      <p style={{ marginBottom: 12 }}>Automates the entire Hill's truck ordering workflow: pull replenishment needs, calculate pallets, optimize into 42,500 lb trucks, find fill items, and export CSVs.</p>
 
-      <div style={{ fontWeight: 500, color: "var(--color-text-primary)", marginTop: 16, marginBottom: 6, fontSize: 13 }}>Data sources</div>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
         <span style={{ background: "#E1F5EE", color: "#085041", padding: "3px 10px", borderRadius: 6, fontSize: 11, fontWeight: 500 }}>Acumatica GI (live)</span>
         <span style={{ background: "#FAEEDA", color: "#633806", padding: "3px 10px", borderRadius: 6, fontSize: 11, fontWeight: 500 }}>Hills Master (upload once)</span>
         <span style={{ background: "#FAECE7", color: "#712B13", padding: "3px 10px", borderRadius: 6, fontSize: 11, fontWeight: 500 }}>Netstock DOH (fill only)</span>
       </div>
 
-      <div style={{ fontWeight: 500, color: "var(--color-text-primary)", marginTop: 16, marginBottom: 6, fontSize: 13 }}>Workflow</div>
-      <Step n="1" color="#D97706">Upload Hills Master spreadsheet (first time only, saved to cloud storage). This provides pallet weights and cases per pallet for every Hill's item.</Step>
-      <Step n="2" color="#D97706">Select warehouse (HILL-CP-CA or HILL-CP-NJ) and click Fetch Replenishment. The tool queries a custom Acumatica GI that finds items below reorder point, then filters client-side using the formula: QtyAvail + OnPO {"<="} ReorderPoint to match Prepare Replenishment exactly.</Step>
-      <Step n="3" color="#D97706">The order table auto-calculates: Case Need = MaxQty - QtyAvail - OnPO, rounded up to full pallets using Hills Master data. Review quantities, edit Case Need if needed.</Step>
-      <Step n="4" color="#D97706">Click Optimize Trucks. The bin-packing algorithm sorts items heaviest-first, then fits each into the truck with the least remaining space. Target is 42,500 lbs per truck. Items over one truck's capacity are automatically split by pallet count.</Step>
-      <Step n="5" color="#D97706">If a truck is under 35,000 lbs, use Fill Suggestions. Upload a Netstock DOH export, click Build Suggestions. The tool cross-references Acumatica's Whse Replenish for replenishment class (A/B/C only), excludes already-ordered items, and sorts by DOH+DOO ascending.</Step>
-      <Step n="6" color="#D97706">The fill page shows a split layout: suggestions on the left with Days/Pal and +Days columns for easy mental math, and a sticky panel on the right showing truck status and items you've added. Adjust pallets, click + to add, then re-optimize.</Step>
-      <Step n="7" color="#D97706">Export CSVs per truck (Inventory ID, Warehouse, Order Qty format) for Acumatica import.</Step>
+      <div style={mockS.wrap}>
+        {mockS.label("Truck optimization result")}
+        <div style={{ marginBottom: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}><span style={{ fontSize: 11, color: "var(--color-text-secondary)", minWidth: 50 }}>Truck 1</span><div style={{ flex: 1, height: 16, background: "var(--color-background-primary)", borderRadius: 3, border: "0.5px solid var(--color-border-tertiary)", overflow: "hidden" }}><div style={{ height: "100%", width: "92%", background: "#059669", borderRadius: 3 }} /></div><span style={{ fontSize: 10, fontWeight: 500, color: "#059669" }}>39,100 lbs</span></div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}><span style={{ fontSize: 11, color: "var(--color-text-secondary)", minWidth: 50 }}>Truck 2</span><div style={{ flex: 1, height: 16, background: "var(--color-background-primary)", borderRadius: 3, border: "0.5px solid var(--color-border-tertiary)", overflow: "hidden" }}><div style={{ height: "100%", width: "85%", background: "#059669", borderRadius: 3 }} /></div><span style={{ fontSize: 10, fontWeight: 500, color: "#059669" }}>36,200 lbs</span></div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}><span style={{ fontSize: 11, color: "var(--color-text-secondary)", minWidth: 50 }}>Truck 3</span><div style={{ flex: 1, height: 16, background: "var(--color-background-primary)", borderRadius: 3, border: "0.5px solid var(--color-border-tertiary)", overflow: "hidden" }}><div style={{ height: "100%", width: "21%", background: "#D97706", borderRadius: 3 }} /></div><span style={{ fontSize: 10, fontWeight: 500, color: "#D97706" }}>9,100 lbs</span></div>
+        </div>
+        <div style={{ fontSize: 10, color: "var(--color-text-tertiary)" }}>Amber = under 35,000 lbs, needs fill items. Green = good to go.</div>
+      </div>
 
-      <div style={{ fontWeight: 500, color: "var(--color-text-primary)", marginTop: 16, marginBottom: 6, fontSize: 13 }}>The Acumatica GI</div>
-      <Note>The "PURCH - Replenishment Needs" GI joins INItemSite (reorder settings), INSiteStatus (live stock), and InventoryItem (descriptions). Conditions: QtyAvail {"<="} MinQty AND MinQty {">"} 0 AND ItemStatus = Active AND warehouse is HILL-CP-CA or NJ. Exposed via OData. The GI returns all items below reorder point (~66); the website further filters to ~37 that genuinely need ordering by accounting for stock already on PO.</Note>
+      <div style={mockS.wrap}>
+        {mockS.label("Fill suggestions (split layout)")}
+        <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ flex: 1, background: "var(--color-background-primary)", borderRadius: 8, border: "0.5px solid var(--color-border-tertiary)", padding: 8 }}>
+            <div style={{ fontSize: 10, fontWeight: 500, color: "var(--color-text-secondary)", marginBottom: 4 }}>Suggestions table</div>
+            <div style={{ display: "flex", gap: 4, fontSize: 9, color: "var(--color-text-tertiary)", marginBottom: 4 }}>
+              <span>Inv ID</span><span>|</span><span>DOH+DOO</span><span>|</span><span style={{ color: "#7C3AED" }}>+Days</span><span>|</span><span style={{ color: "#059669" }}>Order Qty</span><span>|</span><span>Lbs</span><span>|</span><span style={{ background: "#059669", color: "#fff", padding: "0 4px", borderRadius: 3 }}>+</span>
+            </div>
+            <div style={{ fontSize: 9, color: "var(--color-text-tertiary)" }}>132 items sorted by urgency</div>
+          </div>
+          <div style={{ width: 100, background: "var(--color-background-primary)", borderRadius: 8, border: "0.5px solid var(--color-border-tertiary)", padding: 8 }}>
+            <div style={{ fontSize: 10, fontWeight: 500, color: "var(--color-text-secondary)", marginBottom: 4 }}>Truck status</div>
+            <div style={{ height: 6, background: "#E5E7EB", borderRadius: 3, marginBottom: 4 }}><div style={{ height: "100%", width: "65%", background: "#D97706", borderRadius: 3 }} /></div>
+            <div style={{ fontSize: 10, fontWeight: 500, color: "var(--color-text-secondary)", marginBottom: 2 }}>Added (4)</div>
+            <div style={{ fontSize: 9, color: "var(--color-text-tertiary)" }}>+12,400 lbs</div>
+          </div>
+        </div>
+      </div>
+
+      <Step n="1" color="#D97706">Upload Hills Master spreadsheet (first time only, saved to cloud storage).</Step>
+      <Step n="2" color="#D97706">Select warehouse and click Fetch Replenishment. Queries Acumatica GI, filters client-side: QtyAvail + OnPO {"<="} ReorderPoint.</Step>
+      <Step n="3" color="#D97706">Order table auto-calculates: Case Need = MaxQty - QtyAvail - OnPO, rounded to full pallets.</Step>
+      <Step n="4" color="#D97706">Click Optimize Trucks. Best-fit decreasing bin-packing into 42,500 lb trucks. Oversized items auto-split.</Step>
+      <Step n="5" color="#D97706">Fill Suggestions: upload Netstock DOH, cross-reference Whse Replenish (A/B/C only). Days/Pal and +Days columns for quick mental math.</Step>
+      <Step n="6" color="#D97706">Export CSVs per truck for Acumatica import.</Step>
+
+      <Note>The GI joins INItemSite + INSiteStatus + InventoryItem. Returns items below reorder for HILL-CP-CA and NJ. The website filters further by subtracting OnPO to match Prepare Replenishment exactly.</Note>
     </Section>
 
     <Section id="rules" title="Shipping rules" color="#6B7280">
-      <p style={{ marginBottom: 12 }}>Configure vendor-specific shipping cost rules used by the PO tools. Rules are saved in your browser.</p>
-      <Note>Rule format examples: "message:Free Shipping" for always-free vendors, "min:5000; message:Free Shipping; else:Not Free Shipping" for minimum order thresholds, "range:0-99.99=15%; range:100-1499.99=8%; min:1500; message:Free Shipping" for tiered percentage-based fees. Rules can be added, edited, or removed per vendor.</Note>
+      <p style={{ marginBottom: 12 }}>Configure vendor-specific shipping cost rules used by the PO tools.</p>
+
+      <div style={mockS.wrap}>
+        {mockS.label("Rule format examples")}
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}><code style={{ fontSize: 10, background: "var(--color-background-primary)", padding: "2px 6px", borderRadius: 4, border: "0.5px solid var(--color-border-tertiary)" }}>message:Free Shipping</code><span style={{ fontSize: 10, color: "var(--color-text-tertiary)" }}>Always free</span></div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}><code style={{ fontSize: 10, background: "var(--color-background-primary)", padding: "2px 6px", borderRadius: 4, border: "0.5px solid var(--color-border-tertiary)" }}>min:5000; message:Free; else:Not Free</code><span style={{ fontSize: 10, color: "var(--color-text-tertiary)" }}>Minimum threshold</span></div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}><code style={{ fontSize: 10, background: "var(--color-background-primary)", padding: "2px 6px", borderRadius: 4, border: "0.5px solid var(--color-border-tertiary)" }}>range:0-99.99=15%; min:1500</code><span style={{ fontSize: 10, color: "var(--color-text-tertiary)" }}>Tiered fees</span></div>
+        </div>
+      </div>
+
+      <Note>Rules are saved in your browser. Add, edit, or remove per vendor. Use "Reset to Defaults" to restore the original set.</Note>
     </Section>
   </div>;
 }
-
 
 /* ═══════ TRUCKLOADER TOOL ═══════ */
 function TruckloaderTool(props) {
