@@ -2220,6 +2220,127 @@ function FuzeTracker(props) {
   </div>;
 }
 
+/* ═══════ HOW-TO GUIDE ═══════ */
+function HowToGuide(props) {
+  var toast = props.toast;
+  var TOOL_COLOR = "#6B7280";
+  var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
+  var _open = useState(null), openSection = _open[0], setOpen = _open[1];
+
+  function toggle(id) { setOpen(openSection === id ? null : id); }
+
+  function Section(p) {
+    var isOpen = openSection === p.id;
+    return <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden", marginBottom: 12 })}>
+      <div onClick={function() { toggle(p.id); }} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", cursor: "pointer", background: isOpen ? "var(--color-background-secondary)" : "transparent" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ width: 8, height: 8, borderRadius: "50%", background: p.color, flexShrink: 0 }} />
+          <span style={{ fontSize: 15, fontWeight: 500, color: "var(--color-text-primary)" }}>{p.title}</span>
+        </div>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-text-secondary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transition: "transform 0.2s", transform: isOpen ? "rotate(180deg)" : "rotate(0deg)" }}><polyline points="6 9 12 15 18 9" /></svg>
+      </div>
+      {isOpen && <div style={{ padding: "0 20px 20px", fontSize: 13, color: "var(--color-text-secondary)", lineHeight: 1.7 }}>{p.children}</div>}
+    </div>;
+  }
+
+  function Step(p) {
+    return <div style={{ display: "flex", gap: 10, margin: "10px 0" }}>
+      <div style={{ width: 22, height: 22, borderRadius: "50%", background: p.color || "#E5E7EB", color: p.color ? "#fff" : "#6B7280", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 600, flexShrink: 0, marginTop: 1 }}>{p.n}</div>
+      <div style={{ fontSize: 13, color: "var(--color-text-primary)", lineHeight: 1.6 }}>{p.children}</div>
+    </div>;
+  }
+
+  function Note(p) {
+    return <div style={{ background: "var(--color-background-secondary)", borderRadius: 8, padding: "10px 14px", margin: "10px 0", fontSize: 12, color: "var(--color-text-secondary)", lineHeight: 1.6 }}>{p.children}</div>;
+  }
+
+  return <div>
+    <p style={{ fontSize: 14, color: "var(--color-text-secondary)", marginBottom: 20, lineHeight: 1.6 }}>Click any section below to see how it works. All tools require an Acumatica login unless noted otherwise.</p>
+
+    <Section id="po" title="PO tools (Brooklyn, Ohio, Hayward, GoGoMeds)" color="#3B82F6">
+      <p style={{ marginBottom: 12 }}>Each warehouse tab shows today's purchase orders from Acumatica, grouped by vendor. This is your daily ordering dashboard.</p>
+      <Step n="1" color="#3B82F6">Click a warehouse in the sidebar (e.g. Brooklyn, Ohio). The tool fetches today's POs from Acumatica via OData.</Step>
+      <Step n="2" color="#3B82F6">Review the order table. Items are grouped by vendor with shipping cost status shown. Short-dating items are flagged red, sell-off items orange. Flagged items sort to the top.</Step>
+      <Step n="3" color="#3B82F6">Add shipping notes per vendor if needed. These are saved and shared with your team via KV storage.</Step>
+      <Step n="4" color="#3B82F6">Click "Generate Email Drafts" to create one Gmail draft per vendor with the order details as an attached spreadsheet. Drafts appear in your Gmail ready to review and send.</Step>
+      <Note>Data syncs across devices. If someone else fetches POs, your view updates within 8 seconds. Shipping rules (free shipping thresholds, fee calculations) are configurable under Settings {">"} Shipping Rules.</Note>
+      <Note>For TP warehouses (Brooklyn, Ohio, Hayward), email is blocked when flagged items are present to prevent accidentally ordering short-dated product. GoGoMeds is exempt from this rule.</Note>
+    </Section>
+
+    <Section id="ndc" title="PO NDC validator" color="#06B6D4">
+      <p style={{ marginBottom: 12 }}>Validates purchase orders from vendor confirmations (PDFs or McKesson portal data) against Acumatica's NDC cross-reference to catch mismatches before importing.</p>
+      <Step n="1" color="#06B6D4">Select vendor type: "Other Vendors" for PDF confirmations, or "McKesson" for portal copy-paste.</Step>
+      <Step n="2" color="#06B6D4">For PDFs: drag and drop one or more vendor confirmation PDFs. The tool parses them server-side to extract NDCs and quantities. For McKesson: paste the order data from the portal or upload the confirmation file.</Step>
+      <Step n="3" color="#06B6D4">The tool cross-references each NDC against Acumatica's item cross-reference table. It shows matches, mismatches, and items not found in your system.</Step>
+      <Step n="4" color="#06B6D4">Review results, edit prices or quantities if needed, then download the validated CSV ready for Acumatica import.</Step>
+      <Note>The NDC lookup data is fetched from Acumatica each time. Upload a Stock Items export to also pull the correct Sales Unit (UoM) for each item.</Note>
+    </Section>
+
+    <Section id="cycle" title="Cycle counting" color="#14B8A6">
+      <p style={{ marginBottom: 12 }}>Compares physical inventory counts (from warehouse SFTP BOH reports or CSV uploads) against Acumatica stock levels to identify discrepancies.</p>
+      <Step n="1" color="#14B8A6">Upload or paste your physical count data: either an SFTP BOH report from the warehouse, or a CSV with NDCs and counted quantities.</Step>
+      <Step n="2" color="#14B8A6">Upload a Stock Items export from Acumatica (cached locally so you only need to do this once until the data changes).</Step>
+      <Step n="3" color="#14B8A6">Select the warehouse and click Process. The tool matches items by NDC and shows the variance between physical count and system quantity.</Step>
+      <Step n="4" color="#14B8A6">Download the discrepancy report as a CSV for review or adjustment in Acumatica.</Step>
+    </Section>
+
+    <Section id="trackers" title="Short-dating and backorder trackers" color="#E879F9">
+      <p style={{ marginBottom: 12 }}>These two tools work identically but pull different data from Acumatica.</p>
+      <p style={{ marginBottom: 8 }}><span style={{ fontWeight: 500, color: "var(--color-text-primary)" }}>Short-Dating</span> shows items approaching expiration with their best-known dating. Use it to identify products that need to be sold, returned, or disposed of before they expire.</p>
+      <p style={{ marginBottom: 12 }}><span style={{ fontWeight: 500, color: "var(--color-text-primary)" }}>Backorders</span> shows items that are backordered from vendors with recovery dates and open quantities. Use it to track when stock will be available again.</p>
+      <Step n="1" color="#E879F9">Click "Sync Data" to pull the latest data from Acumatica. Results are cached locally.</Step>
+      <Step n="2" color="#E879F9">Filter by vendor or search for specific items. Data is displayed in a sortable table.</Step>
+      <Step n="3" color="#E879F9">Click "Generate Email Drafts" to create vendor-specific email drafts asking about better dating availability (short-dating) or recovery ETA updates (backorders).</Step>
+      <Note>Both tools fetch from dedicated Acumatica Generic Inquiries that surface the relevant item status data.</Note>
+    </Section>
+
+    <Section id="hills" title="Hills and Pawtree tracker" color="#10B981">
+      <p style={{ marginBottom: 12 }}>Tracks all open purchase orders for Hill's and Pawtree vendors. Shows PO number, date ordered, vendor, and warehouse with editable ETA and notes fields that sync across your team.</p>
+      <Step n="1" color="#10B981">Data loads automatically from a dedicated Acumatica GI that shows open and pending-approval POs for Hill's (VID0024) and Pawtree (VID0040).</Step>
+      <Step n="2" color="#10B981">Add ETA dates and notes for each PO. These are saved to KV storage and sync with other users every 10 seconds.</Step>
+      <Step n="3" color="#10B981">Filter by vendor (Hills vs Pawtree) or warehouse (CA, NJ, Pawtree). The table color-codes POs by age.</Step>
+      <Note>PO age coloring: green = recent, yellow = 5+ days, orange = 10+ days, red = 15+ days since ordered.</Note>
+    </Section>
+
+    <Section id="fuze" title="Fuze tracker" color="#F59E0B">
+      <p style={{ marginBottom: 12 }}>Tracks shipments processed by Fuze Health (your 3PL) across Brooklyn, Seven Hills, and Hayward warehouses. Shows PO details, tracking numbers, and received/landed status.</p>
+      <Step n="1" color="#F59E0B">Select a warehouse tab. Data loads from a connected Google Sheet that Fuze maintains.</Step>
+      <Step n="2" color="#F59E0B">Filter by vendor, search for specific POs or tracking numbers, or filter by status (pending, received, landed).</Step>
+      <Step n="3" color="#F59E0B">Stats cards at the top show total items, received count, landed count, and pending count for a quick overview.</Step>
+      <Note>This tool does not require Acumatica login. Data comes directly from the shared Fuze tracking sheets.</Note>
+    </Section>
+
+    <Section id="truck" title="Truckloader (Hills)" color="#D97706">
+      <p style={{ marginBottom: 12 }}>Automates the entire Hill's truck ordering workflow: pull replenishment needs from Acumatica, calculate pallet quantities, optimize items into 42,500 lb trucks, find fill items from Netstock, and export CSVs for import.</p>
+
+      <div style={{ fontWeight: 500, color: "var(--color-text-primary)", marginTop: 16, marginBottom: 6, fontSize: 13 }}>Data sources</div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+        <span style={{ background: "#E1F5EE", color: "#085041", padding: "3px 10px", borderRadius: 6, fontSize: 11, fontWeight: 500 }}>Acumatica GI (live)</span>
+        <span style={{ background: "#FAEEDA", color: "#633806", padding: "3px 10px", borderRadius: 6, fontSize: 11, fontWeight: 500 }}>Hills Master (upload once)</span>
+        <span style={{ background: "#FAECE7", color: "#712B13", padding: "3px 10px", borderRadius: 6, fontSize: 11, fontWeight: 500 }}>Netstock DOH (fill only)</span>
+      </div>
+
+      <div style={{ fontWeight: 500, color: "var(--color-text-primary)", marginTop: 16, marginBottom: 6, fontSize: 13 }}>Workflow</div>
+      <Step n="1" color="#D97706">Upload Hills Master spreadsheet (first time only, saved to cloud storage). This provides pallet weights and cases per pallet for every Hill's item.</Step>
+      <Step n="2" color="#D97706">Select warehouse (HILL-CP-CA or HILL-CP-NJ) and click Fetch Replenishment. The tool queries a custom Acumatica GI that finds items below reorder point, then filters client-side using the formula: QtyAvail + OnPO {"<="} ReorderPoint to match Prepare Replenishment exactly.</Step>
+      <Step n="3" color="#D97706">The order table auto-calculates: Case Need = MaxQty - QtyAvail - OnPO, rounded up to full pallets using Hills Master data. Review quantities, edit Case Need if needed.</Step>
+      <Step n="4" color="#D97706">Click Optimize Trucks. The bin-packing algorithm sorts items heaviest-first, then fits each into the truck with the least remaining space. Target is 42,500 lbs per truck. Items over one truck's capacity are automatically split by pallet count.</Step>
+      <Step n="5" color="#D97706">If a truck is under 35,000 lbs, use Fill Suggestions. Upload a Netstock DOH export, click Build Suggestions. The tool cross-references Acumatica's Whse Replenish for replenishment class (A/B/C only), excludes already-ordered items, and sorts by DOH+DOO ascending.</Step>
+      <Step n="6" color="#D97706">The fill page shows a split layout: suggestions on the left with Days/Pal and +Days columns for easy mental math, and a sticky panel on the right showing truck status and items you've added. Adjust pallets, click + to add, then re-optimize.</Step>
+      <Step n="7" color="#D97706">Export CSVs per truck (Inventory ID, Warehouse, Order Qty format) for Acumatica import.</Step>
+
+      <div style={{ fontWeight: 500, color: "var(--color-text-primary)", marginTop: 16, marginBottom: 6, fontSize: 13 }}>The Acumatica GI</div>
+      <Note>The "PURCH - Replenishment Needs" GI joins INItemSite (reorder settings), INSiteStatus (live stock), and InventoryItem (descriptions). Conditions: QtyAvail {"<="} MinQty AND MinQty {">"} 0 AND ItemStatus = Active AND warehouse is HILL-CP-CA or NJ. Exposed via OData. The GI returns all items below reorder point (~66); the website further filters to ~37 that genuinely need ordering by accounting for stock already on PO.</Note>
+    </Section>
+
+    <Section id="rules" title="Shipping rules" color="#6B7280">
+      <p style={{ marginBottom: 12 }}>Configure vendor-specific shipping cost rules used by the PO tools. Rules are saved in your browser.</p>
+      <Note>Rule format examples: "message:Free Shipping" for always-free vendors, "min:5000; message:Free Shipping; else:Not Free Shipping" for minimum order thresholds, "range:0-99.99=15%; range:100-1499.99=8%; min:1500; message:Free Shipping" for tiered percentage-based fees. Rules can be added, edited, or removed per vendor.</Note>
+    </Section>
+  </div>;
+}
+
+
 /* ═══════ TRUCKLOADER TOOL ═══════ */
 function TruckloaderTool(props) {
   var toast = props.toast, ok = props.ok, lp = props.lp, cred = props.cred;
@@ -3053,8 +3174,8 @@ export default function Hub() {
   );
 
   var isWH = page in WH;
-  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "po-import" ? "#06B6D4" : page === "cycle-count" ? "#14B8A6" : page === "fuze-tracker" ? "#F59E0B" : page === "hills-pawtree" ? "#10B981" : page === "truckloader" ? "#D97706" : "#3B82F6";
-  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "po-import" ? "PO NDC Validator" : page === "cycle-count" ? "Cycle Counting" : page === "fuze-tracker" ? "Fuze Tracker" : page === "hills-pawtree" ? "Hills & Pawtree Tracker" : page === "truckloader" ? "Truckloader" : showLogin ? "Login" : "Shipping Rules";
+  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "po-import" ? "#06B6D4" : page === "cycle-count" ? "#14B8A6" : page === "fuze-tracker" ? "#F59E0B" : page === "hills-pawtree" ? "#10B981" : page === "truckloader" ? "#D97706" : page === "how-to" ? "#6B7280" : "#3B82F6";
+  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "po-import" ? "PO NDC Validator" : page === "cycle-count" ? "Cycle Counting" : page === "fuze-tracker" ? "Fuze Tracker" : page === "hills-pawtree" ? "Hills & Pawtree Tracker" : page === "truckloader" ? "Truckloader" : page === "how-to" ? "How-To Guide" : showLogin ? "Login" : "Shipping Rules";
 
   function SideLink(p) {
     var active = page === p.id && !showLogin;
@@ -3093,6 +3214,7 @@ export default function Hub() {
         <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 8 }}>
           <div style={{ padding: "8px 20px" }}><span style={{ fontSize: 10, fontWeight: 500, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "1px" }}>Settings</span></div>
           <div onClick={function() { setPagePersist("rules"); setShowLogin(false); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", margin: "1px 12px", fontSize: 13, cursor: "pointer", fontWeight: page === "rules" && !showLogin ? 500 : 400, color: page === "rules" && !showLogin ? "#93bbfc" : "rgba(255,255,255,0.55)", background: page === "rules" && !showLogin ? "rgba(96,165,250,0.15)" : "transparent", borderRadius: 8 }}><IconTruck /> Shipping Rules</div>
+          <div onClick={function() { setPagePersist("how-to"); setShowLogin(false); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", margin: "1px 12px", fontSize: 13, cursor: "pointer", fontWeight: page === "how-to" && !showLogin ? 500 : 400, color: page === "how-to" && !showLogin ? "#93bbfc" : "rgba(255,255,255,0.55)", background: page === "how-to" && !showLogin ? "rgba(96,165,250,0.15)" : "transparent", borderRadius: 8 }}><IconCSV /> How-To Guide</div>
         </div>
         <div style={{ flex: 1 }} />
         <div style={{ padding: "0 12px" }}>
@@ -3170,6 +3292,7 @@ export default function Hub() {
           {!showLogin && page === "fuze-tracker" && <FuzeTracker toast={showToast} />}
           {!showLogin && page === "hills-pawtree" && <HillsTracker toast={showToast} ok={ok} lp={promptLogin} cred={cred} />}
           {!showLogin && page === "truckloader" && <TruckloaderTool toast={showToast} ok={ok} lp={promptLogin} cred={cred} />}
+          {!showLogin && page === "how-to" && <HowToGuide toast={showToast} />}
         </div>
       </div>
 
