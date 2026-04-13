@@ -2709,7 +2709,7 @@ function TruckloaderTool(props) {
     {orderItems.length > 0 && <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
       <button onClick={function() { setStep("order"); }} style={S.pill(step === "order", TOOL_COLOR)}>Order Table</button>
       <button onClick={function() { if (truckGroups) setStep("trucks"); else toast("Run Optimize Trucks first", "info"); }} style={S.pill(step === "trucks", "#059669")}>Truck Assignments{truckGroups ? " (" + truckGroups.filter(function(t) { return !t.isError; }).length + ")" : ""}</button>
-      {hasFillFlag && <button onClick={function() { setStep("fill"); }} style={S.pill(step === "fill", "#7C3AED")}>Fill Suggestions</button>}
+      <button onClick={function() { setStep("fill"); }} style={S.pill(step === "fill", "#7C3AED")}>Fill Suggestions</button>
     </div>}
 
     {/* ORDER TABLE */}
@@ -2901,7 +2901,7 @@ function TruckloaderTool(props) {
               return <div key={a.productCode} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: "1px solid #F3F4F6" }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 12, fontWeight: 600, color: "#374151" }}>{a.productCode}</div>
-                  <div style={{ fontSize: 10, color: "#9CA3AF" }}>{a.orderQty} qty \u00B7 {a.totalLbs.toLocaleString(undefined, { maximumFractionDigits: 0 })} lbs</div>
+                  <div style={{ fontSize: 10, color: "#9CA3AF" }}>{a.orderQty} qty {"\u00B7"} {a.totalLbs.toLocaleString(undefined, { maximumFractionDigits: 0 })} lbs</div>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 3, flexShrink: 0 }}>
                   <button onClick={function() { updateFillPallets(a.productCode, a.pallets - 1); }} disabled={a.pallets <= 1} style={{ background: "#F3F4F6", border: "none", borderRadius: 4, width: 20, height: 20, fontSize: 13, fontWeight: 700, cursor: a.pallets <= 1 ? "default" : "pointer", color: a.pallets <= 1 ? "#D1D5DB" : "#374151", display: "flex", alignItems: "center", justifyContent: "center" }}>{"\u2212"}</button>
