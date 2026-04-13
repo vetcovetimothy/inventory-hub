@@ -2852,7 +2852,6 @@ function TruckloaderTool(props) {
       isFill: true,
     };
     setOrderItems(orderItems.concat([newItem]));
-    setTruckGroups(null);
     setFillAdded(fillAdded.concat([{ productCode: f.productCode, description: f.description, pallets: pals, orderQty: orderQty, totalLbs: totalLbs }]));
     if (fillSuggestions) {
       setFillSuggestions(fillSuggestions.filter(function(s) { return s.productCode !== f.productCode; }));
@@ -2862,7 +2861,6 @@ function TruckloaderTool(props) {
 
   function removeFillItem(productCode) {
     setOrderItems(orderItems.filter(function(it) { return it.inventoryID !== productCode; }));
-    setTruckGroups(null);
     var removed = fillAdded.find(function(a) { return a.productCode === productCode; });
     setFillAdded(fillAdded.filter(function(a) { return a.productCode !== productCode; }));
     // Add it back to suggestions if we still have them
@@ -2887,7 +2885,6 @@ function TruckloaderTool(props) {
       if (a.productCode !== productCode) return a;
       return Object.assign({}, a, { pallets: pals, orderQty: orderQty, totalLbs: totalLbs });
     }));
-    setTruckGroups(null);
   }
 
   // Summary stats
