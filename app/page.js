@@ -1603,16 +1603,21 @@ function POImportTool(props) {
     if (!ok) { lp(); return; }
     setLoading(true); setError(null); setResults([]); setMckWarnings([]);
     try {
-      // Step 1: Parse PDFs via server
-      var parseResp = await fetch("/api/po-import", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pdfs: pdfs }),
-      });
-      var parseJson = await parseResp.json();
-      if (!parseResp.ok) throw new Error(parseJson.error || "Parse failed");
-      if (parseJson.error) throw new Error(parseJson.error);
-      var pdfItems = parseJson.items || [];
+      // Step 1: Parse each PDF separately to avoid text extraction state issues
+      var pdfItems = [];
+      for (var pi = 0; pi < pdfs.length; pi++) {
+        var parseResp = await fetch("/api/po-import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pdfs: [pdfs[pi]] }),
+        });
+        var parseJson = await parseResp.json();
+        if (!parseResp.ok) throw new Error(parseJson.error || "Parse failed for " + pdfs[pi].name);
+        if (parseJson.error) throw new Error(parseJson.error);
+        var items = parseJson.items || [];
+        items.forEach(function(item) { item.sourceFile = pdfs[pi].name; });
+        pdfItems = pdfItems.concat(items);
+      }
       if (pdfItems.length === 0) throw new Error("No items found. The PDF parser returned 0 NDCs. Check that your PDFs have the standard PO format.");
 
       // Step 2: Fetch NDC map from Acumatica
