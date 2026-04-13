@@ -2259,6 +2259,125 @@ function HowToGuide(props) {
     return <div style={{ background: "var(--color-background-secondary)", borderRadius: 8, padding: "10px 14px", margin: "10px 0", fontSize: 12, color: "var(--color-text-secondary)", lineHeight: 1.6 }}>{p.children}</div>;
   }
 
+  function TruckloaderWalkthrough() {
+    var _wt = useState(0), wtStep = _wt[0], setWtStep = _wt[1];
+    var wtS = { card: { background: "var(--color-background-secondary)", borderRadius: 8, padding: 12, margin: "8px 0" }, label: { fontSize: 10, color: "var(--color-text-tertiary)", textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: 500, marginBottom: 6 }, formula: { background: "var(--color-background-primary)", borderRadius: 8, padding: "12px 16px", margin: "8px 0", fontFamily: "var(--font-mono, monospace)", fontSize: 12, color: "var(--color-text-primary)", lineHeight: 1.8, border: "0.5px solid var(--color-border-tertiary)" }, tbl: { width: "100%", borderCollapse: "collapse", fontSize: 11, margin: "6px 0" }, th: { padding: "5px 8px", textAlign: "left", background: "var(--color-background-secondary)", color: "var(--color-text-secondary)", fontWeight: 500, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.3px", borderBottom: "0.5px solid var(--color-border-tertiary)" }, td: { padding: "5px 8px", borderBottom: "0.5px solid var(--color-border-tertiary)", color: "var(--color-text-primary)", fontSize: 11 }, badge: function(bg, color, text) { return <span style={{ background: bg, color: color, padding: "2px 8px", borderRadius: 5, fontSize: 10, fontWeight: 500 }}>{text}</span>; } };
+
+    var wtTabs = [
+      { t: "Data sources", c: function() { return <div>
+        <div style={wtS.card}><div style={wtS.label}>Three systems feed the truckloader</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 140, background: "#E1F5EE", borderRadius: 8, padding: "8px 10px", border: "0.5px solid #0F6E56" }}><div style={{ fontSize: 12, fontWeight: 500, color: "#085041" }}>Acumatica (live)</div><div style={{ fontSize: 11, color: "#0F6E56", marginTop: 3 }}>Replenishment needs GI: what items are below reorder point, qty available, qty on PO, max qty. Also Whse Replenish for replenishment classes (A/B/C).</div></div>
+            <div style={{ flex: 1, minWidth: 140, background: "#FAEEDA", borderRadius: 8, padding: "8px 10px", border: "0.5px solid #854F0B" }}><div style={{ fontSize: 12, fontWeight: 500, color: "#633806" }}>Hills Master (upload)</div><div style={{ fontSize: 11, color: "#854F0B", marginTop: 3 }}>Manufacturer spreadsheet with pallet weights, cases per pallet. Uploaded once, stored in cloud (KV). Re-upload only when Hill's sends a new version.</div></div>
+            <div style={{ flex: 1, minWidth: 140, background: "#FAECE7", borderRadius: 8, padding: "8px 10px", border: "0.5px solid #993C1D" }}><div style={{ fontSize: 12, fontWeight: 500, color: "#712B13" }}>Netstock DOH (upload)</div><div style={{ fontSize: 11, color: "#993C1D", marginTop: 3 }}>Days on hand, sales velocity, on-hand quantities. Used only for fill suggestions. Uploaded each session, not stored.</div></div>
+          </div>
+        </div></div>; }
+      },
+      { t: "The GI query", c: function() { return <div>
+        <div style={{ fontSize: 12, color: "var(--color-text-secondary)", marginBottom: 8 }}>A custom query in Acumatica that joins three database tables:</div>
+        <div style={{ background: "var(--color-background-primary)", borderRadius: 8, border: "0.5px solid var(--color-border-tertiary)", overflow: "hidden" }}>
+          <table style={wtS.tbl}><thead><tr><th style={wtS.th}>Table</th><th style={wtS.th}>What it holds</th><th style={wtS.th}>Key fields</th></tr></thead>
+          <tbody>
+            <tr><td style={wtS.td}>INItemSite</td><td style={wtS.td}>Per-warehouse item settings</td><td style={Object.assign({}, wtS.td, { fontFamily: "monospace", fontSize: 10 })}>MinQty (reorder pt), MaxQty, SafetyStock</td></tr>
+            <tr><td style={wtS.td}>INSiteStatus</td><td style={wtS.td}>Live inventory levels</td><td style={Object.assign({}, wtS.td, { fontFamily: "monospace", fontSize: 10 })}>QtyAvail, QtyPOOrders, QtySOBooked</td></tr>
+            <tr><td style={wtS.td}>InventoryItem</td><td style={wtS.td}>Item master</td><td style={Object.assign({}, wtS.td, { fontFamily: "monospace", fontSize: 10 })}>InventoryCD, Description, ItemStatus</td></tr>
+          </tbody></table>
+        </div>
+        <div style={wtS.formula}><span style={{ color: "#534AB7", fontWeight: 500 }}>(</span> QtyAvail <span style={{ color: "#534AB7", fontWeight: 500 }}>{"\u2264"}</span> MinQty <span style={{ color: "#534AB7", fontWeight: 500 }}>AND</span> MinQty <span style={{ color: "#534AB7", fontWeight: 500 }}>{">"}</span> 0 <span style={{ color: "#534AB7", fontWeight: 500 }}>)</span><br /><span style={{ color: "#534AB7", fontWeight: 500 }}>AND</span> ItemStatus <span style={{ color: "#534AB7", fontWeight: 500 }}>=</span> <span style={{ color: "#0F6E56", fontWeight: 500 }}>Active</span><br /><span style={{ color: "#534AB7", fontWeight: 500 }}>AND (</span> SiteID <span style={{ color: "#534AB7", fontWeight: 500 }}>=</span> <span style={{ color: "#0F6E56", fontWeight: 500 }}>HILL-CP-CA</span> <span style={{ color: "#534AB7", fontWeight: 500 }}>OR</span> SiteID <span style={{ color: "#534AB7", fontWeight: 500 }}>=</span> <span style={{ color: "#0F6E56", fontWeight: 500 }}>HILL-CP-NJ</span> <span style={{ color: "#534AB7", fontWeight: 500 }}>)</span></div>
+        <div style={{ fontSize: 11, color: "var(--color-text-secondary)" }}>Returns ~66 items below reorder point. Exposed via OData so the website can call it as an API.</div>
+      </div>; }
+      },
+      { t: "Client filter", c: function() { return <div>
+        <div style={{ fontSize: 12, color: "var(--color-text-secondary)", marginBottom: 8 }}>The GI returns all items below reorder, but Prepare Replenishment also factors in stock on PO. The website applies this filter:</div>
+        <div style={wtS.formula}><span style={{ color: "#534AB7", fontWeight: 500 }}>Show item if:</span> QtyAvail <span style={{ color: "#534AB7", fontWeight: 500 }}>+</span> OnPO <span style={{ color: "#534AB7", fontWeight: 500 }}>{"\u2264"}</span> ReorderPoint</div>
+        <div style={{ background: "var(--color-background-primary)", borderRadius: 8, border: "0.5px solid var(--color-border-tertiary)", overflow: "hidden" }}>
+          <table style={wtS.tbl}><thead><tr><th style={wtS.th}>Item</th><th style={Object.assign({}, wtS.th, { textAlign: "right" })}>Qty avail</th><th style={Object.assign({}, wtS.th, { textAlign: "right" })}>On PO</th><th style={Object.assign({}, wtS.th, { textAlign: "right" })}>Projected</th><th style={Object.assign({}, wtS.th, { textAlign: "right" })}>Reorder pt</th><th style={wtS.th}>Show?</th></tr></thead>
+          <tbody>
+            <tr><td style={Object.assign({}, wtS.td, { fontFamily: "monospace" })}>8694</td><td style={Object.assign({}, wtS.td, { textAlign: "right" })}>190</td><td style={Object.assign({}, wtS.td, { textAlign: "right" })}>288</td><td style={Object.assign({}, wtS.td, { textAlign: "right" })}>478</td><td style={Object.assign({}, wtS.td, { textAlign: "right" })}>502</td><td style={Object.assign({}, wtS.td, { color: "#059669", fontWeight: 500 })}>Yes (478 {"\u2264"} 502)</td></tr>
+            <tr><td style={Object.assign({}, wtS.td, { fontFamily: "monospace" })}>10013</td><td style={Object.assign({}, wtS.td, { textAlign: "right" })}>254</td><td style={Object.assign({}, wtS.td, { textAlign: "right" })}>520</td><td style={Object.assign({}, wtS.td, { textAlign: "right" })}>774</td><td style={Object.assign({}, wtS.td, { textAlign: "right" })}>459</td><td style={Object.assign({}, wtS.td, { color: "#DC2626", fontWeight: 500 })}>No (774 {">"} 459)</td></tr>
+          </tbody></table>
+        </div>
+        <div style={{ fontSize: 11, color: "var(--color-text-secondary)", marginTop: 6 }}>This reduces ~66 GI items to ~37 that genuinely need ordering, matching Prepare Replenishment exactly.</div>
+      </div>; }
+      },
+      { t: "Order calc", c: function() { return <div>
+        <div style={wtS.formula}><span style={{ color: "#534AB7", fontWeight: 500 }}>Case need</span> = MaxQty <span style={{ color: "#534AB7", fontWeight: 500 }}>-</span> QtyAvail <span style={{ color: "#534AB7", fontWeight: 500 }}>-</span> OnPO<br /><span style={{ color: "#534AB7", fontWeight: 500 }}>Pallets</span> = <span style={{ color: "#534AB7", fontWeight: 500 }}>ceil(</span> CaseNeed <span style={{ color: "#534AB7", fontWeight: 500 }}>/</span> CasesPerPallet <span style={{ color: "#534AB7", fontWeight: 500 }}>)</span><br /><span style={{ color: "#534AB7", fontWeight: 500 }}>Order qty</span> = Pallets <span style={{ color: "#534AB7", fontWeight: 500 }}>{"\u00D7"}</span> CasesPerPallet<br /><span style={{ color: "#534AB7", fontWeight: 500 }}>Total lbs</span> = Pallets <span style={{ color: "#534AB7", fontWeight: 500 }}>{"\u00D7"}</span> PalletWeight</div>
+        <div style={{ fontSize: 12, color: "var(--color-text-secondary)", marginBottom: 6 }}>Worked example for item 8694 at HILL-CP-NJ:</div>
+        <div style={{ background: "var(--color-background-primary)", borderRadius: 8, border: "0.5px solid var(--color-border-tertiary)", overflow: "hidden" }}>
+          <table style={wtS.tbl}><thead><tr><th style={wtS.th}>Field</th><th style={wtS.th}>Source</th><th style={Object.assign({}, wtS.th, { textAlign: "right" })}>Value</th></tr></thead>
+          <tbody>
+            <tr><td style={wtS.td}>Max qty</td><td style={Object.assign({}, wtS.td, { fontFamily: "monospace", fontSize: 10 })}>Acumatica GI</td><td style={Object.assign({}, wtS.td, { textAlign: "right" })}>994</td></tr>
+            <tr><td style={wtS.td}>Qty available</td><td style={Object.assign({}, wtS.td, { fontFamily: "monospace", fontSize: 10 })}>Acumatica GI</td><td style={Object.assign({}, wtS.td, { textAlign: "right" })}>190</td></tr>
+            <tr><td style={wtS.td}>On PO</td><td style={Object.assign({}, wtS.td, { fontFamily: "monospace", fontSize: 10 })}>Acumatica GI</td><td style={Object.assign({}, wtS.td, { textAlign: "right" })}>228</td></tr>
+            <tr><td style={wtS.td}>Case need</td><td style={Object.assign({}, wtS.td, { fontFamily: "monospace", fontSize: 10 })}>994 - 190 - 228</td><td style={Object.assign({}, wtS.td, { textAlign: "right", color: "#D97706", fontWeight: 500 })}>576</td></tr>
+            <tr><td style={wtS.td}>Cases/pallet</td><td style={Object.assign({}, wtS.td, { fontFamily: "monospace", fontSize: 10 })}>Hills Master</td><td style={Object.assign({}, wtS.td, { textAlign: "right" })}>96</td></tr>
+            <tr><td style={wtS.td}>Pallets</td><td style={Object.assign({}, wtS.td, { fontFamily: "monospace", fontSize: 10 })}>ceil(576 / 96)</td><td style={Object.assign({}, wtS.td, { textAlign: "right", color: "#D97706", fontWeight: 500 })}>6</td></tr>
+            <tr><td style={wtS.td}>Order qty</td><td style={Object.assign({}, wtS.td, { fontFamily: "monospace", fontSize: 10 })}>6 {"\u00D7"} 96</td><td style={Object.assign({}, wtS.td, { textAlign: "right", color: "#059669", fontWeight: 600 })}>576</td></tr>
+            <tr><td style={wtS.td}>Total lbs</td><td style={Object.assign({}, wtS.td, { fontFamily: "monospace", fontSize: 10 })}>6 {"\u00D7"} 866.9</td><td style={Object.assign({}, wtS.td, { textAlign: "right", color: "#059669", fontWeight: 600 })}>5,201</td></tr>
+          </tbody></table>
+        </div>
+      </div>; }
+      },
+      { t: "Truck optimizer", c: function() { return <div>
+        <div style={wtS.formula}>1. Sort all items by weight, <span style={{ color: "#534AB7", fontWeight: 500 }}>heaviest first</span><br />2. For each item, find the truck with <span style={{ color: "#534AB7", fontWeight: 500 }}>least remaining space</span> that fits<br />3. If no truck fits, <span style={{ color: "#534AB7", fontWeight: 500 }}>open a new truck</span><br />4. If item exceeds 42,500 lbs, <span style={{ color: "#534AB7", fontWeight: 500 }}>split by pallet</span> across two trucks</div>
+        <div style={{ margin: "10px 0" }}>
+          {[{ label: "Truck 1", pct: 92, lbs: "39,100", color: "#059669" }, { label: "Truck 2", pct: 85, lbs: "36,200", color: "#059669" }, { label: "Truck 3", pct: 21, lbs: "9,100", color: "#D97706" }].map(function(t) {
+            return <div key={t.label} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5 }}>
+              <span style={{ fontSize: 11, color: "var(--color-text-secondary)", minWidth: 50 }}>{t.label}</span>
+              <div style={{ flex: 1, height: 14, background: "var(--color-background-primary)", borderRadius: 3, border: "0.5px solid var(--color-border-tertiary)", overflow: "hidden" }}><div style={{ height: "100%", width: t.pct + "%", background: t.color, borderRadius: 3 }} /></div>
+              <span style={{ fontSize: 10, fontWeight: 500, color: t.color, minWidth: 64, textAlign: "right" }}>{t.lbs} lbs</span>
+            </div>;
+          })}
+        </div>
+        <div style={{ fontSize: 11, color: "var(--color-text-secondary)" }}>Trucks under 35,000 lbs (amber) are flagged for fill suggestions.</div>
+      </div>; }
+      },
+      { t: "Fill suggestions", c: function() { return <div>
+        <div style={{ fontSize: 12, color: "var(--color-text-secondary)", marginBottom: 8 }}>Cross-references two data sources to find good candidates for underfilled trucks:</div>
+        <div style={wtS.formula}>Start with all Netstock items for the warehouse<br /><span style={{ color: "#534AB7", fontWeight: 500 }}>{"\u2192"}</span> Remove items already on the order<br /><span style={{ color: "#534AB7", fontWeight: 500 }}>{"\u2192"}</span> Remove items not in Acumatica Replen Class A/B/C<br /><span style={{ color: "#534AB7", fontWeight: 500 }}>{"\u2192"}</span> Remove pawTree items<br /><span style={{ color: "#534AB7", fontWeight: 500 }}>{"\u2192"}</span> Sort by DOH + DOO ascending<br /><span style={{ color: "#D85A30", fontWeight: 500 }}>{"\u2248"} 130 candidates</span></div>
+        <div style={{ fontSize: 12, color: "var(--color-text-secondary)", marginBottom: 4, fontWeight: 500 }}>Key columns:</div>
+        <div style={{ background: "var(--color-background-primary)", borderRadius: 8, border: "0.5px solid var(--color-border-tertiary)", overflow: "hidden" }}>
+          <table style={wtS.tbl}><thead><tr><th style={wtS.th}>Column</th><th style={wtS.th}>What it tells you</th></tr></thead>
+          <tbody>
+            <tr><td style={Object.assign({}, wtS.td, { fontWeight: 500 })}>DOH+DOO</td><td style={wtS.td}>Total days of stock coverage (lower = more urgent)</td></tr>
+            <tr><td style={Object.assign({}, wtS.td, { fontWeight: 500 })}>Days/Pal</td><td style={wtS.td}>How many days one pallet covers (fixed rate)</td></tr>
+            <tr><td style={Object.assign({}, wtS.td, { fontWeight: 500, color: "#7C3AED" })}>+Days</td><td style={wtS.td}>Total days being added at current pallet count (reactive)</td></tr>
+            <tr><td style={Object.assign({}, wtS.td, { fontWeight: 500, color: "#059669" })}>Order Qty</td><td style={wtS.td}>Cases being ordered at current pallet count (reactive)</td></tr>
+            <tr><td style={Object.assign({}, wtS.td, { fontWeight: 500 })}>Total Lbs</td><td style={wtS.td}>Weight impact on the truck (reactive)</td></tr>
+          </tbody></table>
+        </div>
+      </div>; }
+      },
+      { t: "CSV export", c: function() { return <div>
+        <div style={wtS.formula}><span style={{ color: "#534AB7", fontWeight: 500 }}>File name:</span> <span style={{ color: "#0F6E56", fontWeight: 500 }}>CA 4.11.26 Truck 1.csv</span><br /><span style={{ color: "#534AB7", fontWeight: 500 }}>Format:</span> Inventory ID, Warehouse, Order Qty<br /><span style={{ color: "#534AB7", fontWeight: 500 }}>Example:</span><br />8694, HILL-CP-CA, 576<br />10013, HILL-CP-CA, 520<br />6247, HILL-CP-CA, 800</div>
+        <div style={{ fontSize: 12, color: "var(--color-text-secondary)", marginBottom: 6, fontWeight: 500 }}>Complete workflow timing:</div>
+        <div style={{ background: "var(--color-background-primary)", borderRadius: 8, border: "0.5px solid var(--color-border-tertiary)", overflow: "hidden" }}>
+          <table style={wtS.tbl}><thead><tr><th style={Object.assign({}, wtS.th, { width: 20 })}>#</th><th style={wtS.th}>Step</th><th style={Object.assign({}, wtS.th, { textAlign: "right" })}>Time</th></tr></thead>
+          <tbody>
+            <tr><td style={wtS.td}>1</td><td style={wtS.td}>Upload Hills Master (first time only)</td><td style={Object.assign({}, wtS.td, { textAlign: "right" })}>30 sec</td></tr>
+            <tr><td style={wtS.td}>2</td><td style={wtS.td}>Pick warehouse, Fetch Replenishment</td><td style={Object.assign({}, wtS.td, { textAlign: "right" })}>5 sec</td></tr>
+            <tr><td style={wtS.td}>3</td><td style={wtS.td}>Review order table, adjust if needed</td><td style={Object.assign({}, wtS.td, { textAlign: "right" })}>1 min</td></tr>
+            <tr><td style={wtS.td}>4</td><td style={wtS.td}>Optimize Trucks</td><td style={Object.assign({}, wtS.td, { textAlign: "right" })}>1 sec</td></tr>
+            <tr><td style={wtS.td}>5</td><td style={wtS.td}>Upload DOH, add fill items</td><td style={Object.assign({}, wtS.td, { textAlign: "right" })}>3 min</td></tr>
+            <tr><td style={wtS.td}>6</td><td style={wtS.td}>Re-optimize, export CSVs</td><td style={Object.assign({}, wtS.td, { textAlign: "right" })}>10 sec</td></tr>
+          </tbody></table>
+        </div>
+        <div style={{ fontSize: 11, color: "var(--color-text-secondary)", marginTop: 8 }}>Total: under 5 minutes. The old Google Sheets workflow took 15-20 minutes.</div>
+      </div>; }
+      }
+    ];
+
+    return <div style={{ borderRadius: 10, border: "0.5px solid var(--color-border-tertiary)", overflow: "hidden" }}>
+      <div style={{ display: "flex", gap: 0, overflowX: "auto", borderBottom: "0.5px solid var(--color-border-tertiary)", background: "var(--color-background-secondary)" }}>
+        {wtTabs.map(function(tab, idx) {
+          var isActive = wtStep === idx;
+          return <button key={idx} onClick={function() { setWtStep(idx); }} style={{ padding: "8px 12px", fontSize: 11, fontWeight: isActive ? 500 : 400, border: "none", borderBottom: isActive ? "2px solid #D97706" : "2px solid transparent", cursor: "pointer", background: "transparent", color: isActive ? "#D97706" : "var(--color-text-secondary)", whiteSpace: "nowrap", transition: "all 0.15s" }}>{(idx + 1) + ". " + tab.t}</button>;
+        })}
+      </div>
+      <div style={{ padding: 14 }}>{wtTabs[wtStep].c()}</div>
+    </div>;
+  }
+
   return <div>
     <p style={{ fontSize: 14, color: "var(--color-text-secondary)", marginBottom: 20, lineHeight: 1.6 }}>Click any section below to see how it works. All tools require an Acumatica login unless noted otherwise.</p>
 
@@ -2336,6 +2455,9 @@ function HowToGuide(props) {
 
       <div style={{ fontWeight: 500, color: "var(--color-text-primary)", marginTop: 16, marginBottom: 6, fontSize: 13 }}>The Acumatica GI</div>
       <Note>The "PURCH - Replenishment Needs" GI joins INItemSite (reorder settings), INSiteStatus (live stock), and InventoryItem (descriptions). Conditions: QtyAvail {"<="} MinQty AND MinQty {">"} 0 AND ItemStatus = Active AND warehouse is HILL-CP-CA or NJ. Exposed via OData. The GI returns all items below reorder point (~66); the website further filters to ~37 that genuinely need ordering by accounting for stock already on PO.</Note>
+
+      <div style={{ fontWeight: 500, color: "var(--color-text-primary)", marginTop: 20, marginBottom: 10, fontSize: 13 }}>Deep dive walkthrough</div>
+      <TruckloaderWalkthrough />
     </Section>
 
     <Section id="rules" title="Shipping rules" color="#6B7280">
