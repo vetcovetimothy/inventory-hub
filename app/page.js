@@ -3078,9 +3078,6 @@ function TruckloaderTool(props) {
         <div style={Object.assign({}, S.card, { marginTop: 0, flex: 1, minWidth: 0 })}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
             <div style={{ fontSize: 12, color: "#9CA3AF" }}>{fillSuggestions.length} items sorted by DOH+DOO</div>
-            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#6B7280" }}>
-              Target: <input type="number" min="1" max="120" value={dohTarget} onChange={function(e) { setDohTarget(parseInt(e.target.value) || 45); }} style={Object.assign({}, S.inp, { width: 50, textAlign: "center", padding: "3px 6px", fontSize: 12 })} /> days
-            </div>
           </div>
           <div style={{ overflow: "auto", borderRadius: 10, border: "1px solid #E5E7EB", maxHeight: 600 }}>
             <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
@@ -3120,19 +3117,29 @@ function TruckloaderTool(props) {
         {/* RIGHT - Sticky order panel */}
         <div style={{ width: 240, flexShrink: 0, position: "sticky", top: 16 }}>
           {/* Truck status */}
-          {truckGroups && <div style={Object.assign({}, S.card, { marginTop: 0, marginBottom: 12 })}>
-            <div style={{ fontSize: 11, color: "#9CA3AF", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8 }}>Truck Status</div>
-            {truckGroups.filter(function(t) { return !t.isError; }).map(function(t) {
-              var pct = Math.min(100, (t.totalLbs / TARGET) * 100);
-              var barColor = t.needsFill ? "#F59E0B" : "#059669";
-              return <div key={t.label} style={{ marginBottom: 10 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, fontWeight: 500, color: "#374151", marginBottom: 3 }}><span>{t.label}</span><span>{t.totalLbs.toLocaleString(undefined, { maximumFractionDigits: 0 })} / {TARGET.toLocaleString()} lbs</span></div>
-                <div style={{ height: 8, background: "#F3F4F6", borderRadius: 4, overflow: "hidden" }}><div style={{ height: "100%", width: pct + "%", background: barColor, borderRadius: 4, transition: "width 0.3s" }} /></div>
-                {t.needsFill && <div style={{ fontSize: 10, color: "#D97706", marginTop: 2 }}>{t.remaining.toLocaleString(undefined, { maximumFractionDigits: 0 })} lbs remaining</div>}
-              </div>;
-            })}
-            <button onClick={optimizeTrucks} style={Object.assign({}, S.btn(), { width: "100%", justifyContent: "center", marginTop: 4, fontSize: 12, padding: "8px 12px" })}><IconBox /> Re-optimize</button>
-          </div>}
+          {truckGroups && function() {
+            var trucks = truckGroups.filter(function(t) { return !t.isError; });
+            var lastTruck = trucks[trucks.length - 1];
+            var fillTruck = trucks.find(function(t) { return t.needsFill; });
+            var currentTruck = fillTruck || lastTruck;
+            if (!currentTruck) return null;
+            var pct = Math.min(100, (currentTruck.totalLbs / TARGET) * 100);
+            var barColor = currentTruck.needsFill ? "#F59E0B" : "#059669";
+            var remaining = TARGET - currentTruck.totalLbs;
+            return <div style={Object.assign({}, S.card, { marginTop: 0, marginBottom: 12 })}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>{currentTruck.label}</div>
+                <div style={{ fontSize: 11, color: "#9CA3AF" }}>{trucks.length} truck{trucks.length > 1 ? "s" : ""} total</div>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#374151", marginBottom: 4 }}>
+                <span style={{ fontWeight: 500 }}>{currentTruck.totalLbs.toLocaleString(undefined, { maximumFractionDigits: 0 })} lbs</span>
+                <span style={{ color: "#9CA3AF" }}>/ {TARGET.toLocaleString()} lbs</span>
+              </div>
+              <div style={{ height: 10, background: "#F3F4F6", borderRadius: 5, overflow: "hidden", marginBottom: 6 }}><div style={{ height: "100%", width: pct + "%", background: barColor, borderRadius: 5, transition: "width 0.3s" }} /></div>
+              <div style={{ fontSize: 11, color: remaining > 0 ? "#D97706" : "#059669", fontWeight: 500 }}>{remaining > 0 ? remaining.toLocaleString(undefined, { maximumFractionDigits: 0 }) + " lbs remaining" : "Full"}</div>
+              <button onClick={optimizeTrucks} style={Object.assign({}, S.btn(), { width: "100%", justifyContent: "center", marginTop: 8, fontSize: 12, padding: "8px 12px" })}><IconBox /> Re-optimize</button>
+            </div>;
+          }()}
 
           {!truckGroups && <div style={Object.assign({}, S.card, { marginTop: 0, marginBottom: 12, textAlign: "center", padding: 16 })}>
             <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 8 }}>{orderItems.length} items, {totalWeight.toLocaleString(undefined, { maximumFractionDigits: 0 })} lbs total</div>
