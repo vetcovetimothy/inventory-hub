@@ -3120,20 +3120,23 @@ function TruckloaderTool(props) {
             var fillTruck = trucks.find(function(t) { return t.needsFill; });
             var currentTruck = fillTruck || lastTruck;
             if (!currentTruck) return null;
-            var pct = Math.min(100, (currentTruck.totalLbs / TARGET) * 100);
-            var barColor = currentTruck.needsFill ? "#F59E0B" : "#059669";
-            var remaining = TARGET - currentTruck.totalLbs;
+            var addedLbs = fillAdded.reduce(function(s, a) { return s + a.totalLbs; }, 0);
+            var liveLbs = currentTruck.totalLbs + addedLbs;
+            var pct = Math.min(100, (liveLbs / TARGET) * 100);
+            var remaining = TARGET - liveLbs;
+            var barColor = remaining > 7500 ? "#F59E0B" : remaining > 0 ? "#059669" : "#DC2626";
             return <div style={Object.assign({}, S.card, { marginTop: 0, marginBottom: 12 })}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                 <div style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>{currentTruck.label}</div>
                 <div style={{ fontSize: 11, color: "#9CA3AF" }}>{trucks.length} truck{trucks.length > 1 ? "s" : ""} total</div>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#374151", marginBottom: 4 }}>
-                <span style={{ fontWeight: 500 }}>{currentTruck.totalLbs.toLocaleString(undefined, { maximumFractionDigits: 0 })} lbs</span>
+                <span style={{ fontWeight: 500 }}>{liveLbs.toLocaleString(undefined, { maximumFractionDigits: 0 })} lbs</span>
                 <span style={{ color: "#9CA3AF" }}>/ {TARGET.toLocaleString()} lbs</span>
               </div>
               <div style={{ height: 10, background: "#F3F4F6", borderRadius: 5, overflow: "hidden", marginBottom: 6 }}><div style={{ height: "100%", width: pct + "%", background: barColor, borderRadius: 5, transition: "width 0.3s" }} /></div>
-              <div style={{ fontSize: 11, color: remaining > 0 ? "#D97706" : "#059669", fontWeight: 500 }}>{remaining > 0 ? remaining.toLocaleString(undefined, { maximumFractionDigits: 0 }) + " lbs remaining" : "Full"}</div>
+              {remaining > 0 && <div style={{ fontSize: 11, color: remaining > 7500 ? "#D97706" : "#059669", fontWeight: 500 }}>{remaining.toLocaleString(undefined, { maximumFractionDigits: 0 })} lbs remaining</div>}
+              {remaining <= 0 && <div style={{ fontSize: 11, color: "#DC2626", fontWeight: 500 }}>{Math.abs(remaining).toLocaleString(undefined, { maximumFractionDigits: 0 })} lbs over capacity</div>}
               <button onClick={optimizeTrucks} style={Object.assign({}, S.btn(), { width: "100%", justifyContent: "center", marginTop: 8, fontSize: 12, padding: "8px 12px" })}><IconBox /> Re-optimize</button>
             </div>;
           }()}
