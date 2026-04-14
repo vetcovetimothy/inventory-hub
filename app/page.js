@@ -2854,7 +2854,7 @@ function TruckloaderTool(props) {
       isFill: true,
     };
     setOrderItems(orderItems.concat([newItem]));
-    setFillAdded(fillAdded.concat([{ productCode: f.productCode, description: f.description, pallets: pals, orderQty: orderQty, totalLbs: totalLbs }]));
+    setFillAdded(fillAdded.concat([{ productCode: f.productCode, description: f.description, pallets: pals, orderQty: orderQty, totalLbs: totalLbs, _orig: f }]));
     if (fillSuggestions) {
       setFillSuggestions(fillSuggestions.filter(function(s) { return s.productCode !== f.productCode; }));
     }
@@ -2865,8 +2865,12 @@ function TruckloaderTool(props) {
     setOrderItems(orderItems.filter(function(it) { return it.inventoryID !== productCode; }));
     var removed = fillAdded.find(function(a) { return a.productCode === productCode; });
     setFillAdded(fillAdded.filter(function(a) { return a.productCode !== productCode; }));
-    // Add it back to suggestions if we still have them
-    // (won't restore original position but user can re-sort mentally)
+    // Add it back to suggestions list
+    if (removed && removed._orig && fillSuggestions) {
+      var updated = fillSuggestions.concat([removed._orig]);
+      updated.sort(function(a, b) { return a.combined - b.combined; });
+      setFillSuggestions(updated);
+    }
     toast("Removed " + productCode + " from order");
   }
 
