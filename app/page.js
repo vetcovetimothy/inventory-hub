@@ -2488,6 +2488,7 @@ function TruckloaderTool(props) {
   var _fills = useState(null), fillSuggestions = _fills[0], setFillSuggestions = _fills[1];
   var _highlight = useState("all"), highlightTruck = _highlight[0], setHighlightTruck = _highlight[1];
   var _fillAdded = useState([]), fillAdded = _fillAdded[0], setFillAdded = _fillAdded[1];
+  var _orderSort = useState(null), orderSort = _orderSort[0], setOrderSort = _orderSort[1];
   var _dohTarget = useState(45), dohTarget = _dohTarget[0], setDohTarget = _dohTarget[1];
   var _fillPals = useState({}), fillPals = _fillPals[0], setFillPals = _fillPals[1];
   var fileRef = useRef(null);
@@ -2966,24 +2967,35 @@ function TruckloaderTool(props) {
         <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, minWidth: 900 }}>
           <thead><tr>
             {["Inventory ID", "Description", "Order Qty", "Case Need", "Pallets", "Total Lbs", "Lbs/Pallet", "Cases/Pallet", ""].map(function(h) {
-              return <th key={h} style={Object.assign({}, S.th, h === "Order Qty" ? { background: "#F0FDF4", color: "#059669" } : {})}>{h}</th>;
+              var sortable = h === "Order Qty" || h === "Pallets" || h === "Total Lbs";
+              var isSorted = orderSort && orderSort.col === h;
+              var align = (h === "Inventory ID" || h === "Description" || h === "") ? "left" : "center";
+              return <th key={h} onClick={sortable ? function() { setOrderSort(!isSorted ? { col: h, dir: "desc" } : orderSort.dir === "desc" ? { col: h, dir: "asc" } : null); } : undefined} style={Object.assign({}, S.th, { textAlign: align, cursor: sortable ? "pointer" : "default", userSelect: "none" }, h === "Order Qty" ? { background: "#F0FDF4", color: "#059669" } : {})}>{h}{isSorted ? (orderSort.dir === "desc" ? " \u25BE" : " \u25B4") : ""}</th>;
             })}
           </tr></thead>
-          <tbody>{orderItems.map(function(it, i) {
+          <tbody>{(function() {
+            var sorted = orderItems.slice();
+            if (orderSort) {
+              var key = orderSort.col === "Order Qty" ? "orderQty" : orderSort.col === "Pallets" ? "roundedPallets" : orderSort.col === "Total Lbs" ? "totalLbs" : null;
+              if (key) sorted.sort(function(a, b) { return orderSort.dir === "desc" ? (b[key] || 0) - (a[key] || 0) : (a[key] || 0) - (b[key] || 0); });
+            }
+            return sorted;
+          })().map(function(it, i) {
+            var origIdx = orderItems.indexOf(it);
             var rowBg = !it.inHillsMaster ? "#FEF2F2" : i % 2 === 0 ? "#fff" : "#FAFAFA";
             return <tr key={it.inventoryID + "-" + i}>
               <td style={Object.assign({}, S.td, { background: rowBg, fontFamily: "monospace", fontSize: 12, fontWeight: 600 })}>{it.inventoryID}</td>
               <td style={Object.assign({}, S.td, { background: rowBg, maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })} title={it.description}>{it.description}</td>
-              <td style={Object.assign({}, S.td, { background: rowBg, textAlign: "right", fontSize: 15, fontWeight: 700, color: "#059669" })}>{it.orderQty}</td>
-              <td style={Object.assign({}, S.td, { background: rowBg, width: 90 })}>
-                <input type="number" min="0" value={it.caseNeed} onChange={function(e) { updateCaseNeed(i, e.target.value); }} style={Object.assign({}, S.inp, { width: 70, textAlign: "right", padding: "4px 8px", color: "#9CA3AF" })} />
+              <td style={Object.assign({}, S.td, { background: rowBg, textAlign: "center", fontSize: 15, fontWeight: 700, color: "#059669" })}>{it.orderQty}</td>
+              <td style={Object.assign({}, S.td, { background: rowBg, textAlign: "center", width: 90 })}>
+                <input type="number" min="0" value={it.caseNeed} onChange={function(e) { updateCaseNeed(origIdx, e.target.value); }} style={Object.assign({}, S.inp, { width: 70, textAlign: "right", padding: "4px 8px", color: "#9CA3AF" })} />
               </td>
-              <td style={Object.assign({}, S.td, { background: rowBg, textAlign: "right", fontWeight: 600 })}>{it.roundedPallets}</td>
-              <td style={Object.assign({}, S.td, { background: rowBg, textAlign: "right", fontWeight: 600, color: it.totalLbs > TARGET ? "#DC2626" : "#374151" })}>{it.totalLbs ? it.totalLbs.toLocaleString(undefined, { maximumFractionDigits: 1 }) : "—"}</td>
-              <td style={Object.assign({}, S.td, { background: rowBg, textAlign: "right", color: "#9CA3AF" })}>{it.lbsPerPallet ? it.lbsPerPallet.toLocaleString(undefined, { maximumFractionDigits: 1 }) : "—"}</td>
-              <td style={Object.assign({}, S.td, { background: rowBg, textAlign: "right", color: "#9CA3AF" })}>{it.casesPerPallet || "—"}</td>
+              <td style={Object.assign({}, S.td, { background: rowBg, textAlign: "center", fontWeight: 600 })}>{it.roundedPallets}</td>
+              <td style={Object.assign({}, S.td, { background: rowBg, textAlign: "center", fontWeight: 600, color: it.totalLbs > TARGET ? "#DC2626" : "#374151" })}>{it.totalLbs ? it.totalLbs.toLocaleString(undefined, { maximumFractionDigits: 1 }) : "\u2014"}</td>
+              <td style={Object.assign({}, S.td, { background: rowBg, textAlign: "center", color: "#9CA3AF" })}>{it.lbsPerPallet ? it.lbsPerPallet.toLocaleString(undefined, { maximumFractionDigits: 1 }) : "\u2014"}</td>
+              <td style={Object.assign({}, S.td, { background: rowBg, textAlign: "center", color: "#9CA3AF" })}>{it.casesPerPallet || "\u2014"}</td>
               <td style={Object.assign({}, S.td, { background: rowBg, width: 40 })}>
-                <button onClick={function() { removeItem(i); }} style={{ background: "transparent", border: "none", cursor: "pointer", color: "#DC2626", fontSize: 14 }}>{"\u2715"}</button>
+                <button onClick={function() { removeItem(origIdx); }} style={{ background: "transparent", border: "none", cursor: "pointer", color: "#DC2626", fontSize: 14 }}>{"\u2715"}</button>
               </td>
             </tr>;
           })}</tbody>
