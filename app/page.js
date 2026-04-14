@@ -3293,7 +3293,7 @@ export default function Hub() {
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Varela+Round&display=swap');*{box-sizing:border-box;margin:0;padding:0}@keyframes spin{to{transform:rotate(360deg)}}@keyframes slideUp{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}button:hover{filter:brightness(1.12)}input:focus{border-color:#3B82F6!important;box-shadow:0 0 0 2px rgba(59,130,246,0.15)}`}</style>
       <div style={{ background: "#FFFFFF", border: "1px solid #E5E7EB", borderRadius: 16, padding: 40, width: 420, textAlign: "center" }}>
         <div style={{ width: 64, height: 64, borderRadius: 16, background: "rgba(59,130,246,0.15)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px" }}><IconKey /></div>
-        <h1 style={{ fontSize: 24, fontWeight: 700, color: "#1F2937", margin: "0 0 4px" }}>Inventory Hub</h1>
+        <h1 style={{ fontSize: 24, fontWeight: 700, color: "#1F2937", margin: "0 0 4px" }}>Procurement Hub</h1>
         <p style={{ fontSize: 11, color: "#6B7280", fontWeight: 500, letterSpacing: "1.5px", textTransform: "uppercase", margin: "0 0 32px" }}>Vetcove Tools</p>
         <div style={{ textAlign: "left", display: "flex", flexDirection: "column", gap: 14 }}>
           <div><label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 6 }}>Acumatica Username</label><input style={{ background: "#F8F9FB", border: "1px solid #E5E7EB", borderRadius: 8, padding: "10px 14px", color: "#374151", fontSize: 14, outline: "none", width: "100%" }} value={cred.username} onChange={function(e) { setCred({ username: e.target.value, password: cred.password }); }} placeholder="your.username" /></div>
@@ -3320,7 +3320,7 @@ export default function Hub() {
 
       <div style={{ width: 230, background: "#1A1F2E", display: "flex", flexDirection: "column", padding: "20px 0", flexShrink: 0 }}>
         <div style={{ padding: "0 20px 20px", borderBottom: "1px solid rgba(255,255,255,0.08)", marginBottom: 8 }}>
-          <p style={{ fontSize: 18, fontWeight: 700, letterSpacing: "-0.5px", color: "#FFFFFF", margin: 0 }}>Inventory Hub</p>
+          <p style={{ fontSize: 18, fontWeight: 700, letterSpacing: "-0.5px", color: "#FFFFFF", margin: 0 }}>Procurement Hub</p>
           <p style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", fontWeight: 500, letterSpacing: "1.5px", textTransform: "uppercase", marginTop: 4 }}>Vetcove Tools</p>
         </div>
         {(function() {

@@ -1,5 +1,5 @@
 export const metadata = {
-  title: "Inventory Hub — Vetcove Tools",
+  title: "Procurement Hub — Vetcove Tools",
   description: "PO Tools, Short-Dating Tracker, Backorder Tracker",
 };
 

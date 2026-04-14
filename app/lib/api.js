@@ -1,5 +1,5 @@
 /**
- * API helpers for the Inventory Hub frontend.
+ * API helpers for the Procurement Hub frontend.
  * These call the Next.js API routes which proxy to Acumatica and Gmail.
  */
 
