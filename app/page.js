@@ -3210,6 +3210,7 @@ export default function Hub() {
   var _gm = useState(null), gmail = _gm[0], setGmail = _gm[1];
   var _sr = useState(function() { var saved = sGet("shipping-rules-v2"); return saved || Object.assign({}, DEFAULT_SHIP_RULES); }), shipRules = _sr[0], setShipRules = _sr[1];
   var _sideCol = useState(function() { return sGet("sidebar-collapsed") || {}; }), sideCollapsed = _sideCol[0], setSideCollapsed = _sideCol[1];
+  var _sideHide = useState(false), sidebarHidden = _sideHide[0], setSidebarHidden = _sideHide[1];
   function toggleSection(key) { var u = Object.assign({}, sideCollapsed); u[key] = !u[key]; setSideCollapsed(u); sSet("sidebar-collapsed", u); }
   function updateShipRules(newRules) { setShipRules(newRules); sSet("shipping-rules-v2", newRules); }
 
@@ -3335,10 +3336,13 @@ export default function Hub() {
     <div style={{ fontFamily: "'Varela Round',sans-serif", background: "#F8F9FB", color: "#374151", minHeight: "100vh", display: "flex" }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Varela+Round&display=swap');*{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:#F8F9FB}::-webkit-scrollbar-thumb{background:#E5E7EB;border-radius:3px}@keyframes spin{to{transform:rotate(360deg)}}@keyframes slideUp{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}button:hover{filter:brightness(1.08)}input:focus,select:focus{border-color:#3B82F6!important;box-shadow:0 0 0 2px rgba(59,130,246,0.12)}tr:hover td{background:rgba(59,130,246,0.02)}`}</style>
 
-      <div style={{ width: 230, background: "#1A1F2E", display: "flex", flexDirection: "column", padding: "20px 0", flexShrink: 0 }}>
-        <div style={{ padding: "0 20px 20px", borderBottom: "1px solid rgba(255,255,255,0.08)", marginBottom: 8 }}>
-          <p style={{ fontSize: 18, fontWeight: 700, letterSpacing: "-0.5px", color: "#FFFFFF", margin: 0 }}>Procurement Hub</p>
-          <p style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", fontWeight: 500, letterSpacing: "1.5px", textTransform: "uppercase", marginTop: 4 }}>Vetcove Tools</p>
+      <div style={{ width: sidebarHidden ? 0 : 230, background: "#1A1F2E", display: "flex", flexDirection: "column", padding: sidebarHidden ? 0 : "20px 0", flexShrink: 0, overflow: "hidden", transition: "width 0.2s ease", position: "relative" }}>
+        <div style={{ padding: "0 20px 20px", borderBottom: "1px solid rgba(255,255,255,0.08)", marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div>
+            <p style={{ fontSize: 18, fontWeight: 700, letterSpacing: "-0.5px", color: "#FFFFFF", margin: 0 }}>Procurement Hub</p>
+            <p style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", fontWeight: 500, letterSpacing: "1.5px", textTransform: "uppercase", marginTop: 4 }}>Vetcove Tools</p>
+          </div>
+          <button onClick={function() { setSidebarHidden(true); }} style={{ background: "rgba(255,255,255,0.06)", border: "none", borderRadius: 6, padding: "4px 6px", cursor: "pointer", color: "rgba(255,255,255,0.4)", display: "flex", alignItems: "center", justifyContent: "center" }} title="Collapse sidebar"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="11 17 6 12 11 7" /><polyline points="18 17 13 12 18 7" /></svg></button>
         </div>
         {(function() {
           var sections = [
@@ -3388,7 +3392,9 @@ export default function Hub() {
 
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "auto" }}>
         <div style={{ padding: "16px 32px", borderBottom: "0.5px solid #E5E7EB", display: "flex", alignItems: "center", justifyContent: "space-between", background: "#FFFFFF" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>{!showLogin && <Dot color={activeColor} />}<span style={{ fontSize: 18, fontWeight: 500, color: "#1F2937" }}>{showLogin ? "Acumatica Login" : activeLabel}</span>{isWH && !showLogin && <span style={{ fontSize: 11, background: activeColor + "15", color: activeColor, padding: "3px 10px", borderRadius: 6, fontWeight: 500 }}>{page}</span>}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {sidebarHidden && <button onClick={function() { setSidebarHidden(false); }} style={{ background: "none", border: "none", cursor: "pointer", padding: "4px 6px", color: "#6B7280", display: "flex", alignItems: "center", justifyContent: "center", marginRight: 4 }} title="Show sidebar"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="18" x2="21" y2="18" /></svg></button>}
+            {!showLogin && <Dot color={activeColor} />}<span style={{ fontSize: 18, fontWeight: 500, color: "#1F2937" }}>{showLogin ? "Acumatica Login" : activeLabel}</span>{isWH && !showLogin && <span style={{ fontSize: 11, background: activeColor + "15", color: activeColor, padding: "3px 10px", borderRadius: 6, fontWeight: 500 }}>{page}</span>}</div>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>{!ok && !showLogin && <span style={{ fontSize: 12, color: "#DC2626", display: "flex", alignItems: "center", gap: 4 }}><IconLock /> View only</span>}<span style={{ fontSize: 12, color: "#6B7280" }}>{new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</span></div>
         </div>
         <div style={{ padding: 32, flex: 1 }}>
