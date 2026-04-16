@@ -3362,8 +3362,8 @@ export default function Hub() {
           var sections = [
             { key: "po", label: "PO Tools", items: Object.entries(WH).map(function(e) { return { id: e[0], label: e[1].full, color: e[1].color }; }) },
             { key: "generic", label: "Generic PO Tools", items: [{ id: "po-import", label: "PO NDC Validator", color: "#06B6D4" }, { id: "cycle-count", label: "Cycle Counting", color: "#14B8A6" }] },
-            { key: "hills", label: "Hills Tools", items: [{ id: "truckloader", label: "Truckloader", color: "#D97706" }] },
-            { key: "tracking", label: "Tracking", items: [{ id: "hills-pawtree", label: "Hills & Pawtree", color: "#10B981" }, { id: "fuze-tracker", label: "Fuze Tracker", color: "#F59E0B" }] },
+            { key: "hills", label: "Hills Tools", items: [{ id: "hills-pawtree", label: "Hills & Pawtree", color: "#10B981" }, { id: "truckloader", label: "Truckloader", color: "#D97706" }] },
+            { key: "tracking", label: "Tracking", items: [{ id: "fuze-tracker", label: "Fuze Tracker", color: "#F59E0B" }] },
             { key: "inventory", label: "Inventory Tools", items: [{ id: "short-dating", label: "Short-Dating", color: "#E879F9" }, { id: "backorder", label: "Backorders", color: "#F97316" }] },
           ];
           return sections.map(function(sec, si) {
