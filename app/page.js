@@ -2695,6 +2695,7 @@ function TruckloaderTool(props) {
       trucks.push({ label: "Errors", totalLbs: 0, remaining: 0, needsFill: false, color: "#ff9999", assignments: errAssign, errors: errors, isError: true });
     }
     setTruckGroups(trucks);
+    setFillAdded([]);
     setStep("trucks");
     var underFill = trucks.filter(function(t) { return t.needsFill; }).length;
     if (underFill > 0) toast(trucks.length + " trucks created. " + underFill + " flagged to fill (<35k lbs)", "info");
