@@ -1908,6 +1908,7 @@ function HillsTracker(props) {
   var _d = useState([]), data = _d[0], setData = _d[1];
   var _ld = useState(false), loading = _ld[0], setLoading = _ld[1];
   var _meta = useState({}), meta = _meta[0], setMeta = _meta[1];
+  var _hpSort = useState({ col: "date", dir: "desc" }), hpSort = _hpSort[0], setHpSort = _hpSort[1];
   var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
 
   // Persist ETA and Notes in KV (shared) + localStorage (cache)
@@ -2045,16 +2046,18 @@ function HillsTracker(props) {
 
   // Sort: NJ first, then CA, then CA - Pawtree
   var sorted = useMemo(function() {
-    return data.slice().sort(function(a, b) {
-      var wa = simplifyWarehouse(a.Warehouse, a.Vendor);
-      var wb = simplifyWarehouse(b.Warehouse, b.Vendor);
-      var order = { "NJ": 0, "CA": 1, "CA - Pawtree": 2 };
-      var oa = order[wa] != null ? order[wa] : 3;
-      var ob = order[wb] != null ? order[wb] : 3;
-      if (oa !== ob) return oa - ob;
-      return (a.PONumber || "").localeCompare(b.PONumber || "");
-    });
-  }, [data]);
+    var arr = data.slice();
+    if (hpSort.col === "date") {
+      arr.sort(function(a, b) { var da = parseDate(a.DateOrdered) || new Date(0); var db = parseDate(b.DateOrdered) || new Date(0); return hpSort.dir === "desc" ? db - da : da - db; });
+    } else if (hpSort.col === "po") {
+      arr.sort(function(a, b) { return hpSort.dir === "desc" ? (b.PONumber || "").localeCompare(a.PONumber || "") : (a.PONumber || "").localeCompare(b.PONumber || ""); });
+    } else if (hpSort.col === "wh") {
+      arr.sort(function(a, b) { var wa = simplifyWarehouse(a.Warehouse, a.Vendor); var wb = simplifyWarehouse(b.Warehouse, b.Vendor); return hpSort.dir === "desc" ? wb.localeCompare(wa) : wa.localeCompare(wb); });
+    } else {
+      arr.sort(function(a, b) { var wa = simplifyWarehouse(a.Warehouse, a.Vendor); var wb = simplifyWarehouse(b.Warehouse, b.Vendor); var order = { "NJ": 0, "CA": 1, "CA - Pawtree": 2 }; var oa = order[wa] != null ? order[wa] : 3; var ob = order[wb] != null ? order[wb] : 3; if (oa !== ob) return oa - ob; return (a.PONumber || "").localeCompare(b.PONumber || ""); });
+    }
+    return arr;
+  }, [data, hpSort]);
 
   var stats = useMemo(function() {
     var total = data.length;
@@ -2081,9 +2084,9 @@ function HillsTracker(props) {
     {data.length > 0 ? <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto" })}>
       <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 13 }}>
         <thead><tr>
-          <th style={S.th}>PO</th>
-          <th style={S.th}>Warehouse</th>
-          <th style={S.th}>PO Ordered</th>
+          <th onClick={function() { setHpSort(hpSort.col === "po" ? { col: "po", dir: hpSort.dir === "desc" ? "asc" : "desc" } : { col: "po", dir: "asc" }); }} style={Object.assign({}, S.th, { cursor: "pointer", userSelect: "none" })}>PO{hpSort.col === "po" ? (hpSort.dir === "desc" ? " \u25BE" : " \u25B4") : ""}</th>
+          <th onClick={function() { setHpSort(hpSort.col === "wh" ? { col: "wh", dir: hpSort.dir === "desc" ? "asc" : "desc" } : { col: "wh", dir: "asc" }); }} style={Object.assign({}, S.th, { cursor: "pointer", userSelect: "none" })}>Warehouse{hpSort.col === "wh" ? (hpSort.dir === "desc" ? " \u25BE" : " \u25B4") : ""}</th>
+          <th onClick={function() { setHpSort(hpSort.col === "date" ? { col: "date", dir: hpSort.dir === "desc" ? "asc" : "desc" } : { col: "date", dir: "desc" }); }} style={Object.assign({}, S.th, { cursor: "pointer", userSelect: "none" })}>PO Order Date{hpSort.col === "date" ? (hpSort.dir === "desc" ? " \u25BE" : " \u25B4") : ""}</th>
           <th style={Object.assign({}, S.th, { minWidth: 140 })}>PO ETA</th>
           <th style={Object.assign({}, S.th, { minWidth: 200 })}>Notes</th>
         </tr></thead>
