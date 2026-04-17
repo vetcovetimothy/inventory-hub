@@ -2480,7 +2480,7 @@ function HowToGuide(props) {
 }
 /* ═══════ TRUCKLOADER TOOL ═══════ */
 function TruckloaderTool(props) {
-  var toast = props.toast, ok = props.ok, lp = props.lp, cred = props.cred;
+  var toast = props.toast, ok = props.ok, lp = props.lp, cred = props.cred, gmail = props.gmail;
   var TOOL_COLOR = "#D97706";
   var TARGET = 42500;
   var MIN_WEIGHT = 35000;
@@ -2502,6 +2502,8 @@ function TruckloaderTool(props) {
   var _orderSort = useState(null), orderSort = _orderSort[0], setOrderSort = _orderSort[1];
   var _dohTarget = useState(45), dohTarget = _dohTarget[0], setDohTarget = _dohTarget[1];
   var _fillPals = useState({}), fillPals = _fillPals[0], setFillPals = _fillPals[1];
+  var _hillsDraftSent = useState(false), hillsDraftSent = _hillsDraftSent[0], setHillsDraftSent = _hillsDraftSent[1];
+  var _cpDraftSent = useState(false), cpDraftSent = _cpDraftSent[0], setCpDraftSent = _cpDraftSent[1];
   var fileRef = useRef(null);
   var nsFileRef = useRef(null);
 
@@ -2917,7 +2919,7 @@ function TruckloaderTool(props) {
     <div style={Object.assign({}, S.card, { display: "flex", gap: 24, alignItems: "flex-start", flexWrap: "wrap" })}>
       <div style={{ flex: 1, minWidth: 200 }}>
         <div style={{ fontSize: 11, color: "#9CA3AF", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 6 }}>Warehouse</div>
-        <select value={warehouse} onChange={function(e) { setWarehouse(e.target.value); setOrderItems([]); setTruckGroups(null); setFillSuggestions(null); setFillAdded([]); setFillPals({}); }} style={Object.assign({}, S.sel, { width: "100%", maxWidth: 280 })}>
+        <select value={warehouse} onChange={function(e) { setWarehouse(e.target.value); setOrderItems([]); setTruckGroups(null); setFillSuggestions(null); setFillAdded([]); setFillPals({}); setHillsDraftSent(false); setCpDraftSent(false); }} style={Object.assign({}, S.sel, { width: "100%", maxWidth: 280 })}>
           <option value="HILL-CP-CA">HILL-CP-CA (California)</option>
           <option value="HILL-CP-NJ">HILL-CP-NJ (New Jersey)</option>
         </select>
@@ -2971,6 +2973,7 @@ function TruckloaderTool(props) {
       <button onClick={function() { setStep("order"); }} style={S.pill(step === "order", TOOL_COLOR)}>Order Table</button>
       <button onClick={function() { if (truckGroups) setStep("trucks"); else toast("Run Optimize Trucks first", "info"); }} style={S.pill(step === "trucks", "#059669")}>Truck Assignments{truckGroups ? " (" + truckGroups.filter(function(t) { return !t.isError; }).length + ")" : ""}</button>
       <button onClick={function() { setStep("fill"); }} style={S.pill(step === "fill", "#7C3AED")}>Fill Suggestions</button>
+      <button onClick={function() { setStep("email"); }} style={S.pill(step === "email", "#3B82F6")}>Email</button>
     </div>}
 
     {/* ORDER TABLE */}
@@ -3203,6 +3206,75 @@ function TruckloaderTool(props) {
         </div>
       </div>}
       {fillSuggestions && fillSuggestions.length === 0 && <div style={Object.assign({}, S.card, { textAlign: "center", padding: 40, color: "#9CA3AF" })}>No fill candidates found for {warehouse}.</div>}
+    </div>}
+
+    {/* EMAIL DRAFTS */}
+    {step === "email" && <div>
+      {(function() {
+        var isCA = warehouse === "HILL-CP-CA";
+        var whShort = isCA ? "CA" : "NJ";
+        var now = new Date();
+        var dateStr = (now.getMonth() + 1) + "." + ("0" + now.getDate()).slice(-2) + "." + now.getFullYear();
+        var subject = dateStr + " Weekly Replenishment - Vetcove " + whShort;
+        var hillsTo = "truckloador@hillspet.com, brian_shively@hillspet.com, hd-purchaseorders@vetcove.com";
+        var cpTo = isCA ? "ap.petd.santafesprings@central.com, jcanter@centralpet.com, jspengler@central.com, hd-purchaseorders@vetcove.com" : "jcanter@centralpet.com, jspengler@central.com, hd-purchaseorders@vetcove.com, gcustode@central.com";
+        var hillsBody = "<p>Hi, please find attached our weekly replenishment order. Please include the Purchase Order # on our packing list.</p><p>We look forward to confirmation of receipt. Let us know if you have any questions.</p><p>Thanks,</p>";
+        var cpBody = "<p>Hi Central Pet team,</p><p>I've just placed this week's replenishment POs with Hill's. Attaching here to create in your systems. Hill's hasn't set delivery appointments yet.</p><p>Thanks,</p>";
+
+        async function createDraft(type) {
+          if (!gmail || !gmail.token) { toast("Connect Gmail first (bottom-left)", "error"); return; }
+          try {
+            var payload = type === "hills" ? { to: hillsTo, subject: subject, htmlBody: hillsBody, attachments: [] } : { to: cpTo, subject: subject, htmlBody: cpBody, attachments: [] };
+            var result = await postGmailDrafts([payload], gmail.token);
+            if (result.failed > 0) throw new Error("Draft creation failed");
+            if (type === "hills") setHillsDraftSent(true); else setCpDraftSent(true);
+            toast((type === "hills" ? "Hill's" : "Central Pet") + " draft created!");
+          } catch (err) { toast("Gmail error: " + err.message, "error"); }
+        }
+
+        return <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <div style={Object.assign({}, S.card, { borderLeft: "4px solid " + TOOL_COLOR })}>
+            <div style={{ fontSize: 11, color: "#9CA3AF", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 12 }}>{warehouse}</div>
+            <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 4 }}><strong>Subject:</strong> {subject}</div>
+          </div>
+
+          {/* Hill's Draft */}
+          <div style={S.card}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 600, color: "#1F2937", marginBottom: 4 }}>Hill{"'"}s Pet Nutrition</div>
+                <div style={{ fontSize: 11, color: "#9CA3AF" }}>{hillsTo}</div>
+              </div>
+              {hillsDraftSent && <span style={{ fontSize: 11, color: "#059669", fontWeight: 500, display: "flex", alignItems: "center", gap: 4 }}><IconCheck /> Sent</span>}
+            </div>
+            <div style={{ background: "#F9FAFB", borderRadius: 8, padding: "14px 16px", fontSize: 13, color: "#374151", lineHeight: 1.7, marginBottom: 12 }}>
+              Hi, please find attached our weekly replenishment order. Please include the Purchase Order # on our packing list.<br /><br />
+              We look forward to confirmation of receipt. Let us know if you have any questions.<br /><br />
+              Thanks,<br /><br />
+              <span style={{ color: "#9CA3AF", fontSize: 11, fontStyle: "italic" }}>Your Vetcove Gmail signature will be appended automatically</span>
+            </div>
+            <button onClick={function() { createDraft("hills"); }} disabled={hillsDraftSent} style={Object.assign({}, S.btn(), { opacity: hillsDraftSent ? 0.5 : 1 })}><IconMail /> {hillsDraftSent ? "Draft Created" : "Create Draft for Hill\u2019s"}</button>
+          </div>
+
+          {/* Central Pet Draft */}
+          <div style={S.card}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 600, color: "#1F2937", marginBottom: 4 }}>Central Pet</div>
+                <div style={{ fontSize: 11, color: "#9CA3AF" }}>{cpTo}</div>
+              </div>
+              {cpDraftSent && <span style={{ fontSize: 11, color: "#059669", fontWeight: 500, display: "flex", alignItems: "center", gap: 4 }}><IconCheck /> Sent</span>}
+            </div>
+            <div style={{ background: "#F9FAFB", borderRadius: 8, padding: "14px 16px", fontSize: 13, color: "#374151", lineHeight: 1.7, marginBottom: 12 }}>
+              Hi Central Pet team,<br /><br />
+              I{"'"}ve just placed this week{"'"}s replenishment POs with Hill{"'"}s. Attaching here to create in your systems. Hill{"'"}s hasn{"'"}t set delivery appointments yet.<br /><br />
+              Thanks,<br /><br />
+              <span style={{ color: "#9CA3AF", fontSize: 11, fontStyle: "italic" }}>Your Vetcove Gmail signature will be appended automatically</span>
+            </div>
+            <button onClick={function() { createDraft("cp"); }} disabled={cpDraftSent} style={Object.assign({}, S.btn(), { opacity: cpDraftSent ? 0.5 : 1 })}><IconMail /> {cpDraftSent ? "Draft Created" : "Create Draft for Central Pet"}</button>
+          </div>
+        </div>;
+      })()}
     </div>}
 
     {/* EMPTY STATE */}
@@ -3460,7 +3532,7 @@ export default function Hub() {
           {!showLogin && page === "cycle-count" && <CycleCountTool key="cc-standard" toast={showToast} />}
           {!showLogin && page === "fuze-tracker" && <FuzeTracker toast={showToast} />}
           {!showLogin && page === "hills-pawtree" && <HillsTracker toast={showToast} ok={ok} lp={promptLogin} cred={cred} />}
-          {!showLogin && page === "truckloader" && <TruckloaderTool toast={showToast} ok={ok} lp={promptLogin} cred={cred} />}
+          {!showLogin && page === "truckloader" && <TruckloaderTool toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} />}
           {!showLogin && page === "how-to" && <HowToGuide toast={showToast} />}
         </div>
       </div>
