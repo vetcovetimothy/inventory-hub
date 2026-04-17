@@ -2919,7 +2919,7 @@ function TruckloaderTool(props) {
     <div style={Object.assign({}, S.card, { display: "flex", gap: 24, alignItems: "flex-start", flexWrap: "wrap" })}>
       <div style={{ flex: 1, minWidth: 200 }}>
         <div style={{ fontSize: 11, color: "#9CA3AF", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 6 }}>Warehouse</div>
-        <select value={warehouse} onChange={function(e) { setWarehouse(e.target.value); setOrderItems([]); setTruckGroups(null); setFillSuggestions(null); setFillAdded([]); setFillPals({}); setHillsDraftSent(false); setCpDraftSent(false); }} style={Object.assign({}, S.sel, { width: "100%", maxWidth: 280 })}>
+        <select value={warehouse} onChange={function(e) { setWarehouse(e.target.value); setOrderItems([]); setTruckGroups(null); setFillSuggestions(null); setFillAdded([]); setFillPals({}); setHillsDraftSent(false); setCpDraftSent(false); setStep("order"); }} style={Object.assign({}, S.sel, { width: "100%", maxWidth: 280 })}>
           <option value="HILL-CP-CA">HILL-CP-CA (California)</option>
           <option value="HILL-CP-NJ">HILL-CP-NJ (New Jersey)</option>
         </select>
