@@ -3301,6 +3301,7 @@ function OOSTracker(props) {
   var _notesLoaded = useState(false), notesLoaded = _notesLoaded[0], setNotesLoaded = _notesLoaded[1];
   var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
   var OOS_KV_KEY = "oos-notes-shared";
+  var OOS_DATA_KEY = "oos-data-shared";
 
   function getLastMondayReset() {
     var now = new Date();
@@ -3314,6 +3315,7 @@ function OOSTracker(props) {
 
   useEffect(function() {
     var m = true;
+    // Load notes
     kvGet(OOS_KV_KEY).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
       if (!m) return;
       if (d && d.value) {
@@ -3325,6 +3327,15 @@ function OOSTracker(props) {
       }
       setNotesLoaded(true);
     }).catch(function() { setNotesLoaded(true); });
+    // Load CSV data
+    kvGet(OOS_DATA_KEY).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+      if (!m || !d || !d.value) return;
+      var parsed = typeof d.value === "string" ? JSON.parse(d.value) : d.value;
+      var resetTime = getLastMondayReset();
+      if (parsed._savedAt && parsed._savedAt < resetTime) { kvPost(OOS_DATA_KEY, JSON.stringify({ _savedAt: Date.now() })); return; }
+      if (parsed.fuze && parsed.fuze.length > 0) { setFuzeData(parsed.fuze); setFuzeName(parsed.fuzeName || "Loaded from cloud"); }
+      if (parsed.ggm && parsed.ggm.length > 0) { setGgmData(parsed.ggm); setGgmName(parsed.ggmName || "Loaded from cloud"); }
+    }).catch(function() {});
     return function() { m = false; };
   }, []);
 
@@ -3362,12 +3373,17 @@ function OOSTracker(props) {
     return rows;
   }
 
+  function saveDataToKV(fuze, fuzeFn, ggm, ggmFn) {
+    kvPost(OOS_DATA_KEY, JSON.stringify({ fuze: fuze, fuzeName: fuzeFn, ggm: ggm, ggmName: ggmFn, _savedAt: Date.now() })).catch(function() {});
+  }
+
   function handleFile(file, vendor) {
     if (!file) return;
     var reader = new FileReader();
     reader.onload = function(e) {
       var rows = parseCSV(e.target.result);
-      if (vendor === "fuzerx") { setFuzeData(rows); setFuzeName(file.name); } else { setGgmData(rows); setGgmName(file.name); }
+      if (vendor === "fuzerx") { setFuzeData(rows); setFuzeName(file.name); saveDataToKV(rows, file.name, ggmData, ggmName); }
+      else { setGgmData(rows); setGgmName(file.name); saveDataToKV(fuzeData, fuzeName, rows, file.name); }
       setWhFilter("all"); setSearch("");
       toast("Loaded " + rows.length + " OOS items from " + file.name);
     };
@@ -3413,7 +3429,7 @@ function OOSTracker(props) {
         <select value={whFilter} onChange={function(e) { setWhFilter(e.target.value); }} style={Object.assign({}, S.sel, { padding: "8px 12px" })}><option value="all">All Warehouses</option>{warehouses.map(function(w) { return <option key={w} value={w}>{w}</option>; })}</select>
         <div style={{ flex: 1 }} />
         <span style={{ fontSize: 12, color: "#9CA3AF" }}>{filtered.length} of {data.length} items</span>
-        <button onClick={function() { if (tab === "fuzerx") { setFuzeData([]); setFuzeName(null); } else { setGgmData([]); setGgmName(null); } }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}><IconTrash /> Replace CSV</button>
+        <button onClick={function() { if (tab === "fuzerx") { setFuzeData([]); setFuzeName(null); saveDataToKV([], null, ggmData, ggmName); } else { setGgmData([]); setGgmName(null); saveDataToKV(fuzeData, fuzeName, [], null); } }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}><IconTrash /> Replace CSV</button>
       </div>
       <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto", maxHeight: "calc(100vh - 360px)" })}>
         <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
