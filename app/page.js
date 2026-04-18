@@ -3318,21 +3318,21 @@ function OOSTracker(props) {
     // Load notes
     kvGet(OOS_KV_KEY).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
       if (!m) return;
-      if (d && d.value) {
-        var parsed = typeof d.value === "string" ? JSON.parse(d.value) : d.value;
+      if (d && d.data) {
+        var parsed = typeof d.data === "string" ? JSON.parse(d.data) : d.data;
         var savedAt = parsed._savedAt || 0;
         var resetTime = getLastMondayReset();
-        if (savedAt < resetTime) { setNotes({}); kvPost(OOS_KV_KEY, JSON.stringify({ _savedAt: Date.now() })); }
+        if (savedAt < resetTime) { setNotes({}); kvPost(OOS_KV_KEY, { _savedAt: Date.now() }); }
         else { delete parsed._savedAt; setNotes(parsed); }
       }
       setNotesLoaded(true);
     }).catch(function() { setNotesLoaded(true); });
     // Load CSV data
     kvGet(OOS_DATA_KEY).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
-      if (!m || !d || !d.value) return;
-      var parsed = typeof d.value === "string" ? JSON.parse(d.value) : d.value;
+      if (!m || !d || !d.data) return;
+      var parsed = typeof d.data === "string" ? JSON.parse(d.data) : d.data;
       var resetTime = getLastMondayReset();
-      if (parsed._savedAt && parsed._savedAt < resetTime) { kvPost(OOS_DATA_KEY, JSON.stringify({ _savedAt: Date.now() })); return; }
+      if (parsed._savedAt && parsed._savedAt < resetTime) { kvPost(OOS_DATA_KEY, { _savedAt: Date.now() }); return; }
       if (parsed.fuze && parsed.fuze.length > 0) { setFuzeData(parsed.fuze); setFuzeName(parsed.fuzeName || "Loaded from cloud"); }
       if (parsed.ggm && parsed.ggm.length > 0) { setGgmData(parsed.ggm); setGgmName(parsed.ggmName || "Loaded from cloud"); }
     }).catch(function() {});
@@ -3342,8 +3342,8 @@ function OOSTracker(props) {
   useEffect(function() {
     var iv = setInterval(function() {
       kvGet(OOS_KV_KEY).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
-        if (d && d.value) {
-          var parsed = typeof d.value === "string" ? JSON.parse(d.value) : d.value;
+        if (d && d.data) {
+          var parsed = typeof d.data === "string" ? JSON.parse(d.data) : d.data;
           delete parsed._savedAt; setNotes(parsed);
         }
       }).catch(function() {});
@@ -3356,7 +3356,7 @@ function OOSTracker(props) {
 
   function updateNote(key, field, value) {
     var u = Object.assign({}, notes); u[key] = Object.assign({}, u[key] || {}); u[key][field] = value; setNotes(u);
-    var toSave = Object.assign({}, u, { _savedAt: Date.now() }); kvPost(OOS_KV_KEY, JSON.stringify(toSave)).catch(function() {});
+    var toSave = Object.assign({}, u, { _savedAt: Date.now() }); kvPost(OOS_KV_KEY, toSave).catch(function() {});
   }
 
   function parseCSV(text) {
@@ -3374,7 +3374,7 @@ function OOSTracker(props) {
   }
 
   function saveDataToKV(fuze, fuzeFn, ggm, ggmFn) {
-    kvPost(OOS_DATA_KEY, JSON.stringify({ fuze: fuze, fuzeName: fuzeFn, ggm: ggm, ggmName: ggmFn, _savedAt: Date.now() })).catch(function() {});
+    kvPost(OOS_DATA_KEY, { fuze: fuze, fuzeName: fuzeFn, ggm: ggm, ggmName: ggmFn, _savedAt: Date.now() }).catch(function() {});
   }
 
   function handleFile(file, vendor) {
