@@ -3297,14 +3297,55 @@ function OOSTracker(props) {
   var _search = useState(""), search = _search[0], setSearch = _search[1];
   var _whFilter = useState("all"), whFilter = _whFilter[0], setWhFilter = _whFilter[1];
   var _sort = useState({ col: "warehouse", dir: "asc" }), sortState = _sort[0], setSortState = _sort[1];
-  var _notes = useState(function() { return sGet("oos-notes") || {}; }), notes = _notes[0], setNotes = _notes[1];
+  var _notes = useState({}), notes = _notes[0], setNotes = _notes[1];
+  var _notesLoaded = useState(false), notesLoaded = _notesLoaded[0], setNotesLoaded = _notesLoaded[1];
   var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
+  var OOS_KV_KEY = "oos-notes-shared";
+
+  function getLastMondayReset() {
+    var now = new Date();
+    var et = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
+    var day = et.getDay(); // 0=Sun, 1=Mon
+    var daysSinceMonday = day === 0 ? 6 : day - 1;
+    var lastMonday = new Date(et); lastMonday.setDate(et.getDate() - daysSinceMonday); lastMonday.setHours(5, 0, 0, 0);
+    if (et < lastMonday) lastMonday.setDate(lastMonday.getDate() - 7);
+    return lastMonday.getTime();
+  }
+
+  useEffect(function() {
+    var m = true;
+    kvGet(OOS_KV_KEY).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+      if (!m) return;
+      if (d && d.value) {
+        var parsed = typeof d.value === "string" ? JSON.parse(d.value) : d.value;
+        var savedAt = parsed._savedAt || 0;
+        var resetTime = getLastMondayReset();
+        if (savedAt < resetTime) { setNotes({}); kvPost(OOS_KV_KEY, JSON.stringify({ _savedAt: Date.now() })); }
+        else { delete parsed._savedAt; setNotes(parsed); }
+      }
+      setNotesLoaded(true);
+    }).catch(function() { setNotesLoaded(true); });
+    return function() { m = false; };
+  }, []);
+
+  useEffect(function() {
+    var iv = setInterval(function() {
+      kvGet(OOS_KV_KEY).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+        if (d && d.value) {
+          var parsed = typeof d.value === "string" ? JSON.parse(d.value) : d.value;
+          delete parsed._savedAt; setNotes(parsed);
+        }
+      }).catch(function() {});
+    }, 8000);
+    return function() { clearInterval(iv); };
+  }, []);
 
   var WH_MAP = { "TRUEPILL_BROOKLYN": "Brooklyn", "TRUEPILL_OHIO": "Ohio", "TRUEPILL_HAYWARD": "Hayward", "TRUEPILL_MIAMI": "Miami", "GOGOMEDS_KY": "GoGoMeds KY", "GOGOMEDS_AZ": "GoGoMeds AZ", "HILLS_CGP_WAREHOUSE_CA": "Hills CA", "HILLS_CGP_WAREHOUSE_NJ": "Hills NJ" };
   function mapWH(slug) { return WH_MAP[slug] || slug || "\u2014"; }
 
   function updateNote(key, field, value) {
-    var u = Object.assign({}, notes); u[key] = Object.assign({}, u[key] || {}); u[key][field] = value; setNotes(u); sSet("oos-notes", u);
+    var u = Object.assign({}, notes); u[key] = Object.assign({}, u[key] || {}); u[key][field] = value; setNotes(u);
+    var toSave = Object.assign({}, u, { _savedAt: Date.now() }); kvPost(OOS_KV_KEY, JSON.stringify(toSave)).catch(function() {});
   }
 
   function parseCSV(text) {
