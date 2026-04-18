@@ -3290,15 +3290,24 @@ function OOSTracker(props) {
   var toast = props.toast;
   var TOOL_COLOR = "#EF4444";
   var _d = useState([]), data = _d[0], setData = _d[1];
+  var _tab = useState("FuzeRx"), tab = _tab[0], setTab = _tab[1];
   var _search = useState(""), search = _search[0], setSearch = _search[1];
   var _whFilter = useState("all"), whFilter = _whFilter[0], setWhFilter = _whFilter[1];
-  var _mfgFilter = useState("all"), mfgFilter = _mfgFilter[0], setMfgFilter = _mfgFilter[1];
   var _sort = useState({ col: "warehouse", dir: "asc" }), sortState = _sort[0], setSortState = _sort[1];
   var _fileName = useState(null), fileName = _fileName[0], setFileName = _fileName[1];
+  var _notes = useState(function() { return sGet("oos-notes") || {}; }), notes = _notes[0], setNotes = _notes[1];
   var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
 
-  var WH_MAP = { "TRUEPILL_BROOKLYN": "Brooklyn", "TRUEPILL_OHIO": "Ohio", "TRUEPILL_HAYWARD": "Hayward", "TRUEPILL_MIAMI": "Miami", "GOGOMEDS_KY": "GoGoMeds KY", "GOGOMEDS_AZ": "GoGoMeds AZ" };
-  function mapWH(slug) { return WH_MAP[slug] || slug; }
+  var WH_MAP = { "TRUEPILL_BROOKLYN": "Brooklyn", "TRUEPILL_OHIO": "Ohio", "TRUEPILL_HAYWARD": "Hayward", "TRUEPILL_MIAMI": "Miami", "GOGOMEDS_KY": "GoGoMeds KY", "GOGOMEDS_AZ": "GoGoMeds AZ", "HILLS_CGP_WAREHOUSE_CA": "Hills CA", "HILLS_CGP_WAREHOUSE_NJ": "Hills NJ" };
+  function mapWH(slug) { return WH_MAP[slug] || slug || "—"; }
+
+  function updateNote(key, field, value) {
+    var u = Object.assign({}, notes);
+    u[key] = Object.assign({}, u[key] || {});
+    u[key][field] = value;
+    setNotes(u);
+    sSet("oos-notes", u);
+  }
 
   function parseCSV(text) {
     var lines = text.split("\n").filter(function(l) { return l.trim(); });
@@ -3319,7 +3328,7 @@ function OOSTracker(props) {
       obj._wh = mapWH(obj.WAREHOUSE_SLUG || "");
       rows.push(obj);
     }
-    return rows;
+    return rows.filter(function(r) { return r.VENDOR_NAME === "FuzeRx" || r.VENDOR_NAME === "GoGoMeds"; });
   }
 
   function handleFile(file) {
@@ -3330,20 +3339,23 @@ function OOSTracker(props) {
       var rows = parseCSV(e.target.result);
       setData(rows);
       setWhFilter("all");
-      setMfgFilter("all");
       setSearch("");
-      toast("Loaded " + rows.length + " OOS items from " + file.name);
+      var fuze = rows.filter(function(r) { return r.VENDOR_NAME === "FuzeRx"; }).length;
+      var ggm = rows.filter(function(r) { return r.VENDOR_NAME === "GoGoMeds"; }).length;
+      setTab(fuze > 0 ? "FuzeRx" : "GoGoMeds");
+      toast("Loaded " + rows.length + " OOS items (FuzeRx: " + fuze + ", GoGoMeds: " + ggm + ")");
     };
     reader.readAsText(file);
   }
 
-  var warehouses = useMemo(function() { var w = {}; data.forEach(function(r) { w[r._wh] = (w[r._wh] || 0) + 1; }); return Object.keys(w).sort(); }, [data]);
-  var manufacturers = useMemo(function() { var m = {}; data.forEach(function(r) { if (r.MANUFACTURER_NAME) m[r.MANUFACTURER_NAME] = 1; }); return Object.keys(m).sort(); }, [data]);
+  var tabData = useMemo(function() { return data.filter(function(r) { return r.VENDOR_NAME === tab; }); }, [data, tab]);
+  var warehouses = useMemo(function() { var w = {}; tabData.forEach(function(r) { w[r._wh] = 1; }); return Object.keys(w).sort(); }, [tabData]);
+  var fuzeCount = useMemo(function() { return data.filter(function(r) { return r.VENDOR_NAME === "FuzeRx"; }).length; }, [data]);
+  var ggmCount = useMemo(function() { return data.filter(function(r) { return r.VENDOR_NAME === "GoGoMeds"; }).length; }, [data]);
 
   var filtered = useMemo(function() {
-    var d = data.slice();
+    var d = tabData.slice();
     if (whFilter !== "all") d = d.filter(function(r) { return r._wh === whFilter; });
-    if (mfgFilter !== "all") d = d.filter(function(r) { return r.MANUFACTURER_NAME === mfgFilter; });
     if (search) { var s = search.toLowerCase(); d = d.filter(function(r) { return (r.PRODUCT_LINE_NAME || "").toLowerCase().indexOf(s) >= 0 || (r.MANUFACTURER_NAME || "").toLowerCase().indexOf(s) >= 0 || (r.MANUFACTURER_NO || "").toLowerCase().indexOf(s) >= 0; }); }
     var col = sortState.col; var dir = sortState.dir;
     d.sort(function(a, b) {
@@ -3357,12 +3369,7 @@ function OOSTracker(props) {
       return dir === "desc" ? -cmp : cmp;
     });
     return d;
-  }, [data, whFilter, mfgFilter, search, sortState]);
-
-  var stats = useMemo(function() {
-    var byWh = {}; data.forEach(function(r) { byWh[r._wh] = (byWh[r._wh] || 0) + 1; });
-    return { total: data.length, byWh: byWh, manufacturers: manufacturers.length, warehouses: warehouses.length };
-  }, [data, manufacturers, warehouses]);
+  }, [tabData, whFilter, search, sortState]);
 
   function sortHeader(col, label) {
     var isSorted = sortState.col === col;
@@ -3375,17 +3382,23 @@ function OOSTracker(props) {
       <div onDragOver={function(e) { e.preventDefault(); }} onDrop={function(e) { e.preventDefault(); if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); }} style={{ border: "2px dashed #E5E7EB", borderRadius: 12, padding: 40, cursor: "pointer", transition: "border-color 0.15s" }} onClick={function() { var inp = document.createElement("input"); inp.type = "file"; inp.accept = ".csv"; inp.onchange = function(e) { handleFile(e.target.files[0]); }; inp.click(); }}>
         <div style={{ fontSize: 32, marginBottom: 8 }}>{"\uD83D\uDCC4"}</div>
         <div style={{ fontSize: 14, fontWeight: 600, color: "#374151", marginBottom: 4 }}>Upload OOS CSV from Hex</div>
-        <div style={{ fontSize: 12, color: "#9CA3AF" }}>Drag and drop or click to browse</div>
+        <div style={{ fontSize: 12, color: "#9CA3AF" }}>Drag and drop or click to browse. Only FuzeRx and GoGoMeds items will be loaded.</div>
       </div>
     </div>}
 
-    {/* STATS */}
     {data.length > 0 && <div>
+      {/* VENDOR TABS */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 16, alignItems: "center" }}>
+        <button onClick={function() { setTab("FuzeRx"); setWhFilter("all"); setSearch(""); }} style={S.pill(tab === "FuzeRx", "#3B82F6")}>FuzeRx<span style={{ fontSize: 10, background: tab === "FuzeRx" ? "rgba(255,255,255,0.2)" : "rgba(100,116,139,0.2)", padding: "1px 6px", borderRadius: 4, marginLeft: 6 }}>{fuzeCount}</span></button>
+        <button onClick={function() { setTab("GoGoMeds"); setWhFilter("all"); setSearch(""); }} style={S.pill(tab === "GoGoMeds", "#8B5CF6")}>GoGoMeds<span style={{ fontSize: 10, background: tab === "GoGoMeds" ? "rgba(255,255,255,0.2)" : "rgba(100,116,139,0.2)", padding: "1px 6px", borderRadius: 4, marginLeft: 6 }}>{ggmCount}</span></button>
+        <div style={{ flex: 1 }} />
+        <button onClick={function() { setData([]); setFileName(null); }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}><IconTrash /> Replace CSV</button>
+      </div>
+
+      {/* STATS */}
       <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
-        <div style={Object.assign({}, S.statCard, { background: "#FEF2F2" })}><div style={{ fontSize: 11, color: "#C47070", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>Total OOS</div><div style={{ fontSize: 28, fontWeight: 500, color: "#EF4444", marginTop: 6 }}>{stats.total}</div></div>
-        <div style={Object.assign({}, S.statCard, { background: "#FFF7ED" })}><div style={{ fontSize: 11, color: "#B08A4A", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>Warehouses</div><div style={{ fontSize: 28, fontWeight: 500, color: "#D97706", marginTop: 6 }}>{stats.warehouses}</div></div>
-        <div style={Object.assign({}, S.statCard, { background: "#EFF6FF" })}><div style={{ fontSize: 11, color: "#6B8ABF", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>Manufacturers</div><div style={{ fontSize: 28, fontWeight: 500, color: "#3B82F6", marginTop: 6 }}>{stats.manufacturers}</div></div>
-        {warehouses.map(function(wh) { return <div key={wh} style={Object.assign({}, S.statCard, { background: "#F9FAFB" })}><div style={{ fontSize: 11, color: "#6B7280", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>{wh}</div><div style={{ fontSize: 28, fontWeight: 500, color: "#374151", marginTop: 6 }}>{stats.byWh[wh] || 0}</div></div>; })}
+        <div style={Object.assign({}, S.statCard, { background: "#FEF2F2" })}><div style={{ fontSize: 11, color: "#C47070", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>{tab} OOS</div><div style={{ fontSize: 28, fontWeight: 500, color: "#EF4444", marginTop: 6 }}>{tabData.length}</div></div>
+        {warehouses.map(function(wh) { var ct = tabData.filter(function(r) { return r._wh === wh; }).length; return <div key={wh} style={Object.assign({}, S.statCard, { background: "#F9FAFB" })}><div style={{ fontSize: 11, color: "#6B7280", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>{wh}</div><div style={{ fontSize: 28, fontWeight: 500, color: "#374151", marginTop: 6 }}>{ct}</div></div>; })}
       </div>
 
       {/* FILTERS */}
@@ -3395,17 +3408,12 @@ function OOSTracker(props) {
           <option value="all">All Warehouses</option>
           {warehouses.map(function(w) { return <option key={w} value={w}>{w}</option>; })}
         </select>
-        <select value={mfgFilter} onChange={function(e) { setMfgFilter(e.target.value); }} style={Object.assign({}, S.sel, { padding: "8px 12px" })}>
-          <option value="all">All Manufacturers</option>
-          {manufacturers.map(function(m) { return <option key={m} value={m}>{m}</option>; })}
-        </select>
         <div style={{ flex: 1 }} />
-        <span style={{ fontSize: 12, color: "#9CA3AF" }}>{filtered.length} of {data.length} items</span>
-        <button onClick={function() { setData([]); setFileName(null); }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}><IconTrash /> Clear</button>
+        <span style={{ fontSize: 12, color: "#9CA3AF" }}>{filtered.length} of {tabData.length} items</span>
       </div>
 
       {/* TABLE */}
-      <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto", maxHeight: "calc(100vh - 320px)" })}>
+      <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto", maxHeight: "calc(100vh - 360px)" })}>
         <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
           <thead><tr>
             {sortHeader("id", "Mfr No.")}
@@ -3413,14 +3421,24 @@ function OOSTracker(props) {
             {sortHeader("product", "Product")}
             {sortHeader("warehouse", "Warehouse")}
             {sortHeader("status", "Status")}
+            <th style={Object.assign({}, S.th, { textAlign: "center", width: 40 })}>SD</th>
+            <th style={Object.assign({}, S.th, { textAlign: "center", width: 40 })}>BO</th>
+            <th style={Object.assign({}, S.th, { minWidth: 180 })}>Notes</th>
           </tr></thead>
           <tbody>{filtered.map(function(r, i) {
+            var noteKey = r.MANUFACTURER_NO + ":" + r.WAREHOUSE_SLUG;
+            var n = notes[noteKey] || {};
+            var whBg = r._wh === "Brooklyn" ? "#EFF6FF" : r._wh === "Ohio" ? "#ECFDF5" : r._wh === "Hayward" ? "#FFF7ED" : r._wh === "Miami" ? "#FFF1F2" : r._wh === "GoGoMeds KY" ? "#F5F3FF" : r._wh === "GoGoMeds AZ" ? "#FDF2F8" : "#F3F4F6";
+            var whColor = r._wh === "Brooklyn" ? "#2563EB" : r._wh === "Ohio" ? "#059669" : r._wh === "Hayward" ? "#D97706" : r._wh === "Miami" ? "#E11D48" : r._wh === "GoGoMeds KY" ? "#7C3AED" : r._wh === "GoGoMeds AZ" ? "#DB2777" : "#6B7280";
             return <tr key={i}>
               <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, fontWeight: 600, color: "#374151" })}>{r.MANUFACTURER_NO}</td>
               <td style={Object.assign({}, S.td, { color: "#374151" })}>{r.MANUFACTURER_NAME}</td>
-              <td style={Object.assign({}, S.td, { color: "#374151", maxWidth: 350 })}>{r.PRODUCT_LINE_NAME}</td>
-              <td style={S.td}><span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 6, fontWeight: 500, background: r._wh === "Brooklyn" ? "#EFF6FF" : r._wh === "Ohio" ? "#ECFDF5" : r._wh === "Hayward" ? "#FFF7ED" : r._wh === "Miami" ? "#FFF1F2" : "#F3F4F6", color: r._wh === "Brooklyn" ? "#2563EB" : r._wh === "Ohio" ? "#059669" : r._wh === "Hayward" ? "#D97706" : r._wh === "Miami" ? "#E11D48" : "#6B7280" }}>{r._wh}</span></td>
+              <td style={Object.assign({}, S.td, { color: "#374151", maxWidth: 300 })}>{r.PRODUCT_LINE_NAME}</td>
+              <td style={S.td}><span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 6, fontWeight: 500, background: whBg, color: whColor }}>{r._wh}</span></td>
               <td style={S.td}><span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 6, fontWeight: 500, background: r.SUPPLY_STATUS === "UNAVAILABLE" ? "#FEF2F2" : "#FFF7ED", color: r.SUPPLY_STATUS === "UNAVAILABLE" ? "#DC2626" : "#D97706" }}>{r.SUPPLY_STATUS}</span></td>
+              <td style={Object.assign({}, S.td, { textAlign: "center" })}><button onClick={function() { updateNote(noteKey, "sd", !n.sd); }} style={{ width: 20, height: 20, borderRadius: 4, border: n.sd ? "2px solid #E879F9" : "2px solid #D1D5DB", background: n.sd ? "#E879F9" : "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", transition: "all 0.15s" }}>{n.sd && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}</button></td>
+              <td style={Object.assign({}, S.td, { textAlign: "center" })}><button onClick={function() { updateNote(noteKey, "bo", !n.bo); }} style={{ width: 20, height: 20, borderRadius: 4, border: n.bo ? "2px solid #F97316" : "2px solid #D1D5DB", background: n.bo ? "#F97316" : "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", transition: "all 0.15s" }}>{n.bo && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}</button></td>
+              <td style={S.td}><input value={n.note || ""} onChange={function(e) { updateNote(noteKey, "note", e.target.value); }} placeholder="Add notes..." style={Object.assign({}, S.inp, { padding: "5px 10px", fontSize: 12 })} /></td>
             </tr>;
           })}</tbody>
         </table>
