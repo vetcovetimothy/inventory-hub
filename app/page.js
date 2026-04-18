@@ -3284,6 +3284,152 @@ function TruckloaderTool(props) {
     </div>}
   </div>;
 }
+
+/* ═══════ OOS TRACKER ═══════ */
+function OOSTracker(props) {
+  var toast = props.toast;
+  var TOOL_COLOR = "#EF4444";
+  var _d = useState([]), data = _d[0], setData = _d[1];
+  var _search = useState(""), search = _search[0], setSearch = _search[1];
+  var _whFilter = useState("all"), whFilter = _whFilter[0], setWhFilter = _whFilter[1];
+  var _mfgFilter = useState("all"), mfgFilter = _mfgFilter[0], setMfgFilter = _mfgFilter[1];
+  var _sort = useState({ col: "warehouse", dir: "asc" }), sortState = _sort[0], setSortState = _sort[1];
+  var _fileName = useState(null), fileName = _fileName[0], setFileName = _fileName[1];
+  var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
+
+  var WH_MAP = { "TRUEPILL_BROOKLYN": "Brooklyn", "TRUEPILL_OHIO": "Ohio", "TRUEPILL_HAYWARD": "Hayward", "TRUEPILL_MIAMI": "Miami", "GOGOMEDS_KY": "GoGoMeds KY", "GOGOMEDS_AZ": "GoGoMeds AZ" };
+  function mapWH(slug) { return WH_MAP[slug] || slug; }
+
+  function parseCSV(text) {
+    var lines = text.split("\n").filter(function(l) { return l.trim(); });
+    if (lines.length < 2) return [];
+    var headers = lines[0].split(",").map(function(h) { return h.trim().replace(/^"|"$/g, ""); });
+    var rows = [];
+    for (var i = 1; i < lines.length; i++) {
+      var vals = []; var cur = ""; var inQuote = false;
+      for (var c = 0; c < lines[i].length; c++) {
+        var ch = lines[i][c];
+        if (ch === '"') { inQuote = !inQuote; }
+        else if (ch === ',' && !inQuote) { vals.push(cur.trim()); cur = ""; }
+        else { cur += ch; }
+      }
+      vals.push(cur.trim());
+      var obj = {};
+      headers.forEach(function(h, hi) { obj[h] = vals[hi] || ""; });
+      obj._wh = mapWH(obj.WAREHOUSE_SLUG || "");
+      rows.push(obj);
+    }
+    return rows;
+  }
+
+  function handleFile(file) {
+    if (!file) return;
+    setFileName(file.name);
+    var reader = new FileReader();
+    reader.onload = function(e) {
+      var rows = parseCSV(e.target.result);
+      setData(rows);
+      setWhFilter("all");
+      setMfgFilter("all");
+      setSearch("");
+      toast("Loaded " + rows.length + " OOS items from " + file.name);
+    };
+    reader.readAsText(file);
+  }
+
+  var warehouses = useMemo(function() { var w = {}; data.forEach(function(r) { w[r._wh] = (w[r._wh] || 0) + 1; }); return Object.keys(w).sort(); }, [data]);
+  var manufacturers = useMemo(function() { var m = {}; data.forEach(function(r) { if (r.MANUFACTURER_NAME) m[r.MANUFACTURER_NAME] = 1; }); return Object.keys(m).sort(); }, [data]);
+
+  var filtered = useMemo(function() {
+    var d = data.slice();
+    if (whFilter !== "all") d = d.filter(function(r) { return r._wh === whFilter; });
+    if (mfgFilter !== "all") d = d.filter(function(r) { return r.MANUFACTURER_NAME === mfgFilter; });
+    if (search) { var s = search.toLowerCase(); d = d.filter(function(r) { return (r.PRODUCT_LINE_NAME || "").toLowerCase().indexOf(s) >= 0 || (r.MANUFACTURER_NAME || "").toLowerCase().indexOf(s) >= 0 || (r.MANUFACTURER_NO || "").toLowerCase().indexOf(s) >= 0; }); }
+    var col = sortState.col; var dir = sortState.dir;
+    d.sort(function(a, b) {
+      var va, vb;
+      if (col === "warehouse") { va = a._wh; vb = b._wh; }
+      else if (col === "manufacturer") { va = a.MANUFACTURER_NAME; vb = b.MANUFACTURER_NAME; }
+      else if (col === "product") { va = a.PRODUCT_LINE_NAME; vb = b.PRODUCT_LINE_NAME; }
+      else if (col === "status") { va = a.SUPPLY_STATUS; vb = b.SUPPLY_STATUS; }
+      else { va = a.MANUFACTURER_NO; vb = b.MANUFACTURER_NO; }
+      var cmp = (va || "").localeCompare(vb || "");
+      return dir === "desc" ? -cmp : cmp;
+    });
+    return d;
+  }, [data, whFilter, mfgFilter, search, sortState]);
+
+  var stats = useMemo(function() {
+    var byWh = {}; data.forEach(function(r) { byWh[r._wh] = (byWh[r._wh] || 0) + 1; });
+    return { total: data.length, byWh: byWh, manufacturers: manufacturers.length, warehouses: warehouses.length };
+  }, [data, manufacturers, warehouses]);
+
+  function sortHeader(col, label) {
+    var isSorted = sortState.col === col;
+    return <th onClick={function() { setSortState(isSorted ? { col: col, dir: sortState.dir === "asc" ? "desc" : "asc" } : { col: col, dir: "asc" }); }} style={Object.assign({}, S.th, { cursor: "pointer", userSelect: "none" })}>{label}{isSorted ? (sortState.dir === "desc" ? " \u25BE" : " \u25B4") : ""}</th>;
+  }
+
+  return <div>
+    {/* UPLOAD */}
+    {data.length === 0 && <div style={Object.assign({}, S.card, { textAlign: "center", padding: 40 })}>
+      <div onDragOver={function(e) { e.preventDefault(); }} onDrop={function(e) { e.preventDefault(); if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); }} style={{ border: "2px dashed #E5E7EB", borderRadius: 12, padding: 40, cursor: "pointer", transition: "border-color 0.15s" }} onClick={function() { var inp = document.createElement("input"); inp.type = "file"; inp.accept = ".csv"; inp.onchange = function(e) { handleFile(e.target.files[0]); }; inp.click(); }}>
+        <div style={{ fontSize: 32, marginBottom: 8 }}>{"\uD83D\uDCC4"}</div>
+        <div style={{ fontSize: 14, fontWeight: 600, color: "#374151", marginBottom: 4 }}>Upload OOS CSV from Hex</div>
+        <div style={{ fontSize: 12, color: "#9CA3AF" }}>Drag and drop or click to browse</div>
+      </div>
+    </div>}
+
+    {/* STATS */}
+    {data.length > 0 && <div>
+      <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+        <div style={Object.assign({}, S.statCard, { background: "#FEF2F2" })}><div style={{ fontSize: 11, color: "#C47070", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>Total OOS</div><div style={{ fontSize: 28, fontWeight: 500, color: "#EF4444", marginTop: 6 }}>{stats.total}</div></div>
+        <div style={Object.assign({}, S.statCard, { background: "#FFF7ED" })}><div style={{ fontSize: 11, color: "#B08A4A", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>Warehouses</div><div style={{ fontSize: 28, fontWeight: 500, color: "#D97706", marginTop: 6 }}>{stats.warehouses}</div></div>
+        <div style={Object.assign({}, S.statCard, { background: "#EFF6FF" })}><div style={{ fontSize: 11, color: "#6B8ABF", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>Manufacturers</div><div style={{ fontSize: 28, fontWeight: 500, color: "#3B82F6", marginTop: 6 }}>{stats.manufacturers}</div></div>
+        {warehouses.map(function(wh) { return <div key={wh} style={Object.assign({}, S.statCard, { background: "#F9FAFB" })}><div style={{ fontSize: 11, color: "#6B7280", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>{wh}</div><div style={{ fontSize: 28, fontWeight: 500, color: "#374151", marginTop: 6 }}>{stats.byWh[wh] || 0}</div></div>; })}
+      </div>
+
+      {/* FILTERS */}
+      <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
+        <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search..." style={Object.assign({}, S.inp, { padding: "8px 14px", width: 200 })} />
+        <select value={whFilter} onChange={function(e) { setWhFilter(e.target.value); }} style={Object.assign({}, S.sel, { padding: "8px 12px" })}>
+          <option value="all">All Warehouses</option>
+          {warehouses.map(function(w) { return <option key={w} value={w}>{w}</option>; })}
+        </select>
+        <select value={mfgFilter} onChange={function(e) { setMfgFilter(e.target.value); }} style={Object.assign({}, S.sel, { padding: "8px 12px" })}>
+          <option value="all">All Manufacturers</option>
+          {manufacturers.map(function(m) { return <option key={m} value={m}>{m}</option>; })}
+        </select>
+        <div style={{ flex: 1 }} />
+        <span style={{ fontSize: 12, color: "#9CA3AF" }}>{filtered.length} of {data.length} items</span>
+        <button onClick={function() { setData([]); setFileName(null); }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}><IconTrash /> Clear</button>
+      </div>
+
+      {/* TABLE */}
+      <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto", maxHeight: "calc(100vh - 320px)" })}>
+        <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
+          <thead><tr>
+            {sortHeader("id", "Mfr No.")}
+            {sortHeader("manufacturer", "Manufacturer")}
+            {sortHeader("product", "Product")}
+            {sortHeader("warehouse", "Warehouse")}
+            {sortHeader("status", "Status")}
+          </tr></thead>
+          <tbody>{filtered.map(function(r, i) {
+            return <tr key={i}>
+              <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, fontWeight: 600, color: "#374151" })}>{r.MANUFACTURER_NO}</td>
+              <td style={Object.assign({}, S.td, { color: "#374151" })}>{r.MANUFACTURER_NAME}</td>
+              <td style={Object.assign({}, S.td, { color: "#374151", maxWidth: 350 })}>{r.PRODUCT_LINE_NAME}</td>
+              <td style={S.td}><span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 6, fontWeight: 500, background: r._wh === "Brooklyn" ? "#EFF6FF" : r._wh === "Ohio" ? "#ECFDF5" : r._wh === "Hayward" ? "#FFF7ED" : r._wh === "Miami" ? "#FFF1F2" : "#F3F4F6", color: r._wh === "Brooklyn" ? "#2563EB" : r._wh === "Ohio" ? "#059669" : r._wh === "Hayward" ? "#D97706" : r._wh === "Miami" ? "#E11D48" : "#6B7280" }}>{r._wh}</span></td>
+              <td style={S.td}><span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 6, fontWeight: 500, background: r.SUPPLY_STATUS === "UNAVAILABLE" ? "#FEF2F2" : "#FFF7ED", color: r.SUPPLY_STATUS === "UNAVAILABLE" ? "#DC2626" : "#D97706" }}>{r.SUPPLY_STATUS}</span></td>
+            </tr>;
+          })}</tbody>
+        </table>
+      </div>
+      {fileName && <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 8 }}>Source: {fileName}</div>}
+    </div>}
+  </div>;
+}
+
 /* ═══════ MAIN HUB ═══════ */
 export default function Hub() {
   var _p = useState(function() { var s = sGet("active-page"); return s || "TP-NY"; }), page = _p[0], setPage = _p[1];
@@ -3410,8 +3556,8 @@ export default function Hub() {
   );
 
   var isWH = page in WH;
-  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "po-import" ? "#06B6D4" : page === "cycle-count" ? "#14B8A6" : page === "fuze-tracker" ? "#F59E0B" : page === "hills-pawtree" ? "#10B981" : page === "truckloader" ? "#D97706" : page === "how-to" ? "#6B7280" : "#3B82F6";
-  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "po-import" ? "PO NDC Validator" : page === "cycle-count" ? "Cycle Counting" : page === "fuze-tracker" ? "Fuze Tracker" : page === "hills-pawtree" ? "Hills & Pawtree Tracker" : page === "truckloader" ? "Truckloader" : page === "how-to" ? "How-To Guide" : showLogin ? "Login" : "Shipping Rules";
+  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "po-import" ? "#06B6D4" : page === "cycle-count" ? "#14B8A6" : page === "fuze-tracker" ? "#F59E0B" : page === "hills-pawtree" ? "#10B981" : page === "truckloader" ? "#D97706" : page === "oos-tracker" ? "#EF4444" : page === "how-to" ? "#6B7280" : "#3B82F6";
+  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "po-import" ? "PO NDC Validator" : page === "cycle-count" ? "Cycle Counting" : page === "fuze-tracker" ? "Fuze Tracker" : page === "hills-pawtree" ? "Hills & Pawtree Tracker" : page === "truckloader" ? "Truckloader" : page === "oos-tracker" ? "OOS Tracker" : page === "how-to" ? "How-To Guide" : showLogin ? "Login" : "Shipping Rules";
 
   function SideLink(p) {
     var active = page === p.id && !showLogin;
@@ -3436,7 +3582,7 @@ export default function Hub() {
             { key: "generic", label: "Generic PO Tools", items: [{ id: "po-import", label: "PO NDC Validator", color: "#06B6D4" }, { id: "cycle-count", label: "Cycle Counting", color: "#14B8A6" }] },
             { key: "hills", label: "Hills Tools", items: [{ id: "hills-pawtree", label: "Hills & Pawtree", color: "#10B981" }, { id: "truckloader", label: "Truckloader", color: "#D97706" }] },
             { key: "tracking", label: "Tracking", items: [{ id: "fuze-tracker", label: "Fuze Tracker", color: "#F59E0B" }] },
-            { key: "inventory", label: "Inventory Tools", items: [{ id: "short-dating", label: "Short-Dating", color: "#E879F9" }, { id: "backorder", label: "Backorders", color: "#F97316" }] },
+            { key: "inventory", label: "Inventory Tools", items: [{ id: "short-dating", label: "Short-Dating", color: "#E879F9" }, { id: "backorder", label: "Backorders", color: "#F97316" }, { id: "oos-tracker", label: "OOS Tracker", color: "#EF4444" }] },
           ];
           return sections.map(function(sec, si) {
             var hasActive = sec.items.some(function(item) { return page === item.id && !showLogin; });
@@ -3533,6 +3679,7 @@ export default function Hub() {
           {!showLogin && page === "fuze-tracker" && <FuzeTracker toast={showToast} />}
           {!showLogin && page === "hills-pawtree" && <HillsTracker toast={showToast} ok={ok} lp={promptLogin} cred={cred} />}
           {!showLogin && page === "truckloader" && <TruckloaderTool toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} />}
+          {!showLogin && page === "oos-tracker" && <OOSTracker toast={showToast} />}
           {!showLogin && page === "how-to" && <HowToGuide toast={showToast} />}
         </div>
       </div>
