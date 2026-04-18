@@ -3418,7 +3418,7 @@ function OOSTracker(props) {
       <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto", maxHeight: "calc(100vh - 360px)" })}>
         <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
           <thead><tr>
-            <th style={Object.assign({}, S.th, { minWidth: 180 })}>Notes</th>
+            <th style={Object.assign({}, S.th, { minWidth: 360 })}>Notes</th>
             <th style={Object.assign({}, S.th, { textAlign: "center", width: 40 })}>SD</th>
             <th style={Object.assign({}, S.th, { textAlign: "center", width: 40 })}>BO</th>
             {sortHeader("id", "Mfr No.")}
