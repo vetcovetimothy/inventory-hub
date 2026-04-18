@@ -3289,24 +3289,22 @@ function TruckloaderTool(props) {
 function OOSTracker(props) {
   var toast = props.toast;
   var TOOL_COLOR = "#EF4444";
-  var _d = useState([]), data = _d[0], setData = _d[1];
-  var _tab = useState("FuzeRx"), tab = _tab[0], setTab = _tab[1];
+  var _tab = useState("fuzerx"), tab = _tab[0], setTab = _tab[1];
+  var _fuzeData = useState([]), fuzeData = _fuzeData[0], setFuzeData = _fuzeData[1];
+  var _ggmData = useState([]), ggmData = _ggmData[0], setGgmData = _ggmData[1];
+  var _fuzeName = useState(null), fuzeName = _fuzeName[0], setFuzeName = _fuzeName[1];
+  var _ggmName = useState(null), ggmName = _ggmName[0], setGgmName = _ggmName[1];
   var _search = useState(""), search = _search[0], setSearch = _search[1];
   var _whFilter = useState("all"), whFilter = _whFilter[0], setWhFilter = _whFilter[1];
   var _sort = useState({ col: "warehouse", dir: "asc" }), sortState = _sort[0], setSortState = _sort[1];
-  var _fileName = useState(null), fileName = _fileName[0], setFileName = _fileName[1];
   var _notes = useState(function() { return sGet("oos-notes") || {}; }), notes = _notes[0], setNotes = _notes[1];
   var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
 
   var WH_MAP = { "TRUEPILL_BROOKLYN": "Brooklyn", "TRUEPILL_OHIO": "Ohio", "TRUEPILL_HAYWARD": "Hayward", "TRUEPILL_MIAMI": "Miami", "GOGOMEDS_KY": "GoGoMeds KY", "GOGOMEDS_AZ": "GoGoMeds AZ", "HILLS_CGP_WAREHOUSE_CA": "Hills CA", "HILLS_CGP_WAREHOUSE_NJ": "Hills NJ" };
-  function mapWH(slug) { return WH_MAP[slug] || slug || "—"; }
+  function mapWH(slug) { return WH_MAP[slug] || slug || "\u2014"; }
 
   function updateNote(key, field, value) {
-    var u = Object.assign({}, notes);
-    u[key] = Object.assign({}, u[key] || {});
-    u[key][field] = value;
-    setNotes(u);
-    sSet("oos-notes", u);
+    var u = Object.assign({}, notes); u[key] = Object.assign({}, u[key] || {}); u[key][field] = value; setNotes(u); sSet("oos-notes", u);
   }
 
   function parseCSV(text) {
@@ -3316,103 +3314,66 @@ function OOSTracker(props) {
     var rows = [];
     for (var i = 1; i < lines.length; i++) {
       var vals = []; var cur = ""; var inQuote = false;
-      for (var c = 0; c < lines[i].length; c++) {
-        var ch = lines[i][c];
-        if (ch === '"') { inQuote = !inQuote; }
-        else if (ch === ',' && !inQuote) { vals.push(cur.trim()); cur = ""; }
-        else { cur += ch; }
-      }
+      for (var c = 0; c < lines[i].length; c++) { var ch = lines[i][c]; if (ch === '"') { inQuote = !inQuote; } else if (ch === ',' && !inQuote) { vals.push(cur.trim()); cur = ""; } else { cur += ch; } }
       vals.push(cur.trim());
-      var obj = {};
-      headers.forEach(function(h, hi) { obj[h] = vals[hi] || ""; });
-      obj._wh = mapWH(obj.WAREHOUSE_SLUG || "");
-      rows.push(obj);
+      var obj = {}; headers.forEach(function(h, hi) { obj[h] = vals[hi] || ""; }); obj._wh = mapWH(obj.WAREHOUSE_SLUG || ""); rows.push(obj);
     }
-    return rows.filter(function(r) { return r.VENDOR_NAME === "FuzeRx" || r.VENDOR_NAME === "GoGoMeds"; });
+    return rows;
   }
 
-  function handleFile(file) {
+  function handleFile(file, vendor) {
     if (!file) return;
-    setFileName(file.name);
     var reader = new FileReader();
     reader.onload = function(e) {
       var rows = parseCSV(e.target.result);
-      setData(rows);
-      setWhFilter("all");
-      setSearch("");
-      var fuze = rows.filter(function(r) { return r.VENDOR_NAME === "FuzeRx"; }).length;
-      var ggm = rows.filter(function(r) { return r.VENDOR_NAME === "GoGoMeds"; }).length;
-      setTab(fuze > 0 ? "FuzeRx" : "GoGoMeds");
-      toast("Loaded " + rows.length + " OOS items (FuzeRx: " + fuze + ", GoGoMeds: " + ggm + ")");
+      if (vendor === "fuzerx") { setFuzeData(rows); setFuzeName(file.name); } else { setGgmData(rows); setGgmName(file.name); }
+      setWhFilter("all"); setSearch("");
+      toast("Loaded " + rows.length + " OOS items from " + file.name);
     };
     reader.readAsText(file);
   }
 
-  var tabData = useMemo(function() { return data.filter(function(r) { return r.VENDOR_NAME === tab; }); }, [data, tab]);
-  var warehouses = useMemo(function() { var w = {}; tabData.forEach(function(r) { w[r._wh] = 1; }); return Object.keys(w).sort(); }, [tabData]);
-  var fuzeCount = useMemo(function() { return data.filter(function(r) { return r.VENDOR_NAME === "FuzeRx"; }).length; }, [data]);
-  var ggmCount = useMemo(function() { return data.filter(function(r) { return r.VENDOR_NAME === "GoGoMeds"; }).length; }, [data]);
+  function uploadZone(vendor) {
+    return <div style={Object.assign({}, S.card, { textAlign: "center", padding: 40 })}>
+      <div onDragOver={function(e) { e.preventDefault(); }} onDrop={function(e) { e.preventDefault(); if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0], vendor); }} style={{ border: "2px dashed #E5E7EB", borderRadius: 12, padding: 40, cursor: "pointer" }} onClick={function() { var inp = document.createElement("input"); inp.type = "file"; inp.accept = ".csv"; inp.onchange = function(e) { handleFile(e.target.files[0], vendor); }; inp.click(); }}>
+        <div style={{ fontSize: 32, marginBottom: 8 }}>{"\uD83D\uDCC4"}</div>
+        <div style={{ fontSize: 14, fontWeight: 600, color: "#374151", marginBottom: 4 }}>Upload {vendor === "fuzerx" ? "FuzeRx" : "GoGoMeds"} OOS CSV</div>
+        <div style={{ fontSize: 12, color: "#9CA3AF" }}>Drag and drop or click to browse</div>
+      </div>
+    </div>;
+  }
+
+  var data = tab === "fuzerx" ? fuzeData : ggmData;
+  var currentName = tab === "fuzerx" ? fuzeName : ggmName;
+  var warehouses = useMemo(function() { var w = {}; data.forEach(function(r) { w[r._wh] = 1; }); return Object.keys(w).sort(); }, [data]);
 
   var filtered = useMemo(function() {
-    var d = tabData.slice();
+    var d = data.slice();
     if (whFilter !== "all") d = d.filter(function(r) { return r._wh === whFilter; });
     if (search) { var s = search.toLowerCase(); d = d.filter(function(r) { return (r.PRODUCT_LINE_NAME || "").toLowerCase().indexOf(s) >= 0 || (r.MANUFACTURER_NAME || "").toLowerCase().indexOf(s) >= 0 || (r.MANUFACTURER_NO || "").toLowerCase().indexOf(s) >= 0; }); }
     var col = sortState.col; var dir = sortState.dir;
-    d.sort(function(a, b) {
-      var va, vb;
-      if (col === "warehouse") { va = a._wh; vb = b._wh; }
-      else if (col === "manufacturer") { va = a.MANUFACTURER_NAME; vb = b.MANUFACTURER_NAME; }
-      else if (col === "product") { va = a.PRODUCT_LINE_NAME; vb = b.PRODUCT_LINE_NAME; }
-      else if (col === "status") { va = a.SUPPLY_STATUS; vb = b.SUPPLY_STATUS; }
-      else { va = a.MANUFACTURER_NO; vb = b.MANUFACTURER_NO; }
-      var cmp = (va || "").localeCompare(vb || "");
-      return dir === "desc" ? -cmp : cmp;
-    });
+    d.sort(function(a, b) { var va, vb; if (col === "warehouse") { va = a._wh; vb = b._wh; } else if (col === "manufacturer") { va = a.MANUFACTURER_NAME; vb = b.MANUFACTURER_NAME; } else if (col === "product") { va = a.PRODUCT_LINE_NAME; vb = b.PRODUCT_LINE_NAME; } else if (col === "status") { va = a.SUPPLY_STATUS; vb = b.SUPPLY_STATUS; } else { va = a.MANUFACTURER_NO; vb = b.MANUFACTURER_NO; } return dir === "desc" ? -(va || "").localeCompare(vb || "") : (va || "").localeCompare(vb || ""); });
     return d;
-  }, [tabData, whFilter, search, sortState]);
+  }, [data, whFilter, search, sortState]);
 
   function sortHeader(col, label) {
     var isSorted = sortState.col === col;
     return <th onClick={function() { setSortState(isSorted ? { col: col, dir: sortState.dir === "asc" ? "desc" : "asc" } : { col: col, dir: "asc" }); }} style={Object.assign({}, S.th, { cursor: "pointer", userSelect: "none" })}>{label}{isSorted ? (sortState.dir === "desc" ? " \u25BE" : " \u25B4") : ""}</th>;
   }
 
-  return <div>
-    {/* UPLOAD */}
-    {data.length === 0 && <div style={Object.assign({}, S.card, { textAlign: "center", padding: 40 })}>
-      <div onDragOver={function(e) { e.preventDefault(); }} onDrop={function(e) { e.preventDefault(); if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); }} style={{ border: "2px dashed #E5E7EB", borderRadius: 12, padding: 40, cursor: "pointer", transition: "border-color 0.15s" }} onClick={function() { var inp = document.createElement("input"); inp.type = "file"; inp.accept = ".csv"; inp.onchange = function(e) { handleFile(e.target.files[0]); }; inp.click(); }}>
-        <div style={{ fontSize: 32, marginBottom: 8 }}>{"\uD83D\uDCC4"}</div>
-        <div style={{ fontSize: 14, fontWeight: 600, color: "#374151", marginBottom: 4 }}>Upload OOS CSV from Hex</div>
-        <div style={{ fontSize: 12, color: "#9CA3AF" }}>Drag and drop or click to browse. Only FuzeRx and GoGoMeds items will be loaded.</div>
-      </div>
-    </div>}
-
-    {data.length > 0 && <div>
-      {/* VENDOR TABS */}
-      <div style={{ display: "flex", gap: 6, marginBottom: 16, alignItems: "center" }}>
-        <button onClick={function() { setTab("FuzeRx"); setWhFilter("all"); setSearch(""); }} style={S.pill(tab === "FuzeRx", "#3B82F6")}>FuzeRx<span style={{ fontSize: 10, background: tab === "FuzeRx" ? "rgba(255,255,255,0.2)" : "rgba(100,116,139,0.2)", padding: "1px 6px", borderRadius: 4, marginLeft: 6 }}>{fuzeCount}</span></button>
-        <button onClick={function() { setTab("GoGoMeds"); setWhFilter("all"); setSearch(""); }} style={S.pill(tab === "GoGoMeds", "#8B5CF6")}>GoGoMeds<span style={{ fontSize: 10, background: tab === "GoGoMeds" ? "rgba(255,255,255,0.2)" : "rgba(100,116,139,0.2)", padding: "1px 6px", borderRadius: 4, marginLeft: 6 }}>{ggmCount}</span></button>
-        <div style={{ flex: 1 }} />
-        <button onClick={function() { setData([]); setFileName(null); }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}><IconTrash /> Replace CSV</button>
-      </div>
-
-      {/* STATS */}
+  function dataTable() {
+    return <div>
       <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
-        <div style={Object.assign({}, S.statCard, { background: "#FEF2F2" })}><div style={{ fontSize: 11, color: "#C47070", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>{tab} OOS</div><div style={{ fontSize: 28, fontWeight: 500, color: "#EF4444", marginTop: 6 }}>{tabData.length}</div></div>
-        {warehouses.map(function(wh) { var ct = tabData.filter(function(r) { return r._wh === wh; }).length; return <div key={wh} style={Object.assign({}, S.statCard, { background: "#F9FAFB" })}><div style={{ fontSize: 11, color: "#6B7280", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>{wh}</div><div style={{ fontSize: 28, fontWeight: 500, color: "#374151", marginTop: 6 }}>{ct}</div></div>; })}
+        <div style={Object.assign({}, S.statCard, { background: "#FEF2F2" })}><div style={{ fontSize: 11, color: "#C47070", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>Total OOS</div><div style={{ fontSize: 28, fontWeight: 500, color: "#EF4444", marginTop: 6 }}>{data.length}</div></div>
+        {warehouses.map(function(wh) { var ct = data.filter(function(r) { return r._wh === wh; }).length; return <div key={wh} style={Object.assign({}, S.statCard, { background: "#F9FAFB" })}><div style={{ fontSize: 11, color: "#6B7280", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>{wh}</div><div style={{ fontSize: 28, fontWeight: 500, color: "#374151", marginTop: 6 }}>{ct}</div></div>; })}
       </div>
-
-      {/* FILTERS */}
       <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
         <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search..." style={Object.assign({}, S.inp, { padding: "8px 14px", width: 200 })} />
-        <select value={whFilter} onChange={function(e) { setWhFilter(e.target.value); }} style={Object.assign({}, S.sel, { padding: "8px 12px" })}>
-          <option value="all">All Warehouses</option>
-          {warehouses.map(function(w) { return <option key={w} value={w}>{w}</option>; })}
-        </select>
+        <select value={whFilter} onChange={function(e) { setWhFilter(e.target.value); }} style={Object.assign({}, S.sel, { padding: "8px 12px" })}><option value="all">All Warehouses</option>{warehouses.map(function(w) { return <option key={w} value={w}>{w}</option>; })}</select>
         <div style={{ flex: 1 }} />
-        <span style={{ fontSize: 12, color: "#9CA3AF" }}>{filtered.length} of {tabData.length} items</span>
+        <span style={{ fontSize: 12, color: "#9CA3AF" }}>{filtered.length} of {data.length} items</span>
+        <button onClick={function() { if (tab === "fuzerx") { setFuzeData([]); setFuzeName(null); } else { setGgmData([]); setGgmName(null); } }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}><IconTrash /> Replace CSV</button>
       </div>
-
-      {/* TABLE */}
       <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto", maxHeight: "calc(100vh - 360px)" })}>
         <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
           <thead><tr>
@@ -3426,7 +3387,7 @@ function OOSTracker(props) {
             <th style={Object.assign({}, S.th, { minWidth: 180 })}>Notes</th>
           </tr></thead>
           <tbody>{filtered.map(function(r, i) {
-            var noteKey = r.MANUFACTURER_NO + ":" + r.WAREHOUSE_SLUG;
+            var noteKey = tab + ":" + r.MANUFACTURER_NO + ":" + (r.WAREHOUSE_SLUG || "");
             var n = notes[noteKey] || {};
             var whBg = r._wh === "Brooklyn" ? "#EFF6FF" : r._wh === "Ohio" ? "#ECFDF5" : r._wh === "Hayward" ? "#FFF7ED" : r._wh === "Miami" ? "#FFF1F2" : r._wh === "GoGoMeds KY" ? "#F5F3FF" : r._wh === "GoGoMeds AZ" ? "#FDF2F8" : "#F3F4F6";
             var whColor = r._wh === "Brooklyn" ? "#2563EB" : r._wh === "Ohio" ? "#059669" : r._wh === "Hayward" ? "#D97706" : r._wh === "Miami" ? "#E11D48" : r._wh === "GoGoMeds KY" ? "#7C3AED" : r._wh === "GoGoMeds AZ" ? "#DB2777" : "#6B7280";
@@ -3443,8 +3404,16 @@ function OOSTracker(props) {
           })}</tbody>
         </table>
       </div>
-      {fileName && <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 8 }}>Source: {fileName}</div>}
-    </div>}
+      {currentName && <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 8 }}>Source: {currentName}</div>}
+    </div>;
+  }
+
+  return <div>
+    <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
+      <button onClick={function() { setTab("fuzerx"); setWhFilter("all"); setSearch(""); }} style={S.pill(tab === "fuzerx", "#3B82F6")}>FuzeRx{fuzeData.length > 0 && <span style={{ fontSize: 10, background: tab === "fuzerx" ? "rgba(255,255,255,0.2)" : "rgba(100,116,139,0.2)", padding: "1px 6px", borderRadius: 4, marginLeft: 6 }}>{fuzeData.length}</span>}</button>
+      <button onClick={function() { setTab("gogomeds"); setWhFilter("all"); setSearch(""); }} style={S.pill(tab === "gogomeds", "#8B5CF6")}>GoGoMeds{ggmData.length > 0 && <span style={{ fontSize: 10, background: tab === "gogomeds" ? "rgba(255,255,255,0.2)" : "rgba(100,116,139,0.2)", padding: "1px 6px", borderRadius: 4, marginLeft: 6 }}>{ggmData.length}</span>}</button>
+    </div>
+    {data.length === 0 ? uploadZone(tab) : dataTable()}
   </div>;
 }
 
