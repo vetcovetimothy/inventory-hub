@@ -1940,7 +1940,7 @@ function HillsTracker(props) {
   var _d = useState([]), data = _d[0], setData = _d[1];
   var _ld = useState(false), loading = _ld[0], setLoading = _ld[1];
   var _meta = useState({}), meta = _meta[0], setMeta = _meta[1];
-  var _hpSort = useState({ col: "date", dir: "desc" }), hpSort = _hpSort[0], setHpSort = _hpSort[1];
+  var _hpSort = useState({ col: "date", dir: "asc" }), hpSort = _hpSort[0], setHpSort = _hpSort[1];
   var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
 
   // Persist ETA and Notes in KV (shared) + localStorage (cache)
