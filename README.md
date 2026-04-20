@@ -1,298 +1,105 @@
-# Inventory Hub — Vetcove Tools
+# Procurement Hub — Vetcove HD
 
-A Next.js web application that combines three inventory management tools into one dashboard:
+Internal procurement operations dashboard for the Home Delivery team. Built with Next.js 14, hosted on Vercel.
 
-- **PO Tools** — 3 warehouse split (Brooklyn/Ohio/Hayward) with shipping rules engine
-- **Short-Dating Tracker** — Expiring inventory management with vendor email automation
-- **Backorder Tracker** — Backordered items with recovery ETA tracking and vendor emails
+## Tools
+
+### PO Tools (per warehouse)
+- **Brooklyn, Ohio, Hayward, Miami, GoGoMeds KY, GoGoMeds AZ**
+- Fetches open PO data from Acumatica, flags short-dating and sell-off items
+- Shipping tab with vendor totals, shipping rule evaluation, done tracking
+- Email tab creates Gmail drafts with XLSX attachments per vendor
+- Item dismissal tracker for flagged items
+
+### Hills Tools
+- **Hills & Pawtree Tracker** — Tracks open Hills/Pawtree POs from Acumatica with ETA and notes (shared via KV)
+- **Truckloader** — Builds weekly replenishment orders from Acumatica GI data, optimizes truck assignments by weight (42,500 lb target), fill suggestions from Netstock DOH data, email draft creation for Hill's and Central Pet
+
+### OOS Tracker
+- Upload CSV from Hex (separate tabs for FuzeRx and GoGoMeds)
+- Tracks short-dating (auto-checked from Short-Dating Tracker), backorder, and notes per manufacturer number
+- Old/New OOS column compares against previous day's data
+- Notes persist across daily resets by manufacturer number
+- Shared via KV, auto-resets daily at 5am EST (weekdays only)
+
+### Tracking
+- **Fuze Tracker** — Reads from Google Sheets, per-warehouse tabs, auto-refreshes daily at 5am EST
+
+### Inventory Tools
+- **Short-Dating Tracker** — Fetches from Acumatica GI, shared via KV, auto-refreshes daily
+- **Backorder Tracker** — Same architecture as Short-Dating
+
+### Generic PO Tools
+- **PO NDC Validator** — Upload vendor PO PDFs, validates NDCs against Acumatica cross-references
+- **Cycle Counting** — Inventory cycle count tool
+
+### Settings
+- **Shipping Rules** — Configurable free shipping thresholds per vendor
+- **How-To Guide** — Interactive walkthrough of all tools
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────┐
-│  Browser (React)                                │
-│  ┌───────────┐ ┌──────────┐ ┌───────────────┐  │
-│  │ PO Tools  │ │ Short-   │ │ Backorder     │  │
-│  │ (3 WH)   │ │ Dating   │ │ Tracker       │  │
-│  └─────┬─────┘ └────┬─────┘ └──────┬────────┘  │
-│        │             │              │            │
-│        └─────────────┼──────────────┘            │
-│                      │ fetch()                   │
-└──────────────────────┼───────────────────────────┘
-                       │
-┌──────────────────────┼───────────────────────────┐
-│  Vercel Serverless   │                           │
-│  ┌───────────────────▼────────────────────────┐  │
-│  │ /api/acumatica                             │  │
-│  │ Proxies OData calls to Acumatica           │  │
-│  │ (handles CORS + auth)                      │  │
-│  └────────────────────────────────────────────┘  │
-│  ┌────────────────────────────────────────────┐  │
-│  │ /api/gmail-drafts                          │  │
-│  │ Creates Gmail drafts via Google API        │  │
-│  └────────────────────────────────────────────┘  │
-└──────────────────────────────────────────────────┘
-                       │
-          ┌────────────┼────────────┐
-          ▼                         ▼
-   Acumatica OData            Gmail API
+Browser (React SPA)
+  ├── Acumatica data  →  /api/acumatica  →  Acumatica OData
+  ├── PO PDF parsing   →  /api/po-import  →  unpdf (server-side)
+  ├── Gmail drafts     →  /api/gmail-drafts  →  Gmail API
+  ├── XLSX parsing     →  /api/parse-xlsx  →  SheetJS (server-side)
+  ├── Fuze Tracker     →  /api/sheets  →  Google Sheets API
+  └── Shared state     →  /api/kv  →  Upstash Redis
 ```
 
----
+## Shared State (KV)
 
-## Setup Guide (Step by Step)
+Team data is shared via Upstash Redis so everyone sees the same info:
 
-### Step 1: Get the code on your machine
+| Key | Purpose |
+|-----|---------|
+| `wh-data-{wh}` | PO tool data per warehouse |
+| `ship-notes-{wh}` | Shipping notes per warehouse |
+| `hills-master` | Hills Master spreadsheet |
+| `hills-pawtree-meta` | Hills & Pawtree ETA/notes |
+| `tracker-shared-short-dating` | Short-dating tracker data |
+| `tracker-shared-backorder` | Backorder tracker data |
+| `fuze-tracker-{wh}` | Fuze tracker data per warehouse |
+| `oos-data-shared` | OOS CSV data (daily reset) |
+| `oos-notes-shared` | OOS SD/BO checkboxes (daily reset) |
+| `oos-persistent-notes` | OOS text notes (carry forward) |
+| `oos-previous-notes` | OOS yesterday's text notes |
+| `oos-previous-items` | OOS yesterday's items (for Old/New) |
 
-```bash
-# If you have git:
-# Push this folder to a GitHub repo, or just upload it manually
+## Environment Variables
 
-# Install dependencies
-cd inventory-hub
-npm install
-```
+| Variable | Purpose |
+|----------|---------|
+| `KV_REST_API_URL` | Upstash Redis URL |
+| `KV_REST_API_TOKEN` | Upstash Redis token |
+| `NEXT_PUBLIC_KV_SECRET` | Client-side auth for KV API |
+| `GOOGLE_CLIENT_ID` | Google OAuth (Gmail + Sheets) |
+| `GOOGLE_CLIENT_SECRET` | Google OAuth secret |
+| `GOOGLE_REFRESH_TOKEN` | Gmail API refresh token |
+| `GOOGLE_SHEETS_API_KEY` | Google Sheets API key |
 
-### Step 2: Set up environment variables
+## Auth
 
-```bash
-cp .env.example .env.local
-```
+- No standalone user auth — protected behind Acumatica login
+- Users enter Acumatica credentials in-browser, stored in localStorage
+- Credentials are proxied through API routes to Acumatica OData (never persisted server-side)
 
-Edit `.env.local` with your Acumatica URL. The defaults should work if your instance is `vetcove.acumatica.com`.
-
-### Step 3: Set up Gmail (one-time, ~5 minutes)
-
-1. Go to [Google Cloud Console](https://console.cloud.google.com)
-2. Create a new project (or select existing)
-3. Navigate to **APIs & Services → Library**
-4. Search for **Gmail API** and click **Enable**
-5. Go to **APIs & Services → Credentials**
-6. Click **Create Credentials → OAuth 2.0 Client ID**
-   - Application type: **Web application**
-   - Name: `Inventory Hub`
-   - Authorized redirect URIs: add `http://localhost:3000/api/gmail-callback`
-7. Copy the **Client ID** and **Client Secret** into your `.env.local`
-
-Now run the one-time auth:
-
-```bash
-npm run dev
-```
-
-Visit `http://localhost:3000/api/gmail-auth` in your browser. Sign in with the Google account that should create the Gmail drafts. After consenting, you'll see a page with your refresh token. Copy it into your `.env.local` as `GOOGLE_REFRESH_TOKEN`.
-
-### Step 4: Test locally
-
-```bash
-npm run dev
-```
-
-Visit `http://localhost:3000`. Everything should work:
-- Login with your Acumatica credentials
-- Sync data from any tool
-- Generate email drafts
-
-### Step 5: Deploy to Vercel
-
-1. Push your code to GitHub (make sure `.env.local` is in `.gitignore`!)
-2. Go to [vercel.com](https://vercel.com) and sign in with GitHub
-3. Click **New Project** → import your repo
-4. In **Environment Variables**, add all the values from your `.env.local`:
-   - `ACUMATICA_BASE_URL`
-   - `ACUMATICA_ODATA_PREFIX`
-   - `GOOGLE_CLIENT_ID`
-   - `GOOGLE_CLIENT_SECRET`
-   - `GOOGLE_REFRESH_TOKEN`
-   - `APP_SECRET`
-5. Click **Deploy**
-
-After deploying, update your Google OAuth redirect URI:
-- Go back to Google Cloud Console → Credentials
-- Edit your OAuth client
-- Add `https://your-app.vercel.app/api/gmail-callback` as an authorized redirect URI
-
-### Step 6: Share it
-
-Your app is now live at `https://your-app.vercel.app`. Anyone with Acumatica credentials can log in and use it. Only people with the URL can access it — there's no public listing.
-
----
-
-## What each file does
+## File Structure
 
 ```
-inventory-hub/
-├── package.json              # Dependencies (Next.js, React, googleapis)
-├── next.config.js            # Next.js configuration
-├── .env.example              # Template for environment variables
-│
-├── app/
-│   ├── layout.js             # HTML shell (font, metadata)
-│   ├── page.js               # ← The entire React UI (your hub component)
-│   │
-│   ├── lib/
-│   │   └── api.js            # Frontend helpers (fetch wrappers, localStorage)
-│   │
-│   └── api/
-│       ├── acumatica/
-│       │   └── route.js      # Proxies OData calls to Acumatica
-│       ├── gmail-drafts/
-│       │   └── route.js      # Creates Gmail drafts via Google API
-│       ├── gmail-auth/
-│       │   └── route.js      # One-time: starts OAuth consent flow
-│       └── gmail-callback/
-│           └── route.js      # One-time: receives OAuth code, shows refresh token
+app/
+├── page.js              ← Entire UI (~3800 lines)
+├── layout.js            ← HTML shell, metadata, fonts
+├── favicon.ico          ← Vetcove cube icon
+├── api/
+│   ├── acumatica/route.js   ← Acumatica OData proxy
+│   ├── kv/route.js          ← Upstash Redis proxy
+│   ├── po-import/route.js   ← PDF parsing for PO validation
+│   ├── parse-xlsx/route.js  ← XLSX parsing
+│   ├── sheets/route.js      ← Google Sheets reader
+│   ├── gmail-drafts/route.js
+│   ├── gmail-auth/route.js
+│   └── gmail-callback/route.js
 ```
-
----
-
-## Migrating the React component
-
-The current artifact (`hub-v7-fixed.jsx`) needs these changes to work as `app/page.js`:
-
-### 1. Add `"use client"` at the top
-```js
-"use client";
-import { useState, useMemo, useCallback, useEffect } from "react";
-import { fetchAcumatica, createGmailDrafts, saveCredentials, loadCredentials, clearCredentials } from "./lib/api";
-```
-
-### 2. Replace storage helpers
-```js
-// OLD (artifact storage)
-async function sGet(k, sh) { ... window.storage ... }
-async function sSet(k, v, sh) { ... window.storage ... }
-
-// NEW (localStorage for creds, React state for data)
-// Credentials: use loadCredentials() / saveCredentials() from lib/api.js
-// Data: just keep in React state — users fetch fresh each session
-```
-
-### 3. Replace demo data fetch with real API call
-
-In `TrackerTool.syncData`:
-```js
-// OLD
-setTimeout(async function() {
-  var active = demoData.filter(...);
-  setData(active);
-}, 800);
-
-// NEW
-try {
-  setLoading(true);
-  const rows = await fetchAcumatica({
-    type: toolKey,  // "short-dating" or "backorder"
-    username: cred.username,
-    password: cred.password,
-  });
-  setData(rows);
-  toast(toolLabel + ": Synced " + rows.length + " items");
-} catch (err) {
-  toast("Error: " + err.message, "error");
-} finally {
-  setLoading(false);
-}
-```
-
-In `WHT.fetchData`:
-```js
-// OLD
-setTimeout(async function() {
-  var rows = PO_DEMO[whKey].filter(...).map(...);
-  setData(rows);
-}, 800);
-
-// NEW
-try {
-  setLoading(true);
-  const raw = await fetchAcumatica({
-    type: "po",
-    warehouse: whKey,
-    username: cred.username,
-    password: cred.password,
-  });
-  // Add TotalPrice calculation
-  const rows = raw
-    .filter(r => r.SKUNDC && !EXCLUDED.some(ex => (r.VendorName || "").toLowerCase().includes(ex)))
-    .map(r => ({ ...r, Price: Number(r.Price) || 0, OrderQty: Number(r.OrderQty) || 0, TotalPrice: +((Number(r.Price) || 0) * (Number(r.OrderQty) || 0)).toFixed(2) }));
-  setData(rows);
-  toast(cfg.label + ": Fetched " + rows.length + " lines");
-} catch (err) {
-  toast("Error: " + err.message, "error");
-} finally {
-  setLoading(false);
-}
-```
-
-### 4. Replace Gmail draft simulation with real API call
-
-In `TrackerTool.genDrafts`:
-```js
-// OLD
-setDrafts(count);
-
-// NEW
-const draftPayloads = emailVendors.map(([vendor, items]) => ({
-  to: CONTACTS[vendor] || "",
-  cc: "hd-purchaseorders@vetcove.com",
-  subject: emailConfig.subjectPrefix + new Date().toLocaleDateString("en-US"),
-  htmlBody: emailConfig.buildHtml(items),
-})).filter(d => d.to);
-
-const result = await createGmailDrafts(draftPayloads);
-setDrafts(result.created);
-toast(toolLabel + ": " + result.created + " drafts created in Gmail");
-```
-
-### 5. Pass credentials through to child components
-
-Since `localStorage` replaces `window.storage`, update the Hub's `useEffect`:
-```js
-useEffect(function() {
-  const saved = loadCredentials();
-  if (saved) { setCred(saved); setOk(true); }
-  setCredLoading(false);
-}, []);
-```
-
-And the login function:
-```js
-var login = useCallback(function() {
-  if (cred.username && cred.password) {
-    saveCredentials(cred.username, cred.password);
-    setOk(true); setShowLogin(false); showToast("Credentials saved");
-  }
-}, [cred, showToast]);
-```
-
----
-
-## OData endpoint names
-
-If your Acumatica views are named differently, update `ENDPOINTS` in `/api/acumatica/route.js`:
-
-```js
-const ENDPOINTS = {
-  "po":           "INV%20-%20Suggested%20PO%20Review",     // ← your PO view
-  "short-dating": "INV%20-%20Short-Dating%20Tracker",      // ← your short-dating view
-  "backorder":    "INV%20-%20Backorder%20Item%20Review",    // ← your backorder view
-};
-```
-
----
-
-## Security notes
-
-- **Acumatica credentials** are stored in the user's browser (localStorage) and sent to your Vercel serverless function over HTTPS. They're never stored on the server.
-- **Gmail refresh token** is stored in Vercel's environment variables (encrypted at rest). Only your serverless functions can access it.
-- **No database needed** — this is a stateless app. Each user fetches fresh data from Acumatica when they click Sync.
-- For extra security, you can add [Vercel Password Protection](https://vercel.com/docs/security/deployment-protection) (Vercel Pro plan) to restrict access.
-
----
-
-## Costs
-
-- **Vercel free tier**: Covers most use cases (100GB bandwidth, serverless function invocations)
-- **Google Cloud**: Gmail API is free for personal use
-- **Acumatica**: Uses your existing OData license
