@@ -3402,6 +3402,12 @@ function OOSTracker(props) {
 
   var data = tab === "fuzerx" ? fuzeData : ggmData;
   var currentName = tab === "fuzerx" ? fuzeName : ggmName;
+  var sdIds = useMemo(function() {
+    var cached = sGet("tracker-short-dating");
+    var ids = {};
+    if (cached && cached.data) { cached.data.forEach(function(r) { if (r.InventoryID) ids[String(r.InventoryID)] = true; }); }
+    return ids;
+  }, [data]);
   var warehouses = useMemo(function() { var w = {}; data.forEach(function(r) { w[r._wh] = 1; }); return Object.keys(w).sort(); }, [data]);
 
   var filtered = useMemo(function() {
@@ -3446,11 +3452,13 @@ function OOSTracker(props) {
           <tbody>{filtered.map(function(r, i) {
             var noteKey = tab + ":" + r.MANUFACTURER_NO + ":" + (r.WAREHOUSE_SLUG || "");
             var n = notes[noteKey] || {};
+            var autoSD = sdIds[String(r.MANUFACTURER_NO)] || false;
+            var isSD = n.sd !== undefined ? n.sd : autoSD;
             var whBg = r._wh === "Brooklyn" ? "#EFF6FF" : r._wh === "Ohio" ? "#ECFDF5" : r._wh === "Hayward" ? "#FFF7ED" : r._wh === "Miami" ? "#FFF1F2" : r._wh === "GoGoMeds KY" ? "#F5F3FF" : r._wh === "GoGoMeds AZ" ? "#FDF2F8" : "#F3F4F6";
             var whColor = r._wh === "Brooklyn" ? "#2563EB" : r._wh === "Ohio" ? "#059669" : r._wh === "Hayward" ? "#D97706" : r._wh === "Miami" ? "#E11D48" : r._wh === "GoGoMeds KY" ? "#7C3AED" : r._wh === "GoGoMeds AZ" ? "#DB2777" : "#6B7280";
             return <tr key={i}>
               <td style={S.td}><input value={n.note || ""} onChange={function(e) { updateNote(noteKey, "note", e.target.value); }} placeholder="Add notes..." style={Object.assign({}, S.inp, { padding: "5px 10px", fontSize: 12 })} /></td>
-              <td style={Object.assign({}, S.td, { textAlign: "center" })}><button onClick={function() { updateNote(noteKey, "sd", !n.sd); }} style={{ width: 20, height: 20, borderRadius: 4, border: n.sd ? "2px solid #E879F9" : "2px solid #D1D5DB", background: n.sd ? "#E879F9" : "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", transition: "all 0.15s" }}>{n.sd && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}</button></td>
+              <td style={Object.assign({}, S.td, { textAlign: "center" })}><button onClick={function() { updateNote(noteKey, "sd", !isSD); }} style={{ width: 20, height: 20, borderRadius: 4, border: isSD ? "2px solid #E879F9" : "2px solid #D1D5DB", background: isSD ? "#E879F9" : "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", transition: "all 0.15s" }}>{isSD && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}</button></td>
               <td style={Object.assign({}, S.td, { textAlign: "center" })}><button onClick={function() { updateNote(noteKey, "bo", !n.bo); }} style={{ width: 20, height: 20, borderRadius: 4, border: n.bo ? "2px solid #F97316" : "2px solid #D1D5DB", background: n.bo ? "#F97316" : "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", transition: "all 0.15s" }}>{n.bo && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}</button></td>
               <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, fontWeight: 600, color: "#374151" })}>{r.MANUFACTURER_NO}</td>
               <td style={Object.assign({}, S.td, { color: "#374151" })}>{r.MANUFACTURER_NAME}</td>
