@@ -3336,8 +3336,10 @@ function OOSTracker(props) {
   var OOS_DATA_KEY = "oos-data-shared";
   var OOS_PNOTES_KEY = "oos-persistent-notes";
   var OOS_PREV_NOTES_KEY = "oos-previous-notes";
+  var OOS_PREV_ITEMS_KEY = "oos-previous-items";
   var _persistentNotes = useState({}), pNotes = _persistentNotes[0], setPNotes = _persistentNotes[1];
   var _prevNotes = useState({}), prevNotes = _prevNotes[0], setPrevNotes = _prevNotes[1];
+  var _prevItems = useState({}), prevItems = _prevItems[0], setPrevItems = _prevItems[1];
 
   function getDailyReset() {
     var now = new Date();
@@ -3372,9 +3374,24 @@ function OOSTracker(props) {
       if (!m || !d || !d.data) return;
       var parsed = typeof d.data === "string" ? JSON.parse(d.data) : d.data;
       var resetTime = getDailyReset();
-      if (parsed._savedAt && parsed._savedAt < resetTime) { kvPost(OOS_DATA_KEY, { _savedAt: Date.now() }); return; }
+      if (parsed._savedAt && parsed._savedAt < resetTime) {
+        // Save manufacturer numbers as previous items before wiping
+        var prevIds = {};
+        if (parsed.fuze) parsed.fuze.forEach(function(r) { prevIds["fuzerx:" + r.MANUFACTURER_NO] = true; });
+        if (parsed.ggm) parsed.ggm.forEach(function(r) { prevIds["gogomeds:" + r.MANUFACTURER_NO] = true; });
+        kvPost(OOS_PREV_ITEMS_KEY, prevIds);
+        setPrevItems(prevIds);
+        kvPost(OOS_DATA_KEY, { _savedAt: Date.now() });
+        return;
+      }
       if (parsed.fuze && parsed.fuze.length > 0) { setFuzeData(parsed.fuze); setFuzeName(parsed.fuzeName || "Loaded from cloud"); }
       if (parsed.ggm && parsed.ggm.length > 0) { setGgmData(parsed.ggm); setGgmName(parsed.ggmName || "Loaded from cloud"); }
+    }).catch(function() {});
+    // Load previous items
+    kvGet(OOS_PREV_ITEMS_KEY).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+      if (!m || !d || !d.data) return;
+      var parsed = typeof d.data === "string" ? JSON.parse(d.data) : d.data;
+      setPrevItems(parsed);
     }).catch(function() {});
     // Load persistent notes — rotate to previous on daily reset
     Promise.all([
@@ -3527,6 +3544,7 @@ function OOSTracker(props) {
         <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
           <thead><tr>
             <th style={Object.assign({}, S.th, { minWidth: 360 })}>Notes</th>
+            <th style={Object.assign({}, S.th, { textAlign: "center", width: 70 })}>OOS</th>
             <th style={Object.assign({}, S.th, { textAlign: "center", width: 40 })}>SD</th>
             <th style={Object.assign({}, S.th, { textAlign: "center", width: 40 })}>BO</th>
             {sortHeader("id", "Mfr No.")}
@@ -3540,10 +3558,12 @@ function OOSTracker(props) {
             var n = notes[noteKey] || {};
             var autoSD = sdIds[String(r.MANUFACTURER_NO)] || false;
             var isSD = n.sd !== undefined ? n.sd : autoSD;
+            var isOld = prevItems[tab + ":" + r.MANUFACTURER_NO];
             var whBg = r._wh === "Brooklyn" ? "#EFF6FF" : r._wh === "Ohio" ? "#ECFDF5" : r._wh === "Hayward" ? "#FFF7ED" : r._wh === "Miami" ? "#FFF1F2" : r._wh === "GoGoMeds KY" ? "#F5F3FF" : r._wh === "GoGoMeds AZ" ? "#FDF2F8" : "#F3F4F6";
             var whColor = r._wh === "Brooklyn" ? "#2563EB" : r._wh === "Ohio" ? "#059669" : r._wh === "Hayward" ? "#D97706" : r._wh === "Miami" ? "#E11D48" : r._wh === "GoGoMeds KY" ? "#7C3AED" : r._wh === "GoGoMeds AZ" ? "#DB2777" : "#6B7280";
             return <tr key={i}>
-              <td style={S.td}><input value={pNotes[tab + ":" + r.MANUFACTURER_NO] || prevNotes[tab + ":" + r.MANUFACTURER_NO] || ""} onChange={function(e) { updateNote(noteKey, "note", e.target.value); }} placeholder="Add notes..." style={Object.assign({}, S.inp, { padding: "5px 10px", fontSize: 12, color: !pNotes[tab + ":" + r.MANUFACTURER_NO] && prevNotes[tab + ":" + r.MANUFACTURER_NO] ? "#9CA3AF" : "#374151" })} /></td>
+              <td style={S.td}><input value={pNotes[tab + ":" + r.MANUFACTURER_NO] || prevNotes[tab + ":" + r.MANUFACTURER_NO] || ""} onChange={function(e) { updateNote(noteKey, "note", e.target.value); }} placeholder="Add notes..." style={Object.assign({}, S.inp, { padding: "5px 10px", fontSize: 12 })} /></td>
+              <td style={Object.assign({}, S.td, { textAlign: "center" })}><span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 6, fontWeight: 600, background: isOld ? "#FFF7ED" : "#ECFDF5", color: isOld ? "#D97706" : "#059669" }}>{isOld ? "Old" : "New"}</span></td>
               <td style={Object.assign({}, S.td, { textAlign: "center" })}><button onClick={function() { updateNote(noteKey, "sd", !isSD); }} style={{ width: 20, height: 20, borderRadius: 4, border: isSD ? "2px solid #E879F9" : "2px solid #D1D5DB", background: isSD ? "#E879F9" : "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", transition: "all 0.15s" }}>{isSD && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}</button></td>
               <td style={Object.assign({}, S.td, { textAlign: "center" })}><button onClick={function() { updateNote(noteKey, "bo", !n.bo); }} style={{ width: 20, height: 20, borderRadius: 4, border: n.bo ? "2px solid #F97316" : "2px solid #D1D5DB", background: n.bo ? "#F97316" : "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", transition: "all 0.15s" }}>{n.bo && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}</button></td>
               <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, fontWeight: 600, color: "#374151" })}>{r.MANUFACTURER_NO}</td>
