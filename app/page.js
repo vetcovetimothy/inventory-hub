@@ -326,10 +326,39 @@ function TrackerTool(props) {
 
   var S = useMemo(function() { return makeStyles(toolColor); }, [toolColor]);
   var storageKey = "tracker-" + toolKey;
+  var kvTrackerKey = "tracker-shared-" + toolKey;
 
   useEffect(function() {
     var mounted = true;
     (async function() {
+      // Try KV first (shared with team)
+      try {
+        var resp = await kvGet(kvTrackerKey);
+        var json = await resp.json();
+        if (mounted && json.data && json.data.data && json.data.data.length > 0) {
+          var shared = json.data;
+          setData(shared.data); setRunBy(shared.runBy || null); setRunTime(shared.runTime || null); setDrafts(shared.drafts || 0);
+          sSet(storageKey, shared);
+          // Auto-fetch if stale (older than today)
+          if (cred && cred.username && cred.password && shared.fetchedAt) {
+            var today = new Date().toISOString().slice(0, 10);
+            var fetchedDay = new Date(shared.fetchedAt).toISOString().slice(0, 10);
+            if (fetchedDay < today) {
+              // Stale - auto-refresh in background
+              try {
+                var rows = await fetchAcumatica(toolKey, null, cred.username, cred.password);
+                var now = new Date().toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+                if (mounted) { setData(rows); setRunBy("Auto"); setRunTime(now); setDrafts(0); }
+                var payload = { data: rows, runBy: "Auto", runTime: now, drafts: 0, fetchedAt: Date.now() };
+                sSet(storageKey, payload); kvPost(kvTrackerKey, payload);
+              } catch (e) { /* keep stale data */ }
+            }
+          }
+          if (mounted) setInitLoading(false);
+          return;
+        }
+      } catch (e) { /* fall through to localStorage */ }
+      // Fallback to localStorage
       var saved = sGet(storageKey);
       if (mounted && saved && saved.data && saved.data.length > 0) {
         setData(saved.data); setRunBy(saved.runBy || null); setRunTime(saved.runTime || null); setDrafts(saved.drafts || 0);
@@ -340,8 +369,10 @@ function TrackerTool(props) {
   }, [storageKey]);
 
   var persist = useCallback(async function(d, by, time, dr) {
-    sSet(storageKey, { data: d, runBy: by, runTime: time, drafts: dr });
-  }, [storageKey]);
+    var payload = { data: d, runBy: by, runTime: time, drafts: dr, fetchedAt: Date.now() };
+    sSet(storageKey, payload);
+    kvPost(kvTrackerKey, payload).catch(function() {});
+  }, [storageKey, kvTrackerKey]);
 
   var syncData = useCallback(async function() {
     setLoading(true);
@@ -367,8 +398,9 @@ function TrackerTool(props) {
   var clearAll = useCallback(async function() {
     setData([]); setRunBy(null); setRunTime(null); setDrafts(0); setConfirmClear(false); setSubPage("data");
     sDel(storageKey);
+    kvPost(kvTrackerKey, {}).catch(function() {});
     toast(toolLabel + ": Cleared");
-  }, [toast, storageKey, toolLabel]);
+  }, [toast, storageKey, kvTrackerKey, toolLabel]);
 
   var vendorGroups = useMemo(function() {
     var g = {};
@@ -3402,12 +3434,21 @@ function OOSTracker(props) {
 
   var data = tab === "fuzerx" ? fuzeData : ggmData;
   var currentName = tab === "fuzerx" ? fuzeName : ggmName;
-  var sdIds = useMemo(function() {
+  var _sdIds = useState({}), sdIds = _sdIds[0], setSdIds = _sdIds[1];
+  useEffect(function() {
+    // Try localStorage first
     var cached = sGet("tracker-short-dating");
-    var ids = {};
-    if (cached && cached.data) { cached.data.forEach(function(r) { if (r.InventoryID) ids[String(r.InventoryID)] = true; }); }
-    return ids;
-  }, [data]);
+    if (cached && cached.data && cached.data.length > 0) {
+      var ids = {}; cached.data.forEach(function(r) { if (r.InventoryID) ids[String(r.InventoryID)] = true; }); setSdIds(ids);
+    }
+    // Then try KV for fresher data
+    kvGet("tracker-shared-short-dating").then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+      if (d && d.data && d.data.data && d.data.data.length > 0) {
+        var ids = {}; d.data.data.forEach(function(r) { if (r.InventoryID) ids[String(r.InventoryID)] = true; }); setSdIds(ids);
+        sSet("tracker-short-dating", d.data);
+      }
+    }).catch(function() {});
+  }, []);
   var warehouses = useMemo(function() { var w = {}; data.forEach(function(r) { w[r._wh] = 1; }); return Object.keys(w).sort(); }, [data]);
 
   var filtered = useMemo(function() {
