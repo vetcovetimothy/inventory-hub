@@ -3335,13 +3335,21 @@ function OOSTracker(props) {
   var OOS_KV_KEY = "oos-notes-shared";
   var OOS_DATA_KEY = "oos-data-shared";
   var OOS_PNOTES_KEY = "oos-persistent-notes";
+  var OOS_PREV_NOTES_KEY = "oos-previous-notes";
   var _persistentNotes = useState({}), pNotes = _persistentNotes[0], setPNotes = _persistentNotes[1];
+  var _prevNotes = useState({}), prevNotes = _prevNotes[0], setPrevNotes = _prevNotes[1];
 
   function getDailyReset() {
     var now = new Date();
     var et = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
+    var day = et.getDay(); // 0=Sun, 1=Mon, 6=Sat
+    // Find the most recent weekday 5am reset
     var reset = new Date(et); reset.setHours(5, 0, 0, 0);
     if (et < reset) reset.setDate(reset.getDate() - 1);
+    // Walk back past weekends
+    while (reset.getDay() === 0 || reset.getDay() === 6) {
+      reset.setDate(reset.getDate() - 1);
+    }
     return reset.getTime();
   }
 
@@ -3368,11 +3376,28 @@ function OOSTracker(props) {
       if (parsed.fuze && parsed.fuze.length > 0) { setFuzeData(parsed.fuze); setFuzeName(parsed.fuzeName || "Loaded from cloud"); }
       if (parsed.ggm && parsed.ggm.length > 0) { setGgmData(parsed.ggm); setGgmName(parsed.ggmName || "Loaded from cloud"); }
     }).catch(function() {});
-    // Load persistent notes (never wiped)
-    kvGet(OOS_PNOTES_KEY).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
-      if (!m || !d || !d.data) return;
-      var parsed = typeof d.data === "string" ? JSON.parse(d.data) : d.data;
-      setPNotes(parsed);
+    // Load persistent notes — rotate to previous on daily reset
+    Promise.all([
+      kvGet(OOS_PNOTES_KEY).then(function(r) { return r.ok ? r.json() : null; }),
+      kvGet(OOS_PREV_NOTES_KEY).then(function(r) { return r.ok ? r.json() : null; })
+    ]).then(function(results) {
+      if (!m) return;
+      var pData = results[0] && results[0].data ? (typeof results[0].data === "string" ? JSON.parse(results[0].data) : results[0].data) : {};
+      var prevData = results[1] && results[1].data ? (typeof results[1].data === "string" ? JSON.parse(results[1].data) : results[1].data) : {};
+      var savedAt = pData._savedAt || 0;
+      var resetTime = getDailyReset();
+      if (savedAt && savedAt < resetTime) {
+        // Rotate: current becomes previous, clear current
+        delete pData._savedAt;
+        kvPost(OOS_PREV_NOTES_KEY, pData);
+        kvPost(OOS_PNOTES_KEY, { _savedAt: Date.now() });
+        setPrevNotes(pData);
+        setPNotes({});
+      } else {
+        delete pData._savedAt;
+        setPNotes(pData);
+        setPrevNotes(prevData);
+      }
     }).catch(function() {});
     return function() { m = false; };
   }, []);
@@ -3388,7 +3413,7 @@ function OOSTracker(props) {
       kvGet(OOS_PNOTES_KEY).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
         if (d && d.data) {
           var parsed = typeof d.data === "string" ? JSON.parse(d.data) : d.data;
-          setPNotes(parsed);
+          delete parsed._savedAt; setPNotes(parsed);
         }
       }).catch(function() {});
     }, 8000);
@@ -3403,7 +3428,7 @@ function OOSTracker(props) {
       // Persistent notes keyed by tab:MANUFACTURER_NO (no warehouse)
       var pKey = key.split(":").slice(0, 2).join(":");
       var pu = Object.assign({}, pNotes); pu[pKey] = value; setPNotes(pu);
-      kvPost(OOS_PNOTES_KEY, pu).catch(function() {});
+      kvPost(OOS_PNOTES_KEY, Object.assign({}, pu, { _savedAt: Date.now() })).catch(function() {});
     } else {
       // SD/BO go to daily-reset storage
       var u = Object.assign({}, notes); u[key] = Object.assign({}, u[key] || {}); u[key][field] = value; setNotes(u);
@@ -3518,7 +3543,7 @@ function OOSTracker(props) {
             var whBg = r._wh === "Brooklyn" ? "#EFF6FF" : r._wh === "Ohio" ? "#ECFDF5" : r._wh === "Hayward" ? "#FFF7ED" : r._wh === "Miami" ? "#FFF1F2" : r._wh === "GoGoMeds KY" ? "#F5F3FF" : r._wh === "GoGoMeds AZ" ? "#FDF2F8" : "#F3F4F6";
             var whColor = r._wh === "Brooklyn" ? "#2563EB" : r._wh === "Ohio" ? "#059669" : r._wh === "Hayward" ? "#D97706" : r._wh === "Miami" ? "#E11D48" : r._wh === "GoGoMeds KY" ? "#7C3AED" : r._wh === "GoGoMeds AZ" ? "#DB2777" : "#6B7280";
             return <tr key={i}>
-              <td style={S.td}><input value={pNotes[tab + ":" + r.MANUFACTURER_NO] || ""} onChange={function(e) { updateNote(noteKey, "note", e.target.value); }} placeholder="Add notes..." style={Object.assign({}, S.inp, { padding: "5px 10px", fontSize: 12 })} /></td>
+              <td style={S.td}><input value={pNotes[tab + ":" + r.MANUFACTURER_NO] || prevNotes[tab + ":" + r.MANUFACTURER_NO] || ""} onChange={function(e) { updateNote(noteKey, "note", e.target.value); }} placeholder="Add notes..." style={Object.assign({}, S.inp, { padding: "5px 10px", fontSize: 12, color: !pNotes[tab + ":" + r.MANUFACTURER_NO] && prevNotes[tab + ":" + r.MANUFACTURER_NO] ? "#9CA3AF" : "#374151" })} /></td>
               <td style={Object.assign({}, S.td, { textAlign: "center" })}><button onClick={function() { updateNote(noteKey, "sd", !isSD); }} style={{ width: 20, height: 20, borderRadius: 4, border: isSD ? "2px solid #E879F9" : "2px solid #D1D5DB", background: isSD ? "#E879F9" : "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", transition: "all 0.15s" }}>{isSD && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}</button></td>
               <td style={Object.assign({}, S.td, { textAlign: "center" })}><button onClick={function() { updateNote(noteKey, "bo", !n.bo); }} style={{ width: 20, height: 20, borderRadius: 4, border: n.bo ? "2px solid #F97316" : "2px solid #D1D5DB", background: n.bo ? "#F97316" : "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", transition: "all 0.15s" }}>{n.bo && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}</button></td>
               <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, fontWeight: 600, color: "#374151" })}>{r.MANUFACTURER_NO}</td>
