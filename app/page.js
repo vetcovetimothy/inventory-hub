@@ -2166,19 +2166,46 @@ function FuzeTracker(props) {
   var _sf = useState("all"), statusFilter = _sf[0], setStatusFilter = _sf[1];
   var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
 
-  var fetchSheet = useCallback(function(wh) {
-    setLoading(true);
+  var fetchSheet = useCallback(function(wh, silent) {
+    if (!silent) setLoading(true);
     fetch("/api/sheets?wh=" + encodeURIComponent(wh) + "&_t=" + Date.now(), { cache: "no-store" })
       .then(function(r) { return r.json(); })
       .then(function(json) {
-        if (json.error) { toast(json.error, "error"); setData([]); }
-        else { setData(json.data || []); toast("Loaded " + (json.count || 0) + " items for " + wh); }
+        if (json.error) { if (!silent) toast(json.error, "error"); setData([]); }
+        else {
+          setData(json.data || []);
+          if (!silent) toast("Loaded " + (json.count || 0) + " items for " + wh);
+          kvPost("fuze-tracker-" + wh, { data: json.data || [], fetchedAt: Date.now() }).catch(function() {});
+        }
       })
-      .catch(function(err) { toast("Error: " + err.message, "error"); })
+      .catch(function(err) { if (!silent) toast("Error: " + err.message, "error"); })
       .finally(function() { setLoading(false); });
   }, [toast]);
 
-  useEffect(function() { fetchSheet(whTab); }, [whTab]);
+  function getTodayReset() {
+    var now = new Date();
+    var et = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
+    var reset = new Date(et); reset.setHours(5, 0, 0, 0);
+    if (et < reset) reset.setDate(reset.getDate() - 1);
+    return reset.getTime();
+  }
+
+  useEffect(function() {
+    var m = true;
+    kvGet("fuze-tracker-" + whTab).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+      if (!m) return;
+      if (d && d.data && d.data.data && d.data.data.length > 0) {
+        setData(d.data.data);
+        var resetTime = getTodayReset();
+        if (d.data.fetchedAt && d.data.fetchedAt < resetTime) {
+          fetchSheet(whTab, true);
+        }
+      } else {
+        fetchSheet(whTab);
+      }
+    }).catch(function() { if (m) fetchSheet(whTab); });
+    return function() { m = false; };
+  }, [whTab]);
 
   var uniqueVendors = useMemo(function() { return Array.from(new Set(data.map(function(r) { return r["Supplier"]; }).filter(Boolean))).sort(); }, [data]);
 
