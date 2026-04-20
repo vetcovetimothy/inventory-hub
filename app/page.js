@@ -3335,14 +3335,12 @@ function OOSTracker(props) {
   var OOS_KV_KEY = "oos-notes-shared";
   var OOS_DATA_KEY = "oos-data-shared";
 
-  function getLastMondayReset() {
+  function getDailyReset() {
     var now = new Date();
     var et = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
-    var day = et.getDay(); // 0=Sun, 1=Mon
-    var daysSinceMonday = day === 0 ? 6 : day - 1;
-    var lastMonday = new Date(et); lastMonday.setDate(et.getDate() - daysSinceMonday); lastMonday.setHours(5, 0, 0, 0);
-    if (et < lastMonday) lastMonday.setDate(lastMonday.getDate() - 7);
-    return lastMonday.getTime();
+    var reset = new Date(et); reset.setHours(5, 0, 0, 0);
+    if (et < reset) reset.setDate(reset.getDate() - 1);
+    return reset.getTime();
   }
 
   useEffect(function() {
@@ -3353,7 +3351,7 @@ function OOSTracker(props) {
       if (d && d.data) {
         var parsed = typeof d.data === "string" ? JSON.parse(d.data) : d.data;
         var savedAt = parsed._savedAt || 0;
-        var resetTime = getLastMondayReset();
+        var resetTime = getDailyReset();
         if (savedAt < resetTime) { setNotes({}); kvPost(OOS_KV_KEY, { _savedAt: Date.now() }); }
         else { delete parsed._savedAt; setNotes(parsed); }
       }
@@ -3363,7 +3361,7 @@ function OOSTracker(props) {
     kvGet(OOS_DATA_KEY).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
       if (!m || !d || !d.data) return;
       var parsed = typeof d.data === "string" ? JSON.parse(d.data) : d.data;
-      var resetTime = getLastMondayReset();
+      var resetTime = getDailyReset();
       if (parsed._savedAt && parsed._savedAt < resetTime) { kvPost(OOS_DATA_KEY, { _savedAt: Date.now() }); return; }
       if (parsed.fuze && parsed.fuze.length > 0) { setFuzeData(parsed.fuze); setFuzeName(parsed.fuzeName || "Loaded from cloud"); }
       if (parsed.ggm && parsed.ggm.length > 0) { setGgmData(parsed.ggm); setGgmName(parsed.ggmName || "Loaded from cloud"); }
