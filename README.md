@@ -1,4 +1,4 @@
-# Procurement Hub — Vetcove HD
+# Inventory Hub — Vetcove HD
 
 Internal procurement operations dashboard for the Home Delivery team. Built with Next.js 14, hosted on Vercel.
 
