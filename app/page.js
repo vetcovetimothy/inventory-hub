@@ -3334,6 +3334,8 @@ function OOSTracker(props) {
   var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
   var OOS_KV_KEY = "oos-notes-shared";
   var OOS_DATA_KEY = "oos-data-shared";
+  var OOS_PNOTES_KEY = "oos-persistent-notes";
+  var _persistentNotes = useState({}), pNotes = _persistentNotes[0], setPNotes = _persistentNotes[1];
 
   function getDailyReset() {
     var now = new Date();
@@ -3366,6 +3368,12 @@ function OOSTracker(props) {
       if (parsed.fuze && parsed.fuze.length > 0) { setFuzeData(parsed.fuze); setFuzeName(parsed.fuzeName || "Loaded from cloud"); }
       if (parsed.ggm && parsed.ggm.length > 0) { setGgmData(parsed.ggm); setGgmName(parsed.ggmName || "Loaded from cloud"); }
     }).catch(function() {});
+    // Load persistent notes (never wiped)
+    kvGet(OOS_PNOTES_KEY).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+      if (!m || !d || !d.data) return;
+      var parsed = typeof d.data === "string" ? JSON.parse(d.data) : d.data;
+      setPNotes(parsed);
+    }).catch(function() {});
     return function() { m = false; };
   }, []);
 
@@ -3377,6 +3385,12 @@ function OOSTracker(props) {
           delete parsed._savedAt; setNotes(parsed);
         }
       }).catch(function() {});
+      kvGet(OOS_PNOTES_KEY).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+        if (d && d.data) {
+          var parsed = typeof d.data === "string" ? JSON.parse(d.data) : d.data;
+          setPNotes(parsed);
+        }
+      }).catch(function() {});
     }, 8000);
     return function() { clearInterval(iv); };
   }, []);
@@ -3385,8 +3399,16 @@ function OOSTracker(props) {
   function mapWH(slug) { return WH_MAP[slug] || slug || "\u2014"; }
 
   function updateNote(key, field, value) {
-    var u = Object.assign({}, notes); u[key] = Object.assign({}, u[key] || {}); u[key][field] = value; setNotes(u);
-    var toSave = Object.assign({}, u, { _savedAt: Date.now() }); kvPost(OOS_KV_KEY, toSave).catch(function() {});
+    if (field === "note") {
+      // Persistent notes keyed by tab:MANUFACTURER_NO (no warehouse)
+      var pKey = key.split(":").slice(0, 2).join(":");
+      var pu = Object.assign({}, pNotes); pu[pKey] = value; setPNotes(pu);
+      kvPost(OOS_PNOTES_KEY, pu).catch(function() {});
+    } else {
+      // SD/BO go to daily-reset storage
+      var u = Object.assign({}, notes); u[key] = Object.assign({}, u[key] || {}); u[key][field] = value; setNotes(u);
+      var toSave = Object.assign({}, u, { _savedAt: Date.now() }); kvPost(OOS_KV_KEY, toSave).catch(function() {});
+    }
   }
 
   function parseCSV(text) {
@@ -3496,7 +3518,7 @@ function OOSTracker(props) {
             var whBg = r._wh === "Brooklyn" ? "#EFF6FF" : r._wh === "Ohio" ? "#ECFDF5" : r._wh === "Hayward" ? "#FFF7ED" : r._wh === "Miami" ? "#FFF1F2" : r._wh === "GoGoMeds KY" ? "#F5F3FF" : r._wh === "GoGoMeds AZ" ? "#FDF2F8" : "#F3F4F6";
             var whColor = r._wh === "Brooklyn" ? "#2563EB" : r._wh === "Ohio" ? "#059669" : r._wh === "Hayward" ? "#D97706" : r._wh === "Miami" ? "#E11D48" : r._wh === "GoGoMeds KY" ? "#7C3AED" : r._wh === "GoGoMeds AZ" ? "#DB2777" : "#6B7280";
             return <tr key={i}>
-              <td style={S.td}><input value={n.note || ""} onChange={function(e) { updateNote(noteKey, "note", e.target.value); }} placeholder="Add notes..." style={Object.assign({}, S.inp, { padding: "5px 10px", fontSize: 12 })} /></td>
+              <td style={S.td}><input value={pNotes[tab + ":" + r.MANUFACTURER_NO] || ""} onChange={function(e) { updateNote(noteKey, "note", e.target.value); }} placeholder="Add notes..." style={Object.assign({}, S.inp, { padding: "5px 10px", fontSize: 12 })} /></td>
               <td style={Object.assign({}, S.td, { textAlign: "center" })}><button onClick={function() { updateNote(noteKey, "sd", !isSD); }} style={{ width: 20, height: 20, borderRadius: 4, border: isSD ? "2px solid #E879F9" : "2px solid #D1D5DB", background: isSD ? "#E879F9" : "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", transition: "all 0.15s" }}>{isSD && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}</button></td>
               <td style={Object.assign({}, S.td, { textAlign: "center" })}><button onClick={function() { updateNote(noteKey, "bo", !n.bo); }} style={{ width: 20, height: 20, borderRadius: 4, border: n.bo ? "2px solid #F97316" : "2px solid #D1D5DB", background: n.bo ? "#F97316" : "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", transition: "all 0.15s" }}>{n.bo && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}</button></td>
               <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, fontWeight: 600, color: "#374151" })}>{r.MANUFACTURER_NO}</td>
