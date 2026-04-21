@@ -77,12 +77,12 @@ function parsePdfText(text) {
       var nums = afterClean.match(/[\d.]+/g);
 
       var qty = nums && nums.length >= 1 ? parseInt(nums[0]) : null;
-      var totalPrice = nums && nums.length >= 2 ? parseFloat(nums[1]) : null;
-      var unitPrice = nums && nums.length >= 3 ? parseFloat(nums[2]) : null;
+      var totalPrice = nums && nums.length >= 2 ? Math.round(parseFloat(nums[1]) * 100) / 100 : null;
+      var unitPrice = nums && nums.length >= 3 ? Math.round(parseFloat(nums[2]) * 100) / 100 : null;
 
       // Compute real unit cost = totalPrice / qty
       var computedUnitCost = (qty && totalPrice && qty > 0)
-        ? Math.round((totalPrice / qty) * 10000) / 10000
+        ? Math.round((totalPrice / qty) * 100) / 100
         : unitPrice;
 
       // Vendor item # is on a later line: "0 XXXXXXX"
