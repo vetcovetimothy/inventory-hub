@@ -1675,8 +1675,8 @@ function POImportTool(props) {
           ndc: item.ndc,
           drugName: item.drugName,
           qty: item.qty,
-          totalPrice: item.totalPrice,
-          unitPrice: item.unitPrice,
+          totalPrice: item.totalPrice != null ? Math.round(item.totalPrice * 100) / 100 : null,
+          unitPrice: item.unitPrice != null ? Math.round(item.unitPrice * 100) / 100 : null,
           warehouse: item.warehouse,
           vendorSource: item.vendorSource,
           vendorItemNum: item.vendorItemNum,
@@ -1728,7 +1728,7 @@ function POImportTool(props) {
           matched.forEach(function(r) {
             var ndcNorm = normalizeNdcForCompare(r.ndc);
             if (mckPortalPrices[ndcNorm] != null) {
-              r.unitPrice = mckPortalPrices[ndcNorm];
+              r.unitPrice = Math.round(mckPortalPrices[ndcNorm] * 100) / 100;
               r.totalPrice = r.qty ? +(r.qty * r.unitPrice).toFixed(2) : r.totalPrice;
             }
           });
