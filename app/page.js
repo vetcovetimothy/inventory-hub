@@ -1910,7 +1910,7 @@ function POImportTool(props) {
               var qtyChanged = screenshotQtys[r.ndc] != null && parseInt(screenshotQtys[r.ndc]) !== r.qty;
               var editedPrice = editedPrices[r.ndc] != null ? parseFloat(editedPrices[r.ndc]) : r.unitPrice;
               var priceChanged = editedPrices[r.ndc] != null && parseFloat(editedPrices[r.ndc]) !== r.unitPrice;
-              var extCost = (editedQty && editedPrice) ? (editedQty * editedPrice) : r.totalPrice;
+              var extCost = (editedQty && editedPrice) ? Math.round(editedQty * editedPrice * 100) / 100 : r.totalPrice;
               return <tr key={i} style={{ background: (qtyChanged || priceChanged) ? "rgba(245,158,11,0.06)" : (r.ndcFound ? "transparent" : "rgba(239,68,68,0.04)") }}>
                 <td style={S.td}><span style={S.badge(r.ndcFound ? "success" : "danger")}>{r.ndcFound ? <><IconCheck /> Match</> : <><IconAlert /> Missing</>}</span></td>
                 <td style={S.td}>{r.ndc}</td>
@@ -1921,7 +1921,7 @@ function POImportTool(props) {
                 <td style={S.td}>{r.vendorSource || "\u2014"}</td>
                 <td style={Object.assign({}, S.td, { textAlign: "center" })}><input style={Object.assign({}, S.inp, { width: 70, padding: "6px 8px", textAlign: "center", color: qtyChanged ? "#D97706" : "#374151", background: qtyChanged ? "rgba(245,158,11,0.1)" : "#F8F9FB" })} type="number" value={screenshotQtys[r.ndc] != null ? screenshotQtys[r.ndc] : (r.qty || "")} onChange={function(e) { var updated = Object.assign({}, screenshotQtys); updated[r.ndc] = e.target.value; setScreenshotQtys(updated); }} /></td>
                 <td style={Object.assign({}, S.td, { textAlign: "right" })}><input style={Object.assign({}, S.inp, { width: 90, padding: "6px 8px", textAlign: "right", color: priceChanged ? "#D97706" : "#059669", background: priceChanged ? "rgba(245,158,11,0.1)" : "#F8F9FB" })} type="number" step="0.01" value={editedPrices[r.ndc] != null ? editedPrices[r.ndc] : (r.unitPrice || "")} onChange={function(e) { var updated = Object.assign({}, editedPrices); updated[r.ndc] = e.target.value; setEditedPrices(updated); }} /></td>
-                <td style={Object.assign({}, S.td, { textAlign: "right" })}>{extCost ? "$" + extCost.toLocaleString(undefined, { minimumFractionDigits: 2 }) : "\u2014"}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right" })}>{extCost ? "$" + extCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "\u2014"}</td>
                 {vendor === "mckesson" && <td style={S.td}>{r.vendorItemNum || "\u2014"}</td>}
                 <td style={Object.assign({}, S.td, { color: "#9CA3AF" })}>{(r.sourceFile || "").split("/").pop()}</td>
               </tr>;
