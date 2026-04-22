@@ -312,6 +312,7 @@ function TrackerTool(props) {
   var demoData = props.demoData, columns = props.columns, emailConfig = props.emailConfig;
   var skipVendors = props.skipVendors || [];
   var toast = props.toast, ok = props.ok, lp = props.lp, cred = props.cred, gmail = props.gmail;
+  var contacts = props.contacts || CONTACTS;
 
   var _sp = useState("data"), subPage = _sp[0], setSubPage = _sp[1];
   var _d = useState([]), data = _d[0], setData = _d[1];
@@ -432,7 +433,7 @@ function TrackerTool(props) {
     try {
       var draftPayloads = emailVendors.map(function(entry) {
         var vendor = entry[0], items = entry[1];
-        var vendorEmail = CONTACTS[vendor] || "";
+        var vendorEmail = contacts[vendor] || "";
         var toLine = emailConfig.buildTo(vendorEmail);
         if (!toLine) return null;
         var tableRows = items.map(function(r, i) {
@@ -462,7 +463,7 @@ function TrackerTool(props) {
     } catch (err) {
       toast("Gmail error: " + err.message, "error");
     }
-  }, [ok, lp, gmail, emailVendors, emailConfig, toast, data, runBy, runTime, persist, toolLabel]);
+  }, [ok, lp, gmail, emailVendors, emailConfig, toast, data, runBy, runTime, persist, toolLabel, contacts]);
 
   if (initLoading) return <div style={Object.assign({}, S.card, { textAlign: "center", padding: 48, color: "#6B7280" })}><Spinner color={toolColor} size={20} /></div>;
 
@@ -526,7 +527,7 @@ function TrackerTool(props) {
         {data.length > 0 ? <>
           {emailVendors.map(function(entry) {
             var vendor = entry[0], items = entry[1];
-            var email = CONTACTS[vendor] || "";
+            var email = contacts[vendor] || "";
             var toLine = emailConfig.buildTo(email);
             return <div key={vendor} style={S.card}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
@@ -550,7 +551,7 @@ function TrackerTool(props) {
         <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto" })}>
           <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
             <thead><tr><th style={S.th}>Vendor</th><th style={S.th}>Email(s)</th></tr></thead>
-            <tbody>{Object.entries(CONTACTS).filter(function(e) { return e[1]; }).sort(function(a, b) { return a[0].localeCompare(b[0]); }).map(function(e) { return <tr key={e[0]}><td style={Object.assign({}, S.td, { fontWeight: 500, color: "#374151" })}>{e[0]}</td><td style={Object.assign({}, S.td, { fontSize: 14, color: "#6B7280" })}>{e[1]}</td></tr>; })}</tbody>
+            <tbody>{Object.entries(contacts).filter(function(e) { return e[1]; }).sort(function(a, b) { return a[0].localeCompare(b[0]); }).map(function(e) { return <tr key={e[0]}><td style={Object.assign({}, S.td, { fontWeight: 500, color: "#374151" })}>{e[0]}</td><td style={Object.assign({}, S.td, { fontSize: 14, color: "#6B7280" })}>{e[1]}</td></tr>; })}</tbody>
           </table>
         </div>
       </div>}
@@ -3614,6 +3615,56 @@ function OOSTracker(props) {
   </div>;
 }
 
+/* ═══════ VENDOR CONTACTS PAGE ═══════ */
+function VendorContactsPage(props) {
+  var contacts = props.contacts, updateContacts = props.updateContacts, toast = props.toast;
+  var S = useMemo(function() { return makeStyles("#6366F1"); }, []);
+  var _editing = useState(null), editing = _editing[0], setEditing = _editing[1];
+  var _newVendor = useState(""), newVendor = _newVendor[0], setNewVendor = _newVendor[1];
+  var _newEmail = useState(""), newEmail = _newEmail[0], setNewEmail = _newEmail[1];
+  var _editEmail = useState(""), editEmail = _editEmail[0], setEditEmail = _editEmail[1];
+  var _search = useState(""), search = _search[0], setSearch = _search[1];
+  var sorted = useMemo(function() {
+    var entries = Object.entries(contacts).filter(function(e) { return e[0] && e[1]; });
+    if (search) { var s = search.toLowerCase(); entries = entries.filter(function(e) { return e[0].toLowerCase().indexOf(s) >= 0 || e[1].toLowerCase().indexOf(s) >= 0; }); }
+    return entries.sort(function(a, b) { return a[0].localeCompare(b[0]); });
+  }, [contacts, search]);
+
+  return <div>
+    <div style={Object.assign({}, S.card, { display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" })}>
+      <input value={newVendor} onChange={function(e) { setNewVendor(e.target.value); }} placeholder="Vendor name..." style={Object.assign({}, S.inp, { padding: "8px 14px", flex: 1, minWidth: 180 })} />
+      <input value={newEmail} onChange={function(e) { setNewEmail(e.target.value); }} placeholder="email1@example.com, email2@example.com" style={Object.assign({}, S.inp, { padding: "8px 14px", flex: 2, minWidth: 280 })} />
+      <button onClick={function() { if (!newVendor.trim() || !newEmail.trim()) { toast("Enter vendor name and email", "error"); return; } var u = Object.assign({}, contacts); u[newVendor.trim()] = newEmail.trim(); updateContacts(u); setNewVendor(""); setNewEmail(""); toast("Added " + newVendor.trim()); }} style={S.btn()}>+ Add</button>
+    </div>
+    <div style={{ display: "flex", gap: 10, marginBottom: 16, alignItems: "center" }}>
+      <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search vendors or emails..." style={Object.assign({}, S.inp, { padding: "8px 14px", width: 300 })} />
+      <div style={{ flex: 1 }} />
+      <span style={{ fontSize: 12, color: "#9CA3AF" }}>{sorted.length} vendors</span>
+    </div>
+    <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto" })}>
+      <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 13 }}>
+        <thead><tr><th style={Object.assign({}, S.th, { width: "30%" })}>Vendor</th><th style={S.th}>Email(s)</th><th style={Object.assign({}, S.th, { width: 100 })}>Actions</th></tr></thead>
+        <tbody>{sorted.map(function(e) {
+          var vendor = e[0], email = e[1];
+          var isEditing = editing === vendor;
+          return <tr key={vendor}>
+            <td style={Object.assign({}, S.td, { fontWeight: 500, color: "#374151" })}>{vendor}</td>
+            <td style={S.td}>{isEditing ? <input value={editEmail} onChange={function(ev) { setEditEmail(ev.target.value); }} style={Object.assign({}, S.inp, { padding: "5px 10px", fontSize: 13, width: "100%" })} autoFocus onKeyDown={function(ev) { if (ev.key === "Enter") { var u = Object.assign({}, contacts); u[vendor] = editEmail.trim(); updateContacts(u); setEditing(null); toast("Updated " + vendor); } if (ev.key === "Escape") setEditing(null); }} /> : <span style={{ color: "#6B7280" }}>{email}</span>}</td>
+            <td style={Object.assign({}, S.td, { textAlign: "center" })}>{isEditing ? <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
+              <button onClick={function() { var u = Object.assign({}, contacts); u[vendor] = editEmail.trim(); updateContacts(u); setEditing(null); toast("Updated " + vendor); }} style={Object.assign({}, S.btn(), { padding: "4px 10px", fontSize: 11 })}>Save</button>
+              <button onClick={function() { setEditing(null); }} style={Object.assign({}, S.btn("ghost"), { padding: "4px 10px", fontSize: 11 })}>Cancel</button>
+            </div> : <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
+              <button onClick={function() { setEditing(vendor); setEditEmail(email); }} style={{ background: "none", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 14, padding: 4 }} title="Edit">{"\u270E"}</button>
+              <button onClick={function() { if (confirm("Remove " + vendor + "?")) { var u = Object.assign({}, contacts); delete u[vendor]; updateContacts(u); toast("Removed " + vendor); } }} style={{ background: "none", border: "none", cursor: "pointer", color: "#D1D5DB", fontSize: 14, padding: 4 }} title="Delete">{"\u2715"}</button>
+            </div>}</td>
+          </tr>;
+        })}</tbody>
+      </table>
+    </div>
+    <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 8 }}>Shared with team &middot; Used by Short-Dating and Backorder email drafts</div>
+  </div>;
+}
+
 /* ═══════ MAIN HUB ═══════ */
 export default function Hub() {
   var _p = useState(function() { var s = sGet("active-page"); return s || "TP-NY"; }), page = _p[0], setPage = _p[1];
@@ -3625,13 +3676,15 @@ export default function Hub() {
   var _cl = useState(true), credLoading = _cl[0], setCredLoading = _cl[1];
   var _gm = useState(null), gmail = _gm[0], setGmail = _gm[1];
   var _sr = useState(function() { var saved = sGet("shipping-rules-v2"); return saved || Object.assign({}, DEFAULT_SHIP_RULES); }), shipRules = _sr[0], setShipRules = _sr[1];
+  var _vc = useState(Object.assign({}, CONTACTS)), vendorContacts = _vc[0], setVendorContacts = _vc[1];
   var _sideCol = useState(function() { return sGet("sidebar-collapsed") || {}; }), sideCollapsed = _sideCol[0], setSideCollapsed = _sideCol[1];
   var _sideHide = useState(false), sidebarHidden = _sideHide[0], setSidebarHidden = _sideHide[1];
   function toggleSection(key) { var u = Object.assign({}, sideCollapsed); u[key] = !u[key]; setSideCollapsed(u); sSet("sidebar-collapsed", u); }
   function updateShipRules(newRules) { setShipRules(newRules); sSet("shipping-rules-v2", newRules); }
+  function updateVendorContacts(newContacts) { setVendorContacts(newContacts); kvPost("vendor-contacts", newContacts).catch(function() {}); }
 
   var showToast = useCallback(function(m, t) { setToast({ m: m, t: t || "success" }); setTimeout(function() { setToast(null); }, 3500); }, []);
-  useEffect(function() { var mt = true; (async function() { var s = sGet("user-credentials"); if (mt && s && s.username && s.password) { setCred(s); setOk(true); } var g = getGmailToken(); if (mt && g && g.token) { setGmail(g); } if (mt) setCredLoading(false); })(); return function() { mt = false; }; }, []);
+  useEffect(function() { var mt = true; (async function() { var s = sGet("user-credentials"); if (mt && s && s.username && s.password) { setCred(s); setOk(true); } var g = getGmailToken(); if (mt && g && g.token) { setGmail(g); } if (mt) setCredLoading(false); kvGet("vendor-contacts").then(function(r) { return r.ok ? r.json() : null; }).then(function(d) { if (mt && d && d.data && typeof d.data === "object" && Object.keys(d.data).length > 0) { setVendorContacts(d.data); } }).catch(function() {}); })(); return function() { mt = false; }; }, []);
 
   // Handle Gmail OAuth callback (reads token from URL hash)
   useEffect(function() {
@@ -3740,8 +3793,8 @@ export default function Hub() {
   );
 
   var isWH = page in WH;
-  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "po-import" ? "#06B6D4" : page === "cycle-count" ? "#14B8A6" : page === "fuze-tracker" ? "#F59E0B" : page === "hills-pawtree" ? "#10B981" : page === "truckloader" ? "#D97706" : page === "oos-tracker" ? "#EF4444" : page === "how-to" ? "#6B7280" : "#3B82F6";
-  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "po-import" ? "PO NDC Validator" : page === "cycle-count" ? "Cycle Counting" : page === "fuze-tracker" ? "Fuze Tracker" : page === "hills-pawtree" ? "Hills & Pawtree Tracker" : page === "truckloader" ? "Truckloader" : page === "oos-tracker" ? "OOS Tracker" : page === "how-to" ? "How-To Guide" : showLogin ? "Login" : "Shipping Rules";
+  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "po-import" ? "#06B6D4" : page === "cycle-count" ? "#14B8A6" : page === "fuze-tracker" ? "#F59E0B" : page === "hills-pawtree" ? "#10B981" : page === "truckloader" ? "#D97706" : page === "oos-tracker" ? "#EF4444" : page === "vendor-contacts" ? "#6366F1" : page === "how-to" ? "#6B7280" : "#3B82F6";
+  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "po-import" ? "PO NDC Validator" : page === "cycle-count" ? "Cycle Counting" : page === "fuze-tracker" ? "Fuze Tracker" : page === "hills-pawtree" ? "Hills & Pawtree Tracker" : page === "truckloader" ? "Truckloader" : page === "oos-tracker" ? "OOS Tracker" : page === "vendor-contacts" ? "Vendor Contacts" : page === "how-to" ? "How-To Guide" : showLogin ? "Login" : "Shipping Rules";
 
   function SideLink(p) {
     var active = page === p.id && !showLogin;
@@ -3784,6 +3837,7 @@ export default function Hub() {
         <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 8 }}>
           <div style={{ padding: "8px 20px" }}><span style={{ fontSize: 10, fontWeight: 500, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "1px" }}>Settings</span></div>
           <div onClick={function() { setPagePersist("rules"); setShowLogin(false); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", margin: "1px 12px", fontSize: 13, cursor: "pointer", fontWeight: page === "rules" && !showLogin ? 500 : 400, color: page === "rules" && !showLogin ? "#93bbfc" : "rgba(255,255,255,0.55)", background: page === "rules" && !showLogin ? "rgba(96,165,250,0.15)" : "transparent", borderRadius: 8 }}><IconTruck /> Shipping Rules</div>
+          <div onClick={function() { setPagePersist("vendor-contacts"); setShowLogin(false); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", margin: "1px 12px", fontSize: 13, cursor: "pointer", fontWeight: page === "vendor-contacts" && !showLogin ? 500 : 400, color: page === "vendor-contacts" && !showLogin ? "#93bbfc" : "rgba(255,255,255,0.55)", background: page === "vendor-contacts" && !showLogin ? "rgba(96,165,250,0.15)" : "transparent", borderRadius: 8 }}><IconMail /> Vendor Contacts</div>
           <div onClick={function() { setPagePersist("how-to"); setShowLogin(false); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", margin: "1px 12px", fontSize: 13, cursor: "pointer", fontWeight: page === "how-to" && !showLogin ? 500 : 400, color: page === "how-to" && !showLogin ? "#93bbfc" : "rgba(255,255,255,0.55)", background: page === "how-to" && !showLogin ? "rgba(96,165,250,0.15)" : "transparent", borderRadius: 8 }}><IconCSV /> How-To Guide</div>
         </div>
         <div style={{ flex: 1 }} />
@@ -3857,14 +3911,15 @@ export default function Hub() {
           </div>}
 
           {!showLogin && Object.entries(WH).map(function(e) { return <div key={e[0]} style={{ display: page === e[0] ? "block" : "none" }}><WHT whKey={e[0]} cfg={e[1]} toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} shipRules={shipRules} /></div>; })}
-          {!showLogin && page === "short-dating" && <TrackerTool toolKey="short-dating" toolLabel="Short-Dating Tracker" toolColor="#E879F9" demoData={SD_DEMO} columns={sdColumns} emailConfig={sdEmail} toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} />}
-          {!showLogin && page === "backorder" && <TrackerTool toolKey="backorder" toolLabel="Backorder Tracker" toolColor="#F97316" demoData={BKO_DEMO} columns={bkoColumns} emailConfig={bkoEmail} skipVendors={BKO_SKIP} toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} />}
+          {!showLogin && page === "short-dating" && <TrackerTool toolKey="short-dating" toolLabel="Short-Dating Tracker" toolColor="#E879F9" demoData={SD_DEMO} columns={sdColumns} emailConfig={sdEmail} toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} contacts={vendorContacts} />}
+          {!showLogin && page === "backorder" && <TrackerTool toolKey="backorder" toolLabel="Backorder Tracker" toolColor="#F97316" demoData={BKO_DEMO} columns={bkoColumns} emailConfig={bkoEmail} skipVendors={BKO_SKIP} toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} contacts={vendorContacts} />}
           {!showLogin && page === "po-import" && <POImportTool toast={showToast} cred={cred} ok={ok} lp={promptLogin} />}
           {!showLogin && page === "cycle-count" && <CycleCountTool key="cc-standard" toast={showToast} />}
           {!showLogin && page === "fuze-tracker" && <FuzeTracker toast={showToast} />}
           {!showLogin && page === "hills-pawtree" && <HillsTracker toast={showToast} ok={ok} lp={promptLogin} cred={cred} />}
           {!showLogin && page === "truckloader" && <TruckloaderTool toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} />}
           {!showLogin && page === "oos-tracker" && <OOSTracker toast={showToast} />}
+          {!showLogin && page === "vendor-contacts" && <VendorContactsPage contacts={vendorContacts} updateContacts={updateVendorContacts} toast={showToast} />}
           {!showLogin && page === "how-to" && <HowToGuide toast={showToast} />}
         </div>
       </div>
