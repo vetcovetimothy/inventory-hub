@@ -2701,6 +2701,10 @@ function TruckloaderTool(props) {
   }
 
   function removeItem(idx) {
+    var item = orderItems[idx];
+    if (item && !item.isFill) {
+      if (!confirm("This item came from Prepare Replenishment. Are you sure you want to remove " + item.inventoryID + " from the order?")) return;
+    }
     var items = orderItems.slice();
     items.splice(idx, 1);
     setOrderItems(items);
@@ -3157,7 +3161,7 @@ function TruckloaderTool(props) {
                   <td style={Object.assign({}, S.td, { textAlign: "right" })}>{a.orderQty}</td>
                   <td style={Object.assign({}, S.td, { textAlign: "right" })}>{a.pallets}</td>
                   <td style={Object.assign({}, S.td, { textAlign: "right", fontWeight: 600 })}>{a.lbs ? a.lbs.toLocaleString(undefined, { maximumFractionDigits: 1 }) + " lbs" : "—"}</td>
-                  <td style={Object.assign({}, S.td, { textAlign: "center", padding: "8px 4px" })}><button onClick={function() { var id = a.inventoryID; setOrderItems(orderItems.filter(function(it) { return it.inventoryID !== id; })); var updated = truckGroups.map(function(tk) { if (tk.isError) return tk; var newAssign = tk.assignments.filter(function(x) { return x.inventoryID !== id; }); var newLbs = newAssign.reduce(function(s, x) { return s + (x.lbs || 0); }, 0); return Object.assign({}, tk, { assignments: newAssign, totalLbs: newLbs, remaining: TARGET - newLbs, needsFill: newLbs < MIN_WEIGHT }); }).filter(function(tk) { return tk.isError || tk.assignments.length > 0; }); setTruckGroups(updated); toast("Removed " + id); }} style={{ background: "none", border: "none", cursor: "pointer", color: "#D1D5DB", fontSize: 14, padding: 2, borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center" }} title="Remove from order">{"\u2715"}</button></td>
+                  <td style={Object.assign({}, S.td, { textAlign: "center", padding: "8px 4px" })}><button onClick={function() { var id = a.inventoryID; var srcItem = orderItems.find(function(it) { return it.inventoryID === id; }); if (srcItem && !srcItem.isFill) { if (!confirm("This item came from Prepare Replenishment. Are you sure you want to remove " + id + " from the order?")) return; } setOrderItems(orderItems.filter(function(it) { return it.inventoryID !== id; })); var updated = truckGroups.map(function(tk) { if (tk.isError) return tk; var newAssign = tk.assignments.filter(function(x) { return x.inventoryID !== id; }); var newLbs = newAssign.reduce(function(s, x) { return s + (x.lbs || 0); }, 0); return Object.assign({}, tk, { assignments: newAssign, totalLbs: newLbs, remaining: TARGET - newLbs, needsFill: newLbs < MIN_WEIGHT }); }).filter(function(tk) { return tk.isError || tk.assignments.length > 0; }); setTruckGroups(updated); toast("Removed " + id); }} style={{ background: "none", border: "none", cursor: "pointer", color: "#D1D5DB", fontSize: 14, padding: 2, borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center" }} title="Remove from order">{"\u2715"}</button></td>
                 </tr>;
               })}</tbody>
             </table>
