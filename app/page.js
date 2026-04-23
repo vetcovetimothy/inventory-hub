@@ -2593,6 +2593,22 @@ function TruckloaderTool(props) {
     return function() { m = false; };
   }, []);
 
+  // Load Netstock DOH from KV on mount (wipes at 4am EST daily)
+  useEffect(function() {
+    var m = true;
+    kvGet("netstock-doh").then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+      if (!m || !d || !d.data || !d.data.items) return;
+      var savedAt = d.data._savedAt || 0;
+      var now = new Date();
+      var et = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
+      var reset = new Date(et); reset.setHours(4, 0, 0, 0);
+      if (et < reset) reset.setDate(reset.getDate() - 1);
+      if (savedAt < reset.getTime()) { kvPost("netstock-doh", { _savedAt: Date.now() }); return; }
+      setNetstockDoh({ items: d.data.items, fileName: d.data.fileName || "Loaded from cloud" });
+    }).catch(function() {});
+    return function() { m = false; };
+  }, []);
+
   // Parse Hills Master xlsx
   function handleHillsUpload(e) {
     var file = e.target.files && e.target.files[0];
@@ -2848,6 +2864,7 @@ function TruckloaderTool(props) {
           };
         }).filter(function(x) { return x.productCode; });
         setNetstockDoh({ items: items, fileName: file.name });
+        kvPost("netstock-doh", { items: items, fileName: file.name, _savedAt: Date.now() }).catch(function() {});
         toast("Netstock DOH loaded: " + items.length + " items");
       } catch (err) { toast("Error parsing Netstock file: " + err.message, "error"); }
     };
