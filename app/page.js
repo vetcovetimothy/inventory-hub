@@ -3015,6 +3015,18 @@ function TruckloaderTool(props) {
         </div>}
         <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleHillsUpload} style={{ display: "none" }} />
       </div>
+      <div style={{ flex: 1, minWidth: 240 }}>
+        <div style={{ fontSize: 11, color: "#9CA3AF", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 6 }}>Netstock DOH</div>
+        {netstockDoh ? <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={S.badge("success")}><IconCheck /> {netstockDoh.items.length} items</span>
+          <span style={{ fontSize: 11, color: "#9CA3AF" }}>{netstockDoh.fileName || ""}</span>
+          <button onClick={function() { nsFileRef.current && nsFileRef.current.click(); }} style={{ background: "transparent", border: "1px solid #E5E7EB", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", color: "#6B7280" }}>Replace</button>
+        </div> : <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <button onClick={function() { nsFileRef.current && nsFileRef.current.click(); }} style={S.btn("ghost")}><IconUpload /> Upload DOH XLSX</button>
+          <span style={{ fontSize: 11, color: "#9CA3AF" }}>Optional</span>
+        </div>}
+        <input ref={nsFileRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleNetstockUpload} style={{ display: "none" }} />
+      </div>
       <div>
         <div style={{ fontSize: 11, color: "#9CA3AF", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 6 }}>{"\u00A0"}</div>
         <button onClick={fetchReplen} disabled={replenLoading || !hillsMaster} style={Object.assign({}, S.btn(), { opacity: replenLoading || !hillsMaster ? 0.6 : 1 })}>
@@ -3178,9 +3190,7 @@ function TruckloaderTool(props) {
     {step === "fill" && <div>
       <div style={Object.assign({}, S.card, { display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" })}>
         <span style={{ fontWeight: 600, color: "#374151" }}>Fill Suggestions — {warehouse}</span>
-        <button onClick={function() { nsFileRef.current && nsFileRef.current.click(); }} style={S.btn("ghost")}><IconUpload /> Upload Netstock DOH</button>
-        <input ref={nsFileRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleNetstockUpload} style={{ display: "none" }} />
-        {netstockDoh && <span style={S.badge("success")}><IconCheck /> {netstockDoh.items.length} items ({netstockDoh.fileName})</span>}
+        {netstockDoh ? <span style={S.badge("success")}><IconCheck /> {netstockDoh.items.length} items ({netstockDoh.fileName})</span> : <span style={{ fontSize: 12, color: "#DC2626" }}>Upload Netstock DOH above to build suggestions</span>}
         {netstockDoh && <button onClick={buildFillSuggestions} disabled={fillLoading} style={Object.assign({}, S.btn(), { opacity: fillLoading ? 0.6 : 1 })}>{fillLoading ? <><Spinner color="#fff" size={14} /> Loading...</> : <><IconFilter /> Build Suggestions</>}</button>}
       </div>
       {fillSuggestions && fillSuggestions.length > 0 && <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
