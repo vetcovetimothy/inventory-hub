@@ -2747,8 +2747,8 @@ function TruckloaderTool(props) {
         available.push({ weight: weight, idx: idx, isSplit: false, urgency: urgency });
       }
     });
-    // Sort by urgency ascending (lowest DOH/qty first → Truck 1)
-    available.sort(function(a, b) { return a.urgency - b.urgency; });
+    // Sort by urgency ascending (lowest DOH/qty first → Truck 1), tiebreak by inventoryID
+    available.sort(function(a, b) { var d = a.urgency - b.urgency; if (d !== 0) return d; var idA = orderItems[a.idx].inventoryID || ""; var idB = orderItems[b.idx].inventoryID || ""; return idA.localeCompare(idB); });
     // Sequential first-fit: fill Truck 1 first, then 2, etc.
     var groups = [];
     available.forEach(function(item) {
