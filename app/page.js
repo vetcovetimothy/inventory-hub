@@ -2553,6 +2553,7 @@ function TruckloaderTool(props) {
   var _replen = useState([]), replenData = _replen[0], setReplenData = _replen[1];
   var _rLoad = useState(false), replenLoading = _rLoad[0], setReplenLoading = _rLoad[1];
   var _order = useState([]), orderItems = _order[0], setOrderItems = _order[1];
+  var _confirmRemove = useState(null), confirmRemove = _confirmRemove[0], setConfirmRemove = _confirmRemove[1];
   var _trucks = useState(null), truckGroups = _trucks[0], setTruckGroups = _trucks[1];
   var _step = useState("order"), step = _step[0], setStep = _step[1];
   var _nsDoh = useState(null), netstockDoh = _nsDoh[0], setNetstockDoh = _nsDoh[1];
@@ -2703,7 +2704,8 @@ function TruckloaderTool(props) {
   function removeItem(idx) {
     var item = orderItems[idx];
     if (item && !item.isFill) {
-      if (!confirm("This item came from Prepare Replenishment. Are you sure you want to remove " + item.inventoryID + " from the order?")) return;
+      setConfirmRemove({ id: item.inventoryID, action: function() { var items = orderItems.slice(); items.splice(idx, 1); setOrderItems(items); setTruckGroups(null); setConfirmRemove(null); } });
+      return;
     }
     var items = orderItems.slice();
     items.splice(idx, 1);
@@ -3161,7 +3163,7 @@ function TruckloaderTool(props) {
                   <td style={Object.assign({}, S.td, { textAlign: "right" })}>{a.orderQty}</td>
                   <td style={Object.assign({}, S.td, { textAlign: "right" })}>{a.pallets}</td>
                   <td style={Object.assign({}, S.td, { textAlign: "right", fontWeight: 600 })}>{a.lbs ? a.lbs.toLocaleString(undefined, { maximumFractionDigits: 1 }) + " lbs" : "—"}</td>
-                  <td style={Object.assign({}, S.td, { textAlign: "center", padding: "8px 4px" })}><button onClick={function() { var id = a.inventoryID; var srcItem = orderItems.find(function(it) { return it.inventoryID === id; }); if (srcItem && !srcItem.isFill) { if (!confirm("This item came from Prepare Replenishment. Are you sure you want to remove " + id + " from the order?")) return; } setOrderItems(orderItems.filter(function(it) { return it.inventoryID !== id; })); var updated = truckGroups.map(function(tk) { if (tk.isError) return tk; var newAssign = tk.assignments.filter(function(x) { return x.inventoryID !== id; }); var newLbs = newAssign.reduce(function(s, x) { return s + (x.lbs || 0); }, 0); return Object.assign({}, tk, { assignments: newAssign, totalLbs: newLbs, remaining: TARGET - newLbs, needsFill: newLbs < MIN_WEIGHT }); }).filter(function(tk) { return tk.isError || tk.assignments.length > 0; }); setTruckGroups(updated); toast("Removed " + id); }} style={{ background: "none", border: "none", cursor: "pointer", color: "#D1D5DB", fontSize: 14, padding: 2, borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center" }} title="Remove from order">{"\u2715"}</button></td>
+                  <td style={Object.assign({}, S.td, { textAlign: "center", padding: "8px 4px" })}><button onClick={function() { var id = a.inventoryID; var srcItem = orderItems.find(function(it) { return it.inventoryID === id; }); if (srcItem && !srcItem.isFill) { setConfirmRemove({ id: id, action: function() { setOrderItems(orderItems.filter(function(it) { return it.inventoryID !== id; })); var updated = truckGroups.map(function(tk) { if (tk.isError) return tk; var newAssign = tk.assignments.filter(function(x) { return x.inventoryID !== id; }); var newLbs = newAssign.reduce(function(s, x) { return s + (x.lbs || 0); }, 0); return Object.assign({}, tk, { assignments: newAssign, totalLbs: newLbs, remaining: TARGET - newLbs, needsFill: newLbs < MIN_WEIGHT }); }).filter(function(tk) { return tk.isError || tk.assignments.length > 0; }); setTruckGroups(updated); toast("Removed " + id); setConfirmRemove(null); } }); return; } setOrderItems(orderItems.filter(function(it) { return it.inventoryID !== id; })); var updated = truckGroups.map(function(tk) { if (tk.isError) return tk; var newAssign = tk.assignments.filter(function(x) { return x.inventoryID !== id; }); var newLbs = newAssign.reduce(function(s, x) { return s + (x.lbs || 0); }, 0); return Object.assign({}, tk, { assignments: newAssign, totalLbs: newLbs, remaining: TARGET - newLbs, needsFill: newLbs < MIN_WEIGHT }); }).filter(function(tk) { return tk.isError || tk.assignments.length > 0; }); setTruckGroups(updated); toast("Removed " + id); }} style={{ background: "none", border: "none", cursor: "pointer", color: "#D1D5DB", fontSize: 14, padding: 2, borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center" }} title="Remove from order">{"\u2715"}</button></td>
                 </tr>;
               })}</tbody>
             </table>
@@ -3356,6 +3358,21 @@ function TruckloaderTool(props) {
     {orderItems.length === 0 && !replenLoading && <div style={Object.assign({}, S.card, { textAlign: "center", padding: 60, color: "#9CA3AF" })}>
       <IconBox /><br /><br />
       {hillsMaster ? "Select warehouse and click Fetch Replenishment to load items." : "Upload Hills Master XLSX to get started."}
+    </div>}
+
+    {/* Confirm Remove Modal */}
+    {confirmRemove && <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={function() { setConfirmRemove(null); }}>
+      <div style={{ background: "#FFFFFF", borderRadius: 16, padding: 32, width: 420, boxShadow: "0 20px 60px rgba(0,0,0,0.15)", animation: "slideUp 0.2s ease" }} onClick={function(e) { e.stopPropagation(); }}>
+        <div style={{ width: 48, height: 48, borderRadius: 12, background: "rgba(245,158,11,0.12)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#D97706" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        </div>
+        <h3 style={{ fontSize: 16, fontWeight: 700, color: "#1F2937", textAlign: "center", margin: "0 0 8px" }}>Remove Replenishment Item</h3>
+        <p style={{ fontSize: 13, color: "#6B7280", textAlign: "center", margin: "0 0 24px", lineHeight: 1.6 }}>Item <strong style={{ color: "#D97706", fontFamily: "monospace" }}>{confirmRemove.id}</strong> came from Prepare Replenishment. Removing it means it won{"'"}t be included in the order or any truck assignments.</p>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button onClick={function() { setConfirmRemove(null); }} style={{ flex: 1, padding: "10px 16px", borderRadius: 10, border: "1px solid #E5E7EB", background: "#FFFFFF", color: "#374151", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
+          <button onClick={function() { confirmRemove.action(); }} style={{ flex: 1, padding: "10px 16px", borderRadius: 10, border: "none", background: "#DC2626", color: "#FFFFFF", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Remove Item</button>
+        </div>
+      </div>
     </div>}
   </div>;
 }
