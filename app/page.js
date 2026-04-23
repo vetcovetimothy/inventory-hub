@@ -2707,16 +2707,23 @@ function TruckloaderTool(props) {
     setTruckGroups(null);
   }
 
-  // Bin-packing truck optimizer
+  // DOH-priority truck optimizer: lowest DOH → Truck 1
   function optimizeTrucks() {
     if (orderItems.length === 0) { toast("No items to optimize", "error"); return; }
     var target = TARGET * 100;
     var minW = MIN_WEIGHT * 100;
+    // Build DOH lookup from Netstock if uploaded
+    var dohLookup = {};
+    if (netstockDoh && netstockDoh.items) {
+      netstockDoh.items.forEach(function(ns) { dohLookup[ns.productCode] = ns.doh; });
+    }
     var available = [];
     var errors = [];
     orderItems.forEach(function(item, idx) {
       var weight = Math.round(item.totalLbs * 100);
       if (weight <= 0) return;
+      var doh = dohLookup[item.inventoryID] != null ? dohLookup[item.inventoryID] : null;
+      var urgency = doh != null ? doh : item.qtyAvail;
       if (weight > target) {
         if (item.lbsPerPallet > 0 && item.roundedPallets > 0) {
           var maxPals = Math.floor(target / Math.round(item.lbsPerPallet * 100));
@@ -2725,23 +2732,26 @@ function TruckloaderTool(props) {
           var c1 = maxPals * Math.round(item.lbsPerPallet * 100);
           var c2 = remainder * Math.round(item.lbsPerPallet * 100);
           if (c2 > target) { errors.push({ idx: idx, reason: "Too large, needs 2+ splits" }); return; }
-          available.push({ weight: c1, idx: idx, isSplit: true, splitPals: maxPals });
-          available.push({ weight: c2, idx: idx, isSplit: true, splitPals: remainder });
+          available.push({ weight: c1, idx: idx, isSplit: true, splitPals: maxPals, urgency: urgency });
+          available.push({ weight: c2, idx: idx, isSplit: true, splitPals: remainder, urgency: urgency });
         } else { errors.push({ idx: idx, reason: "Missing pallet info for split" }); }
       } else {
-        available.push({ weight: weight, idx: idx, isSplit: false });
+        available.push({ weight: weight, idx: idx, isSplit: false, urgency: urgency });
       }
     });
-    available.sort(function(a, b) { return b.weight - a.weight; });
+    // Sort by urgency ascending (lowest DOH/qty first → Truck 1)
+    available.sort(function(a, b) { return a.urgency - b.urgency; });
+    // Sequential first-fit: fill Truck 1 first, then 2, etc.
     var groups = [];
     available.forEach(function(item) {
-      var bestIdx = -1, minGap = target + 1;
+      var placed = false;
       for (var i = 0; i < groups.length; i++) {
-        var gap = target - (groups[i].total + item.weight);
-        if (gap >= 0 && gap < minGap) { bestIdx = i; minGap = gap; }
+        if (groups[i].total + item.weight <= target) {
+          groups[i].items.push(item); groups[i].total += item.weight;
+          placed = true; break;
+        }
       }
-      if (bestIdx !== -1) { groups[bestIdx].items.push(item); groups[bestIdx].total += item.weight; }
-      else { groups.push({ items: [item], total: item.weight }); }
+      if (!placed) { groups.push({ items: [item], total: item.weight }); }
     });
     // Build truck assignments
     var trucks = groups.map(function(g, ti) {
@@ -2763,8 +2773,9 @@ function TruckloaderTool(props) {
     setFillAdded([]);
     setStep("trucks");
     var underFill = trucks.filter(function(t) { return t.needsFill; }).length;
-    if (underFill > 0) toast(trucks.length + " trucks created. " + underFill + " flagged to fill (<35k lbs)", "info");
-    else toast(trucks.length + " trucks optimized!");
+    var dohNote = Object.keys(dohLookup).length > 0 ? " (sorted by DOH)" : " (sorted by available qty)";
+    if (underFill > 0) toast(trucks.length + " trucks created" + dohNote + ". " + underFill + " flagged to fill (<35k lbs)", "info");
+    else toast(trucks.length + " trucks optimized" + dohNote + "!");
   }
 
   // CSV export for a single truck
