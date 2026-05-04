@@ -2662,12 +2662,13 @@ function TruckloaderTool(props) {
       setReplenData(rows);
       // Filter by warehouse client-side (GI params don't pass through OData)
       var whRows = rows.filter(function(r) { return String(r.Warehouse || "").trim() === warehouse; });
-      // Filter: QtyAvail + OnPO < ReorderPoint (match Prepare Replenishment)
+      // Filter: QtyAvail + OnPO + POPrepared < ReorderPoint (match Prepare Replenishment)
       var filtered = whRows.filter(function(r) {
         var avail = parseFloat(r.QtyAvailable) || 0;
         var onPO = parseFloat(r.OnPO) || 0;
+        var poPrepared = parseFloat(r.POPrepared) || 0;
         var reorder = parseFloat(r.ReorderPoint) || 0;
-        return (avail + onPO) < reorder && reorder > 0;
+        return (avail + onPO + poPrepared) < reorder && reorder > 0;
       });
       // Build order items with Hills Master lookup
       var items = filtered.map(function(r) {
@@ -2676,7 +2677,8 @@ function TruckloaderTool(props) {
         var maxQty = parseFloat(r.MaxQty) || 0;
         var avail = parseFloat(r.QtyAvailable) || 0;
         var onPO = parseFloat(r.OnPO) || 0;
-        var caseNeed = Math.max(0, Math.round(maxQty - avail - onPO));
+        var poPrepared = parseFloat(r.POPrepared) || 0;
+        var caseNeed = Math.max(0, Math.round(maxQty - avail - onPO - poPrepared));
         var casesPerPallet = hm.unitsPerPallet || 0;
         var lbsPerPallet = hm.palletWeight || 0;
         var palletCount = casesPerPallet > 0 ? caseNeed / casesPerPallet : 0;
