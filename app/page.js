@@ -2662,12 +2662,12 @@ function TruckloaderTool(props) {
       setReplenData(rows);
       // Filter by warehouse client-side (GI params don't pass through OData)
       var whRows = rows.filter(function(r) { return String(r.Warehouse || "").trim() === warehouse; });
-      // Filter: QtyAvail + OnPO <= ReorderPoint (match Prepare Replenishment)
+      // Filter: QtyAvail + OnPO < ReorderPoint (match Prepare Replenishment)
       var filtered = whRows.filter(function(r) {
         var avail = parseFloat(r.QtyAvailable) || 0;
         var onPO = parseFloat(r.OnPO) || 0;
         var reorder = parseFloat(r.ReorderPoint) || 0;
-        return (avail + onPO) <= reorder && reorder > 0;
+        return (avail + onPO) < reorder && reorder > 0;
       });
       // Build order items with Hills Master lookup
       var items = filtered.map(function(r) {
