@@ -3646,7 +3646,6 @@ function OOSTracker(props) {
             {sortHeader("manufacturer", "Manufacturer")}
             {sortHeader("product", "Product")}
             {sortHeader("warehouse", "Warehouse")}
-            {sortHeader("status", "Status")}
           </tr></thead>
           <tbody>{filtered.map(function(r, i) {
             var noteKey = tab + ":" + r.MANUFACTURER_NO + ":" + (r.WAREHOUSE_SLUG || "");
@@ -3665,7 +3664,6 @@ function OOSTracker(props) {
               <td style={Object.assign({}, S.td, { color: "#374151" })}>{r.MANUFACTURER_NAME}</td>
               <td style={Object.assign({}, S.td, { color: "#374151", maxWidth: 300 })}>{r.PRODUCT_LINE_NAME}</td>
               <td style={S.td}><span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 6, fontWeight: 500, background: whBg, color: whColor }}>{r._wh}</span></td>
-              <td style={S.td}><span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 6, fontWeight: 500, background: r.SUPPLY_STATUS === "UNAVAILABLE" ? "#FEF2F2" : "#FFF7ED", color: r.SUPPLY_STATUS === "UNAVAILABLE" ? "#DC2626" : "#D97706" }}>{r.SUPPLY_STATUS}</span></td>
             </tr>;
           })}</tbody>
         </table>
