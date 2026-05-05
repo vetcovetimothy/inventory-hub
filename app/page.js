@@ -3772,7 +3772,7 @@ function ShippingRulesPage(props) {
         })}</tbody>
       </table>
     </div>
-    <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 8 }}>Saved to your browser &middot; Used by PO warehouse tools to determine free shipping eligibility</div>
+    <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 8 }}>Shared with team &middot; Used by PO warehouse tools to determine free shipping eligibility</div>
   </div>;
 }
 
@@ -3791,11 +3791,11 @@ export default function Hub() {
   var _sideCol = useState(function() { return sGet("sidebar-collapsed") || {}; }), sideCollapsed = _sideCol[0], setSideCollapsed = _sideCol[1];
   var _sideHide = useState(false), sidebarHidden = _sideHide[0], setSidebarHidden = _sideHide[1];
   function toggleSection(key) { var u = Object.assign({}, sideCollapsed); u[key] = !u[key]; setSideCollapsed(u); sSet("sidebar-collapsed", u); }
-  function updateShipRules(newRules) { setShipRules(newRules); sSet("shipping-rules-v2", newRules); }
+  function updateShipRules(newRules) { setShipRules(newRules); sSet("shipping-rules-v2", newRules); kvPost("shipping-rules-v2", newRules).catch(function() {}); }
   function updateVendorContacts(newContacts) { setVendorContacts(newContacts); kvPost("vendor-contacts", newContacts).catch(function() {}); }
 
   var showToast = useCallback(function(m, t) { setToast({ m: m, t: t || "success" }); setTimeout(function() { setToast(null); }, 3500); }, []);
-  useEffect(function() { var mt = true; (async function() { var s = sGet("user-credentials"); if (mt && s && s.username && s.password) { setCred(s); setOk(true); } var g = getGmailToken(); if (mt && g && g.token) { setGmail(g); } if (mt) setCredLoading(false); kvGet("vendor-contacts").then(function(r) { return r.ok ? r.json() : null; }).then(function(d) { if (mt && d && d.data && typeof d.data === "object" && Object.keys(d.data).length > 0) { setVendorContacts(d.data); } }).catch(function() {}); })(); return function() { mt = false; }; }, []);
+  useEffect(function() { var mt = true; (async function() { var s = sGet("user-credentials"); if (mt && s && s.username && s.password) { setCred(s); setOk(true); } var g = getGmailToken(); if (mt && g && g.token) { setGmail(g); } if (mt) setCredLoading(false); kvGet("vendor-contacts").then(function(r) { return r.ok ? r.json() : null; }).then(function(d) { if (mt && d && d.data && typeof d.data === "object" && Object.keys(d.data).length > 0) { setVendorContacts(d.data); } }).catch(function() {}); kvGet("shipping-rules-v2").then(function(r) { return r.ok ? r.json() : null; }).then(function(d) { if (mt && d && d.data && typeof d.data === "object" && Object.keys(d.data).length > 0) { setShipRules(d.data); } }).catch(function() {}); })(); return function() { mt = false; }; }, []);
 
   // Handle Gmail OAuth callback (reads token from URL hash)
   useEffect(function() {
