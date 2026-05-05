@@ -1444,7 +1444,7 @@ function POImportTool(props) {
   var _editedPrices = useState({}), editedPrices = _editedPrices[0], setEditedPrices = _editedPrices[1];
   var _mckWarnings = useState([]), mckWarnings = _mckWarnings[0], setMckWarnings = _mckWarnings[1];
   var _error = useState(null), error = _error[0], setError = _error[1];
-  var _statedAmt = useState(null), statedAmount = _statedAmt[0], setStatedAmount = _statedAmt[1];
+  var _statedAmts = useState({}), statedAmounts = _statedAmts[0], setStatedAmounts = _statedAmts[1];
   var _ndcMap = useState(null), ndcMap = _ndcMap[0], setNdcMap = _ndcMap[1];
   var _ndcLoading = useState(false), ndcLoading = _ndcLoading[0], setNdcLoading = _ndcLoading[1];
   var _activeFileTab = useState(null), activeFileTab = _activeFileTab[0], setActiveFileTab = _activeFileTab[1];
@@ -1650,8 +1650,7 @@ function POImportTool(props) {
     try {
       // Step 1: Parse each PDF separately to avoid text extraction state issues
       var pdfItems = [];
-      var totalStatedAmount = 0;
-      var hasStatedAmount = false;
+      var newStatedAmounts = {};
       for (var pi = 0; pi < pdfs.length; pi++) {
         var parseResp = await fetch("/api/po-import", {
           method: "POST",
@@ -1664,7 +1663,7 @@ function POImportTool(props) {
         var items = parseJson.items || [];
         items.forEach(function(item) { item.sourceFile = pdfs[pi].name; });
         pdfItems = pdfItems.concat(items);
-        if (parseJson.statedAmount != null) { totalStatedAmount += parseJson.statedAmount; hasStatedAmount = true; }
+        if (parseJson.statedAmount != null) { newStatedAmounts[pdfs[pi].name] = Math.round(parseJson.statedAmount * 100) / 100; }
       }
       if (pdfItems.length === 0) throw new Error("No items found. The PDF parser returned 0 NDCs. Check that your PDFs have the standard PO format.");
 
@@ -1740,7 +1739,7 @@ function POImportTool(props) {
       }
 
       setResults(matched);
-      setStatedAmount(hasStatedAmount ? Math.round(totalStatedAmount * 100) / 100 : null);
+      setStatedAmounts(newStatedAmounts);
       // Auto-select first file tab for "other" vendor
       if (vendor === "other" && matched.length > 0) {
         var files = {}; matched.forEach(function(r) { if (r.sourceFile) files[r.sourceFile] = 1; });
@@ -1784,7 +1783,7 @@ function POImportTool(props) {
   }
 
   function reset() {
-    setPdfs([]); setMckPaste(""); setMckParsed(null); setMckFile(null); setMckPortalPrices({}); setScreenshotQtys({}); setEditedPrices({}); setResults([]); setMckWarnings([]); setError(null); setActiveFileTab(null); setStatedAmount(null);
+    setPdfs([]); setMckPaste(""); setMckParsed(null); setMckFile(null); setMckPortalPrices({}); setScreenshotQtys({}); setEditedPrices({}); setResults([]); setMckWarnings([]); setError(null); setActiveFileTab(null); setStatedAmounts({});
   }
 
   var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
@@ -1873,7 +1872,7 @@ function POImportTool(props) {
         </div>}
         <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
           {(function() { var pos = {}; var vendors = {}; var whs = {}; activeResults.forEach(function(r) { if (r.poNumber) pos[r.poNumber] = 1; if (r.vendorSource) vendors[r.vendorSource] = 1; if (r.warehouse) whs[r.warehouse] = 1; }); var poList = Object.keys(pos); var vendorList = Object.keys(vendors); var whList = Object.keys(whs); function copyVal(val) { navigator.clipboard.writeText(val).then(function() { toast("Copied: " + val); }).catch(function() {}); } return <>{poList.length > 0 && <div onClick={function() { copyVal(poList.join(", ")); }} style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0, cursor: "pointer", transition: "all 0.15s" })} title="Click to copy"><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>PO #</div><div style={{ fontSize: 20, fontWeight: 700, color: TOOL_COLOR, marginTop: 4 }}>{poList.join(", ")}</div></div>}{vendorList.length > 0 && <div onClick={function() { copyVal(vendorList.join(", ")); }} style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0, cursor: "pointer", transition: "all 0.15s" })} title="Click to copy"><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Vendor</div><div style={{ fontSize: 18, fontWeight: 700, color: "#1F2937", marginTop: 4 }}>{vendorList.join(", ")}</div></div>}{whList.length > 0 && <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Warehouse</div><div style={{ fontSize: 20, fontWeight: 700, color: "#1F2937", marginTop: 4 }}>{whList.join(", ")}</div></div>}</>; })()}
-          {(function() { var totalExt = 0; activeResults.forEach(function(r) { var eq = screenshotQtys[r.ndc] != null ? parseInt(screenshotQtys[r.ndc]) : r.qty; var ep = editedPrices[r.ndc] != null ? parseFloat(editedPrices[r.ndc]) : r.unitPrice; if (eq && ep) totalExt += Math.round(eq * ep * 100) / 100; else if (r.totalPrice) totalExt += r.totalPrice; }); var matches = statedAmount != null ? Math.abs(totalExt - statedAmount) < 0.02 : null; return <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Total Ext. Cost</div><div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}><span style={{ fontSize: 20, fontWeight: 700, color: "#1F2937" }}>{"$" + totalExt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>{matches === true && <span style={{ color: "#059669", fontSize: 16 }}>{"\u2713"}</span>}{matches === false && <span style={{ color: "#DC2626", fontSize: 11, fontWeight: 500 }}>{"\u2717 off $" + Math.abs(totalExt - statedAmount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}</div></div>; })()}
+          {(function() { var totalExt = 0; activeResults.forEach(function(r) { var eq = screenshotQtys[r.ndc] != null ? parseInt(screenshotQtys[r.ndc]) : r.qty; var ep = editedPrices[r.ndc] != null ? parseFloat(editedPrices[r.ndc]) : r.unitPrice; if (eq && ep) totalExt += Math.round(eq * ep * 100) / 100; else if (r.totalPrice) totalExt += r.totalPrice; }); var activeStated = null; if (activeFileTab && statedAmounts[activeFileTab] != null) { activeStated = statedAmounts[activeFileTab]; } else { var keys = Object.keys(statedAmounts); if (keys.length > 0) { var sum = 0; keys.forEach(function(k) { sum += statedAmounts[k]; }); activeStated = Math.round(sum * 100) / 100; } } var matches = activeStated != null ? Math.abs(totalExt - activeStated) < 0.02 : null; return <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Total Price</div><div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}><span style={{ fontSize: 20, fontWeight: 700, color: "#1F2937" }}>{"$" + totalExt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>{matches === true && <span style={{ color: "#059669", fontSize: 16 }}>{"\u2713"}</span>}{matches === false && <span style={{ color: "#DC2626", fontSize: 11, fontWeight: 500 }}>{"\u2717 off $" + Math.abs(totalExt - activeStated).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}</div></div>; })()}
           <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Total Items</div><div style={{ fontSize: 24, fontWeight: 700, color: "#1F2937", marginTop: 4 }}>{activeResults.length}</div></div>
           <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>In OData</div><div style={{ fontSize: 24, fontWeight: 700, color: "#059669", marginTop: 4 }}>{foundCount}</div></div>
           <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Not in OData</div><div style={{ fontSize: 24, fontWeight: 700, color: notFoundCount > 0 ? "#DC2626" : "#059669", marginTop: 4 }}>{notFoundCount}</div></div>
