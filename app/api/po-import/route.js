@@ -133,6 +133,7 @@ export async function POST(req) {
     var vendorSource = "";
     var poNumber = "";
     var storeName = "";
+    var statedAmount = null;
 
     for (var i = 0; i < pdfs.length; i++) {
       try {
@@ -146,6 +147,7 @@ export async function POST(req) {
         if (parsed.vendorSource && !vendorSource) vendorSource = parsed.vendorSource;
         if (parsed.poNumber && !poNumber) poNumber = parsed.poNumber;
         if (parsed.storeName && !storeName) storeName = parsed.storeName;
+        if (parsed.statedAmount != null) statedAmount = (statedAmount || 0) + parsed.statedAmount;
 
         parsed.items.forEach(function(item) { item.sourceFile = pdfs[i].name; });
         allItems = allItems.concat(parsed.items);
@@ -163,6 +165,7 @@ export async function POST(req) {
       vendorSource: vendorSource,
       poNumber: poNumber,
       storeName: storeName,
+      statedAmount: statedAmount,
       count: allItems.length,
     });
   } catch (err) {
