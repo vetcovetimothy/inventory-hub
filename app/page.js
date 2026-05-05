@@ -1873,7 +1873,7 @@ function POImportTool(props) {
         </div>}
         <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
           {(function() { var pos = {}; var vendors = {}; var whs = {}; activeResults.forEach(function(r) { if (r.poNumber) pos[r.poNumber] = 1; if (r.vendorSource) vendors[r.vendorSource] = 1; if (r.warehouse) whs[r.warehouse] = 1; }); var poList = Object.keys(pos); var vendorList = Object.keys(vendors); var whList = Object.keys(whs); function copyVal(val) { navigator.clipboard.writeText(val).then(function() { toast("Copied: " + val); }).catch(function() {}); } return <>{poList.length > 0 && <div onClick={function() { copyVal(poList.join(", ")); }} style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0, cursor: "pointer", transition: "all 0.15s" })} title="Click to copy"><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>PO #</div><div style={{ fontSize: 20, fontWeight: 700, color: TOOL_COLOR, marginTop: 4 }}>{poList.join(", ")}</div></div>}{vendorList.length > 0 && <div onClick={function() { copyVal(vendorList.join(", ")); }} style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0, cursor: "pointer", transition: "all 0.15s" })} title="Click to copy"><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Vendor</div><div style={{ fontSize: 18, fontWeight: 700, color: "#1F2937", marginTop: 4 }}>{vendorList.join(", ")}</div></div>}{whList.length > 0 && <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Warehouse</div><div style={{ fontSize: 20, fontWeight: 700, color: "#1F2937", marginTop: 4 }}>{whList.join(", ")}</div></div>}</>; })()}
-          {(function() { var totalExt = 0; activeResults.forEach(function(r) { var eq = screenshotQtys[r.ndc] != null ? parseInt(screenshotQtys[r.ndc]) : r.qty; var ep = editedPrices[r.ndc] != null ? parseFloat(editedPrices[r.ndc]) : r.unitPrice; if (eq && ep) totalExt += Math.round(eq * ep * 100) / 100; else if (r.totalPrice) totalExt += r.totalPrice; }); var matches = statedAmount != null ? Math.abs(totalExt - statedAmount) < 0.02 : null; return <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Total Price</div><div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}><span style={{ fontSize: 20, fontWeight: 700, color: "#1F2937" }}>{"$" + totalExt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>{matches === true && <span style={{ color: "#059669", fontSize: 16 }}>{"\u2713"}</span>}{matches === false && <span style={{ color: "#DC2626", fontSize: 11, fontWeight: 500 }}>{"\u2717 off $" + Math.abs(totalExt - statedAmount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}</div></div>; })()}
+          {(function() { var totalExt = 0; activeResults.forEach(function(r) { var eq = screenshotQtys[r.ndc] != null ? parseInt(screenshotQtys[r.ndc]) : r.qty; var ep = editedPrices[r.ndc] != null ? parseFloat(editedPrices[r.ndc]) : r.unitPrice; if (eq && ep) totalExt += Math.round(eq * ep * 100) / 100; else if (r.totalPrice) totalExt += r.totalPrice; }); var matches = statedAmount != null ? Math.abs(totalExt - statedAmount) < 0.02 : null; return <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Total Ext. Cost</div><div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}><span style={{ fontSize: 20, fontWeight: 700, color: "#1F2937" }}>{"$" + totalExt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>{matches === true && <span style={{ color: "#059669", fontSize: 16 }}>{"\u2713"}</span>}{matches === false && <span style={{ color: "#DC2626", fontSize: 11, fontWeight: 500 }}>{"\u2717 off $" + Math.abs(totalExt - statedAmount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}</div></div>; })()}
           <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Total Items</div><div style={{ fontSize: 24, fontWeight: 700, color: "#1F2937", marginTop: 4 }}>{activeResults.length}</div></div>
           <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>In OData</div><div style={{ fontSize: 24, fontWeight: 700, color: "#059669", marginTop: 4 }}>{foundCount}</div></div>
           <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Not in OData</div><div style={{ fontSize: 24, fontWeight: 700, color: notFoundCount > 0 ? "#DC2626" : "#059669", marginTop: 4 }}>{notFoundCount}</div></div>
@@ -3726,6 +3726,56 @@ function VendorContactsPage(props) {
   </div>;
 }
 
+/* ═══════ SHIPPING RULES PAGE ═══════ */
+function ShippingRulesPage(props) {
+  var shipRules = props.shipRules, updateShipRules = props.updateShipRules, toast = props.toast;
+  var S = useMemo(function() { return makeStyles("#3B82F6"); }, []);
+  var _editing = useState(null), editing = _editing[0], setEditing = _editing[1];
+  var _newVendor = useState(""), newVendor = _newVendor[0], setNewVendor = _newVendor[1];
+  var _newRule = useState(""), newRule = _newRule[0], setNewRule = _newRule[1];
+  var _editRule = useState(""), editRule = _editRule[0], setEditRule = _editRule[1];
+  var _search = useState(""), search = _search[0], setSearch = _search[1];
+  var sorted = useMemo(function() {
+    var entries = Object.entries(shipRules).filter(function(e) { return e[0] && e[1]; });
+    if (search) { var s = search.toLowerCase(); entries = entries.filter(function(e) { return e[0].toLowerCase().indexOf(s) >= 0 || e[1].toLowerCase().indexOf(s) >= 0; }); }
+    return entries.sort(function(a, b) { return a[0].localeCompare(b[0]); });
+  }, [shipRules, search]);
+
+  return <div>
+    <div style={Object.assign({}, S.card, { display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" })}>
+      <input value={newVendor} onChange={function(e) { setNewVendor(e.target.value); }} placeholder="Vendor name..." style={Object.assign({}, S.inp, { padding: "8px 14px", flex: 1, minWidth: 180 })} />
+      <input value={newRule} onChange={function(e) { setNewRule(e.target.value); }} placeholder="e.g. min:5000; message:Free Shipping; else:Not Free Shipping" style={Object.assign({}, S.inp, { padding: "8px 14px", flex: 2, minWidth: 280 })} />
+      <button onClick={function() { if (!newVendor.trim() || !newRule.trim()) { toast("Enter vendor name and rule", "error"); return; } var u = Object.assign({}, shipRules); u[newVendor.trim()] = newRule.trim(); updateShipRules(u); setNewVendor(""); setNewRule(""); toast("Added " + newVendor.trim()); }} style={S.btn()}>+ Add</button>
+    </div>
+    <div style={{ display: "flex", gap: 10, marginBottom: 16, alignItems: "center" }}>
+      <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search vendors or rules..." style={Object.assign({}, S.inp, { padding: "8px 14px", width: 300 })} />
+      <div style={{ flex: 1 }} />
+      <span style={{ fontSize: 12, color: "#9CA3AF" }}>{sorted.length} vendors</span>
+    </div>
+    <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto" })}>
+      <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 13 }}>
+        <thead><tr><th style={Object.assign({}, S.th, { width: "30%" })}>Vendor</th><th style={S.th}>Rule</th><th style={Object.assign({}, S.th, { width: 100 })}>Actions</th></tr></thead>
+        <tbody>{sorted.map(function(e) {
+          var vendor = e[0], rule = e[1];
+          var isEditing = editing === vendor;
+          return <tr key={vendor}>
+            <td style={Object.assign({}, S.td, { fontWeight: 500, color: "#374151" })}>{vendor}</td>
+            <td style={S.td}>{isEditing ? <input value={editRule} onChange={function(ev) { setEditRule(ev.target.value); }} style={Object.assign({}, S.inp, { padding: "5px 10px", fontSize: 13, width: "100%" })} autoFocus onKeyDown={function(ev) { if (ev.key === "Enter") { var u = Object.assign({}, shipRules); u[vendor] = editRule.trim(); updateShipRules(u); setEditing(null); toast("Updated " + vendor); } if (ev.key === "Escape") setEditing(null); }} /> : <span style={{ color: "#6B7280" }}>{rule}</span>}</td>
+            <td style={Object.assign({}, S.td, { textAlign: "center" })}>{isEditing ? <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
+              <button onClick={function() { var u = Object.assign({}, shipRules); u[vendor] = editRule.trim(); updateShipRules(u); setEditing(null); toast("Updated " + vendor); }} style={Object.assign({}, S.btn(), { padding: "4px 10px", fontSize: 11 })}>Save</button>
+              <button onClick={function() { setEditing(null); }} style={Object.assign({}, S.btn("ghost"), { padding: "4px 10px", fontSize: 11 })}>Cancel</button>
+            </div> : <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
+              <button onClick={function() { setEditing(vendor); setEditRule(rule); }} style={{ background: "none", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 14, padding: 4 }} title="Edit">{"\u270E"}</button>
+              <button onClick={function() { if (confirm("Remove " + vendor + "?")) { var u = Object.assign({}, shipRules); delete u[vendor]; updateShipRules(u); toast("Removed " + vendor); } }} style={{ background: "none", border: "none", cursor: "pointer", color: "#D1D5DB", fontSize: 14, padding: 4 }} title="Delete">{"\u2715"}</button>
+            </div>}</td>
+          </tr>;
+        })}</tbody>
+      </table>
+    </div>
+    <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 8 }}>Saved to your browser &middot; Used by PO warehouse tools to determine free shipping eligibility</div>
+  </div>;
+}
+
 /* ═══════ MAIN HUB ═══════ */
 export default function Hub() {
   var _p = useState(function() { var s = sGet("active-page"); return s || "TP-NY"; }), page = _p[0], setPage = _p[1];
@@ -3932,44 +3982,7 @@ export default function Hub() {
         <div style={{ padding: 32, flex: 1 }}>
           {showLogin && <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 400 }}><div style={{ background: "#FFFFFF", border: "1px solid #E5E7EB", borderRadius: 12, padding: 32, width: 400, textAlign: "center" }}><div style={{ width: 56, height: 56, borderRadius: 14, background: "rgba(59,130,246,0.15)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}><IconKey /></div><h2 style={{ fontSize: 20, fontWeight: 700, color: "#1F2937", margin: "0 0 4px" }}>Acumatica Login</h2><p style={{ color: "#9CA3AF", fontSize: 11, margin: "0 0 24px" }}>Shared across all tools</p><div style={{ textAlign: "left", display: "flex", flexDirection: "column", gap: 12 }}><div><label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 4 }}>Username</label><input style={{ background: "#F8F9FB", border: "1px solid #E5E7EB", borderRadius: 8, padding: "8px 12px", color: "#374151", fontSize: 13, outline: "none", width: "100%" }} value={cred.username} onChange={function(e) { setCred({ username: e.target.value, password: cred.password }); }} placeholder="your.username" /></div><div><label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 4 }}>Password</label><input style={{ background: "#F8F9FB", border: "1px solid #E5E7EB", borderRadius: 8, padding: "8px 12px", color: "#374151", fontSize: 13, outline: "none", width: "100%" }} type="password" value={cred.password} onChange={function(e) { setCred({ username: cred.username, password: e.target.value }); }} placeholder="\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" /></div><button onClick={login} disabled={loginLoading} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, width: "100%", background: "#3B82F6", color: "#fff", border: "none", borderRadius: 8, padding: "10px 16px", fontSize: 13, fontWeight: 600, cursor: loginLoading ? "wait" : "pointer", marginTop: 8, opacity: loginLoading ? 0.7 : 1 }}>{loginLoading ? <><Spinner color="#fff" size={14} /> Verifying...</> : "Connect"}</button></div></div></div>}
 
-          {page === "rules" && !showLogin && <div>
-            <p style={{ color: "#6B7280", fontSize: 13, marginBottom: 16 }}>Vendor shipping rules for PO warehouses. Rules are saved to your browser.</p>
-            <div style={{ background: "#FFFFFF", border: "1px solid #E5E7EB", borderRadius: 12, overflow: "auto", marginBottom: 16 }}>
-              <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
-                <thead><tr>
-                  <th style={{ padding: "12px 14px", textAlign: "left", background: "#F9FAFB", color: "#9CA3AF", fontWeight: 600, fontSize: 13, textTransform: "uppercase", borderBottom: "2px solid #E5E7EB" }}>Vendor</th>
-                  <th style={{ padding: "12px 14px", textAlign: "left", background: "#F9FAFB", color: "#9CA3AF", fontWeight: 600, fontSize: 13, textTransform: "uppercase", borderBottom: "2px solid #E5E7EB" }}>Rule</th>
-                  <th style={{ padding: "12px 14px", textAlign: "center", background: "#F9FAFB", color: "#9CA3AF", fontWeight: 600, fontSize: 13, textTransform: "uppercase", borderBottom: "2px solid #E5E7EB", width: 60 }}></th>
-                </tr></thead>
-                <tbody>{Object.entries(shipRules).sort(function(a, b) { return a[0].localeCompare(b[0]); }).map(function(e) {
-                  return <tr key={e[0]}>
-                    <td style={{ padding: "10px 14px", borderBottom: "1px solid #F3F4F6", color: "#374151", fontSize: 14 }}>{e[0]}</td>
-                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #F3F4F6" }}>
-                      <input style={{ background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 8, padding: "8px 12px", color: "#374151", fontSize: 13, outline: "none", width: "100%", fontFamily: "'Varela Round', sans-serif" }} value={e[1]} onChange={function(ev) { var updated = Object.assign({}, shipRules); updated[e[0]] = ev.target.value; updateShipRules(updated); }} />
-                    </td>
-                    <td style={{ padding: "8px 10px", borderBottom: "1px solid #F3F4F6", textAlign: "center" }}>
-                      <button onClick={function() { var updated = Object.assign({}, shipRules); delete updated[e[0]]; updateShipRules(updated); showToast("Removed " + e[0]); }} style={{ background: "transparent", border: "1px solid #E5E7EB", borderRadius: 6, padding: "4px 8px", fontSize: 11, color: "#DC2626", cursor: "pointer" }}>{"\u2715"}</button>
-                    </td>
-                  </tr>;
-                })}</tbody>
-              </table>
-            </div>
-            <div style={{ background: "#FFFFFF", border: "1px solid #E5E7EB", borderRadius: 12, padding: 20, display: "flex", gap: 12, alignItems: "flex-end" }}>
-              <div style={{ flex: 1 }}>
-                <label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 4 }}>Vendor Name</label>
-                <input id="new-vendor-name" style={{ background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 8, padding: "8px 12px", color: "#374151", fontSize: 14, outline: "none", width: "100%", fontFamily: "'Varela Round', sans-serif" }} placeholder="e.g. Zoetis US LLC" />
-              </div>
-              <div style={{ flex: 2 }}>
-                <label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 4 }}>Rule</label>
-                <input id="new-vendor-rule" style={{ background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 8, padding: "8px 12px", color: "#374151", fontSize: 14, outline: "none", width: "100%", fontFamily: "'Varela Round', sans-serif" }} placeholder="e.g. min:5000; message:Free Shipping; else:Not Free Shipping" />
-              </div>
-              <button onClick={function() { var nameEl = document.getElementById("new-vendor-name"); var ruleEl = document.getElementById("new-vendor-rule"); var name = (nameEl.value || "").trim(); var rule = (ruleEl.value || "").trim(); if (!name) { showToast("Enter a vendor name", "error"); return; } if (!rule) { showToast("Enter a rule", "error"); return; } var updated = Object.assign({}, shipRules); updated[name] = rule; updateShipRules(updated); nameEl.value = ""; ruleEl.value = ""; showToast("Added " + name); }} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "10px 18px", borderRadius: 10, border: "none", fontSize: 14, fontWeight: 600, cursor: "pointer", background: "#3B82F6", color: "#fff", flexShrink: 0 }}>+ Add</button>
-            </div>
-            <div style={{ marginTop: 16, display: "flex", gap: 10 }}>
-              <button onClick={function() { updateShipRules(Object.assign({}, DEFAULT_SHIP_RULES)); showToast("Reset to defaults"); }} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 8, border: "1px solid #E5E7EB", fontSize: 13, fontWeight: 600, cursor: "pointer", background: "transparent", color: "#6B7280" }}>Reset to Defaults</button>
-              <span style={{ fontSize: 12, color: "#B5AEA5", alignSelf: "center" }}>{Object.keys(shipRules).length} vendors</span>
-            </div>
-          </div>}
+          {page === "rules" && !showLogin && <ShippingRulesPage shipRules={shipRules} updateShipRules={updateShipRules} toast={showToast} />}
 
           {!showLogin && Object.entries(WH).map(function(e) { return <div key={e[0]} style={{ display: page === e[0] ? "block" : "none" }}><WHT whKey={e[0]} cfg={e[1]} toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} shipRules={shipRules} /></div>; })}
           {!showLogin && page === "short-dating" && <TrackerTool toolKey="short-dating" toolLabel="Short-Dating Tracker" toolColor="#E879F9" demoData={SD_DEMO} columns={sdColumns} emailConfig={sdEmail} toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} contacts={vendorContacts} />}
