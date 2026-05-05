@@ -39,6 +39,15 @@ function parsePdfText(text) {
   var storeMatch = headerText.match(/Store Name:\s*(.*?)(?=Original|$)/i);
   var storeName = storeMatch ? storeMatch[1].trim() : "";
 
+  // Parse stated PO amount from header
+  var statedAmount = null;
+  var fullText = lines.join(" ");
+  var amountMatch = fullText.match(/Amount:\s*\$?([\d,]+\.?\d*)/i);
+  if (amountMatch) {
+    statedAmount = parseFloat(amountMatch[1].replace(/,/g, ""));
+    if (isNaN(statedAmount)) statedAmount = null;
+  }
+
   var items = [];
 
   for (var i = 0; i < lines.length; i++) {
@@ -107,7 +116,7 @@ function parsePdfText(text) {
     }
   }
 
-  return { items: items, warehouse: warehouse, vendorSource: vendorSource, poNumber: poNumber, storeName: storeName };
+  return { items: items, warehouse: warehouse, vendorSource: vendorSource, poNumber: poNumber, storeName: storeName, statedAmount: statedAmount };
 }
 
 export async function POST(req) {
