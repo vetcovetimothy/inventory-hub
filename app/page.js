@@ -3467,8 +3467,11 @@ function OOSTracker(props) {
         var prevIds = {};
         if (parsed.fuze) parsed.fuze.forEach(function(r) { prevIds["fuzerx:" + r.MANUFACTURER_NO] = true; });
         if (parsed.ggm) parsed.ggm.forEach(function(r) { prevIds["gogomeds:" + r.MANUFACTURER_NO] = true; });
-        kvPost(OOS_PREV_ITEMS_KEY, prevIds);
-        setPrevItems(prevIds);
+        // Only rotate prevItems if current data actually has rows — otherwise keep whatever's already in prev
+        if (Object.keys(prevIds).length > 0) {
+          kvPost(OOS_PREV_ITEMS_KEY, prevIds);
+          setPrevItems(prevIds);
+        }
         kvPost(OOS_DATA_KEY, { _savedAt: Date.now() });
         return;
       }
@@ -3492,11 +3495,16 @@ function OOSTracker(props) {
       var savedAt = pData._savedAt || 0;
       var resetTime = getDailyReset();
       if (savedAt && savedAt < resetTime) {
-        // Rotate: current becomes previous, clear current
+        // Rotate: current becomes previous, clear current — but only if current actually has notes,
+        // otherwise keep whatever's already in prev so a skipped day doesn't wipe yesterday's data
         delete pData._savedAt;
-        kvPost(OOS_PREV_NOTES_KEY, pData);
+        if (Object.keys(pData).length > 0) {
+          kvPost(OOS_PREV_NOTES_KEY, pData);
+          setPrevNotes(pData);
+        } else {
+          setPrevNotes(prevData);
+        }
         kvPost(OOS_PNOTES_KEY, { _savedAt: Date.now() });
-        setPrevNotes(pData);
         setPNotes({});
       } else {
         delete pData._savedAt;
