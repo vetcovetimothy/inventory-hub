@@ -3537,7 +3537,7 @@ function OOSTracker(props) {
     return function() { clearInterval(iv); };
   }, []);
 
-  var WH_MAP = { "TRUEPILL_BROOKLYN": "Brooklyn", "TRUEPILL_OHIO": "Ohio", "TRUEPILL_HAYWARD": "Hayward", "TRUEPILL_MIAMI": "Miami", "GOGOMEDS_KY": "GoGoMeds KY", "GOGOMEDS_AZ": "GoGoMeds AZ", "HILLS_CGP_WAREHOUSE_CA": "Hills CA", "HILLS_CGP_WAREHOUSE_NJ": "Hills NJ" };
+  var WH_MAP = { "TRUEPILL_BROOKLYN": "Brooklyn", "TRUEPILL_OHIO": "Ohio", "TRUEPILL_HAYWARD": "Hayward", "TRUEPILL_MIAMI": "Miami", "GOGOMEDS_KY": "Kentucky", "GOGOMEDS_AZ": "Arizona", "GOGOMEDS_KENTUCKY": "Kentucky", "GOGOMEDS_ARIZONA": "Arizona", "HILLS_CGP_WAREHOUSE_CA": "Hills CA", "HILLS_CGP_WAREHOUSE_NJ": "Hills NJ" };
   function mapWH(slug) { return WH_MAP[slug] || slug || "\u2014"; }
 
   function updateNote(key, field, value) {
@@ -3659,8 +3659,8 @@ function OOSTracker(props) {
             var autoSD = sdIds[String(r.MANUFACTURER_NO)] || false;
             var isSD = n.sd !== undefined ? n.sd : autoSD;
             var isOld = prevItems[tab + ":" + r.MANUFACTURER_NO];
-            var whBg = r._wh === "Brooklyn" ? "#EFF6FF" : r._wh === "Ohio" ? "#ECFDF5" : r._wh === "Hayward" ? "#FFF7ED" : r._wh === "Miami" ? "#FFF1F2" : r._wh === "GoGoMeds KY" ? "#F5F3FF" : r._wh === "GoGoMeds AZ" ? "#FDF2F8" : r._wh === "Hills CA" ? "#FEF9C3" : r._wh === "Hills NJ" ? "#E0F2FE" : "#F3F4F6";
-            var whColor = r._wh === "Brooklyn" ? "#2563EB" : r._wh === "Ohio" ? "#059669" : r._wh === "Hayward" ? "#D97706" : r._wh === "Miami" ? "#E11D48" : r._wh === "GoGoMeds KY" ? "#7C3AED" : r._wh === "GoGoMeds AZ" ? "#DB2777" : r._wh === "Hills CA" ? "#A16207" : r._wh === "Hills NJ" ? "#0369A1" : "#6B7280";
+            var whBg = r._wh === "Brooklyn" ? "#EFF6FF" : r._wh === "Ohio" ? "#ECFDF5" : r._wh === "Hayward" ? "#FFF7ED" : r._wh === "Miami" ? "#FFF1F2" : r._wh === "Kentucky" ? "#F5F3FF" : r._wh === "Arizona" ? "#FDF2F8" : r._wh === "Hills CA" ? "#FEF9C3" : r._wh === "Hills NJ" ? "#E0F2FE" : "#F3F4F6";
+            var whColor = r._wh === "Brooklyn" ? "#2563EB" : r._wh === "Ohio" ? "#059669" : r._wh === "Hayward" ? "#D97706" : r._wh === "Miami" ? "#E11D48" : r._wh === "Kentucky" ? "#7C3AED" : r._wh === "Arizona" ? "#DB2777" : r._wh === "Hills CA" ? "#A16207" : r._wh === "Hills NJ" ? "#0369A1" : "#6B7280";
             return <tr key={i}>
               <td style={S.td}><textarea value={pNotes[noteKey] || prevNotes[noteKey] || ""} onChange={function(e) { updateNote(noteKey, "note", e.target.value); e.target.style.height = "auto"; e.target.style.height = e.target.scrollHeight + "px"; }} placeholder="Add notes..." rows={1} style={Object.assign({}, S.inp, { padding: "5px 10px", fontSize: 12, resize: "none", overflow: "hidden", minHeight: 32, lineHeight: "1.4", display: "block", width: "100%" })} ref={function(el) { if (el) { el.style.height = "auto"; el.style.height = el.scrollHeight + "px"; } }} /></td>
               <td style={Object.assign({}, S.td, { textAlign: "center" })}><button onClick={function() { updateNote(noteKey, "sd", !isSD); }} style={{ width: 20, height: 20, borderRadius: 4, border: isSD ? "2px solid #E879F9" : "2px solid #D1D5DB", background: isSD ? "#E879F9" : "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", transition: "all 0.15s" }}>{isSD && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}</button></td>
