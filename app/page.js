@@ -3412,8 +3412,10 @@ function OOSTracker(props) {
   var _tab = useState("fuzerx"), tab = _tab[0], setTab = _tab[1];
   var _fuzeData = useState([]), fuzeData = _fuzeData[0], setFuzeData = _fuzeData[1];
   var _ggmData = useState([]), ggmData = _ggmData[0], setGgmData = _ggmData[1];
+  var _cgpData = useState([]), cgpData = _cgpData[0], setCgpData = _cgpData[1];
   var _fuzeName = useState(null), fuzeName = _fuzeName[0], setFuzeName = _fuzeName[1];
   var _ggmName = useState(null), ggmName = _ggmName[0], setGgmName = _ggmName[1];
+  var _cgpName = useState(null), cgpName = _cgpName[0], setCgpName = _cgpName[1];
   var _search = useState(""), search = _search[0], setSearch = _search[1];
   var _whFilter = useState("all"), whFilter = _whFilter[0], setWhFilter = _whFilter[1];
   var _sort = useState({ col: "warehouse", dir: "asc" }), sortState = _sort[0], setSortState = _sort[1];
@@ -3467,6 +3469,7 @@ function OOSTracker(props) {
         var prevIds = {};
         if (parsed.fuze) parsed.fuze.forEach(function(r) { prevIds["fuzerx:" + r.MANUFACTURER_NO] = true; });
         if (parsed.ggm) parsed.ggm.forEach(function(r) { prevIds["gogomeds:" + r.MANUFACTURER_NO] = true; });
+        if (parsed.cgp) parsed.cgp.forEach(function(r) { prevIds["cgp:" + r.MANUFACTURER_NO] = true; });
         // Only rotate prevItems if current data actually has rows — otherwise keep whatever's already in prev
         if (Object.keys(prevIds).length > 0) {
           kvPost(OOS_PREV_ITEMS_KEY, prevIds);
@@ -3477,6 +3480,7 @@ function OOSTracker(props) {
       }
       if (parsed.fuze && parsed.fuze.length > 0) { setFuzeData(parsed.fuze); setFuzeName(parsed.fuzeName || "Loaded from cloud"); }
       if (parsed.ggm && parsed.ggm.length > 0) { setGgmData(parsed.ggm); setGgmName(parsed.ggmName || "Loaded from cloud"); }
+      if (parsed.cgp && parsed.cgp.length > 0) { setCgpData(parsed.cgp); setCgpName(parsed.cgpName || "Loaded from cloud"); }
     }).catch(function() {});
     // Load previous items
     kvGet(OOS_PREV_ITEMS_KEY).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
@@ -3562,8 +3566,8 @@ function OOSTracker(props) {
     return rows;
   }
 
-  function saveDataToKV(fuze, fuzeFn, ggm, ggmFn) {
-    kvPost(OOS_DATA_KEY, { fuze: fuze, fuzeName: fuzeFn, ggm: ggm, ggmName: ggmFn, _savedAt: Date.now() }).catch(function() {});
+  function saveDataToKV(fuze, fuzeFn, ggm, ggmFn, cgp, cgpFn) {
+    kvPost(OOS_DATA_KEY, { fuze: fuze, fuzeName: fuzeFn, ggm: ggm, ggmName: ggmFn, cgp: cgp, cgpName: cgpFn, _savedAt: Date.now() }).catch(function() {});
   }
 
   function handleFile(file, vendor) {
@@ -3571,8 +3575,9 @@ function OOSTracker(props) {
     var reader = new FileReader();
     reader.onload = function(e) {
       var rows = parseCSV(e.target.result);
-      if (vendor === "fuzerx") { setFuzeData(rows); setFuzeName(file.name); saveDataToKV(rows, file.name, ggmData, ggmName); }
-      else { setGgmData(rows); setGgmName(file.name); saveDataToKV(fuzeData, fuzeName, rows, file.name); }
+      if (vendor === "fuzerx") { setFuzeData(rows); setFuzeName(file.name); saveDataToKV(rows, file.name, ggmData, ggmName, cgpData, cgpName); }
+      else if (vendor === "cgp") { setCgpData(rows); setCgpName(file.name); saveDataToKV(fuzeData, fuzeName, ggmData, ggmName, rows, file.name); }
+      else { setGgmData(rows); setGgmName(file.name); saveDataToKV(fuzeData, fuzeName, rows, file.name, cgpData, cgpName); }
       setWhFilter("all"); setSearch("");
       toast("Loaded " + rows.length + " OOS items from " + file.name);
     };
@@ -3580,17 +3585,18 @@ function OOSTracker(props) {
   }
 
   function uploadZone(vendor) {
+    var label = vendor === "fuzerx" ? "FuzeRx" : vendor === "cgp" ? "Central Garden & Pet" : "GoGoMeds";
     return <div style={Object.assign({}, S.card, { textAlign: "center", padding: 40 })}>
       <div onDragOver={function(e) { e.preventDefault(); }} onDrop={function(e) { e.preventDefault(); if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0], vendor); }} style={{ border: "2px dashed #E5E7EB", borderRadius: 12, padding: 40, cursor: "pointer" }} onClick={function() { var inp = document.createElement("input"); inp.type = "file"; inp.accept = ".csv"; inp.onchange = function(e) { handleFile(e.target.files[0], vendor); }; inp.click(); }}>
         <div style={{ fontSize: 32, marginBottom: 8 }}>{"\uD83D\uDCC4"}</div>
-        <div style={{ fontSize: 14, fontWeight: 600, color: "#374151", marginBottom: 4 }}>Upload {vendor === "fuzerx" ? "FuzeRx" : "GoGoMeds"} OOS CSV</div>
+        <div style={{ fontSize: 14, fontWeight: 600, color: "#374151", marginBottom: 4 }}>Upload {label} OOS CSV</div>
         <div style={{ fontSize: 12, color: "#9CA3AF" }}>Drag and drop or click to browse</div>
       </div>
     </div>;
   }
 
-  var data = tab === "fuzerx" ? fuzeData : ggmData;
-  var currentName = tab === "fuzerx" ? fuzeName : ggmName;
+  var data = tab === "fuzerx" ? fuzeData : tab === "cgp" ? cgpData : ggmData;
+  var currentName = tab === "fuzerx" ? fuzeName : tab === "cgp" ? cgpName : ggmName;
   var _sdIds = useState({}), sdIds = _sdIds[0], setSdIds = _sdIds[1];
   useEffect(function() {
     // Try localStorage first
@@ -3633,7 +3639,7 @@ function OOSTracker(props) {
         <select value={whFilter} onChange={function(e) { setWhFilter(e.target.value); }} style={Object.assign({}, S.sel, { padding: "8px 12px" })}><option value="all">All Warehouses</option>{warehouses.map(function(w) { return <option key={w} value={w}>{w}</option>; })}</select>
         <div style={{ flex: 1 }} />
         <span style={{ fontSize: 12, color: "#9CA3AF" }}>{filtered.length} of {data.length} items</span>
-        <button onClick={function() { if (tab === "fuzerx") { setFuzeData([]); setFuzeName(null); saveDataToKV([], null, ggmData, ggmName); } else { setGgmData([]); setGgmName(null); saveDataToKV(fuzeData, fuzeName, [], null); } }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}><IconTrash /> Replace CSV</button>
+        <button onClick={function() { if (tab === "fuzerx") { setFuzeData([]); setFuzeName(null); saveDataToKV([], null, ggmData, ggmName, cgpData, cgpName); } else if (tab === "cgp") { setCgpData([]); setCgpName(null); saveDataToKV(fuzeData, fuzeName, ggmData, ggmName, [], null); } else { setGgmData([]); setGgmName(null); saveDataToKV(fuzeData, fuzeName, [], null, cgpData, cgpName); } }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}><IconTrash /> Replace CSV</button>
       </div>
       <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto" })}>
         <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
@@ -3653,8 +3659,8 @@ function OOSTracker(props) {
             var autoSD = sdIds[String(r.MANUFACTURER_NO)] || false;
             var isSD = n.sd !== undefined ? n.sd : autoSD;
             var isOld = prevItems[tab + ":" + r.MANUFACTURER_NO];
-            var whBg = r._wh === "Brooklyn" ? "#EFF6FF" : r._wh === "Ohio" ? "#ECFDF5" : r._wh === "Hayward" ? "#FFF7ED" : r._wh === "Miami" ? "#FFF1F2" : r._wh === "GoGoMeds KY" ? "#F5F3FF" : r._wh === "GoGoMeds AZ" ? "#FDF2F8" : "#F3F4F6";
-            var whColor = r._wh === "Brooklyn" ? "#2563EB" : r._wh === "Ohio" ? "#059669" : r._wh === "Hayward" ? "#D97706" : r._wh === "Miami" ? "#E11D48" : r._wh === "GoGoMeds KY" ? "#7C3AED" : r._wh === "GoGoMeds AZ" ? "#DB2777" : "#6B7280";
+            var whBg = r._wh === "Brooklyn" ? "#EFF6FF" : r._wh === "Ohio" ? "#ECFDF5" : r._wh === "Hayward" ? "#FFF7ED" : r._wh === "Miami" ? "#FFF1F2" : r._wh === "GoGoMeds KY" ? "#F5F3FF" : r._wh === "GoGoMeds AZ" ? "#FDF2F8" : r._wh === "Hills CA" ? "#FEF9C3" : r._wh === "Hills NJ" ? "#E0F2FE" : "#F3F4F6";
+            var whColor = r._wh === "Brooklyn" ? "#2563EB" : r._wh === "Ohio" ? "#059669" : r._wh === "Hayward" ? "#D97706" : r._wh === "Miami" ? "#E11D48" : r._wh === "GoGoMeds KY" ? "#7C3AED" : r._wh === "GoGoMeds AZ" ? "#DB2777" : r._wh === "Hills CA" ? "#A16207" : r._wh === "Hills NJ" ? "#0369A1" : "#6B7280";
             return <tr key={i}>
               <td style={S.td}><textarea value={pNotes[noteKey] || prevNotes[noteKey] || ""} onChange={function(e) { updateNote(noteKey, "note", e.target.value); e.target.style.height = "auto"; e.target.style.height = e.target.scrollHeight + "px"; }} placeholder="Add notes..." rows={1} style={Object.assign({}, S.inp, { padding: "5px 10px", fontSize: 12, resize: "none", overflow: "hidden", minHeight: 32, lineHeight: "1.4", display: "block", width: "100%" })} ref={function(el) { if (el) { el.style.height = "auto"; el.style.height = el.scrollHeight + "px"; } }} /></td>
               <td style={Object.assign({}, S.td, { textAlign: "center" })}><button onClick={function() { updateNote(noteKey, "sd", !isSD); }} style={{ width: 20, height: 20, borderRadius: 4, border: isSD ? "2px solid #E879F9" : "2px solid #D1D5DB", background: isSD ? "#E879F9" : "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", transition: "all 0.15s" }}>{isSD && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}</button></td>
@@ -3676,6 +3682,7 @@ function OOSTracker(props) {
     <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
       <button onClick={function() { setTab("fuzerx"); setWhFilter("all"); setSearch(""); }} style={S.pill(tab === "fuzerx", "#3B82F6")}>FuzeRx{fuzeData.length > 0 && <span style={{ fontSize: 10, background: tab === "fuzerx" ? "rgba(255,255,255,0.2)" : "rgba(100,116,139,0.2)", padding: "1px 6px", borderRadius: 4, marginLeft: 6 }}>{fuzeData.length}</span>}</button>
       <button onClick={function() { setTab("gogomeds"); setWhFilter("all"); setSearch(""); }} style={S.pill(tab === "gogomeds", "#8B5CF6")}>GoGoMeds{ggmData.length > 0 && <span style={{ fontSize: 10, background: tab === "gogomeds" ? "rgba(255,255,255,0.2)" : "rgba(100,116,139,0.2)", padding: "1px 6px", borderRadius: 4, marginLeft: 6 }}>{ggmData.length}</span>}</button>
+      <button onClick={function() { setTab("cgp"); setWhFilter("all"); setSearch(""); }} style={S.pill(tab === "cgp", "#10B981")}>Central Garden &amp; Pet{cgpData.length > 0 && <span style={{ fontSize: 10, background: tab === "cgp" ? "rgba(255,255,255,0.2)" : "rgba(100,116,139,0.2)", padding: "1px 6px", borderRadius: 4, marginLeft: 6 }}>{cgpData.length}</span>}</button>
     </div>
     {data.length === 0 ? uploadZone(tab) : dataTable()}
   </div>;
