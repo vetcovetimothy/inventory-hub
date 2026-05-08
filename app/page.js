@@ -2026,8 +2026,8 @@ function POImportTool(props) {
               <th style={Object.assign({}, S.th, { textAlign: "center" })}>Qty</th>
               <th style={Object.assign({}, S.th, { textAlign: "right" })}>Unit Cost</th>
               <th style={Object.assign({}, S.th, { textAlign: "right" })}>Ext. Cost</th>
-              <th style={Object.assign({}, S.th, { textAlign: "right" })}>Avg Cost</th>
-              <th style={Object.assign({}, S.th, { textAlign: "right" })}>vs Avg</th>
+              <th style={Object.assign({}, S.th, { textAlign: "right" })}>Avg Unit Cost</th>
+              <th style={Object.assign({}, S.th, { textAlign: "right" })}>{"\u0394% Unit Cost"}</th>
               {vendor === "mckesson" && <th style={S.th}>MCK Item #</th>}
               <th style={S.th}>Source</th>
             </tr></thead>
