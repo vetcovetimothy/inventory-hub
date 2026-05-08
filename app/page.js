@@ -2380,7 +2380,7 @@ function HillsTracker(props) {
 
 /* ═══════ FUZE TRACKER ═══════ */
 function FuzeTracker(props) {
-  var toast = props.toast;
+  var toast = props.toast, cred = props.cred;
   var TOOL_COLOR = "#F59E0B";
   var _wh = useState("TP-NY"), whTab = _wh[0], setWhTab = _wh[1];
   var _d = useState([]), data = _d[0], setData = _d[1];
@@ -2388,7 +2388,30 @@ function FuzeTracker(props) {
   var _q = useState(""), search = _q[0], setSearch = _q[1];
   var _vf = useState("all"), vendorFilter = _vf[0], setVendorFilter = _vf[1];
   var _sf = useState("all"), statusFilter = _sf[0], setStatusFilter = _sf[1];
+  var _idMap = useState({}), invIdMap = _idMap[0], setInvIdMap = _idMap[1];
   var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
+
+  function normalizeNdc(s) { return (s || "").replace(/\D/g, ""); }
+
+  useEffect(function() {
+    if (!cred || !cred.username || !cred.password) return;
+    var m = true;
+    fetch("/api/acumatica", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "stock-cross-ref", username: cred.username, password: cred.password }),
+    }).then(function(r) { return r.ok ? r.json() : null; }).then(function(json) {
+      if (!m || !json || !json.data) return;
+      var map = {};
+      json.data.forEach(function(row) {
+        var ndc = normalizeNdc(row.NDC);
+        var invId = (row.InventoryID || "").trim();
+        if (ndc && invId && !map[ndc]) map[ndc] = invId;
+      });
+      setInvIdMap(map);
+    }).catch(function() {});
+    return function() { m = false; };
+  }, [cred]);
 
   var fetchSheet = useCallback(function(wh, silent) {
     if (!silent) setLoading(true);
@@ -2489,6 +2512,7 @@ function FuzeTracker(props) {
           <th style={S.th}>Supplier</th>
           <th style={S.th}>NDC</th>
           <th style={Object.assign({}, S.th, { minWidth: 200 })}>Product Description</th>
+          <th style={S.th}>Inventory ID</th>
           <th style={Object.assign({}, S.th, { textAlign: "right" })}>Pkg Qty</th>
           <th style={Object.assign({}, S.th, { textAlign: "right" })}>Expected BOH</th>
           <th style={S.th}>PO No.</th>
@@ -2501,10 +2525,12 @@ function FuzeTracker(props) {
         <tbody>{filtered.map(function(r, i) {
           var isReceived = r["Received?**"] === "TRUE" || r["Received?**"] === "true";
           var isLanded = r["Landed Onsite?"] === "TRUE" || r["Landed Onsite?"] === "true";
+          var invId = invIdMap[normalizeNdc(r["NDC"])] || "";
           return <tr key={i}>
             <td style={Object.assign({}, S.td, { color: "#1F2937", fontWeight: 500 })}>{r["Supplier"]}</td>
             <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, whiteSpace: "nowrap" })}>{r["NDC"]}</td>
             <td style={S.td}>{r["Product Description"]}</td>
+            <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, color: invId ? "#D97706" : "#9CA3AF", fontWeight: 600 })}>{invId || "\u2014"}</td>
             <td style={Object.assign({}, S.td, { textAlign: "right" })}>{r["Pkg Qty"]}</td>
             <td style={Object.assign({}, S.td, { textAlign: "right" })}>{r["Expected BOH Increase"]}</td>
             <td style={S.td}>{r["PO No."]}</td>
@@ -2522,7 +2548,7 @@ function FuzeTracker(props) {
 
 /* ═══════ GGM TRACKER ═══════ */
 function GGMTracker(props) {
-  var toast = props.toast;
+  var toast = props.toast, cred = props.cred;
   var TOOL_COLOR = "#8B5CF6";
   var _wh = useState("GGM-KY"), whTab = _wh[0], setWhTab = _wh[1];
   var _d = useState([]), data = _d[0], setData = _d[1];
@@ -2530,7 +2556,30 @@ function GGMTracker(props) {
   var _q = useState(""), search = _q[0], setSearch = _q[1];
   var _vf = useState("all"), vendorFilter = _vf[0], setVendorFilter = _vf[1];
   var _sf = useState("all"), statusFilter = _sf[0], setStatusFilter = _sf[1];
+  var _idMap = useState({}), invIdMap = _idMap[0], setInvIdMap = _idMap[1];
   var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
+
+  function normalizeNdc(s) { return (s || "").replace(/\D/g, ""); }
+
+  useEffect(function() {
+    if (!cred || !cred.username || !cred.password) return;
+    var m = true;
+    fetch("/api/acumatica", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "stock-cross-ref", username: cred.username, password: cred.password }),
+    }).then(function(r) { return r.ok ? r.json() : null; }).then(function(json) {
+      if (!m || !json || !json.data) return;
+      var map = {};
+      json.data.forEach(function(row) {
+        var ndc = normalizeNdc(row.NDC);
+        var invId = (row.InventoryID || "").trim();
+        if (ndc && invId && !map[ndc]) map[ndc] = invId;
+      });
+      setInvIdMap(map);
+    }).catch(function() {});
+    return function() { m = false; };
+  }, [cred]);
 
   var fetchSheet = useCallback(function(wh, silent) {
     if (!silent) setLoading(true);
@@ -2627,6 +2676,7 @@ function GGMTracker(props) {
           <th style={S.th}>Manufacturer</th>
           <th style={S.th}>NDC</th>
           <th style={Object.assign({}, S.th, { minWidth: 200 })}>Product Description</th>
+          <th style={S.th}>Inventory ID</th>
           <th style={Object.assign({}, S.th, { textAlign: "right" })}>Pkg Qty</th>
           <th style={Object.assign({}, S.th, { textAlign: "right" })}>Expected BOH</th>
           <th style={S.th}>PO Number</th>
@@ -2637,10 +2687,12 @@ function GGMTracker(props) {
         </tr></thead>
         <tbody>{filtered.map(function(r, i) {
           var isReceived = r["Received?"] === "TRUE" || r["Received?"] === "true";
+          var invId = invIdMap[normalizeNdc(r["NDC"])] || r["Inventory ID"] || "";
           return <tr key={i}>
             <td style={Object.assign({}, S.td, { color: "#1F2937", fontWeight: 500 })}>{r["Manufacturer"]}</td>
             <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, whiteSpace: "nowrap" })}>{r["NDC"]}</td>
             <td style={S.td}>{r["Product Description"]}</td>
+            <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, color: invId ? "#7C3AED" : "#9CA3AF", fontWeight: 600 })}>{invId || "\u2014"}</td>
             <td style={Object.assign({}, S.td, { textAlign: "right" })}>{r["Pkg Qty"]}</td>
             <td style={Object.assign({}, S.td, { textAlign: "right" })}>{r["Expected BOH Increase"]}</td>
             <td style={S.td}>{r["PO Number"]}</td>
@@ -4360,8 +4412,8 @@ export default function Hub() {
           {!showLogin && page === "backorder" && <TrackerTool toolKey="backorder" toolLabel="Backorder Tracker" toolColor="#F97316" demoData={BKO_DEMO} columns={bkoColumns} emailConfig={bkoEmail} skipVendors={BKO_SKIP} toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} contacts={vendorContacts} />}
           {!showLogin && page === "po-import" && <POImportTool toast={showToast} cred={cred} ok={ok} lp={promptLogin} />}
           {!showLogin && page === "cycle-count" && <CycleCountTool key="cc-standard" toast={showToast} />}
-          {!showLogin && page === "fuze-tracker" && <FuzeTracker toast={showToast} />}
-          {!showLogin && page === "ggm-tracker" && <GGMTracker toast={showToast} />}
+          {!showLogin && page === "fuze-tracker" && <FuzeTracker toast={showToast} cred={cred} />}
+          {!showLogin && page === "ggm-tracker" && <GGMTracker toast={showToast} cred={cred} />}
           {!showLogin && page === "hills-pawtree" && <HillsTracker toast={showToast} ok={ok} lp={promptLogin} cred={cred} />}
           {!showLogin && page === "truckloader" && <TruckloaderTool toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} />}
           {!showLogin && page === "oos-tracker" && <OOSTracker toast={showToast} />}
