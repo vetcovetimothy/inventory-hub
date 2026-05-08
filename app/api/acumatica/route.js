@@ -23,6 +23,7 @@ const ENDPOINTS = {
   "replenishment-needs": "PURCH%20-%20Replenishment%20Needs%20-%20Hills",
   "whse-replenish": "Stock%20Item%20Whse%20Replenish",
   "gen-pricing":   "PRICING%20-%20Generics%20-%20Avg%20Cost",
+  "gen-pricing-3prx": "PRICING%20-%20Generics%20Avg%20Cost%20Per%203PRx",
   "uom-conversions": "Stock%20Item%20UOM%20Conversions",
 };
 
@@ -139,6 +140,17 @@ const COLUMN_MAP = {
     { label: "MultiplyDivide",   keys: ["MultiplyDivide", "Multiply/Divide", "MultiplyDivideOp", "ConvOp"] },
     { label: "ConversionFactor", keys: ["ConversionFactor", "Conversion Factor", "Conv Factor", "ConvFactor"] },
   ],
+  "gen-pricing-3prx": [
+    { label: "InventoryID",   keys: ["InventoryID", "InventoryId", "InventoryCd", "InventoryCD", "Inventory ID", "Inventory_ID"] },
+    { label: "TPNYAvgCost",   keys: ["TPNYAvgCost", "TP-NY Avg Cost", "TP-NYAvgCost", "TP_NY_Avg_Cost", "TPNY_AvgCost"] },
+    { label: "TPOHAvgCost",   keys: ["TPOHAvgCost", "TP-OH Avg Cost", "TP-OHAvgCost", "TP_OH_Avg_Cost", "TPOH_AvgCost"] },
+    { label: "TPCAAvgCost",   keys: ["TPCAAvgCost", "TP-CA Avg Cost", "TP-CAAvgCost", "TP_CA_Avg_Cost", "TPCA_AvgCost"] },
+    { label: "TPMIAvgCost",   keys: ["TPMIAvgCost", "TP-MI Avg Cost", "TP-MIAvgCost", "TP_MI_Avg_Cost", "TPMI_AvgCost"] },
+    { label: "TPFLAvgCost",   keys: ["TPFLAvgCost", "TP-FL Avg Cost", "TP-FLAvgCost", "TP_FL_Avg_Cost", "TPFL_AvgCost"] },
+    { label: "GGMAvgCost",    keys: ["GGMAvgCost", "GGM Avg Cost", "GGM_AvgCost", "GGMAVGCost"] },
+    { label: "GGMKYAvgCost",  keys: ["GGMKYAvgCost", "GGM-KY Avg Cost", "GGM-KYAvgCost", "GGM_KY_Avg_Cost"] },
+    { label: "GGMAZAvgCost",  keys: ["GGMAZAvgCost", "GGM-AZ Avg Cost", "GGM-AZAvgCost", "GGM_AZ_Avg_Cost"] },
+  ],
 };
 
 export async function POST(request) {
@@ -147,7 +159,7 @@ export async function POST(request) {
     const { type, warehouse, username, password, useServiceAccount } = body;
 
     if (!type || !ENDPOINTS[type]) {
-      return Response.json({ error: "Invalid type. Use: po, po-ggm, ndc-lookup, item-xref, short-dating, backorder, hills-pawtree, replenishment-needs, whse-replenish, gen-pricing, uom-conversions" }, { status: 400 });
+      return Response.json({ error: "Invalid type. Use: po, po-ggm, ndc-lookup, item-xref, short-dating, backorder, hills-pawtree, replenishment-needs, whse-replenish, gen-pricing, gen-pricing-3prx, uom-conversions" }, { status: 400 });
     }
 
     // Use service account credentials from env vars, or user-provided credentials
