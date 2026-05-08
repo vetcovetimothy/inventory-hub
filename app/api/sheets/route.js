@@ -6,6 +6,8 @@ const SHEET_URLS = {
   "TP-NY": process.env.TRACKER_SHEET_URL_NY,
   "TP-OH": process.env.TRACKER_SHEET_URL_OH,
   "TP-CA": process.env.TRACKER_SHEET_URL_CA,
+  "GGM-KY": process.env.TRACKER_SHEET_URL_GGM_KY,
+  "GGM-AZ": process.env.TRACKER_SHEET_URL_GGM_AZ,
 };
 
 function parseCSV(text) {
@@ -14,7 +16,7 @@ function parseCSV(text) {
 
   let headerIdx = 0;
   for (let i = 0; i < Math.min(lines.length, 10); i++) {
-    if (lines[i].includes("Supplier") && lines[i].includes("NDC")) {
+    if ((lines[i].includes("Supplier") || lines[i].includes("Manufacturer")) && lines[i].includes("NDC")) {
       headerIdx = i;
       break;
     }
@@ -45,7 +47,7 @@ function parseCSV(text) {
 
     const obj = {};
     headers.forEach((h, idx) => { obj[h] = vals[idx] || ""; });
-    if (obj["Supplier"] || obj["NDC"] || obj["Product Description"]) {
+    if (obj["Supplier"] || obj["Manufacturer"] || obj["NDC"] || obj["Product Description"]) {
       rows.push(obj);
     }
   }
@@ -57,7 +59,7 @@ export async function GET(request) {
     const { searchParams } = new URL(request.url);
     const wh = searchParams.get("wh");
     if (!wh || !SHEET_URLS[wh]) {
-      return Response.json({ error: "Invalid warehouse. Use: TP-NY, TP-OH, TP-CA" }, { status: 400 });
+      return Response.json({ error: "Invalid warehouse. Use: TP-NY, TP-OH, TP-CA, GGM-KY, GGM-AZ" }, { status: 400 });
     }
 
     const url = SHEET_URLS[wh];
