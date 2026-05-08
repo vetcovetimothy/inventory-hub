@@ -2396,20 +2396,35 @@ function FuzeTracker(props) {
   useEffect(function() {
     if (!cred || !cred.username || !cred.password) return;
     var m = true;
-    fetch("/api/acumatica", {
+    var crossRefP = fetch("/api/acumatica", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ type: "stock-cross-ref", username: cred.username, password: cred.password }),
-    }).then(function(r) { return r.ok ? r.json() : null; }).then(function(json) {
-      if (!m || !json || !json.data) return;
+    }).then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; });
+    var ndcLookupP = fetch("/api/acumatica", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "ndc-lookup", username: cred.username, password: cred.password }),
+    }).then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; });
+    Promise.all([crossRefP, ndcLookupP]).then(function(both) {
+      if (!m) return;
       var map = {};
-      json.data.forEach(function(row) {
-        var ndc = normalizeNdc(row.NDC);
-        var invId = (row.InventoryID || "").trim();
-        if (ndc && invId && !map[ndc]) map[ndc] = invId;
-      });
+      if (both[0] && both[0].data) {
+        both[0].data.forEach(function(row) {
+          var ndc = normalizeNdc(row.NDC);
+          var invId = (row.InventoryID || "").trim();
+          if (ndc && invId && !map[ndc]) map[ndc] = invId;
+        });
+      }
+      if (both[1] && both[1].data) {
+        both[1].data.forEach(function(row) {
+          var ndc = normalizeNdc(row.AlternateID);
+          var invId = (row.InventoryID || "").trim();
+          if (ndc && invId && !map[ndc]) map[ndc] = invId;
+        });
+      }
       setInvIdMap(map);
-    }).catch(function() {});
+    });
     return function() { m = false; };
   }, [cred]);
 
@@ -2564,20 +2579,35 @@ function GGMTracker(props) {
   useEffect(function() {
     if (!cred || !cred.username || !cred.password) return;
     var m = true;
-    fetch("/api/acumatica", {
+    var crossRefP = fetch("/api/acumatica", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ type: "stock-cross-ref", username: cred.username, password: cred.password }),
-    }).then(function(r) { return r.ok ? r.json() : null; }).then(function(json) {
-      if (!m || !json || !json.data) return;
+    }).then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; });
+    var ndcLookupP = fetch("/api/acumatica", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "ndc-lookup", username: cred.username, password: cred.password }),
+    }).then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; });
+    Promise.all([crossRefP, ndcLookupP]).then(function(both) {
+      if (!m) return;
       var map = {};
-      json.data.forEach(function(row) {
-        var ndc = normalizeNdc(row.NDC);
-        var invId = (row.InventoryID || "").trim();
-        if (ndc && invId && !map[ndc]) map[ndc] = invId;
-      });
+      if (both[0] && both[0].data) {
+        both[0].data.forEach(function(row) {
+          var ndc = normalizeNdc(row.NDC);
+          var invId = (row.InventoryID || "").trim();
+          if (ndc && invId && !map[ndc]) map[ndc] = invId;
+        });
+      }
+      if (both[1] && both[1].data) {
+        both[1].data.forEach(function(row) {
+          var ndc = normalizeNdc(row.AlternateID);
+          var invId = (row.InventoryID || "").trim();
+          if (ndc && invId && !map[ndc]) map[ndc] = invId;
+        });
+      }
       setInvIdMap(map);
-    }).catch(function() {});
+    });
     return function() { m = false; };
   }, [cred]);
 
@@ -3839,15 +3869,30 @@ function OOSTracker(props) {
           body: JSON.stringify({ type: "stock-cross-ref", username: cred.username, password: cred.password }),
         }).then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; })
       : Promise.resolve(null);
-    Promise.all([sheetPromise, crossRefPromise]).then(function(both) {
+    var ndcLookupPromise = (cred && cred.username && cred.password)
+      ? fetch("/api/acumatica", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "ndc-lookup", username: cred.username, password: cred.password }),
+        }).then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; })
+      : Promise.resolve(null);
+    Promise.all([sheetPromise, crossRefPromise, ndcLookupPromise]).then(function(all) {
       if (!m) return;
-      var sheetResults = both[0];
-      var crossRefJson = both[1];
-      // Build NDC -> Inventory ID map from cross-ref GI
+      var sheetResults = all[0];
+      var crossRefJson = all[1];
+      var ndcLookupJson = all[2];
+      // Build NDC -> Inventory ID map from BOTH GIs (cross-ref for branded, ndc-lookup for GEN-)
       var ndcToInvId = {};
       if (crossRefJson && crossRefJson.data) {
         crossRefJson.data.forEach(function(row) {
           var ndc = normalizeNdc(row.NDC);
+          var invId = (row.InventoryID || "").trim();
+          if (ndc && invId && !ndcToInvId[ndc]) ndcToInvId[ndc] = invId;
+        });
+      }
+      if (ndcLookupJson && ndcLookupJson.data) {
+        ndcLookupJson.data.forEach(function(row) {
+          var ndc = normalizeNdc(row.AlternateID);
           var invId = (row.InventoryID || "").trim();
           if (ndc && invId && !ndcToInvId[ndc]) ndcToInvId[ndc] = invId;
         });
