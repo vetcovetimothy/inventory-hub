@@ -583,6 +583,27 @@ function WHT(props) {
   var _pcr = useState({}), pcReported = _pcr[0], setPcReported = _pcr[1];
   var _esel = useState(null), emailSelected = _esel[0], setEmailSelected = _esel[1];
   var _il = useState(true), initLoading = _il[0], setInitLoading = _il[1];
+  var _emailTo = useState(cfg.emailTo), emailTo = _emailTo[0], setEmailTo = _emailTo[1];
+  var _emailSubject = useState(""), emailSubject = _emailSubject[0], setEmailSubject = _emailSubject[1];
+  var DEFAULT_BODY = "Good morning,\n\nAttached are today's POs.\n\nThanks in advance,";
+  var _emailBody = useState(DEFAULT_BODY), emailBody = _emailBody[0], setEmailBody = _emailBody[1];
+  var EMAIL_OVERRIDE_KEY = "po-email-overrides:" + whKey;
+  useEffect(function() {
+    var m = true;
+    kvGet(EMAIL_OVERRIDE_KEY).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+      if (!m || !d || !d.data) return;
+      var ov = typeof d.data === "string" ? JSON.parse(d.data) : d.data;
+      if (ov.to != null) setEmailTo(ov.to);
+      if (ov.subject != null) setEmailSubject(ov.subject);
+      if (ov.body != null) setEmailBody(ov.body);
+    }).catch(function() {});
+    return function() { m = false; };
+  }, [whKey]);
+  function persistEmailOverride(patch) {
+    var current = { to: emailTo, subject: emailSubject, body: emailBody };
+    var merged = Object.assign({}, current, patch);
+    kvPost(EMAIL_OVERRIDE_KEY, merged).catch(function() {});
+  }
   var S = useMemo(function() { return makeStyles(cfg.color); }, [cfg.color]);
   var kvKey = "po:" + whKey;
 
@@ -910,9 +931,18 @@ function WHT(props) {
       {emailSent && <div style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.3)", borderRadius: 10, padding: "14px 20px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}><IconCheck /><span style={{ fontSize: 13, color: "#059669" }}><strong>Draft created!</strong></span></div>}
       <div style={S.card}>
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <div style={{ display: "flex", gap: 8 }}><span style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, width: 50 }}>To:</span><span style={{ fontSize: 13, color: "#374151" }}>{cfg.emailTo}</span></div>
-          <div style={{ display: "flex", gap: 8 }}><span style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, width: 50 }}>Subject:</span><span style={{ fontSize: 13, color: "#1F2937", fontWeight: 600 }}>{cfg.subjectFn(todayStr)}</span></div>
-          <div style={{ borderTop: "1px solid #E5E7EB", paddingTop: 16, marginTop: 4, fontSize: 13, color: "#374151", lineHeight: 1.7 }}>Good morning,<br /><br />Attached are today&apos;s POs.<br /><br />Thanks in advance,<br /><br /><span style={{ color: "#9CA3AF", fontSize: 11, fontStyle: "italic" }}>Your Vetcove Gmail signature will be appended automatically</span></div>
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+            <span style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, width: 60, paddingTop: 8 }}>To:</span>
+            <input value={emailTo} onChange={function(e) { setEmailTo(e.target.value); }} onBlur={function() { persistEmailOverride({ to: emailTo }); }} placeholder="recipient@example.com, recipient2@example.com" style={Object.assign({}, S.inp, { padding: "6px 10px", fontSize: 13, flex: 1 })} />
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+            <span style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, width: 60, paddingTop: 8 }}>Subject:</span>
+            <input value={emailSubject || cfg.subjectFn(todayStr)} onChange={function(e) { setEmailSubject(e.target.value); }} onBlur={function() { persistEmailOverride({ subject: emailSubject }); }} placeholder={cfg.subjectFn(todayStr)} style={Object.assign({}, S.inp, { padding: "6px 10px", fontSize: 13, flex: 1, fontWeight: 600 })} />
+          </div>
+          <div style={{ borderTop: "1px solid #E5E7EB", paddingTop: 16, marginTop: 4 }}>
+            <textarea value={emailBody} onChange={function(e) { setEmailBody(e.target.value); }} onBlur={function() { persistEmailOverride({ body: emailBody }); }} rows={6} style={Object.assign({}, S.inp, { padding: "10px 12px", fontSize: 13, lineHeight: 1.6, color: "#374151", width: "100%", resize: "vertical", fontFamily: "'Varela Round', sans-serif" })} />
+            <div style={{ color: "#9CA3AF", fontSize: 11, fontStyle: "italic", marginTop: 6 }}>Your Vetcove Gmail signature will be appended automatically</div>
+          </div>
         </div>
         <div style={{ marginTop: 20, borderTop: "1px solid #E5E7EB", paddingTop: 16 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
@@ -936,9 +966,10 @@ function WHT(props) {
             if (selectedVendors.length === 0) { toast("Select at least one vendor attachment", "error"); return; }
             setEmailLoading(true);
             try {
-              var toLine = cfg.emailTo;
-              var subject = cfg.subjectFn(todayStr);
-              var htmlBody = "<p>Good morning,</p><p>Attached are today's POs.</p><p>Thanks in advance,</p><br>";
+              var toLine = emailTo;
+              var subject = emailSubject || cfg.subjectFn(todayStr);
+              var safeBody = (emailBody || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+              var htmlBody = "<p>" + safeBody.replace(/\n\n+/g, "</p><p>").replace(/\n/g, "<br>") + "</p>";
               var xlsCols = ["SKU", "Description", "Qty", "Vendor", "PO #", "Reorder", "Max", "Lead", "Min", "Avail", "Price", "Total"];
               var attachments = selectedVendors.map(function(v) {
                 var rows = data.filter(function(r) { return r.VendorName === v; }).map(function(r) {
