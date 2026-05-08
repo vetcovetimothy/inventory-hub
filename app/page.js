@@ -1940,7 +1940,14 @@ function POImportTool(props) {
 
       <div style={S.card}>
         <div style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, marginBottom: 8 }}>Vendor Type</div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+            <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 500 }}>Vendor Type</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#6B7280" }}>
+              <span style={{ fontWeight: 500 }}>{"\u0394% Unit Cost Threshold"}</span>
+              <input type="number" min="1" step="1" value={flagThreshold} onChange={function(e) { updateFlagThreshold(e.target.value); }} style={{ width: 64, padding: "5px 8px", border: "1px solid #E5E7EB", borderRadius: 6, fontSize: 12, color: "#374151", outline: "none", textAlign: "center", fontFamily: "'Varela Round', sans-serif", background: "#F9FAFB" }} />
+              <span>%</span>
+            </div>
+          </div>
           <div style={{ display: "flex", gap: 10 }}>
             {[["other", "Keysource / Anda / Bloodworth"], ["mckesson", "McKesson"]].map(function(v) {
               return <button key={v[0]} onClick={function() { switchVendor(v[0]); }}
@@ -2023,14 +2030,7 @@ function POImportTool(props) {
 
         <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto" })}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", borderBottom: "1px solid #E5E7EB" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-              <span style={{ fontSize: 14, fontWeight: 600, color: "#1F2937" }}>Translation Results</span>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#6B7280" }}>
-                <span>{"Flag if \u0394% \u2265"}</span>
-                <input type="number" min="1" step="1" value={flagThreshold} onChange={function(e) { updateFlagThreshold(e.target.value); }} style={{ width: 56, padding: "4px 8px", border: "1px solid #E5E7EB", borderRadius: 6, fontSize: 12, color: "#374151", outline: "none", textAlign: "center", fontFamily: "'Varela Round', sans-serif", background: "#F9FAFB" }} />
-                <span>%</span>
-              </div>
-            </div>
+            <span style={{ fontSize: 14, fontWeight: 600, color: "#1F2937" }}>Translation Results</span>
             <div style={{ display: "flex", gap: 8 }}>
               <button onClick={reset} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}><IconTrash /> Clear</button>
               {vendor === "other" && fileList.length > 1 && <button onClick={function() { downloadCSV(activeResults); }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}><IconCSV /> Download Tab</button>}
