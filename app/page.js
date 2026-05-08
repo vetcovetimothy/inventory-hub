@@ -767,6 +767,16 @@ function WHT(props) {
   var getFlag = function(r) { var mc = (r.MovementClass || "").toLowerCase().trim(); if (mc === "short-dating") return "short"; if (mc === "sell-off item") return "selloff"; return null; };
   var filtered = useMemo(function() { var d = data.slice(); if (search) { var s = search.toLowerCase(); d = d.filter(function(r) { return r.SKUNDC.toLowerCase().indexOf(s) >= 0 || r.Description.toLowerCase().indexOf(s) >= 0 || r.VendorName.toLowerCase().indexOf(s) >= 0; }); } if (vendorFilter !== "all") d = d.filter(function(r) { return r.VendorName === vendorFilter; }); if (flagsOnly) { var fi = new Set(flags.s.concat(flags.so)); d = d.filter(function(r) { return fi.has(data.indexOf(r)); }); } if (poSort.col) { var col = poSort.col; var dir = poSort.dir; d.sort(function(a, b) { var va, vb; if (col === "Qty") { va = parseFloat(a.OrderQty) || 0; vb = parseFloat(b.OrderQty) || 0; } else if (col === "Vendor") { va = a.VendorName || ""; vb = b.VendorName || ""; return dir === "desc" ? vb.localeCompare(va) : va.localeCompare(vb); } else if (col === "PO #") { va = a.OrderNbr || ""; vb = b.OrderNbr || ""; return dir === "desc" ? vb.localeCompare(va) : va.localeCompare(vb); } else if (col === "SKU") { va = a.SKUNDC || ""; vb = b.SKUNDC || ""; return dir === "desc" ? vb.localeCompare(va) : va.localeCompare(vb); } else if (col === "Description") { va = a.Description || ""; vb = b.Description || ""; return dir === "desc" ? vb.localeCompare(va) : va.localeCompare(vb); } else if (col === "Reorder") { va = parseFloat(a.ReorderPoint) || 0; vb = parseFloat(b.ReorderPoint) || 0; } else if (col === "Max") { va = parseFloat(a.MaxQty) || 0; vb = parseFloat(b.MaxQty) || 0; } else if (col === "Lead") { va = parseFloat(a.LeadTime) || 0; vb = parseFloat(b.LeadTime) || 0; } else if (col === "Min") { va = parseFloat(a.MinOrderQty) || 0; vb = parseFloat(b.MinOrderQty) || 0; } else if (col === "Avail") { va = parseFloat(a.QtyAvailable) || 0; vb = parseFloat(b.QtyAvailable) || 0; } else if (col === "Price") { va = a.Price || 0; vb = b.Price || 0; } else if (col === "Total") { va = a.TotalPrice || 0; vb = b.TotalPrice || 0; } else if (col === "Flag") { va = getFlag(a) ? 0 : 1; vb = getFlag(b) ? 0 : 1; } else { return 0; } return dir === "desc" ? vb - va : va - vb; }); } else { d.sort(function(a, b) { var fa = getFlag(a) ? 0 : 1; var fb = getFlag(b) ? 0 : 1; return fa - fb; }); } return d; }, [data, search, vendorFilter, flagsOnly, flags, poSort]);
   var todayStr = new Date().toLocaleDateString("en-US", { month: "numeric", day: "numeric" });
+  function fillTemplate(text) {
+    if (!text) return text;
+    var now = new Date();
+    var weekday = now.toLocaleDateString("en-US", { weekday: "long" });
+    var fullDate = now.toLocaleDateString("en-US", { month: "numeric", day: "numeric", year: "numeric" });
+    return text
+      .replace(/\{date\}/gi, todayStr)
+      .replace(/\{fulldate\}/gi, fullDate)
+      .replace(/\{weekday\}/gi, weekday);
+  }
 
   if (initLoading) return <div style={Object.assign({}, S.card, { textAlign: "center", padding: 48, color: "#6B7280" })}><Spinner color={cfg.color} size={20} /></div>;
 
@@ -946,7 +956,7 @@ function WHT(props) {
             {editingField === "subject" ? <>
               <input value={emailSubject || cfg.subjectFn(todayStr)} onChange={function(e) { setEmailSubject(e.target.value); }} autoFocus onBlur={function() { persistEmailOverride({ subject: emailSubject }); setEditingField(null); }} onKeyDown={function(e) { if (e.key === "Enter") { persistEmailOverride({ subject: emailSubject }); setEditingField(null); } if (e.key === "Escape") setEditingField(null); }} placeholder={cfg.subjectFn(todayStr)} style={Object.assign({}, S.inp, { padding: "6px 10px", fontSize: 13, flex: 1, fontWeight: 600 })} />
             </> : <>
-              <span style={{ fontSize: 13, color: "#1F2937", fontWeight: 600, flex: 1, paddingTop: 7 }}>{emailSubject || cfg.subjectFn(todayStr)}</span>
+              <span style={{ fontSize: 13, color: "#1F2937", fontWeight: 600, flex: 1, paddingTop: 7 }}>{fillTemplate(emailSubject) || cfg.subjectFn(todayStr)}</span>
               <button onClick={function() { setEditingField("subject"); }} title="Edit subject" style={{ background: "transparent", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 14, padding: 4, alignSelf: "center" }}>{"\u270E"}</button>
             </>}
           </div>
@@ -954,8 +964,8 @@ function WHT(props) {
             <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
               {editingField === "body" ? <button onClick={function() { persistEmailOverride({ body: emailBody }); setEditingField(null); }} style={Object.assign({}, S.btn(), { padding: "4px 12px", fontSize: 11 })}>Save</button> : <button onClick={function() { setEditingField("body"); }} title="Edit body" style={{ background: "transparent", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 14, padding: 4 }}>{"\u270E"}</button>}
             </div>
-            {editingField === "body" ? <textarea value={emailBody} onChange={function(e) { setEmailBody(e.target.value); }} autoFocus rows={6} style={Object.assign({}, S.inp, { padding: "10px 12px", fontSize: 13, lineHeight: 1.6, color: "#374151", width: "100%", resize: "vertical", fontFamily: "'Varela Round', sans-serif" })} /> : <div style={{ fontSize: 13, color: "#374151", lineHeight: 1.7, whiteSpace: "pre-wrap", padding: "8px 0" }}>{emailBody}</div>}
-            <div style={{ color: "#9CA3AF", fontSize: 11, fontStyle: "italic", marginTop: 6 }}>Your Vetcove Gmail signature will be appended automatically</div>
+            {editingField === "body" ? <textarea value={emailBody} onChange={function(e) { setEmailBody(e.target.value); }} autoFocus rows={6} style={Object.assign({}, S.inp, { padding: "10px 12px", fontSize: 13, lineHeight: 1.6, color: "#374151", width: "100%", resize: "vertical", fontFamily: "'Varela Round', sans-serif" })} /> : <div style={{ fontSize: 13, color: "#374151", lineHeight: 1.7, whiteSpace: "pre-wrap", padding: "8px 0" }}>{fillTemplate(emailBody)}</div>}
+            <div style={{ color: "#9CA3AF", fontSize: 11, fontStyle: "italic", marginTop: 6 }}>{"Your Vetcove Gmail signature will be appended automatically \u00B7 Use {date}, {weekday}, or {fulldate} as placeholders"}</div>
           </div>
         </div>
         <div style={{ marginTop: 20, borderTop: "1px solid #E5E7EB", paddingTop: 16 }}>
@@ -981,8 +991,8 @@ function WHT(props) {
             setEmailLoading(true);
             try {
               var toLine = emailTo;
-              var subject = emailSubject || cfg.subjectFn(todayStr);
-              var safeBody = (emailBody || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+              var subject = fillTemplate(emailSubject) || cfg.subjectFn(todayStr);
+              var safeBody = fillTemplate(emailBody || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
               var htmlBody = "<p>" + safeBody.replace(/\n\n+/g, "</p><p>").replace(/\n/g, "<br>") + "</p>";
               var xlsCols = ["SKU", "Description", "Qty", "Vendor", "PO #", "Reorder", "Max", "Lead", "Min", "Avail", "Price", "Total"];
               var attachments = selectedVendors.map(function(v) {
