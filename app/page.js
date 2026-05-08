@@ -588,6 +588,7 @@ function WHT(props) {
   var DEFAULT_BODY = "Good morning,\n\nAttached are today's POs.\n\nThanks in advance,";
   var _emailBody = useState(DEFAULT_BODY), emailBody = _emailBody[0], setEmailBody = _emailBody[1];
   var EMAIL_OVERRIDE_KEY = "po-email-overrides:" + whKey;
+  var _editingField = useState(null), editingField = _editingField[0], setEditingField = _editingField[1];
   useEffect(function() {
     var m = true;
     kvGet(EMAIL_OVERRIDE_KEY).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
@@ -933,14 +934,27 @@ function WHT(props) {
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
             <span style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, width: 60, paddingTop: 8 }}>To:</span>
-            <input value={emailTo} onChange={function(e) { setEmailTo(e.target.value); }} onBlur={function() { persistEmailOverride({ to: emailTo }); }} placeholder="recipient@example.com, recipient2@example.com" style={Object.assign({}, S.inp, { padding: "6px 10px", fontSize: 13, flex: 1 })} />
+            {editingField === "to" ? <>
+              <input value={emailTo} onChange={function(e) { setEmailTo(e.target.value); }} autoFocus onBlur={function() { persistEmailOverride({ to: emailTo }); setEditingField(null); }} onKeyDown={function(e) { if (e.key === "Enter") { persistEmailOverride({ to: emailTo }); setEditingField(null); } if (e.key === "Escape") setEditingField(null); }} placeholder="recipient@example.com, recipient2@example.com" style={Object.assign({}, S.inp, { padding: "6px 10px", fontSize: 13, flex: 1 })} />
+            </> : <>
+              <span style={{ fontSize: 13, color: "#374151", flex: 1, paddingTop: 7, wordBreak: "break-all" }}>{emailTo || <span style={{ color: "#9CA3AF" }}>No recipients set</span>}</span>
+              <button onClick={function() { setEditingField("to"); }} title="Edit recipients" style={{ background: "transparent", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 14, padding: 4, alignSelf: "center" }}>{"\u270E"}</button>
+            </>}
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
             <span style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, width: 60, paddingTop: 8 }}>Subject:</span>
-            <input value={emailSubject || cfg.subjectFn(todayStr)} onChange={function(e) { setEmailSubject(e.target.value); }} onBlur={function() { persistEmailOverride({ subject: emailSubject }); }} placeholder={cfg.subjectFn(todayStr)} style={Object.assign({}, S.inp, { padding: "6px 10px", fontSize: 13, flex: 1, fontWeight: 600 })} />
+            {editingField === "subject" ? <>
+              <input value={emailSubject || cfg.subjectFn(todayStr)} onChange={function(e) { setEmailSubject(e.target.value); }} autoFocus onBlur={function() { persistEmailOverride({ subject: emailSubject }); setEditingField(null); }} onKeyDown={function(e) { if (e.key === "Enter") { persistEmailOverride({ subject: emailSubject }); setEditingField(null); } if (e.key === "Escape") setEditingField(null); }} placeholder={cfg.subjectFn(todayStr)} style={Object.assign({}, S.inp, { padding: "6px 10px", fontSize: 13, flex: 1, fontWeight: 600 })} />
+            </> : <>
+              <span style={{ fontSize: 13, color: "#1F2937", fontWeight: 600, flex: 1, paddingTop: 7 }}>{emailSubject || cfg.subjectFn(todayStr)}</span>
+              <button onClick={function() { setEditingField("subject"); }} title="Edit subject" style={{ background: "transparent", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 14, padding: 4, alignSelf: "center" }}>{"\u270E"}</button>
+            </>}
           </div>
           <div style={{ borderTop: "1px solid #E5E7EB", paddingTop: 16, marginTop: 4 }}>
-            <textarea value={emailBody} onChange={function(e) { setEmailBody(e.target.value); }} onBlur={function() { persistEmailOverride({ body: emailBody }); }} rows={6} style={Object.assign({}, S.inp, { padding: "10px 12px", fontSize: 13, lineHeight: 1.6, color: "#374151", width: "100%", resize: "vertical", fontFamily: "'Varela Round', sans-serif" })} />
+            <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
+              {editingField === "body" ? <button onClick={function() { persistEmailOverride({ body: emailBody }); setEditingField(null); }} style={Object.assign({}, S.btn(), { padding: "4px 12px", fontSize: 11 })}>Save</button> : <button onClick={function() { setEditingField("body"); }} title="Edit body" style={{ background: "transparent", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 14, padding: 4 }}>{"\u270E"}</button>}
+            </div>
+            {editingField === "body" ? <textarea value={emailBody} onChange={function(e) { setEmailBody(e.target.value); }} autoFocus rows={6} style={Object.assign({}, S.inp, { padding: "10px 12px", fontSize: 13, lineHeight: 1.6, color: "#374151", width: "100%", resize: "vertical", fontFamily: "'Varela Round', sans-serif" })} /> : <div style={{ fontSize: 13, color: "#374151", lineHeight: 1.7, whiteSpace: "pre-wrap", padding: "8px 0" }}>{emailBody}</div>}
             <div style={{ color: "#9CA3AF", fontSize: 11, fontStyle: "italic", marginTop: 6 }}>Your Vetcove Gmail signature will be appended automatically</div>
           </div>
         </div>
