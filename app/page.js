@@ -1448,6 +1448,23 @@ function POImportTool(props) {
   var _ndcMap = useState(null), ndcMap = _ndcMap[0], setNdcMap = _ndcMap[1];
   var _ndcLoading = useState(false), ndcLoading = _ndcLoading[0], setNdcLoading = _ndcLoading[1];
   var _activeFileTab = useState(null), activeFileTab = _activeFileTab[0], setActiveFileTab = _activeFileTab[1];
+  var _flagThreshold = useState(40), flagThreshold = _flagThreshold[0], setFlagThreshold = _flagThreshold[1];
+  useEffect(function() {
+    var mt = true;
+    kvGet("po-translator-flag-threshold").then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+      if (mt && d && d.data != null) {
+        var n = parseFloat(d.data);
+        if (!isNaN(n) && n > 0) setFlagThreshold(n);
+      }
+    }).catch(function() {});
+    return function() { mt = false; };
+  }, []);
+  function updateFlagThreshold(v) {
+    var n = parseFloat(v);
+    if (isNaN(n) || n <= 0) return;
+    setFlagThreshold(n);
+    kvPost("po-translator-flag-threshold", n).catch(function() {});
+  }
   // Persist results separately per vendor type so switching doesn't lose data
   var otherCache = useRef({ pdfs: [], results: [], editedPrices: {}, screenshotQtys: {}, error: null });
   var mckCache = useRef({ pdfs: [], results: [], mckPaste: "", mckParsed: null, mckFile: null, mckPortalPrices: {}, editedPrices: {}, screenshotQtys: {}, mckWarnings: [], error: null });
@@ -2006,7 +2023,14 @@ function POImportTool(props) {
 
         <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto" })}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", borderBottom: "1px solid #E5E7EB" }}>
-            <span style={{ fontSize: 14, fontWeight: 600, color: "#1F2937" }}>Translation Results</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+              <span style={{ fontSize: 14, fontWeight: 600, color: "#1F2937" }}>Translation Results</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#6B7280" }}>
+                <span>{"Flag if \u0394% \u2265"}</span>
+                <input type="number" min="1" step="1" value={flagThreshold} onChange={function(e) { updateFlagThreshold(e.target.value); }} style={{ width: 56, padding: "4px 8px", border: "1px solid #E5E7EB", borderRadius: 6, fontSize: 12, color: "#374151", outline: "none", textAlign: "center", fontFamily: "'Varela Round', sans-serif", background: "#F9FAFB" }} />
+                <span>%</span>
+              </div>
+            </div>
             <div style={{ display: "flex", gap: 8 }}>
               <button onClick={reset} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}><IconTrash /> Clear</button>
               {vendor === "other" && fileList.length > 1 && <button onClick={function() { downloadCSV(activeResults); }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}><IconCSV /> Download Tab</button>}
@@ -2053,10 +2077,18 @@ function POImportTool(props) {
                   // Scale avg cost (per base unit, e.g. per tablet) up to PO UOM (e.g. per BT100)
                   var avgPerPkg = hasAvg ? (r.uomConvFactor && r.uomConvFactor > 0 ? r.avgCost * r.uomConvFactor : r.avgCost) : null;
                   var pct = (avgPerPkg != null && avgPerPkg > 0 && editedPrice) ? ((editedPrice - avgPerPkg) / avgPerPkg) * 100 : null;
-                  var pctColor = pct == null ? "#9CA3AF" : pct >= 20 ? "#DC2626" : pct >= 10 ? "#D97706" : pct <= -10 ? "#059669" : "#6B7280";
+                  var isFlag = pct != null && pct >= flagThreshold;
+                  var pctColor = pct == null ? "#9CA3AF" : isFlag ? "#FFFFFF" : pct >= 20 ? "#DC2626" : pct >= 10 ? "#D97706" : pct <= -10 ? "#059669" : "#6B7280";
+                  var pctTdStyle = isFlag
+                    ? Object.assign({}, S.td, { textAlign: "center", padding: "8px 10px" })
+                    : Object.assign({}, S.td, { textAlign: "right", color: pctColor, fontWeight: pct != null && pct >= 20 ? 600 : 400 });
                   return <>
                     <td style={Object.assign({}, S.td, { textAlign: "right", color: hasAvg ? "#374151" : "#9CA3AF" })}>{avgPerPkg != null ? "$" + avgPerPkg.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 }) : "\u2014"}</td>
-                    <td style={Object.assign({}, S.td, { textAlign: "right", color: pctColor, fontWeight: pct != null && pct >= 20 ? 600 : 400 })}>{pct == null ? "\u2014" : (pct > 0 ? "+" : "") + pct.toFixed(1) + "%"}</td>
+                    <td style={pctTdStyle}>
+                      {pct == null ? <span style={{ color: "#9CA3AF" }}>{"\u2014"}</span>
+                        : isFlag ? <span style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "#DC2626", color: "#FFFFFF", padding: "4px 10px", borderRadius: 999, fontSize: 12, fontWeight: 700, letterSpacing: 0.3, boxShadow: "0 1px 2px rgba(220,38,38,0.3)" }}>{"\u26A0 +" + pct.toFixed(1) + "%"}</span>
+                        : <span style={{ color: pctColor, fontWeight: pct >= 20 ? 600 : 400 }}>{(pct > 0 ? "+" : "") + pct.toFixed(1) + "%"}</span>}
+                    </td>
                   </>;
                 })()}
                 {vendor === "mckesson" && <td style={S.td}>{r.vendorItemNum || "\u2014"}</td>}
