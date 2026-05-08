@@ -4185,19 +4185,26 @@ function OOSTracker(props) {
               <td style={S.td}><span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 6, fontWeight: 500, background: whBg, color: whColor }}>{r._wh}</span></td>
               <td style={S.td}>{(function() {
                 var matches = orderMap[String(r.MANUFACTURER_NO)] || [];
-                if (matches.length === 0) return <span style={{ color: "#D1D5DB" }}>{"\u2014"}</span>;
+                if (matches.length === 0) return <span style={{ color: "#D1D5DB", fontSize: 13 }}>{"\u2014"}</span>;
                 var anyPending = matches.some(function(m) { return !m.received; });
-                var topPill = anyPending
-                  ? <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 6, fontWeight: 600, background: "#ECFDF5", color: "#059669", display: "inline-block", width: "fit-content" }}>{"\u2713 On Order"}</span>
-                  : <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 6, fontWeight: 600, background: "#EFF6FF", color: "#2563EB", display: "inline-block", width: "fit-content" }}>{"\u2713 Received"}</span>;
-                return <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  {topPill}
-                  {matches.map(function(m, mi) { return <div key={mi} style={{ fontSize: 11, color: "#6B7280", lineHeight: 1.4, opacity: m.received ? 0.7 : 1 }}>
-                    <span style={{ fontWeight: 600, color: m.received ? "#6B7280" : "#374151", textDecoration: m.received ? "line-through" : "none" }}>{m.po || "(no PO#)"}</span>
-                    {m.orderDate ? <span> &middot; ordered {m.orderDate}</span> : null}
-                    {m.expectedArrival ? <span> &middot; ETA {m.expectedArrival}</span> : null}
-                    {m.received ? <span style={{ marginLeft: 6, fontSize: 10, color: "#2563EB", fontWeight: 600 }}>RECEIVED</span> : null}
-                  </div>; })}
+                var pendingCount = matches.filter(function(m) { return !m.received; }).length;
+                return <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {anyPending
+                    ? <div style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 600, color: "#059669", background: "#ECFDF5", padding: "3px 8px", borderRadius: 999, width: "fit-content" }}>
+                        <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#10B981" }} />
+                        On Order{matches.length > 1 ? " (" + pendingCount + "/" + matches.length + ")" : ""}
+                      </div>
+                    : <div style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 600, color: "#2563EB", background: "#EFF6FF", padding: "3px 8px", borderRadius: 999, width: "fit-content" }}>
+                        <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#3B82F6" }} />
+                        Received
+                      </div>}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                    {matches.map(function(m, mi) { return <div key={mi} style={{ display: "flex", alignItems: "baseline", gap: 8, fontSize: 11, color: m.received ? "#9CA3AF" : "#4B5563" }}>
+                      <span style={{ fontFamily: "monospace", fontWeight: 600, color: m.received ? "#9CA3AF" : "#1F2937", textDecoration: m.received ? "line-through" : "none", minWidth: 70 }}>{m.po || "—"}</span>
+                      {m.orderDate ? <span style={{ fontSize: 10, color: "#9CA3AF" }}>ord {m.orderDate}</span> : null}
+                      {m.expectedArrival ? <span style={{ fontSize: 10, color: m.received ? "#9CA3AF" : "#6B7280", fontWeight: m.received ? 400 : 500 }}>{m.received ? "arr " : "ETA "}{m.expectedArrival}</span> : null}
+                    </div>; })}
+                  </div>
                 </div>;
               })()}</td>
             </tr>;
