@@ -2520,6 +2520,141 @@ function FuzeTracker(props) {
   </div>;
 }
 
+/* ═══════ GGM TRACKER ═══════ */
+function GGMTracker(props) {
+  var toast = props.toast;
+  var TOOL_COLOR = "#8B5CF6";
+  var _wh = useState("GGM-KY"), whTab = _wh[0], setWhTab = _wh[1];
+  var _d = useState([]), data = _d[0], setData = _d[1];
+  var _ld = useState(false), loading = _ld[0], setLoading = _ld[1];
+  var _q = useState(""), search = _q[0], setSearch = _q[1];
+  var _vf = useState("all"), vendorFilter = _vf[0], setVendorFilter = _vf[1];
+  var _sf = useState("all"), statusFilter = _sf[0], setStatusFilter = _sf[1];
+  var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
+
+  var fetchSheet = useCallback(function(wh, silent) {
+    if (!silent) setLoading(true);
+    fetch("/api/sheets?wh=" + encodeURIComponent(wh) + "&_t=" + Date.now(), { cache: "no-store" })
+      .then(function(r) { return r.json(); })
+      .then(function(json) {
+        if (json.error) { if (!silent) toast(json.error, "error"); setData([]); }
+        else {
+          setData(json.data || []);
+          if (!silent) toast("Loaded " + (json.count || 0) + " items for " + wh);
+          kvPost("ggm-tracker-" + wh, { data: json.data || [], fetchedAt: Date.now() }).catch(function() {});
+        }
+      })
+      .catch(function(err) { if (!silent) toast("Error: " + err.message, "error"); })
+      .finally(function() { setLoading(false); });
+  }, [toast]);
+
+  function getTodayReset() {
+    var now = new Date();
+    var et = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
+    var reset = new Date(et); reset.setHours(5, 0, 0, 0);
+    if (et < reset) reset.setDate(reset.getDate() - 1);
+    return reset.getTime();
+  }
+
+  useEffect(function() {
+    var m = true;
+    kvGet("ggm-tracker-" + whTab).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+      if (!m) return;
+      if (d && d.data && d.data.data && d.data.data.length > 0) {
+        setData(d.data.data);
+        var resetTime = getTodayReset();
+        if (d.data.fetchedAt && d.data.fetchedAt < resetTime) {
+          fetchSheet(whTab, true);
+        }
+      } else {
+        fetchSheet(whTab);
+      }
+    }).catch(function() { if (m) fetchSheet(whTab); });
+    return function() { m = false; };
+  }, [whTab]);
+
+  var uniqueVendors = useMemo(function() { return Array.from(new Set(data.map(function(r) { return r["Manufacturer"]; }).filter(Boolean))).sort(); }, [data]);
+
+  var filtered = useMemo(function() {
+    var d = data.slice();
+    if (search) { var s = search.toLowerCase(); d = d.filter(function(r) { return (r["Manufacturer"] || "").toLowerCase().indexOf(s) >= 0 || (r["NDC"] || "").toLowerCase().indexOf(s) >= 0 || (r["Product Description"] || "").toLowerCase().indexOf(s) >= 0 || (r["PO Number"] || "").toLowerCase().indexOf(s) >= 0 || (r["Tracking #"] || "").toLowerCase().indexOf(s) >= 0; }); }
+    if (vendorFilter !== "all") d = d.filter(function(r) { return r["Manufacturer"] === vendorFilter; });
+    if (statusFilter === "pending") d = d.filter(function(r) { return r["Received?"] !== "TRUE" && r["Received?"] !== "true"; });
+    if (statusFilter === "received") d = d.filter(function(r) { return r["Received?"] === "TRUE" || r["Received?"] === "true"; });
+    return d;
+  }, [data, search, vendorFilter, statusFilter]);
+
+  var stats = useMemo(function() {
+    var total = data.length;
+    var received = data.filter(function(r) { return r["Received?"] === "TRUE" || r["Received?"] === "true"; }).length;
+    var pending = total - received;
+    return { total: total, received: received, pending: pending };
+  }, [data]);
+
+  var whTabs = [{ id: "GGM-KY", label: "Kentucky" }, { id: "GGM-AZ", label: "Arizona" }];
+
+  return <div>
+    {/* Warehouse tabs */}
+    <div style={{ display: "flex", gap: 4, marginBottom: 20, background: "#FFFFFF", borderRadius: 10, padding: 3, width: "fit-content", border: "0.5px solid #E5E7EB" }}>
+      {whTabs.map(function(t) { return <button key={t.id} onClick={function() { setWhTab(t.id); setSearch(""); setVendorFilter("all"); setStatusFilter("all"); }} style={S.pill(whTab === t.id, TOOL_COLOR)}>{t.label}{whTab === t.id && data.length > 0 && <span style={{ fontSize: 10, background: "rgba(255,255,255,0.25)", padding: "1px 6px", borderRadius: 4, marginLeft: 4 }}>{data.length}</span>}</button>; })}
+    </div>
+
+    {/* Stat cards */}
+    {data.length > 0 && <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 20 }}>
+      <div style={Object.assign({}, S.statCard, { background: "#EEF4FF" })}><div style={{ fontSize: 11, color: "#6B8ABF", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>Total Items</div><div style={{ fontSize: 28, fontWeight: 500, color: "#2563EB", marginTop: 6 }}>{stats.total}</div></div>
+      <div style={Object.assign({}, S.statCard, { background: "#FEF7EC" })}><div style={{ fontSize: 11, color: "#B08A4A", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>Pending</div><div style={{ fontSize: 28, fontWeight: 500, color: "#D97706", marginTop: 6 }}>{stats.pending}</div></div>
+      <div style={Object.assign({}, S.statCard, { background: "#F0FDF4" })}><div style={{ fontSize: 11, color: "#6B9E8A", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>Received</div><div style={{ fontSize: 28, fontWeight: 500, color: "#059669", marginTop: 6 }}>{stats.received}</div></div>
+    </div>}
+
+    {/* Toolbar */}
+    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+      <input style={Object.assign({}, S.inp, { maxWidth: 220 })} placeholder="Search..." value={search} onChange={function(e) { setSearch(e.target.value); }} />
+      <select style={S.sel} value={vendorFilter} onChange={function(e) { setVendorFilter(e.target.value); }}><option value="all">All Manufacturers</option>{uniqueVendors.map(function(v) { return <option key={v} value={v}>{v}</option>; })}</select>
+      <select style={S.sel} value={statusFilter} onChange={function(e) { setStatusFilter(e.target.value); }}>
+        <option value="all">All Statuses</option>
+        <option value="pending">Pending</option>
+        <option value="received">Received</option>
+      </select>
+      <div style={{ flex: 1 }} />
+      <button onClick={function() { fetchSheet(whTab); }} disabled={loading} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}>{loading ? <><Spinner color={TOOL_COLOR} size={14} /> Refreshing...</> : <><IconRefresh /> Refresh</>}</button>
+      <span style={{ fontSize: 12, color: "#6B7280" }}>{filtered.length}/{data.length}</span>
+    </div>
+
+    {/* Table */}
+    {data.length > 0 ? <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto", maxHeight: "calc(100vh - 320px)" })}>
+      <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
+        <thead><tr>
+          <th style={S.th}>Manufacturer</th>
+          <th style={S.th}>NDC</th>
+          <th style={Object.assign({}, S.th, { minWidth: 200 })}>Product Description</th>
+          <th style={Object.assign({}, S.th, { textAlign: "right" })}>Pkg Qty</th>
+          <th style={Object.assign({}, S.th, { textAlign: "right" })}>Expected BOH</th>
+          <th style={S.th}>PO Number</th>
+          <th style={S.th}>Order Date</th>
+          <th style={S.th}>Expected Arrival</th>
+          <th style={S.th}>Tracking #</th>
+          <th style={S.th}>Received</th>
+        </tr></thead>
+        <tbody>{filtered.map(function(r, i) {
+          var isReceived = r["Received?"] === "TRUE" || r["Received?"] === "true";
+          return <tr key={i}>
+            <td style={Object.assign({}, S.td, { color: "#1F2937", fontWeight: 500 })}>{r["Manufacturer"]}</td>
+            <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, whiteSpace: "nowrap" })}>{r["NDC"]}</td>
+            <td style={S.td}>{r["Product Description"]}</td>
+            <td style={Object.assign({}, S.td, { textAlign: "right" })}>{r["Pkg Qty"]}</td>
+            <td style={Object.assign({}, S.td, { textAlign: "right" })}>{r["Expected BOH Increase"]}</td>
+            <td style={S.td}>{r["PO Number"]}</td>
+            <td style={Object.assign({}, S.td, { whiteSpace: "nowrap" })}>{r["Order Date"]}</td>
+            <td style={Object.assign({}, S.td, { whiteSpace: "nowrap" })}>{r["Expected Arrival"]}</td>
+            <td style={Object.assign({}, S.td, { fontSize: 11, maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })}>{r["Tracking #"]}</td>
+            <td style={Object.assign({}, S.td, { textAlign: "center" })}><span style={S.badge(isReceived ? "success" : "warning")}>{isReceived ? "Yes" : "No"}</span></td>
+          </tr>;
+        })}</tbody>
+      </table>
+    </div> : <div style={Object.assign({}, S.card, { textAlign: "center", padding: 60, color: "#9CA3AF" })}>{loading ? <Spinner color={TOOL_COLOR} size={20} /> : "No data loaded. Check that the sheet URLs are configured."}</div>}
+  </div>;
+}
+
 /* ═══════ HOW-TO GUIDE ═══════ */
 function HowToGuide(props) {
   var toast = props.toast;
@@ -4140,8 +4275,8 @@ export default function Hub() {
   );
 
   var isWH = page in WH;
-  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "po-import" ? "#06B6D4" : page === "cycle-count" ? "#14B8A6" : page === "fuze-tracker" ? "#F59E0B" : page === "hills-pawtree" ? "#10B981" : page === "truckloader" ? "#D97706" : page === "oos-tracker" ? "#EF4444" : page === "vendor-contacts" ? "#6366F1" : page === "how-to" ? "#6B7280" : "#3B82F6";
-  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "po-import" ? "Generic PO Translator" : page === "cycle-count" ? "Cycle Counting" : page === "fuze-tracker" ? "Fuze Tracker" : page === "hills-pawtree" ? "Hills & Pawtree Tracker" : page === "truckloader" ? "Truckloader" : page === "oos-tracker" ? "OOS Tracker" : page === "vendor-contacts" ? "Vendor Contacts" : page === "how-to" ? "How-To Guide" : showLogin ? "Login" : "Shipping Rules";
+  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "po-import" ? "#06B6D4" : page === "cycle-count" ? "#14B8A6" : page === "fuze-tracker" ? "#F59E0B" : page === "ggm-tracker" ? "#8B5CF6" : page === "hills-pawtree" ? "#10B981" : page === "truckloader" ? "#D97706" : page === "oos-tracker" ? "#EF4444" : page === "vendor-contacts" ? "#6366F1" : page === "how-to" ? "#6B7280" : "#3B82F6";
+  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "po-import" ? "Generic PO Translator" : page === "cycle-count" ? "Cycle Counting" : page === "fuze-tracker" ? "Fuze Tracker" : page === "ggm-tracker" ? "GGM Tracker" : page === "hills-pawtree" ? "Hills & Pawtree Tracker" : page === "truckloader" ? "Truckloader" : page === "oos-tracker" ? "OOS Tracker" : page === "vendor-contacts" ? "Vendor Contacts" : page === "how-to" ? "How-To Guide" : showLogin ? "Login" : "Shipping Rules";
 
   function SideLink(p) {
     var active = page === p.id && !showLogin;
@@ -4166,7 +4301,7 @@ export default function Hub() {
             { key: "generic", label: "Generic PO Tools", items: [{ id: "po-import", label: "Generic PO Translator", color: "#06B6D4" }, { id: "cycle-count", label: "Cycle Counting", color: "#14B8A6" }] },
             { key: "hills", label: "Hills Tools", items: [{ id: "hills-pawtree", label: "Hills & Pawtree", color: "#10B981" }, { id: "truckloader", label: "Truckloader", color: "#D97706" }] },
             { key: "oos", label: "OOS", items: [{ id: "oos-tracker", label: "OOS Tracker", color: "#EF4444" }] },
-            { key: "tracking", label: "Tracking", items: [{ id: "fuze-tracker", label: "Fuze Tracker", color: "#F59E0B" }] },
+            { key: "tracking", label: "Tracking", items: [{ id: "fuze-tracker", label: "Fuze Tracker", color: "#F59E0B" }, { id: "ggm-tracker", label: "GGM Tracker", color: "#8B5CF6" }] },
             { key: "inventory", label: "Inventory Tools", items: [{ id: "short-dating", label: "Short-Dating", color: "#E879F9" }, { id: "backorder", label: "Backorders", color: "#F97316" }] },
           ];
           return sections.map(function(sec, si) {
@@ -4226,6 +4361,7 @@ export default function Hub() {
           {!showLogin && page === "po-import" && <POImportTool toast={showToast} cred={cred} ok={ok} lp={promptLogin} />}
           {!showLogin && page === "cycle-count" && <CycleCountTool key="cc-standard" toast={showToast} />}
           {!showLogin && page === "fuze-tracker" && <FuzeTracker toast={showToast} />}
+          {!showLogin && page === "ggm-tracker" && <GGMTracker toast={showToast} />}
           {!showLogin && page === "hills-pawtree" && <HillsTracker toast={showToast} ok={ok} lp={promptLogin} cred={cred} />}
           {!showLogin && page === "truckloader" && <TruckloaderTool toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} />}
           {!showLogin && page === "oos-tracker" && <OOSTracker toast={showToast} />}
