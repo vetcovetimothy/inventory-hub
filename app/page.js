@@ -3903,7 +3903,6 @@ function OOSTracker(props) {
         rs.rows.forEach(function(r) {
           var receivedKey = isFuze ? "Received?**" : "Received?";
           var isReceived = r[receivedKey] === "TRUE" || r[receivedKey] === "true";
-          if (isReceived) return;
           // Resolve Inventory ID via NDC -> cross-ref GI; fall back to sheet's Inventory ID column
           var ndcNorm = normalizeNdc(r["NDC"]);
           var invId = (ndcNorm && ndcToInvId[ndcNorm]) || (r["Inventory ID"] || "").trim();
@@ -3915,6 +3914,7 @@ function OOSTracker(props) {
             po: r[poKey] || "",
             orderDate: r["Order Date"] || "",
             expectedArrival: r["Expected Arrival"] || "",
+            received: isReceived,
           });
         });
       });
@@ -4186,12 +4186,17 @@ function OOSTracker(props) {
               <td style={S.td}>{(function() {
                 var matches = orderMap[String(r.MANUFACTURER_NO)] || [];
                 if (matches.length === 0) return <span style={{ color: "#D1D5DB" }}>{"\u2014"}</span>;
+                var anyPending = matches.some(function(m) { return !m.received; });
+                var topPill = anyPending
+                  ? <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 6, fontWeight: 600, background: "#ECFDF5", color: "#059669", display: "inline-block", width: "fit-content" }}>{"\u2713 On Order"}</span>
+                  : <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 6, fontWeight: 600, background: "#EFF6FF", color: "#2563EB", display: "inline-block", width: "fit-content" }}>{"\u2713 Received"}</span>;
                 return <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 6, fontWeight: 600, background: "#ECFDF5", color: "#059669", display: "inline-block", width: "fit-content" }}>{"\u2713 On Order"}</span>
-                  {matches.map(function(m, mi) { return <div key={mi} style={{ fontSize: 11, color: "#6B7280", lineHeight: 1.4 }}>
-                    <span style={{ fontWeight: 600, color: "#374151" }}>{m.po || "(no PO#)"}</span>
+                  {topPill}
+                  {matches.map(function(m, mi) { return <div key={mi} style={{ fontSize: 11, color: "#6B7280", lineHeight: 1.4, opacity: m.received ? 0.7 : 1 }}>
+                    <span style={{ fontWeight: 600, color: m.received ? "#6B7280" : "#374151", textDecoration: m.received ? "line-through" : "none" }}>{m.po || "(no PO#)"}</span>
                     {m.orderDate ? <span> &middot; ordered {m.orderDate}</span> : null}
                     {m.expectedArrival ? <span> &middot; ETA {m.expectedArrival}</span> : null}
+                    {m.received ? <span style={{ marginLeft: 6, fontSize: 10, color: "#2563EB", fontWeight: 600 }}>RECEIVED</span> : null}
                   </div>; })}
                 </div>;
               })()}</td>
