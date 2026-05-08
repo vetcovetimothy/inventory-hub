@@ -1600,6 +1600,34 @@ function POImportTool(props) {
 
 
   // Fetch NDC → GEN- map from Acumatica
+  var fetchAvgCostMap = useCallback(async function() {
+    if (!cred || !cred.username || !cred.password) return null;
+    try {
+      var resp = await fetch("/api/acumatica", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "gen-pricing", username: cred.username, password: cred.password }),
+      });
+      var json = await resp.json();
+      if (!resp.ok) return null;
+      var data = json.data || [];
+      var map = {};
+      data.forEach(function(row) {
+        var invId = (row.InventoryID || "").trim();
+        if (!invId) return;
+        var avgCost = parseFloat(row.AverageCost);
+        var multiplier = parseFloat(row.Multiplier);
+        var defaultPrice = parseFloat(row.DefaultPrice);
+        map[invId] = {
+          avgCost: isNaN(avgCost) ? null : avgCost,
+          multiplier: isNaN(multiplier) ? 1 : multiplier,
+          defaultPrice: isNaN(defaultPrice) ? null : defaultPrice,
+        };
+      });
+      return map;
+    } catch (err) { return null; }
+  }, [cred]);
+
   var fetchNdcMap = useCallback(async function() {
     if (!cred || !cred.username || !cred.password) { toast("Please log in first", "error"); return null; }
     setNdcLoading(true);
@@ -1667,13 +1695,17 @@ function POImportTool(props) {
       }
       if (pdfItems.length === 0) throw new Error("No items found. The PDF parser returned 0 NDCs. Check that your PDFs have the standard PO format.");
 
-      // Step 2: Fetch fresh NDC map from Acumatica
-      var map = await fetchNdcMap();
+      // Step 2: Fetch fresh NDC map and avg cost map from Acumatica (in parallel)
+      var mapResults = await Promise.all([fetchNdcMap(), fetchAvgCostMap()]);
+      var map = mapResults[0];
+      var avgCostMap = mapResults[1] || {};
       if (!map) throw new Error("Could not fetch NDC data from Acumatica. Check your login.");
 
       // Step 3: Match each item's NDC against OData
       var matched = pdfItems.map(function(item) {
         var match = lookupNdc(item.ndc, map);
+        var invId = match ? match.inventoryId : null;
+        var pricing = invId && avgCostMap[invId] ? avgCostMap[invId] : null;
         return {
           ndc: item.ndc,
           drugName: item.drugName,
@@ -1685,10 +1717,13 @@ function POImportTool(props) {
           vendorItemNum: item.vendorItemNum,
           poNumber: item.poNumber,
           sourceFile: item.sourceFile,
-          inventoryId: match ? match.inventoryId : null,
+          inventoryId: invId,
           acumaticaDesc: match ? match.description : null,
           uom: match ? match.uom : null,
           ndcFound: !!match,
+          avgCost: pricing ? pricing.avgCost : null,
+          multiplier: pricing ? pricing.multiplier : null,
+          defaultPrice: pricing ? pricing.defaultPrice : null,
         };
       });
 
@@ -1902,6 +1937,8 @@ function POImportTool(props) {
               <th style={Object.assign({}, S.th, { textAlign: "center" })}>Qty</th>
               <th style={Object.assign({}, S.th, { textAlign: "right" })}>Unit Cost</th>
               <th style={Object.assign({}, S.th, { textAlign: "right" })}>Ext. Cost</th>
+              <th style={Object.assign({}, S.th, { textAlign: "right" })}>Avg Cost</th>
+              <th style={Object.assign({}, S.th, { textAlign: "right" })}>vs Avg</th>
               {vendor === "mckesson" && <th style={S.th}>MCK Item #</th>}
               <th style={S.th}>Source</th>
             </tr></thead>
@@ -1922,6 +1959,16 @@ function POImportTool(props) {
                 <td style={Object.assign({}, S.td, { textAlign: "center" })}><input style={Object.assign({}, S.inp, { width: 70, padding: "6px 8px", textAlign: "center", color: qtyChanged ? "#D97706" : "#374151", background: qtyChanged ? "rgba(245,158,11,0.1)" : "#F8F9FB" })} type="number" value={screenshotQtys[r.ndc] != null ? screenshotQtys[r.ndc] : (r.qty || "")} onChange={function(e) { var updated = Object.assign({}, screenshotQtys); updated[r.ndc] = e.target.value; setScreenshotQtys(updated); }} /></td>
                 <td style={Object.assign({}, S.td, { textAlign: "right" })}><input style={Object.assign({}, S.inp, { width: 90, padding: "6px 8px", textAlign: "right", color: priceChanged ? "#D97706" : "#059669", background: priceChanged ? "rgba(245,158,11,0.1)" : "#F8F9FB" })} type="number" step="0.01" value={editedPrices[r.ndc] != null ? editedPrices[r.ndc] : (r.unitPrice || "")} onChange={function(e) { var updated = Object.assign({}, editedPrices); updated[r.ndc] = e.target.value; setEditedPrices(updated); }} /></td>
                 <td style={Object.assign({}, S.td, { textAlign: "right" })}>{extCost ? "$" + extCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "\u2014"}</td>
+                {(function() {
+                  var hasAvg = r.avgCost != null && r.avgCost > 0;
+                  var avgPerPkg = hasAvg ? (r.multiplier && r.multiplier > 0 ? r.avgCost / r.multiplier : r.avgCost) : null;
+                  var pct = (hasAvg && editedPrice && avgPerPkg > 0) ? ((editedPrice - avgPerPkg) / avgPerPkg) * 100 : null;
+                  var pctColor = pct == null ? "#9CA3AF" : pct >= 20 ? "#DC2626" : pct >= 10 ? "#D97706" : pct <= -10 ? "#059669" : "#6B7280";
+                  return <>
+                    <td style={Object.assign({}, S.td, { textAlign: "right", color: hasAvg ? "#374151" : "#9CA3AF" })}>{hasAvg ? "$" + avgPerPkg.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 }) : "\u2014"}</td>
+                    <td style={Object.assign({}, S.td, { textAlign: "right", color: pctColor, fontWeight: pct != null && pct >= 20 ? 600 : 400 })}>{pct == null ? "\u2014" : (pct > 0 ? "+" : "") + pct.toFixed(1) + "%"}</td>
+                  </>;
+                })()}
                 {vendor === "mckesson" && <td style={S.td}>{r.vendorItemNum || "\u2014"}</td>}
                 <td style={Object.assign({}, S.td, { color: "#9CA3AF" })}>{(r.sourceFile || "").split("/").pop()}</td>
               </tr>;
