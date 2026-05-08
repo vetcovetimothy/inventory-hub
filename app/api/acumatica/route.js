@@ -23,6 +23,7 @@ const ENDPOINTS = {
   "replenishment-needs": "PURCH%20-%20Replenishment%20Needs%20-%20Hills",
   "whse-replenish": "Stock%20Item%20Whse%20Replenish",
   "gen-pricing":   "PRICING%20-%20Generics%20-%20Avg%20Cost",
+  "uom-conversions": "Stock%20Item%20UOM%20Conversions",
 };
 
 // Which columns to extract for each type (keyGroup = possible OData field names)
@@ -130,6 +131,14 @@ const COLUMN_MAP = {
     { label: "DefaultPrice",  keys: ["DefaultPrice", "Default Price", "Default_Price", "Price"] },
     { label: "ItemClass",     keys: ["ItemClass", "Item Class", "ItemClassID"] },
   ],
+  "uom-conversions": [
+    { label: "InventoryID",      keys: ["InventoryID", "InventoryId", "InventoryCd", "InventoryCD", "Inventory ID", "Inventory_ID"] },
+    { label: "BaseUnit",         keys: ["BaseUnit", "Base Unit", "BaseUOM"] },
+    { label: "FromUnit",         keys: ["FromUnit", "From Unit", "FromUOM"] },
+    { label: "ToUnit",           keys: ["ToUnit", "To Unit", "ToUOM"] },
+    { label: "MultiplyDivide",   keys: ["MultiplyDivide", "Multiply/Divide", "MultiplyDivideOp", "ConvOp"] },
+    { label: "ConversionFactor", keys: ["ConversionFactor", "Conversion Factor", "Conv Factor", "ConvFactor"] },
+  ],
 };
 
 export async function POST(request) {
@@ -138,7 +147,7 @@ export async function POST(request) {
     const { type, warehouse, username, password, useServiceAccount } = body;
 
     if (!type || !ENDPOINTS[type]) {
-      return Response.json({ error: "Invalid type. Use: po, po-ggm, ndc-lookup, item-xref, short-dating, backorder, hills-pawtree, replenishment-needs, whse-replenish, gen-pricing" }, { status: 400 });
+      return Response.json({ error: "Invalid type. Use: po, po-ggm, ndc-lookup, item-xref, short-dating, backorder, hills-pawtree, replenishment-needs, whse-replenish, gen-pricing, uom-conversions" }, { status: 400 });
     }
 
     // Use service account credentials from env vars, or user-provided credentials
