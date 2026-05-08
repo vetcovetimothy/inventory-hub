@@ -1600,6 +1600,35 @@ function POImportTool(props) {
 
 
   // Fetch NDC → GEN- map from Acumatica
+  var fetchUomConversionMap = useCallback(async function() {
+    if (!cred || !cred.username || !cred.password) return null;
+    try {
+      var resp = await fetch("/api/acumatica", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "uom-conversions", username: cred.username, password: cred.password }),
+      });
+      var json = await resp.json();
+      if (!resp.ok) return null;
+      var data = json.data || [];
+      // Build nested map: { invId: { TO_UOM: { factor, op, fromUnit, baseUnit } } }
+      var map = {};
+      data.forEach(function(row) {
+        var invId = (row.InventoryID || "").trim();
+        if (!invId) return;
+        var toUnit = (row.ToUnit || "").trim().toUpperCase();
+        var fromUnit = (row.FromUnit || "").trim().toUpperCase();
+        var baseUnit = (row.BaseUnit || "").trim().toUpperCase();
+        var factor = parseFloat(row.ConversionFactor);
+        if (!toUnit || isNaN(factor) || factor <= 0) return;
+        var op = (row.MultiplyDivide || "Multiply").toLowerCase().indexOf("div") >= 0 ? "Divide" : "Multiply";
+        if (!map[invId]) map[invId] = {};
+        map[invId][toUnit] = { factor: factor, op: op, fromUnit: fromUnit, baseUnit: baseUnit };
+      });
+      return map;
+    } catch (err) { return null; }
+  }, [cred]);
+
   var fetchAvgCostMap = useCallback(async function() {
     if (!cred || !cred.username || !cred.password) return null;
     try {
@@ -1695,10 +1724,11 @@ function POImportTool(props) {
       }
       if (pdfItems.length === 0) throw new Error("No items found. The PDF parser returned 0 NDCs. Check that your PDFs have the standard PO format.");
 
-      // Step 2: Fetch fresh NDC map and avg cost map from Acumatica (in parallel)
-      var mapResults = await Promise.all([fetchNdcMap(), fetchAvgCostMap()]);
+      // Step 2: Fetch fresh NDC map, avg cost map, and UOM conversion map from Acumatica (in parallel)
+      var mapResults = await Promise.all([fetchNdcMap(), fetchAvgCostMap(), fetchUomConversionMap()]);
       var map = mapResults[0];
       var avgCostMap = mapResults[1] || {};
+      var uomMap = mapResults[2] || {};
       if (!map) throw new Error("Could not fetch NDC data from Acumatica. Check your login.");
 
       // Step 3: Match each item's NDC against OData
@@ -1706,6 +1736,14 @@ function POImportTool(props) {
         var match = lookupNdc(item.ndc, map);
         var invId = match ? match.inventoryId : null;
         var pricing = invId && avgCostMap[invId] ? avgCostMap[invId] : null;
+        var uom = match ? (match.uom || "").toUpperCase() : "";
+        // Look up conversion: how many base units (e.g., tablets) per 1 PO unit (e.g., BT100)
+        var conv = (invId && uom && uomMap[invId] && uomMap[invId][uom]) ? uomMap[invId][uom] : null;
+        var convFactor = null;
+        if (conv) {
+          // Multiply means: 1 PO_UOM × factor = base units. Divide means inverse.
+          convFactor = conv.op === "Divide" ? (1 / conv.factor) : conv.factor;
+        }
         return {
           ndc: item.ndc,
           drugName: item.drugName,
@@ -1724,6 +1762,7 @@ function POImportTool(props) {
           avgCost: pricing ? pricing.avgCost : null,
           multiplier: pricing ? pricing.multiplier : null,
           defaultPrice: pricing ? pricing.defaultPrice : null,
+          uomConvFactor: convFactor,
         };
       });
 
@@ -1961,11 +2000,12 @@ function POImportTool(props) {
                 <td style={Object.assign({}, S.td, { textAlign: "right" })}>{extCost ? "$" + extCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "\u2014"}</td>
                 {(function() {
                   var hasAvg = r.avgCost != null && r.avgCost > 0;
-                  var avgPerPkg = hasAvg ? (r.multiplier && r.multiplier > 0 ? r.avgCost / r.multiplier : r.avgCost) : null;
-                  var pct = (hasAvg && editedPrice && avgPerPkg > 0) ? ((editedPrice - avgPerPkg) / avgPerPkg) * 100 : null;
+                  // Scale avg cost (per base unit, e.g. per tablet) up to PO UOM (e.g. per BT100)
+                  var avgPerPkg = hasAvg ? (r.uomConvFactor && r.uomConvFactor > 0 ? r.avgCost * r.uomConvFactor : r.avgCost) : null;
+                  var pct = (avgPerPkg != null && avgPerPkg > 0 && editedPrice) ? ((editedPrice - avgPerPkg) / avgPerPkg) * 100 : null;
                   var pctColor = pct == null ? "#9CA3AF" : pct >= 20 ? "#DC2626" : pct >= 10 ? "#D97706" : pct <= -10 ? "#059669" : "#6B7280";
                   return <>
-                    <td style={Object.assign({}, S.td, { textAlign: "right", color: hasAvg ? "#374151" : "#9CA3AF" })}>{hasAvg ? "$" + avgPerPkg.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 }) : "\u2014"}</td>
+                    <td style={Object.assign({}, S.td, { textAlign: "right", color: hasAvg ? "#374151" : "#9CA3AF" })}>{avgPerPkg != null ? "$" + avgPerPkg.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 }) : "\u2014"}</td>
                     <td style={Object.assign({}, S.td, { textAlign: "right", color: pctColor, fontWeight: pct != null && pct >= 20 ? 600 : 400 })}>{pct == null ? "\u2014" : (pct > 0 ? "+" : "") + pct.toFixed(1) + "%"}</td>
                   </>;
                 })()}
