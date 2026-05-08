@@ -22,6 +22,7 @@ const ENDPOINTS = {
   "hills-pawtree": "PURCH%20-%20Open%20Hills%20and%20Pawtree",
   "replenishment-needs": "PURCH%20-%20Replenishment%20Needs%20-%20Hills",
   "whse-replenish": "Stock%20Item%20Whse%20Replenish",
+  "gen-pricing":   "PRICING%20-%20Generics%20-%20Avg%20Cost",
 };
 
 // Which columns to extract for each type (keyGroup = possible OData field names)
@@ -119,6 +120,16 @@ const COLUMN_MAP = {
     { label: "ReplenishmentClass", keys: ["ReplenishmentClass", "Replenishment_Class", "Replenishment Class", "ReplenishmentClassID"] },
     { label: "ItemStatus",        keys: ["ItemStatus", "Item_Status", "Item Status", "Status"] },
   ],
+  "gen-pricing": [
+    { label: "InventoryID",   keys: ["InventoryID", "InventoryId", "InventoryCd", "InventoryCD", "Inventory ID", "Inventory_ID"] },
+    { label: "Description",   keys: ["Description", "Descr", "ItemDescription"] },
+    { label: "BaseUnit",      keys: ["BaseUnit", "Base Unit", "BaseUOM"] },
+    { label: "SalesUnit",     keys: ["SalesUnit", "Sales Unit", "SalesUOM"] },
+    { label: "AverageCost",   keys: ["AverageCost", "Average Cost", "AvgCost", "Avg Cost", "Average_Cost"] },
+    { label: "Multiplier",    keys: ["Multiplier", "UOMMultiplier", "ConvFactor", "ConversionFactor"] },
+    { label: "DefaultPrice",  keys: ["DefaultPrice", "Default Price", "Default_Price", "Price"] },
+    { label: "ItemClass",     keys: ["ItemClass", "Item Class", "ItemClassID"] },
+  ],
 };
 
 export async function POST(request) {
@@ -127,7 +138,7 @@ export async function POST(request) {
     const { type, warehouse, username, password, useServiceAccount } = body;
 
     if (!type || !ENDPOINTS[type]) {
-      return Response.json({ error: "Invalid type. Use: po, po-ggm, ndc-lookup, item-xref, short-dating, backorder, hills-pawtree, replenishment-needs, whse-replenish" }, { status: 400 });
+      return Response.json({ error: "Invalid type. Use: po, po-ggm, ndc-lookup, item-xref, short-dating, backorder, hills-pawtree, replenishment-needs, whse-replenish, gen-pricing" }, { status: 400 });
     }
 
     // Use service account credentials from env vars, or user-provided credentials
