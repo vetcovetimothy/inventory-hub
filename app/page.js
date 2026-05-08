@@ -1600,6 +1600,44 @@ function POImportTool(props) {
 
 
   // Fetch NDC → GEN- map from Acumatica
+  var fetchPerWarehouseCostMap = useCallback(async function() {
+    if (!cred || !cred.username || !cred.password) return null;
+    try {
+      var resp = await fetch("/api/acumatica", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "gen-pricing-3prx", username: cred.username, password: cred.password }),
+      });
+      var json = await resp.json();
+      if (!resp.ok) return null;
+      var data = json.data || [];
+      // Map from labeled column name to warehouse code we'll match against r.warehouse
+      var WH_COL = {
+        "TP-NY":  "TPNYAvgCost",
+        "TP-OH":  "TPOHAvgCost",
+        "TP-CA":  "TPCAAvgCost",
+        "TP-MI":  "TPMIAvgCost",
+        "TP-FL":  "TPFLAvgCost",
+        "GGM":    "GGMAvgCost",
+        "GGM-KY": "GGMKYAvgCost",
+        "GGM-AZ": "GGMAZAvgCost",
+      };
+      var map = {};
+      data.forEach(function(row) {
+        var invId = (row.InventoryID || "").trim();
+        if (!invId) return;
+        var perWh = {};
+        Object.keys(WH_COL).forEach(function(wh) {
+          var col = WH_COL[wh];
+          var val = parseFloat(row[col]);
+          if (!isNaN(val) && val > 0) perWh[wh] = val;
+        });
+        map[invId] = perWh;
+      });
+      return map;
+    } catch (err) { return null; }
+  }, [cred]);
+
   var fetchUomConversionMap = useCallback(async function() {
     if (!cred || !cred.username || !cred.password) return null;
     try {
@@ -1724,11 +1762,12 @@ function POImportTool(props) {
       }
       if (pdfItems.length === 0) throw new Error("No items found. The PDF parser returned 0 NDCs. Check that your PDFs have the standard PO format.");
 
-      // Step 2: Fetch fresh NDC map, avg cost map, and UOM conversion map from Acumatica (in parallel)
-      var mapResults = await Promise.all([fetchNdcMap(), fetchAvgCostMap(), fetchUomConversionMap()]);
+      // Step 2: Fetch fresh NDC map, avg cost map (general + per-warehouse), and UOM conversions in parallel
+      var mapResults = await Promise.all([fetchNdcMap(), fetchAvgCostMap(), fetchUomConversionMap(), fetchPerWarehouseCostMap()]);
       var map = mapResults[0];
       var avgCostMap = mapResults[1] || {};
       var uomMap = mapResults[2] || {};
+      var perWhCostMap = mapResults[3] || {};
       if (!map) throw new Error("Could not fetch NDC data from Acumatica. Check your login.");
 
       // Step 3: Match each item's NDC against OData
@@ -1741,8 +1780,18 @@ function POImportTool(props) {
         var conv = (invId && uom && uomMap[invId] && uomMap[invId][uom]) ? uomMap[invId][uom] : null;
         var convFactor = null;
         if (conv) {
-          // Multiply means: 1 PO_UOM × factor = base units. Divide means inverse.
           convFactor = conv.op === "Divide" ? (1 / conv.factor) : conv.factor;
+        }
+        // Resolve avg cost: prefer per-warehouse from 3PRx GI, else fall back to general avg cost
+        var resolvedAvgCost = null;
+        var avgCostSource = null;
+        var wh = item.warehouse;
+        if (invId && wh && perWhCostMap[invId] && perWhCostMap[invId][wh] != null) {
+          resolvedAvgCost = perWhCostMap[invId][wh];
+          avgCostSource = "3prx:" + wh;
+        } else if (pricing && pricing.avgCost != null) {
+          resolvedAvgCost = pricing.avgCost;
+          avgCostSource = "general";
         }
         return {
           ndc: item.ndc,
@@ -1759,7 +1808,8 @@ function POImportTool(props) {
           acumaticaDesc: match ? match.description : null,
           uom: match ? match.uom : null,
           ndcFound: !!match,
-          avgCost: pricing ? pricing.avgCost : null,
+          avgCost: resolvedAvgCost,
+          avgCostSource: avgCostSource,
           multiplier: pricing ? pricing.multiplier : null,
           defaultPrice: pricing ? pricing.defaultPrice : null,
           uomConvFactor: convFactor,
