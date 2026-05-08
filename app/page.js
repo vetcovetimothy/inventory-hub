@@ -3818,29 +3818,51 @@ function TruckloaderTool(props) {
 
 /* ═══════ OOS TRACKER ═══════ */
 function OOSTracker(props) {
-  var toast = props.toast;
+  var toast = props.toast, cred = props.cred;
   var TOOL_COLOR = "#EF4444";
   var _tab = useState("fuzerx"), tab = _tab[0], setTab = _tab[1];
   var _orderMap = useState({}), orderMap = _orderMap[0], setOrderMap = _orderMap[1];
+  function normalizeNdc(s) { return (s || "").replace(/\D/g, ""); }
   useEffect(function() {
     var m = true;
     var whs = ["TP-NY", "TP-OH", "TP-CA", "GGM-KY", "GGM-AZ"];
-    Promise.all(whs.map(function(wh) {
+    var sheetPromise = Promise.all(whs.map(function(wh) {
       return fetch("/api/sheets?wh=" + encodeURIComponent(wh) + "&_t=" + Date.now(), { cache: "no-store" })
         .then(function(r) { return r.ok ? r.json() : null; })
         .then(function(j) { return { wh: wh, rows: (j && j.data) || [] }; })
         .catch(function() { return { wh: wh, rows: [] }; });
-    })).then(function(results) {
+    }));
+    var crossRefPromise = (cred && cred.username && cred.password)
+      ? fetch("/api/acumatica", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "stock-cross-ref", username: cred.username, password: cred.password }),
+        }).then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; })
+      : Promise.resolve(null);
+    Promise.all([sheetPromise, crossRefPromise]).then(function(both) {
       if (!m) return;
+      var sheetResults = both[0];
+      var crossRefJson = both[1];
+      // Build NDC -> Inventory ID map from cross-ref GI
+      var ndcToInvId = {};
+      if (crossRefJson && crossRefJson.data) {
+        crossRefJson.data.forEach(function(row) {
+          var ndc = normalizeNdc(row.NDC);
+          var invId = (row.InventoryID || "").trim();
+          if (ndc && invId && !ndcToInvId[ndc]) ndcToInvId[ndc] = invId;
+        });
+      }
       var map = {};
-      results.forEach(function(rs) {
+      sheetResults.forEach(function(rs) {
         var isFuze = rs.wh.indexOf("TP-") === 0;
         rs.rows.forEach(function(r) {
-          var invId = (r["Inventory ID"] || "").trim();
-          if (!invId) return;
           var receivedKey = isFuze ? "Received?**" : "Received?";
           var isReceived = r[receivedKey] === "TRUE" || r[receivedKey] === "true";
           if (isReceived) return;
+          // Resolve Inventory ID via NDC -> cross-ref GI; fall back to sheet's Inventory ID column
+          var ndcNorm = normalizeNdc(r["NDC"]);
+          var invId = (ndcNorm && ndcToInvId[ndcNorm]) || (r["Inventory ID"] || "").trim();
+          if (!invId) return;
           var poKey = isFuze ? "PO No." : "PO Number";
           if (!map[invId]) map[invId] = [];
           map[invId].push({
@@ -3854,7 +3876,7 @@ function OOSTracker(props) {
       setOrderMap(map);
     });
     return function() { m = false; };
-  }, []);
+  }, [cred]);
   var _fuzeData = useState([]), fuzeData = _fuzeData[0], setFuzeData = _fuzeData[1];
   var _ggmData = useState([]), ggmData = _ggmData[0], setGgmData = _ggmData[1];
   var _cgpData = useState([]), cgpData = _cgpData[0], setCgpData = _cgpData[1];
@@ -4463,7 +4485,7 @@ export default function Hub() {
           {!showLogin && page === "ggm-tracker" && <GGMTracker toast={showToast} cred={cred} />}
           {!showLogin && page === "hills-pawtree" && <HillsTracker toast={showToast} ok={ok} lp={promptLogin} cred={cred} />}
           {!showLogin && page === "truckloader" && <TruckloaderTool toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} />}
-          {!showLogin && page === "oos-tracker" && <OOSTracker toast={showToast} />}
+          {!showLogin && page === "oos-tracker" && <OOSTracker toast={showToast} cred={cred} />}
           {!showLogin && page === "vendor-contacts" && <VendorContactsPage contacts={vendorContacts} updateContacts={updateVendorContacts} toast={showToast} />}
           {!showLogin && page === "how-to" && <HowToGuide toast={showToast} />}
         </div>
