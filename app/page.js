@@ -3821,6 +3821,40 @@ function OOSTracker(props) {
   var toast = props.toast;
   var TOOL_COLOR = "#EF4444";
   var _tab = useState("fuzerx"), tab = _tab[0], setTab = _tab[1];
+  var _orderMap = useState({}), orderMap = _orderMap[0], setOrderMap = _orderMap[1];
+  useEffect(function() {
+    var m = true;
+    var whs = ["TP-NY", "TP-OH", "TP-CA", "GGM-KY", "GGM-AZ"];
+    Promise.all(whs.map(function(wh) {
+      return fetch("/api/sheets?wh=" + encodeURIComponent(wh) + "&_t=" + Date.now(), { cache: "no-store" })
+        .then(function(r) { return r.ok ? r.json() : null; })
+        .then(function(j) { return { wh: wh, rows: (j && j.data) || [] }; })
+        .catch(function() { return { wh: wh, rows: [] }; });
+    })).then(function(results) {
+      if (!m) return;
+      var map = {};
+      results.forEach(function(rs) {
+        var isFuze = rs.wh.indexOf("TP-") === 0;
+        rs.rows.forEach(function(r) {
+          var invId = (r["Inventory ID"] || "").trim();
+          if (!invId) return;
+          var receivedKey = isFuze ? "Received?**" : "Received?";
+          var isReceived = r[receivedKey] === "TRUE" || r[receivedKey] === "true";
+          if (isReceived) return;
+          var poKey = isFuze ? "PO No." : "PO Number";
+          if (!map[invId]) map[invId] = [];
+          map[invId].push({
+            wh: rs.wh,
+            po: r[poKey] || "",
+            orderDate: r["Order Date"] || "",
+            expectedArrival: r["Expected Arrival"] || "",
+          });
+        });
+      });
+      setOrderMap(map);
+    });
+    return function() { m = false; };
+  }, []);
   var _fuzeData = useState([]), fuzeData = _fuzeData[0], setFuzeData = _fuzeData[1];
   var _ggmData = useState([]), ggmData = _ggmData[0], setGgmData = _ggmData[1];
   var _cgpData = useState([]), cgpData = _cgpData[0], setCgpData = _cgpData[1];
@@ -4063,6 +4097,7 @@ function OOSTracker(props) {
             {sortHeader("manufacturer", "Manufacturer")}
             {sortHeader("product", "Product")}
             {sortHeader("warehouse", "Warehouse")}
+            <th style={Object.assign({}, S.th, { minWidth: 220 })}>Order Status</th>
           </tr></thead>
           <tbody>{filtered.map(function(r, i) {
             var noteKey = tab + ":" + r.MANUFACTURER_NO + ":" + (r.WAREHOUSE_SLUG || "");
@@ -4081,6 +4116,18 @@ function OOSTracker(props) {
               <td style={Object.assign({}, S.td, { color: "#374151" })}>{r.MANUFACTURER_NAME}</td>
               <td style={Object.assign({}, S.td, { color: "#374151", maxWidth: 300 })}>{r.PRODUCT_LINE_NAME}</td>
               <td style={S.td}><span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 6, fontWeight: 500, background: whBg, color: whColor }}>{r._wh}</span></td>
+              <td style={S.td}>{(function() {
+                var matches = orderMap[String(r.MANUFACTURER_NO)] || [];
+                if (matches.length === 0) return <span style={{ color: "#D1D5DB" }}>{"\u2014"}</span>;
+                return <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 6, fontWeight: 600, background: "#ECFDF5", color: "#059669", display: "inline-block", width: "fit-content" }}>{"\u2713 On Order"}</span>
+                  {matches.map(function(m, mi) { return <div key={mi} style={{ fontSize: 11, color: "#6B7280", lineHeight: 1.4 }}>
+                    <span style={{ fontWeight: 600, color: "#374151" }}>{m.po || "(no PO#)"}</span>
+                    {m.orderDate ? <span> &middot; ordered {m.orderDate}</span> : null}
+                    {m.expectedArrival ? <span> &middot; ETA {m.expectedArrival}</span> : null}
+                  </div>; })}
+                </div>;
+              })()}</td>
             </tr>;
           })}</tbody>
         </table>
