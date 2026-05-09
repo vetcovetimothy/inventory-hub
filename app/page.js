@@ -3869,24 +3869,43 @@ function OOSTracker(props) {
           body: JSON.stringify({ type: "open-po-lines", username: cred.username, password: cred.password }),
         }).then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; })
       : Promise.resolve(null);
-    Promise.all([sheetPromise, openPoPromise]).then(function(all) {
+    var hillsMetaPromise = kvGet("hills-pawtree-meta").then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; });
+    function parseDateLoose(s) {
+      if (!s) return null;
+      var t = String(s).split("T")[0];
+      var iso = t.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (iso) return new Date(parseInt(iso[1]), parseInt(iso[2]) - 1, parseInt(iso[3])).getTime();
+      var us = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+      if (us) { var y = parseInt(us[3]); if (y < 100) y += 2000; return new Date(y, parseInt(us[1]) - 1, parseInt(us[2])).getTime(); }
+      var d = new Date(t); return isNaN(d.getTime()) ? null : d.getTime();
+    }
+    Promise.all([sheetPromise, openPoPromise, hillsMetaPromise]).then(function(all) {
       if (!m) return;
       var sheetResults = all[0];
       var openPoJson = all[1];
-      // Build PO# + Inventory ID -> ETA map from trackers (only source of ETA dates)
-      var etaMap = {};
+      var hillsMetaResp = all[2];
+      // Build Inventory ID -> [tracker entries] map for proximity matching
+      var trackerByInvId = {};
       sheetResults.forEach(function(rs) {
+        var isFuze = rs.wh.indexOf("TP-") === 0;
         rs.rows.forEach(function(r) {
-          var isFuze = rs.wh.indexOf("TP-") === 0;
-          var po = (isFuze ? r["PO No."] : r["PO Number"]) || "";
           var trackerInvId = (r["Inventory ID"] || "").trim();
           var eta = r["Expected Arrival"] || "";
-          if (po && trackerInvId && eta) {
-            etaMap[po + "|" + trackerInvId] = eta;
-          }
+          var orderDate = r["Order Date"] || "";
+          if (!trackerInvId || !eta) return;
+          if (!trackerByInvId[trackerInvId]) trackerByInvId[trackerInvId] = [];
+          trackerByInvId[trackerInvId].push({ eta: eta, orderDateMs: parseDateLoose(orderDate) });
         });
       });
-      // Primary source: Open PO Lines GI
+      // Hills KV meta: { "P0001234": { eta: "5/15/2026", notes: "..." } }
+      var hillsMeta = {};
+      if (hillsMetaResp && hillsMetaResp.data) {
+        var raw = typeof hillsMetaResp.data === "string" ? JSON.parse(hillsMetaResp.data) : hillsMetaResp.data;
+        Object.keys(raw || {}).forEach(function(po) {
+          if (raw[po] && raw[po].eta) hillsMeta[po] = raw[po].eta;
+        });
+      }
+      // Build final map from Open PO Lines, enriched with ETA where possible
       var map = {};
       if (openPoJson && openPoJson.data) {
         openPoJson.data.forEach(function(row) {
@@ -3896,12 +3915,29 @@ function OOSTracker(props) {
           var qtyReceived = parseFloat(row.QtyOnReceipts) || 0;
           var outstanding = orderQty - qtyReceived;
           var po = (row.OrderNbr || "").trim();
+          var orderDate = row.OrderDate || "";
+          var orderDateMs = parseDateLoose(orderDate);
+          // ETA resolution priority:
+          // 1) Hills KV (matches by Acumatica PO# directly)
+          // 2) Closest-in-time tracker entry for same Inventory ID (within 14 days)
+          var eta = "";
+          if (po && hillsMeta[po]) {
+            eta = hillsMeta[po];
+          } else if (trackerByInvId[invId] && orderDateMs) {
+            var best = null, bestDelta = Infinity;
+            trackerByInvId[invId].forEach(function(t) {
+              if (!t.orderDateMs) return;
+              var delta = Math.abs(t.orderDateMs - orderDateMs);
+              if (delta < bestDelta && delta <= 14 * 86400000) { bestDelta = delta; best = t; }
+            });
+            if (best) eta = best.eta;
+          }
           if (!map[invId]) map[invId] = [];
           map[invId].push({
             wh: row.Warehouse || "",
             po: po,
-            orderDate: row.OrderDate || "",
-            expectedArrival: etaMap[po + "|" + invId] || "",
+            orderDate: orderDate,
+            expectedArrival: eta,
             orderQty: orderQty,
             qtyReceived: qtyReceived,
             received: outstanding <= 0,
