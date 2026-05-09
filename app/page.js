@@ -4176,24 +4176,33 @@ function OOSTracker(props) {
               <td style={S.td}>{(function() {
                 var matches = orderMap[String(r.MANUFACTURER_NO)] || [];
                 if (matches.length === 0) return <span style={{ color: "#D1D5DB", fontSize: 13 }}>{"\u2014"}</span>;
-                var anyPending = matches.some(function(m) { return !m.received; });
+                function fmtDate(s) {
+                  if (!s) return "";
+                  var iso = String(s).split("T")[0];
+                  var parts = iso.split("-");
+                  if (parts.length === 3) return parseInt(parts[1]) + "/" + parseInt(parts[2]) + "/" + parts[0].slice(2);
+                  return s;
+                }
                 var pendingCount = matches.filter(function(m) { return !m.received; }).length;
-                return <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  {anyPending
-                    ? <div style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 600, color: "#059669", background: "#ECFDF5", padding: "3px 8px", borderRadius: 999, width: "fit-content" }}>
-                        <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#10B981" }} />
-                        On Order{matches.length > 1 ? " (" + pendingCount + "/" + matches.length + ")" : ""}
-                      </div>
-                    : <div style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 600, color: "#2563EB", background: "#EFF6FF", padding: "3px 8px", borderRadius: 999, width: "fit-content" }}>
-                        <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#3B82F6" }} />
-                        Received
-                      </div>}
-                  <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                    {matches.map(function(m, mi) { return <div key={mi} style={{ display: "flex", alignItems: "baseline", gap: 8, fontSize: 11, color: m.received ? "#9CA3AF" : "#4B5563" }}>
-                      <span style={{ fontFamily: "monospace", fontWeight: 600, color: m.received ? "#9CA3AF" : "#1F2937", textDecoration: m.received ? "line-through" : "none", minWidth: 70 }}>{m.po || "—"}</span>
-                      {m.orderDate ? <span style={{ fontSize: 10, color: "#9CA3AF" }}>ord {m.orderDate}</span> : null}
-                      {m.expectedArrival ? <span style={{ fontSize: 10, color: m.received ? "#9CA3AF" : "#6B7280", fontWeight: m.received ? 400 : 500 }}>{m.received ? "arr " : "ETA "}{m.expectedArrival}</span> : null}
-                    </div>; })}
+                var allPending = pendingCount === matches.length;
+                var allReceived = pendingCount === 0;
+                var pillContent, pillBg, pillFg, dotBg;
+                if (allReceived) { pillContent = "Received"; pillBg = "#EFF6FF"; pillFg = "#2563EB"; dotBg = "#3B82F6"; }
+                else if (allPending) { pillContent = matches.length > 1 ? "On Order \u00B7 " + matches.length + " POs" : "On Order"; pillBg = "#ECFDF5"; pillFg = "#059669"; dotBg = "#10B981"; }
+                else { pillContent = "On Order \u00B7 " + pendingCount + " of " + matches.length; pillBg = "#ECFDF5"; pillFg = "#059669"; dotBg = "#10B981"; }
+                return <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 200 }}>
+                  <div style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 600, color: pillFg, background: pillBg, padding: "3px 8px", borderRadius: 999, width: "fit-content" }}>
+                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: dotBg }} />
+                    {pillContent}
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                    {matches.map(function(m, mi) {
+                      var dateStr = m.expectedArrival ? "ETA " + fmtDate(m.expectedArrival) : fmtDate(m.orderDate);
+                      return <div key={mi} style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, fontSize: 11 }}>
+                        <span style={{ fontFamily: "monospace", fontWeight: 600, color: m.received ? "#9CA3AF" : "#1F2937", textDecoration: m.received ? "line-through" : "none" }}>{m.po || "\u2014"}</span>
+                        <span style={{ color: m.received ? "#9CA3AF" : (m.expectedArrival ? "#059669" : "#9CA3AF"), fontWeight: m.expectedArrival && !m.received ? 600 : 400, whiteSpace: "nowrap" }}>{dateStr}</span>
+                      </div>;
+                    })}
                   </div>
                 </div>;
               })()}</td>
