@@ -4231,12 +4231,22 @@ function OOSTracker(props) {
                     <span style={{ width: 6, height: 6, borderRadius: "50%", background: dotBg }} />
                     {pillContent}
                   </div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                     {matches.map(function(m, mi) {
-                      var dateStr = m.expectedArrival ? "ETA " + fmtDate(m.expectedArrival) : fmtDate(m.orderDate);
-                      return <div key={mi} style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, fontSize: 11 }}>
+                      var ordStr = m.orderDate ? fmtDate(m.orderDate) : "";
+                      var etaStr = m.expectedArrival ? fmtDate(m.expectedArrival) : "";
+                      return <div key={mi} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, fontSize: 11 }}>
                         <span style={{ fontFamily: "monospace", fontWeight: 600, color: m.received ? "#9CA3AF" : "#1F2937", textDecoration: m.received ? "line-through" : "none" }}>{m.po || "\u2014"}</span>
-                        <span style={{ color: m.received ? "#9CA3AF" : (m.expectedArrival ? "#059669" : "#9CA3AF"), fontWeight: m.expectedArrival && !m.received ? 600 : 400, whiteSpace: "nowrap" }}>{dateStr}</span>
+                        <span style={{ display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}>
+                          {ordStr && <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 10, fontWeight: 500, color: m.received ? "#9CA3AF" : "#6B7280", background: m.received ? "#F9FAFB" : "#F3F4F6", padding: "2px 7px", borderRadius: 999 }}>
+                            <span style={{ fontWeight: 600, opacity: 0.7 }}>Order Date</span>
+                            {ordStr}
+                          </span>}
+                          {etaStr && <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 10, fontWeight: 600, color: m.received ? "#9CA3AF" : "#047857", background: m.received ? "#F9FAFB" : "#D1FAE5", padding: "2px 7px", borderRadius: 999 }}>
+                            <span style={{ fontWeight: 700, opacity: 0.85 }}>ETA</span>
+                            {etaStr}
+                          </span>}
+                        </span>
                       </div>;
                     })}
                   </div>
