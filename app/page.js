@@ -4242,7 +4242,7 @@ function OOSTracker(props) {
                             <span style={{ fontWeight: 600, opacity: 0.7 }}>Order Date</span>
                             <span style={{ fontWeight: 500 }}>{ordStr}</span>
                           </span>}
-                          {etaStr && <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, color: m.received ? "#9CA3AF" : "#047857", background: m.received ? "#F9FAFB" : "#D1FAE5", padding: "2px 7px", borderRadius: 999, whiteSpace: "nowrap" }}>
+                          {etaStr && <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, color: m.received ? "#9CA3AF" : "#9A3412", background: m.received ? "#F9FAFB" : "#FFEDD5", padding: "2px 7px", borderRadius: 999, whiteSpace: "nowrap" }}>
                             <span style={{ fontWeight: 700, opacity: 0.85 }}>ETA</span>
                             <span style={{ fontWeight: 600 }}>{etaStr}</span>
                           </span>}
