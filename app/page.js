@@ -3862,62 +3862,52 @@ function OOSTracker(props) {
         .then(function(j) { return { wh: wh, rows: (j && j.data) || [] }; })
         .catch(function() { return { wh: wh, rows: [] }; });
     }));
-    var crossRefPromise = (cred && cred.username && cred.password)
+    var openPoPromise = (cred && cred.username && cred.password)
       ? fetch("/api/acumatica", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ type: "stock-cross-ref", username: cred.username, password: cred.password }),
+          body: JSON.stringify({ type: "open-po-lines", username: cred.username, password: cred.password }),
         }).then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; })
       : Promise.resolve(null);
-    var ndcLookupPromise = (cred && cred.username && cred.password)
-      ? fetch("/api/acumatica", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ type: "ndc-lookup", username: cred.username, password: cred.password }),
-        }).then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; })
-      : Promise.resolve(null);
-    Promise.all([sheetPromise, crossRefPromise, ndcLookupPromise]).then(function(all) {
+    Promise.all([sheetPromise, openPoPromise]).then(function(all) {
       if (!m) return;
       var sheetResults = all[0];
-      var crossRefJson = all[1];
-      var ndcLookupJson = all[2];
-      // Build NDC -> Inventory ID map from BOTH GIs (cross-ref for branded, ndc-lookup for GEN-)
-      var ndcToInvId = {};
-      if (crossRefJson && crossRefJson.data) {
-        crossRefJson.data.forEach(function(row) {
-          var ndc = normalizeNdc(row.NDC);
-          var invId = (row.InventoryID || "").trim();
-          if (ndc && invId && !ndcToInvId[ndc]) ndcToInvId[ndc] = invId;
-        });
-      }
-      if (ndcLookupJson && ndcLookupJson.data) {
-        ndcLookupJson.data.forEach(function(row) {
-          var ndc = normalizeNdc(row.AlternateID);
-          var invId = (row.InventoryID || "").trim();
-          if (ndc && invId && !ndcToInvId[ndc]) ndcToInvId[ndc] = invId;
-        });
-      }
-      var map = {};
+      var openPoJson = all[1];
+      // Build PO# + Inventory ID -> ETA map from trackers (only source of ETA dates)
+      var etaMap = {};
       sheetResults.forEach(function(rs) {
-        var isFuze = rs.wh.indexOf("TP-") === 0;
         rs.rows.forEach(function(r) {
-          var receivedKey = isFuze ? "Received?**" : "Received?";
-          var isReceived = r[receivedKey] === "TRUE" || r[receivedKey] === "true";
-          // Resolve Inventory ID via NDC -> cross-ref GI; fall back to sheet's Inventory ID column
-          var ndcNorm = normalizeNdc(r["NDC"]);
-          var invId = (ndcNorm && ndcToInvId[ndcNorm]) || (r["Inventory ID"] || "").trim();
-          if (!invId) return;
-          var poKey = isFuze ? "PO No." : "PO Number";
-          if (!map[invId]) map[invId] = [];
-          map[invId].push({
-            wh: rs.wh,
-            po: r[poKey] || "",
-            orderDate: r["Order Date"] || "",
-            expectedArrival: r["Expected Arrival"] || "",
-            received: isReceived,
-          });
+          var isFuze = rs.wh.indexOf("TP-") === 0;
+          var po = (isFuze ? r["PO No."] : r["PO Number"]) || "";
+          var trackerInvId = (r["Inventory ID"] || "").trim();
+          var eta = r["Expected Arrival"] || "";
+          if (po && trackerInvId && eta) {
+            etaMap[po + "|" + trackerInvId] = eta;
+          }
         });
       });
+      // Primary source: Open PO Lines GI
+      var map = {};
+      if (openPoJson && openPoJson.data) {
+        openPoJson.data.forEach(function(row) {
+          var invId = (row.InventoryID || "").trim();
+          if (!invId) return;
+          var orderQty = parseFloat(row.OrderQty) || 0;
+          var qtyReceived = parseFloat(row.QtyOnReceipts) || 0;
+          var outstanding = orderQty - qtyReceived;
+          var po = (row.OrderNbr || "").trim();
+          if (!map[invId]) map[invId] = [];
+          map[invId].push({
+            wh: row.Warehouse || "",
+            po: po,
+            orderDate: row.OrderDate || "",
+            expectedArrival: etaMap[po + "|" + invId] || "",
+            orderQty: orderQty,
+            qtyReceived: qtyReceived,
+            received: outstanding <= 0,
+          });
+        });
+      }
       setOrderMap(map);
     });
     return function() { m = false; };
