@@ -26,6 +26,7 @@ const ENDPOINTS = {
   "gen-pricing-3prx": "PRICING%20-%20Generics%20Avg%20Cost%20Per%203PRx",
   "uom-conversions": "Stock%20Item%20UOM%20Conversions",
   "stock-cross-ref": "FORMULARY%20-%20Stock%20Item%20Cross%20Ref",
+  "open-po-lines": "Open%20PO%20Lines",
 };
 
 // Which columns to extract for each type (keyGroup = possible OData field names)
@@ -158,6 +159,17 @@ const COLUMN_MAP = {
     { label: "NDC",           keys: ["NDC", "AlternateID", "Alternate ID", "AltID", "CrossReference", "Cross Reference", "Cross_Reference"] },
     { label: "VendorName",    keys: ["VendorName", "Vendor Name", "Vendor"] },
   ],
+  "open-po-lines": [
+    { label: "OrderNbr",      keys: ["OrderNbr", "Order Nbr.", "Order Nbr", "OrderNbr_", "PONbr", "PO Nbr"] },
+    { label: "VendorRef",     keys: ["VendorRef", "Vendor Ref.", "Vendor Ref", "VendorRefNbr"] },
+    { label: "InventoryID",   keys: ["InventoryID", "InventoryId", "InventoryCd", "InventoryCD", "Inventory ID", "Inventory_ID"] },
+    { label: "Description",   keys: ["Description", "Descr", "ItemDescription"] },
+    { label: "OrderQty",      keys: ["OrderQty", "Order Qty.", "Order Qty", "OrderQuantity"] },
+    { label: "OrderDate",     keys: ["OrderDate", "POLine_orderDate", "POLine_orderdate", "POLineOrderDate", "Order Date"] },
+    { label: "QtyOnReceipts", keys: ["QtyOnReceipts", "Qty. On Receipts", "Qty On Receipts", "QtyReceived"] },
+    { label: "VendorName",    keys: ["VendorName", "Vendor Name", "Vendor"] },
+    { label: "Warehouse",     keys: ["Warehouse", "WarehouseID", "SiteID"] },
+  ],
 };
 
 export async function POST(request) {
@@ -166,7 +178,7 @@ export async function POST(request) {
     const { type, warehouse, username, password, useServiceAccount } = body;
 
     if (!type || !ENDPOINTS[type]) {
-      return Response.json({ error: "Invalid type. Use: po, po-ggm, ndc-lookup, item-xref, short-dating, backorder, hills-pawtree, replenishment-needs, whse-replenish, gen-pricing, gen-pricing-3prx, uom-conversions, stock-cross-ref" }, { status: 400 });
+      return Response.json({ error: "Invalid type. Use: po, po-ggm, ndc-lookup, item-xref, short-dating, backorder, hills-pawtree, replenishment-needs, whse-replenish, gen-pricing, gen-pricing-3prx, uom-conversions, stock-cross-ref, open-po-lines" }, { status: 400 });
     }
 
     // Use service account credentials from env vars, or user-provided credentials
