@@ -4226,27 +4226,27 @@ function OOSTracker(props) {
                 if (allReceived) { pillContent = "Received"; pillBg = "#EFF6FF"; pillFg = "#2563EB"; dotBg = "#3B82F6"; }
                 else if (allPending) { pillContent = matches.length > 1 ? "On Order \u00B7 " + matches.length + " POs" : "On Order"; pillBg = "#ECFDF5"; pillFg = "#059669"; dotBg = "#10B981"; }
                 else { pillContent = "On Order \u00B7 " + pendingCount + " of " + matches.length; pillBg = "#ECFDF5"; pillFg = "#059669"; dotBg = "#10B981"; }
-                return <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 200 }}>
+                return <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 220 }}>
                   <div style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 600, color: pillFg, background: pillBg, padding: "3px 8px", borderRadius: 999, width: "fit-content" }}>
                     <span style={{ width: 6, height: 6, borderRadius: "50%", background: dotBg }} />
                     {pillContent}
                   </div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     {matches.map(function(m, mi) {
                       var ordStr = m.orderDate ? fmtDate(m.orderDate) : "";
                       var etaStr = m.expectedArrival ? fmtDate(m.expectedArrival) : "";
-                      return <div key={mi} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, fontSize: 11 }}>
-                        <span style={{ fontFamily: "monospace", fontWeight: 600, color: m.received ? "#9CA3AF" : "#1F2937", textDecoration: m.received ? "line-through" : "none" }}>{m.po || "\u2014"}</span>
-                        <span style={{ display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap" }}>
-                          {ordStr && <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 10, fontWeight: 500, color: m.received ? "#9CA3AF" : "#6B7280", background: m.received ? "#F9FAFB" : "#F3F4F6", padding: "2px 7px", borderRadius: 999 }}>
+                      return <div key={mi} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                        <span style={{ fontFamily: "monospace", fontSize: 11, fontWeight: 600, color: m.received ? "#9CA3AF" : "#1F2937", textDecoration: m.received ? "line-through" : "none" }}>{m.po || "\u2014"}</span>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                          {ordStr && <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, color: m.received ? "#9CA3AF" : "#4B5563", background: m.received ? "#F9FAFB" : "#F3F4F6", padding: "2px 7px", borderRadius: 999, whiteSpace: "nowrap" }}>
                             <span style={{ fontWeight: 600, opacity: 0.7 }}>Order Date</span>
-                            {ordStr}
+                            <span style={{ fontWeight: 500 }}>{ordStr}</span>
                           </span>}
-                          {etaStr && <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 10, fontWeight: 600, color: m.received ? "#9CA3AF" : "#047857", background: m.received ? "#F9FAFB" : "#D1FAE5", padding: "2px 7px", borderRadius: 999 }}>
+                          {etaStr && <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, color: m.received ? "#9CA3AF" : "#047857", background: m.received ? "#F9FAFB" : "#D1FAE5", padding: "2px 7px", borderRadius: 999, whiteSpace: "nowrap" }}>
                             <span style={{ fontWeight: 700, opacity: 0.85 }}>ETA</span>
-                            {etaStr}
+                            <span style={{ fontWeight: 600 }}>{etaStr}</span>
                           </span>}
-                        </span>
+                        </div>
                       </div>;
                     })}
                   </div>
