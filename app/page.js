@@ -581,6 +581,7 @@ function WHT(props) {
   var _poSort = useState({ col: null, dir: "asc" }), poSort = _poSort[0], setPoSort = _poSort[1];
   var _shipSort = useState({ col: null, dir: "asc" }), shipSort = _shipSort[0], setShipSort = _shipSort[1];
   var _pcr = useState({}), pcReported = _pcr[0], setPcReported = _pcr[1];
+  var _pcs = useState(null), pcSort = _pcs[0], setPcSort = _pcs[1];
   var _esel = useState(null), emailSelected = _esel[0], setEmailSelected = _esel[1];
   var _il = useState(true), initLoading = _il[0], setInitLoading = _il[1];
   var _emailTo = useState(cfg.emailTo), emailTo = _emailTo[0], setEmailTo = _emailTo[1];
@@ -858,6 +859,39 @@ function WHT(props) {
       var parts = priceCheckKey.split(" || ");
       var vendorName = parts[0], poNum = parts[1] || "";
       var rows = vendorGroups[priceCheckKey] || [];
+      var sortedRows = rows;
+      if (pcSort) {
+        var withIdx = rows.map(function(r, i) { return { r: r, i: i }; });
+        withIdx.sort(function(a, b) {
+          var ra = a.r, rb = b.r;
+          var av, bv;
+          if (pcSort.col === "sku") { av = String(ra.SKUNDC || ""); bv = String(rb.SKUNDC || ""); return pcSort.dir === "desc" ? bv.localeCompare(av) : av.localeCompare(bv); }
+          if (pcSort.col === "desc") { av = String(ra.Description || ""); bv = String(rb.Description || ""); return pcSort.dir === "desc" ? bv.localeCompare(av) : av.localeCompare(bv); }
+          if (pcSort.col === "qty") { av = ra.OrderQty || 0; bv = rb.OrderQty || 0; return pcSort.dir === "desc" ? bv - av : av - bv; }
+          if (pcSort.col === "unit") { av = ra.Price || 0; bv = rb.Price || 0; return pcSort.dir === "desc" ? bv - av : av - bv; }
+          if (pcSort.col === "total") { av = ra.TotalPrice || 0; bv = rb.TotalPrice || 0; return pcSort.dir === "desc" ? bv - av : av - bv; }
+          if (pcSort.col === "reported") {
+            var ka = priceCheckKey + ":" + ra.SKUNDC, kb = priceCheckKey + ":" + rb.SKUNDC;
+            av = parseFloat(String(pcReported[ka] || "").replace(/[$,]/g, "")); bv = parseFloat(String(pcReported[kb] || "").replace(/[$,]/g, ""));
+            if (isNaN(av) && isNaN(bv)) return a.i - b.i;
+            if (isNaN(av)) return 1;
+            if (isNaN(bv)) return -1;
+            return pcSort.dir === "desc" ? bv - av : av - bv;
+          }
+          if (pcSort.col === "reportedUnit") {
+            var ka2 = priceCheckKey + ":" + ra.SKUNDC, kb2 = priceCheckKey + ":" + rb.SKUNDC;
+            var rn_a = parseFloat(String(pcReported[ka2] || "").replace(/[$,]/g, "")), rn_b = parseFloat(String(pcReported[kb2] || "").replace(/[$,]/g, ""));
+            av = !isNaN(rn_a) && ra.OrderQty > 0 ? rn_a / ra.OrderQty : null;
+            bv = !isNaN(rn_b) && rb.OrderQty > 0 ? rn_b / rb.OrderQty : null;
+            if (av == null && bv == null) return a.i - b.i;
+            if (av == null) return 1;
+            if (bv == null) return -1;
+            return pcSort.dir === "desc" ? bv - av : av - bv;
+          }
+          return a.i - b.i;
+        });
+        sortedRows = withIdx.map(function(x) { return x.r; });
+      }
       var total = rows.reduce(function(s, r) { return s + (r.TotalPrice || 0); }, 0);
       var allChecked = rows.length > 0 && rows.every(function(r) { return priceChecked[priceCheckKey + ":" + r.SKUNDC]; });
       var checkedCount = rows.filter(function(r) { return priceChecked[priceCheckKey + ":" + r.SKUNDC]; }).length;
@@ -888,20 +922,28 @@ function WHT(props) {
             </div>
           </div>
           {/* Column headers */}
-          <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "10px 32px", background: "#F9FAFB", borderBottom: "1px solid #F3F4F6", fontSize: 10, fontWeight: 500, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-            <div style={{ width: 22 }}></div>
-            <div style={{ minWidth: 110 }}>SKU</div>
-            <div style={{ flex: 1 }}>Description</div>
-            <div style={{ textAlign: "right", minWidth: 40 }}>Qty</div>
-            <div style={{ textAlign: "right", minWidth: 75 }}>Unit Price</div>
-            <div style={{ textAlign: "right", minWidth: 95 }}>Total</div>
-            <div style={{ width: 1, height: 14, background: "#E5E7EB", margin: "0 4px" }}></div>
-            <div style={{ textAlign: "right", minWidth: 90 }}>Reported</div>
-            <div style={{ textAlign: "right", minWidth: 75 }}>Unit Cost</div>
-          </div>
+          {(function() {
+            function hdr(col, label, opts) {
+              opts = opts || {};
+              var isSorted = pcSort && pcSort.col === col;
+              var arrow = isSorted ? (pcSort.dir === "desc" ? " \u25BE" : " \u25B4") : "";
+              return <div onClick={function() { setPcSort(isSorted ? (pcSort.dir === "desc" ? { col: col, dir: "asc" } : null) : { col: col, dir: "desc" }); }} style={Object.assign({ cursor: "pointer", userSelect: "none", color: isSorted ? "#374151" : "#9CA3AF" }, opts)}>{label}{arrow}</div>;
+            }
+            return <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "10px 32px", background: "#F9FAFB", borderBottom: "1px solid #F3F4F6", fontSize: 10, fontWeight: 500, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+              <div style={{ width: 22 }}></div>
+              {hdr("sku", "SKU", { minWidth: 110 })}
+              {hdr("desc", "Description", { flex: 1 })}
+              {hdr("qty", "Qty", { textAlign: "right", minWidth: 40 })}
+              {hdr("unit", "Unit Price", { textAlign: "right", minWidth: 75 })}
+              {hdr("total", "Total", { textAlign: "right", minWidth: 95 })}
+              <div style={{ width: 1, height: 14, background: "#E5E7EB", margin: "0 4px" }}></div>
+              {hdr("reported", "Reported", { textAlign: "right", minWidth: 90 })}
+              {hdr("reportedUnit", "Unit Cost", { textAlign: "right", minWidth: 75 })}
+            </div>;
+          })()}
           {/* Item list */}
           <div style={{ overflow: "auto", flex: 1, padding: "4px 16px" }}>
-            {rows.map(function(r, i) {
+            {sortedRows.map(function(r, i) {
               var ck = priceChecked[priceCheckKey + ":" + r.SKUNDC] || false;
               var rKey = priceCheckKey + ":" + r.SKUNDC;
               var reported = pcReported[rKey] || "";
