@@ -4273,7 +4273,11 @@ function OOSTracker(props) {
               <td style={Object.assign({}, S.td, { color: "#374151", maxWidth: 300 })}>{r.PRODUCT_LINE_NAME}</td>
               <td style={S.td}><span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 6, fontWeight: 500, background: whBg, color: whColor }}>{r._wh}</span></td>
               <td style={S.td}>{(function() {
-                var matches = orderMap[String(r.MANUFACTURER_NO)] || [];
+                // Map OOS row's display warehouse to Acumatica warehouse codes
+                var OOS_TO_ACU = { "Brooklyn": ["TP-NY"], "Ohio": ["TP-OH"], "Hayward": ["TP-CA"], "Miami": ["TP-FL", "TP-MI"], "Kentucky": ["GGM-KY"], "Arizona": ["GGM-AZ"], "Hills CA": ["HILLS_CGP_WAREHOUSE_CA", "HILLS-CGP-CA", "HILL-CP-CA"], "Hills NJ": ["HILLS_CGP_WAREHOUSE_NJ", "HILLS-CGP-NJ", "HILL-CP-NJ"] };
+                var allowed = OOS_TO_ACU[r._wh] || null;
+                var allMatches = orderMap[String(r.MANUFACTURER_NO)] || [];
+                var matches = allowed ? allMatches.filter(function(m) { return allowed.indexOf(m.wh) >= 0; }) : allMatches;
                 if (matches.length === 0) return <span style={{ color: "#D1D5DB", fontSize: 13 }}>{"\u2014"}</span>;
                 function fmtDate(s) {
                   if (!s) return "";
