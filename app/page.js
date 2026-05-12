@@ -1985,6 +1985,27 @@ function POImportTool(props) {
   var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
   var fileList = useMemo(function() { if (vendor !== "other" || results.length === 0) return []; var f = {}; results.forEach(function(r) { if (r.sourceFile) f[r.sourceFile] = (f[r.sourceFile] || 0) + 1; }); return Object.keys(f).map(function(name) { return { name: name, count: f[name] }; }); }, [results, vendor]);
   var activeResults = useMemo(function() { if (vendor !== "other" || !activeFileTab || fileList.length <= 1) return results; return results.filter(function(r) { return r.sourceFile === activeFileTab; }); }, [results, vendor, activeFileTab, fileList]);
+  var _deltaSort = useState(null), deltaSort = _deltaSort[0], setDeltaSort = _deltaSort[1];
+  function computeDeltaPct(r) {
+    if (r.avgCost == null || r.avgCost <= 0) return null;
+    var avgPerPkg = r.uomConvFactor && r.uomConvFactor > 0 ? r.avgCost * r.uomConvFactor : r.avgCost;
+    if (avgPerPkg <= 0) return null;
+    var unitCost = editedPrices[r.ndc] != null ? parseFloat(editedPrices[r.ndc]) : r.unitPrice;
+    if (!unitCost) return null;
+    return ((unitCost - avgPerPkg) / avgPerPkg) * 100;
+  }
+  var sortedActiveResults = useMemo(function() {
+    if (!deltaSort) return activeResults;
+    var withPct = activeResults.map(function(r, i) { return { r: r, i: i, pct: computeDeltaPct(r) }; });
+    withPct.sort(function(a, b) {
+      // Rows without Δ% go to bottom regardless of sort direction
+      if (a.pct == null && b.pct == null) return a.i - b.i;
+      if (a.pct == null) return 1;
+      if (b.pct == null) return -1;
+      return deltaSort === "desc" ? b.pct - a.pct : a.pct - b.pct;
+    });
+    return withPct.map(function(x) { return x.r; });
+  }, [activeResults, deltaSort, editedPrices]);
   var foundCount = activeResults.filter(function(r) { return r.ndcFound; }).length;
   var notFoundCount = activeResults.length - foundCount;
   var qtyMismatchCount = activeResults.filter(function(r) { return screenshotQtys[r.ndc] != null && parseInt(screenshotQtys[r.ndc]) !== r.qty; }).length;
@@ -2106,11 +2127,11 @@ function POImportTool(props) {
               <th style={Object.assign({}, S.th, { textAlign: "right" })}>Unit Cost</th>
               <th style={Object.assign({}, S.th, { textAlign: "right" })}>Ext. Cost</th>
               <th style={Object.assign({}, S.th, { textAlign: "right" })}>Avg Unit Cost</th>
-              <th style={Object.assign({}, S.th, { textAlign: "right" })}>{"\u0394% Unit Cost"}</th>
+              <th onClick={function() { setDeltaSort(deltaSort === "desc" ? "asc" : deltaSort === "asc" ? null : "desc"); }} style={Object.assign({}, S.th, { textAlign: "right", cursor: "pointer", userSelect: "none" })}>{"\u0394% Unit Cost"}{deltaSort === "desc" ? " \u25BE" : deltaSort === "asc" ? " \u25B4" : ""}</th>
               {vendor === "mckesson" && <th style={S.th}>MCK Item #</th>}
               <th style={S.th}>Source</th>
             </tr></thead>
-            <tbody>{activeResults.map(function(r, i) {
+            <tbody>{sortedActiveResults.map(function(r, i) {
               var editedQty = screenshotQtys[r.ndc] != null ? parseInt(screenshotQtys[r.ndc]) : r.qty;
               var qtyChanged = screenshotQtys[r.ndc] != null && parseInt(screenshotQtys[r.ndc]) !== r.qty;
               var editedPrice = editedPrices[r.ndc] != null ? parseFloat(editedPrices[r.ndc]) : r.unitPrice;
