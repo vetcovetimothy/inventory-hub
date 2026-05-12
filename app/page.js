@@ -4280,7 +4280,10 @@ function OOSTracker(props) {
                 var OOS_TO_ACU = { "Brooklyn": ["TP-NY"], "Ohio": ["TP-OH"], "Hayward": ["TP-CA"], "Miami": ["TP-FL", "TP-MI"], "Kentucky": ["GGM-KY"], "Arizona": ["GGM-AZ"], "Hills CA": ["HILL-CP-CA"], "Hills NJ": ["HILL-CP-NJ"] };
                 var allowed = OOS_TO_ACU[r._wh] || null;
                 var allMatches = orderMap[String(r.MANUFACTURER_NO)] || [];
-                var matches = allowed ? allMatches.filter(function(m) { return allowed.indexOf(m.wh) >= 0; }) : allMatches;
+                var filtered = allowed ? allMatches.filter(function(m) { return allowed.indexOf(m.wh) >= 0; }) : allMatches;
+                // Fail-open: if filter rejected everything but matches exist, show all with a flag
+                var matches = filtered.length > 0 ? filtered : allMatches;
+                var unfilteredFallback = filtered.length === 0 && allMatches.length > 0;
                 if (matches.length === 0) return <span style={{ color: "#D1D5DB", fontSize: 13 }}>{"\u2014"}</span>;
                 function fmtDate(s) {
                   if (!s) return "";
@@ -4301,6 +4304,7 @@ function OOSTracker(props) {
                     <span style={{ width: 6, height: 6, borderRadius: "50%", background: dotBg }} />
                     {pillContent}
                   </div>
+                  {unfilteredFallback && <div style={{ fontSize: 9, color: "#D97706", fontStyle: "italic" }} title="Warehouse filter could not match — showing all">unfiltered: {Array.from(new Set(matches.map(function(m) { return m.wh || "(blank)"; }))).join(", ")}</div>}
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     {matches.map(function(m, mi) {
                       var ordStr = m.orderDate ? fmtDate(m.orderDate) : "";
