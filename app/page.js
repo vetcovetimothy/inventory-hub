@@ -3974,6 +3974,9 @@ function OOSTracker(props) {
         openPoJson.data.forEach(function(row) {
           var invId = (row.InventoryID || "").trim();
           if (!invId) return;
+          var whCode = (row.Warehouse || "").trim();
+          // Skip warehouses we don't work with (e.g. EXP-NJ and any other EXP- prefixed)
+          if (whCode.indexOf("EXP") === 0) return;
           var orderQty = parseFloat(row.OrderQty) || 0;
           var qtyReceived = parseFloat(row.QtyOnReceipts) || 0;
           var outstanding = orderQty - qtyReceived;
@@ -4274,7 +4277,7 @@ function OOSTracker(props) {
               <td style={S.td}><span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 6, fontWeight: 500, background: whBg, color: whColor }}>{r._wh}</span></td>
               <td style={S.td}>{(function() {
                 // Map OOS row's display warehouse to Acumatica warehouse codes
-                var OOS_TO_ACU = { "Brooklyn": ["TP-NY"], "Ohio": ["TP-OH"], "Hayward": ["TP-CA"], "Miami": ["TP-FL", "TP-MI"], "Kentucky": ["GGM-KY"], "Arizona": ["GGM-AZ"], "Hills CA": ["HILL-CP-CA"], "Hills NJ": ["HILL-CP-NJ", "EXP-NJ"] };
+                var OOS_TO_ACU = { "Brooklyn": ["TP-NY"], "Ohio": ["TP-OH"], "Hayward": ["TP-CA"], "Miami": ["TP-FL", "TP-MI"], "Kentucky": ["GGM-KY"], "Arizona": ["GGM-AZ"], "Hills CA": ["HILL-CP-CA"], "Hills NJ": ["HILL-CP-NJ"] };
                 var allowed = OOS_TO_ACU[r._wh] || null;
                 var allMatches = orderMap[String(r.MANUFACTURER_NO)] || [];
                 var matches = allowed ? allMatches.filter(function(m) { return allowed.indexOf(m.wh) >= 0; }) : allMatches;
