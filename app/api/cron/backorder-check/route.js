@@ -69,45 +69,83 @@ async function postSlack(webhookUrl, payload) {
 }
 
 function buildSlackMessage(newItems, totalResolved, link) {
-  const showLimit = 8;
-  const lines = newItems.slice(0, showLimit).map((r) => {
-    const id = r.InventoryID || "(no ID)";
-    const desc = (r.Description || "").substring(0, 80);
-    const vendor = r.VendorName || "Unknown vendor";
-    return `• *${id}* — ${desc} _(${vendor})_`;
+  // Group items by vendor
+  const byVendor = {};
+  newItems.forEach((r) => {
+    const v = r.VendorName || "Unknown Vendor";
+    if (!byVendor[v]) byVendor[v] = [];
+    byVendor[v].push(r);
   });
-  const overflow = newItems.length > showLimit ? `\n_…and ${newItems.length - showLimit} more_` : "";
+  // Order vendors by item count (most first)
+  const vendors = Object.keys(byVendor).sort((a, b) => byVendor[b].length - byVendor[a].length);
+
+  // Across all vendors, cap total items displayed to keep message readable
+  const ITEM_LIMIT = 30;
+  let itemsShown = 0;
+  let vendorsShown = 0;
+  const vendorBlocks = [];
+  for (const v of vendors) {
+    if (itemsShown >= ITEM_LIMIT) break;
+    const items = byVendor[v];
+    const remainingCap = ITEM_LIMIT - itemsShown;
+    const toShow = items.slice(0, remainingCap);
+    const itemLines = toShow.map((r) => {
+      const id = r.InventoryID || "(no ID)";
+      const desc = (r.Description || "").substring(0, 70);
+      return `   • \`${id}\` — ${desc}`;
+    });
+    const extra = items.length > toShow.length ? `\n   _…and ${items.length - toShow.length} more from this vendor_` : "";
+    const text = `*${v}* — ${items.length} item${items.length === 1 ? "" : "s"}\n${itemLines.join("\n")}${extra}`;
+    vendorBlocks.push({ type: "section", text: { type: "mrkdwn", text } });
+    itemsShown += toShow.length;
+    vendorsShown++;
+  }
+  const overflowVendors = vendors.length - vendorsShown;
+  const overflowText = overflowVendors > 0 ? `\n_…and ${overflowVendors} more vendor${overflowVendors === 1 ? "" : "s"} not shown_` : "";
+
   const headerText = newItems.length === 1
     ? "*1 new resolved backorder*"
     : `*${newItems.length} new resolved backorders*`;
-  return {
-    text: `${headerText} — ${totalResolved} total currently resolved`,
-    blocks: [
-      {
-        type: "header",
-        text: { type: "plain_text", text: "🔓 Backorder Resolver Update", emoji: true },
+
+  const blocks = [
+    {
+      type: "header",
+      text: { type: "plain_text", text: "🔓 Backorder Resolver Update", emoji: true },
+    },
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `${headerText} since yesterday — ${totalResolved} total currently resolved (no open PO).`,
       },
+    },
+    { type: "divider" },
+    ...vendorBlocks,
+  ];
+  if (overflowText) {
+    blocks.push({ type: "section", text: { type: "mrkdwn", text: overflowText } });
+  }
+  blocks.push({
+    type: "actions",
+    elements: [
       {
-        type: "section",
-        text: {
-          type: "mrkdwn",
-          text: `${headerText} since yesterday — ${totalResolved} total currently resolved (no open PO).`,
-        },
-      },
-      { type: "section", text: { type: "mrkdwn", text: lines.join("\n") + overflow } },
-      {
-        type: "actions",
-        elements: [
-          {
-            type: "button",
-            text: { type: "plain_text", text: "Open Backorder Resolver", emoji: true },
-            url: link,
-            style: "primary",
-          },
-        ],
+        type: "button",
+        text: { type: "plain_text", text: "Open Backorder Resolver", emoji: true },
+        url: link,
+        style: "primary",
       },
     ],
+  });
+
+  const payload = {
+    username: "Backorder Resolver",
+    text: `${headerText} — ${totalResolved} total currently resolved`,
+    blocks,
   };
+  const iconUrl = process.env.SLACK_BOT_ICON_URL;
+  if (iconUrl) payload.icon_url = iconUrl;
+  else payload.icon_emoji = ":parrot:";
+  return payload;
 }
 
 export async function GET(request) {
