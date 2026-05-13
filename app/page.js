@@ -4434,20 +4434,6 @@ function BackorderResolver(props) {
     return <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 999, fontWeight: 600, background: m.bg, color: m.fg }}>{m.label}</span>;
   }
 
-  function copyEmailHtml() {
-    var newRows = filtered.filter(function(r) { var st = statusMap[r.InventoryID] || "new"; return st === "new"; });
-    if (newRows.length === 0) { toast("No 'New' rows to email", "error"); return; }
-    var html = '<p>Good morning,</p><p>The following items are no longer on open POs and may be off backorder:</p>';
-    html += '<table border="1" cellpadding="5" cellspacing="0" style="border-collapse: collapse;"><thead style="background-color:#f2f2f2;"><tr><th>Inventory ID</th><th>Movement Class</th><th>Description</th><th>Vendor Name</th></tr></thead><tbody>';
-    newRows.forEach(function(r) { html += "<tr><td>" + (r.InventoryID || "") + "</td><td>" + (r.MovementClass || "") + "</td><td>" + (r.Description || "") + "</td><td>" + (r.VendorName || "") + "</td></tr>"; });
-    html += '</tbody></table><p>Thanks,<br>Procurement Hub</p>';
-    if (navigator.clipboard && navigator.clipboard.write) {
-      var blob = new Blob([html], { type: "text/html" });
-      var item = new ClipboardItem({ "text/html": blob, "text/plain": new Blob([html.replace(/<[^>]+>/g, "")], { type: "text/plain" }) });
-      navigator.clipboard.write([item]).then(function() { toast("HTML table copied to clipboard"); }).catch(function() { navigator.clipboard.writeText(html); toast("Copied as HTML source"); });
-    } else { navigator.clipboard.writeText(html); toast("Copied to clipboard"); }
-  }
-
   return <div>
     {/* Stat cards */}
     <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 20 }}>
@@ -4470,7 +4456,6 @@ function BackorderResolver(props) {
       </select>
       <div style={{ flex: 1 }} />
       <span style={{ fontSize: 12, color: "#6B7280" }}>{filtered.length}/{resolved.length}</span>
-      <button onClick={copyEmailHtml} style={Object.assign({}, S.btn(), { padding: "6px 14px", fontSize: 12 })}><IconMail /> Copy Email</button>
       <button onClick={fetchAll} disabled={loading} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}>{loading ? <><Spinner color={TOOL_COLOR} size={14} /> Refreshing...</> : <><IconRefresh /> Refresh</>}</button>
     </div>
 
