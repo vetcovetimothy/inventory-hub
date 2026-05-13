@@ -4599,7 +4599,13 @@ function ShippingRulesPage(props) {
 
 /* ═══════ MAIN HUB ═══════ */
 export default function Hub() {
-  var _p = useState(function() { var s = sGet("active-page"); return s || "TP-NY"; }), page = _p[0], setPage = _p[1];
+  var _p = useState(function() {
+    if (typeof window !== "undefined") {
+      var qp = new URLSearchParams(window.location.search).get("page");
+      if (qp) return qp;
+    }
+    var s = sGet("active-page"); return s || "TP-NY";
+  }), page = _p[0], setPage = _p[1];
   function setPagePersist(p) { setPage(p); sSet("active-page", p); }
   var _c = useState({ username: "", password: "" }), cred = _c[0], setCred = _c[1];
   var _ok = useState(false), ok = _ok[0], setOk = _ok[1];
