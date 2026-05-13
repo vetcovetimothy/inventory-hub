@@ -204,13 +204,19 @@ export async function GET(request) {
     const newItems = resolved.filter((r) => !prevIds.has(String(r.InventoryID).trim()));
 
     // Save today's snapshot regardless of whether we send a message
-    await kvSet(SNAPSHOT_KEY, {
-      ids: Array.from(resolvedIds),
-      savedAt: Date.now(),
-    });
+    // (Skip snapshot save when forcing — keeps tomorrow's diff accurate during tests)
+    const url = new URL(request.url);
+    const force = url.searchParams.get("force") === "1";
+    if (!force) {
+      await kvSet(SNAPSHOT_KEY, {
+        ids: Array.from(resolvedIds),
+        savedAt: Date.now(),
+      });
+    }
 
-    // Only send Slack if there are new items
-    if (newItems.length === 0) {
+    // Only send Slack if there are new items (or force=1 was passed)
+    const itemsToSend = force ? resolved : newItems;
+    if (itemsToSend.length === 0) {
       return Response.json({
         ok: true,
         totalResolved: resolved.length,
@@ -220,14 +226,15 @@ export async function GET(request) {
     }
 
     const link = `${SITE_URL}/?page=backorder-resolver`;
-    const payload = buildSlackMessage(newItems, resolved.length, link);
+    const payload = buildSlackMessage(itemsToSend, resolved.length, link);
     await postSlack(slackUrl, payload);
 
     return Response.json({
       ok: true,
       totalResolved: resolved.length,
-      newItems: newItems.length,
+      newItems: itemsToSend.length,
       sentSlack: true,
+      forced: force,
     });
   } catch (err) {
     return Response.json({ error: err.message || "Cron failed" }, { status: 500 });
