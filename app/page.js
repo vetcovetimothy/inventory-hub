@@ -4340,6 +4340,178 @@ function OOSTracker(props) {
   </div>;
 }
 
+/* ═══════ BACKORDER RESOLVER ═══════ */
+function BackorderResolver(props) {
+  var toast = props.toast, cred = props.cred;
+  var TOOL_COLOR = "#14B8A6";
+  var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
+  var _ld = useState(false), loading = _ld[0], setLoading = _ld[1];
+  var _err = useState(null), err = _err[0], setErr = _err[1];
+  var _resolved = useState([]), resolved = _resolved[0], setResolved = _resolved[1];
+  var _backTotal = useState(0), backTotal = _backTotal[0], setBackTotal = _backTotal[1];
+  var _notes = useState({}), notes = _notes[0], setNotes = _notes[1];
+  var _statusMap = useState({}), statusMap = _statusMap[0], setStatusMap = _statusMap[1];
+  var _search = useState(""), search = _search[0], setSearch = _search[1];
+  var _vf = useState("all"), vendorFilter = _vf[0], setVendorFilter = _vf[1];
+  var _sf = useState("all"), statusFilter = _sf[0], setStatusFilter = _sf[1];
+  var _sort = useState(null), sortState = _sort[0], setSortState = _sort[1];
+  var KV_NOTES = "backorder-resolver-notes";
+  var KV_STATUS = "backorder-resolver-status";
+
+  function fetchAll() {
+    if (!cred || !cred.username || !cred.password) { setErr("Login required to fetch from Acumatica"); return; }
+    setLoading(true); setErr(null);
+    Promise.all([
+      fetch("/api/acumatica", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "backorder", username: cred.username, password: cred.password }) }).then(function(r) { return r.json(); }),
+      fetch("/api/acumatica", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "open-po-lines", username: cred.username, password: cred.password }) }).then(function(r) { return r.json(); }),
+    ]).then(function(both) {
+      var bo = both[0].data || []; var pos = both[1].data || [];
+      var openIds = {};
+      pos.forEach(function(p) { var id = (p.InventoryID || "").trim(); var open = (parseFloat(p.OrderQty) || 0) - (parseFloat(p.QtyOnReceipts) || 0); if (id && open > 0) openIds[id] = true; });
+      var filtered = bo.filter(function(r) {
+        var id = (r.InventoryID || "").trim();
+        var vendor = (r.VendorName || "").trim();
+        var mc = (r.MovementClass || "").trim();
+        return id && !openIds[id] && vendor !== "Bloodworth Wholesale Drugs" && mc !== "Long-Term Backorder";
+      });
+      setBackTotal(bo.length);
+      setResolved(filtered);
+      setLoading(false);
+      toast("Found " + filtered.length + " resolved backorders of " + bo.length + " total");
+    }).catch(function(e) { setErr(e.message || "Failed"); setLoading(false); });
+  }
+
+  useEffect(function() {
+    var m = true;
+    kvGet(KV_NOTES).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+      if (!m || !d || !d.data) return;
+      var parsed = typeof d.data === "string" ? JSON.parse(d.data) : d.data;
+      delete parsed._savedAt; setNotes(parsed || {});
+    }).catch(function() {});
+    kvGet(KV_STATUS).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+      if (!m || !d || !d.data) return;
+      var parsed = typeof d.data === "string" ? JSON.parse(d.data) : d.data;
+      delete parsed._savedAt; setStatusMap(parsed || {});
+    }).catch(function() {});
+    return function() { m = false; };
+  }, []);
+
+  useEffect(function() { if (cred && cred.username) fetchAll(); }, [cred]);
+
+  function updateNote(id, v) { var u = Object.assign({}, notes); u[id] = v; setNotes(u); kvPost(KV_NOTES, Object.assign({}, u, { _savedAt: Date.now() })).catch(function() {}); }
+  function updateStatus(id, s) { var u = Object.assign({}, statusMap); if (s === "new") delete u[id]; else u[id] = s; setStatusMap(u); kvPost(KV_STATUS, Object.assign({}, u, { _savedAt: Date.now() })).catch(function() {}); }
+
+  var vendors = useMemo(function() { return Array.from(new Set(resolved.map(function(r) { return r.VendorName; }).filter(Boolean))).sort(); }, [resolved]);
+
+  var filtered = useMemo(function() {
+    var d = resolved.slice();
+    if (search) { var s = search.toLowerCase(); d = d.filter(function(r) { return (r.InventoryID || "").toLowerCase().indexOf(s) >= 0 || (r.Description || "").toLowerCase().indexOf(s) >= 0 || (r.VendorName || "").toLowerCase().indexOf(s) >= 0 || (r.SKUNDC || "").toLowerCase().indexOf(s) >= 0; }); }
+    if (vendorFilter !== "all") d = d.filter(function(r) { return r.VendorName === vendorFilter; });
+    if (statusFilter !== "all") d = d.filter(function(r) { var st = statusMap[r.InventoryID] || "new"; return st === statusFilter; });
+    if (sortState) {
+      d.sort(function(a, b) {
+        var av, bv;
+        if (sortState.col === "id") { av = a.InventoryID || ""; bv = b.InventoryID || ""; return sortState.dir === "desc" ? bv.localeCompare(av) : av.localeCompare(bv); }
+        if (sortState.col === "desc") { av = a.Description || ""; bv = b.Description || ""; return sortState.dir === "desc" ? bv.localeCompare(av) : av.localeCompare(bv); }
+        if (sortState.col === "vendor") { av = a.VendorName || ""; bv = b.VendorName || ""; return sortState.dir === "desc" ? bv.localeCompare(av) : av.localeCompare(bv); }
+        if (sortState.col === "mc") { av = a.MovementClass || ""; bv = b.MovementClass || ""; return sortState.dir === "desc" ? bv.localeCompare(av) : av.localeCompare(bv); }
+        if (sortState.col === "qty") { av = parseFloat(a.QtyOnHand) || 0; bv = parseFloat(b.QtyOnHand) || 0; return sortState.dir === "desc" ? bv - av : av - bv; }
+        return 0;
+      });
+    }
+    return d;
+  }, [resolved, search, vendorFilter, statusFilter, sortState, statusMap]);
+
+  function sortHeader(col, label, opts) {
+    opts = opts || {};
+    var isSorted = sortState && sortState.col === col;
+    return <th onClick={function() { setSortState(isSorted ? (sortState.dir === "desc" ? { col: col, dir: "asc" } : null) : { col: col, dir: "desc" }); }} style={Object.assign({}, S.th, { cursor: "pointer", userSelect: "none" }, opts)}>{label}{isSorted ? (sortState.dir === "desc" ? " \u25BE" : " \u25B4") : ""}</th>;
+  }
+
+  function statusBadge(st) {
+    var map = { "review": { bg: "#FEF3C7", fg: "#A16207", label: "In Review" }, "ordered": { bg: "#DBEAFE", fg: "#1D4ED8", label: "Ordered" }, "ignored": { bg: "#F3F4F6", fg: "#6B7280", label: "Ignored" } };
+    var m = map[st]; if (!m) return null;
+    return <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 999, fontWeight: 600, background: m.bg, color: m.fg }}>{m.label}</span>;
+  }
+
+  function copyEmailHtml() {
+    var newRows = filtered.filter(function(r) { var st = statusMap[r.InventoryID] || "new"; return st === "new"; });
+    if (newRows.length === 0) { toast("No 'New' rows to email", "error"); return; }
+    var html = '<p>Good morning,</p><p>The following items are no longer on open POs and may be off backorder:</p>';
+    html += '<table border="1" cellpadding="5" cellspacing="0" style="border-collapse: collapse;"><thead style="background-color:#f2f2f2;"><tr><th>Inventory ID</th><th>Movement Class</th><th>Description</th><th>Vendor Name</th></tr></thead><tbody>';
+    newRows.forEach(function(r) { html += "<tr><td>" + (r.InventoryID || "") + "</td><td>" + (r.MovementClass || "") + "</td><td>" + (r.Description || "") + "</td><td>" + (r.VendorName || "") + "</td></tr>"; });
+    html += '</tbody></table><p>Thanks,<br>Procurement Hub</p>';
+    if (navigator.clipboard && navigator.clipboard.write) {
+      var blob = new Blob([html], { type: "text/html" });
+      var item = new ClipboardItem({ "text/html": blob, "text/plain": new Blob([html.replace(/<[^>]+>/g, "")], { type: "text/plain" }) });
+      navigator.clipboard.write([item]).then(function() { toast("HTML table copied to clipboard"); }).catch(function() { navigator.clipboard.writeText(html); toast("Copied as HTML source"); });
+    } else { navigator.clipboard.writeText(html); toast("Copied to clipboard"); }
+  }
+
+  return <div>
+    {/* Stat cards */}
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 20 }}>
+      <div style={Object.assign({}, S.statCard, { background: "#FEF2F2" })}><div style={{ fontSize: 11, color: "#B5736B", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>Total Backordered</div><div style={{ fontSize: 28, fontWeight: 500, color: "#DC2626", marginTop: 6 }}>{backTotal}</div></div>
+      <div style={Object.assign({}, S.statCard, { background: "#F0FDFA" })}><div style={{ fontSize: 11, color: "#6B9CA0", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>Resolved (No Open PO)</div><div style={{ fontSize: 28, fontWeight: 500, color: "#0D9488", marginTop: 6 }}>{resolved.length}</div></div>
+      <div style={Object.assign({}, S.statCard, { background: "#FEF3C7" })}><div style={{ fontSize: 11, color: "#A1804A", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>In Review</div><div style={{ fontSize: 28, fontWeight: 500, color: "#A16207", marginTop: 6 }}>{resolved.filter(function(r) { return statusMap[r.InventoryID] === "review"; }).length}</div></div>
+      <div style={Object.assign({}, S.statCard, { background: "#DBEAFE" })}><div style={{ fontSize: 11, color: "#6B85B5", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>Ordered</div><div style={{ fontSize: 28, fontWeight: 500, color: "#1D4ED8", marginTop: 6 }}>{resolved.filter(function(r) { return statusMap[r.InventoryID] === "ordered"; }).length}</div></div>
+    </div>
+
+    {/* Toolbar */}
+    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+      <input style={Object.assign({}, S.inp, { maxWidth: 260 })} placeholder="Search by ID, NDC, description, vendor..." value={search} onChange={function(e) { setSearch(e.target.value); }} />
+      <select style={S.sel} value={vendorFilter} onChange={function(e) { setVendorFilter(e.target.value); }}><option value="all">All Vendors</option>{vendors.map(function(v) { return <option key={v} value={v}>{v}</option>; })}</select>
+      <select style={S.sel} value={statusFilter} onChange={function(e) { setStatusFilter(e.target.value); }}>
+        <option value="all">All Statuses</option>
+        <option value="new">New</option>
+        <option value="review">In Review</option>
+        <option value="ordered">Ordered</option>
+        <option value="ignored">Ignored</option>
+      </select>
+      <div style={{ flex: 1 }} />
+      <span style={{ fontSize: 12, color: "#6B7280" }}>{filtered.length}/{resolved.length}</span>
+      <button onClick={copyEmailHtml} style={Object.assign({}, S.btn(), { padding: "6px 14px", fontSize: 12 })}><IconMail /> Copy Email</button>
+      <button onClick={fetchAll} disabled={loading} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}>{loading ? <><Spinner color={TOOL_COLOR} size={14} /> Refreshing...</> : <><IconRefresh /> Refresh</>}</button>
+    </div>
+
+    {err && <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", color: "#991B1B", padding: "10px 14px", borderRadius: 8, marginBottom: 12, fontSize: 13 }}>{err}</div>}
+
+    {/* Table */}
+    {resolved.length > 0 ? <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto", maxHeight: "calc(100vh - 360px)" })}>
+      <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
+        <thead><tr>
+          <th style={Object.assign({}, S.th, { minWidth: 110 })}>Status</th>
+          {sortHeader("id", "Inventory ID")}
+          {sortHeader("desc", "Description", { minWidth: 200 })}
+          {sortHeader("vendor", "Vendor")}
+          {sortHeader("mc", "Movement Class")}
+          {sortHeader("qty", "Qty On Hand", { textAlign: "right" })}
+          <th style={Object.assign({}, S.th, { minWidth: 200 })}>Notes</th>
+        </tr></thead>
+        <tbody>{filtered.map(function(r, i) {
+          var id = r.InventoryID; var st = statusMap[id] || "new";
+          return <tr key={id + ":" + i}>
+            <td style={S.td}>
+              <select value={st} onChange={function(e) { updateStatus(id, e.target.value); }} style={{ background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 6, padding: "4px 8px", fontSize: 11, color: "#374151", outline: "none", fontFamily: "'Varela Round', sans-serif", width: "100%" }}>
+                <option value="new">New</option>
+                <option value="review">In Review</option>
+                <option value="ordered">Ordered</option>
+                <option value="ignored">Ignored</option>
+              </select>
+            </td>
+            <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontWeight: 600, color: "#0D9488" })}>{id}</td>
+            <td style={Object.assign({}, S.td, { color: "#374151" })}>{r.Description}</td>
+            <td style={S.td}>{r.VendorName}</td>
+            <td style={S.td}><span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 6, fontWeight: 500, background: "#F3F4F6", color: "#6B7280" }}>{r.MovementClass}</span></td>
+            <td style={Object.assign({}, S.td, { textAlign: "right" })}>{r.QtyOnHand}</td>
+            <td style={S.td}><input value={notes[id] !== undefined ? notes[id] : ""} onChange={function(e) { updateNote(id, e.target.value); }} placeholder="Add notes..." style={Object.assign({}, S.inp, { padding: "5px 10px", fontSize: 12, width: "100%" })} /></td>
+          </tr>;
+        })}</tbody>
+      </table>
+    </div> : <div style={Object.assign({}, S.card, { textAlign: "center", padding: 60, color: "#9CA3AF" })}>{loading ? <Spinner color={TOOL_COLOR} size={20} /> : err ? err : "No resolved backorders found. Click Refresh to check."}</div>}
+  </div>;
+}
+
 /* ═══════ VENDOR CONTACTS PAGE ═══════ */
 function VendorContactsPage(props) {
   var contacts = props.contacts, updateContacts = props.updateContacts, toast = props.toast;
@@ -4568,8 +4740,8 @@ export default function Hub() {
   );
 
   var isWH = page in WH;
-  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "po-import" ? "#06B6D4" : page === "cycle-count" ? "#14B8A6" : page === "fuze-tracker" ? "#F59E0B" : page === "ggm-tracker" ? "#8B5CF6" : page === "hills-pawtree" ? "#10B981" : page === "truckloader" ? "#D97706" : page === "oos-tracker" ? "#EF4444" : page === "vendor-contacts" ? "#6366F1" : page === "how-to" ? "#6B7280" : "#3B82F6";
-  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "po-import" ? "Generic PO Translator" : page === "cycle-count" ? "Cycle Counting" : page === "fuze-tracker" ? "Fuze Tracker" : page === "ggm-tracker" ? "GGM Tracker" : page === "hills-pawtree" ? "Hills & Pawtree Tracker" : page === "truckloader" ? "Truckloader" : page === "oos-tracker" ? "OOS Tracker" : page === "vendor-contacts" ? "Vendor Contacts" : page === "how-to" ? "How-To Guide" : showLogin ? "Login" : "Shipping Rules";
+  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "backorder-resolver" ? "#14B8A6" : page === "po-import" ? "#06B6D4" : page === "cycle-count" ? "#14B8A6" : page === "fuze-tracker" ? "#F59E0B" : page === "ggm-tracker" ? "#8B5CF6" : page === "hills-pawtree" ? "#10B981" : page === "truckloader" ? "#D97706" : page === "oos-tracker" ? "#EF4444" : page === "vendor-contacts" ? "#6366F1" : page === "how-to" ? "#6B7280" : "#3B82F6";
+  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "backorder-resolver" ? "Backorder Resolver" : page === "po-import" ? "Generic PO Translator" : page === "cycle-count" ? "Cycle Counting" : page === "fuze-tracker" ? "Fuze Tracker" : page === "ggm-tracker" ? "GGM Tracker" : page === "hills-pawtree" ? "Hills & Pawtree Tracker" : page === "truckloader" ? "Truckloader" : page === "oos-tracker" ? "OOS Tracker" : page === "vendor-contacts" ? "Vendor Contacts" : page === "how-to" ? "How-To Guide" : showLogin ? "Login" : "Shipping Rules";
 
   function SideLink(p) {
     var active = page === p.id && !showLogin;
@@ -4595,7 +4767,7 @@ export default function Hub() {
             { key: "hills", label: "Hills Tools", items: [{ id: "hills-pawtree", label: "Hills & Pawtree", color: "#10B981" }, { id: "truckloader", label: "Truckloader", color: "#D97706" }] },
             { key: "oos", label: "OOS", items: [{ id: "oos-tracker", label: "OOS Tracker", color: "#EF4444" }] },
             { key: "tracking", label: "Tracking", items: [{ id: "fuze-tracker", label: "Fuze Tracker", color: "#F59E0B" }, { id: "ggm-tracker", label: "GGM Tracker", color: "#8B5CF6" }] },
-            { key: "inventory", label: "Inventory Tools", items: [{ id: "short-dating", label: "Short-Dating", color: "#E879F9" }, { id: "backorder", label: "Backorders", color: "#F97316" }] },
+            { key: "inventory", label: "Inventory Tools", items: [{ id: "short-dating", label: "Short-Dating", color: "#E879F9" }, { id: "backorder", label: "Backorders", color: "#F97316" }, { id: "backorder-resolver", label: "Backorder Resolver", color: "#14B8A6" }] },
           ];
           return sections.map(function(sec, si) {
             var hasActive = sec.items.some(function(item) { return page === item.id && !showLogin; });
@@ -4658,6 +4830,7 @@ export default function Hub() {
           {!showLogin && page === "hills-pawtree" && <HillsTracker toast={showToast} ok={ok} lp={promptLogin} cred={cred} />}
           {!showLogin && page === "truckloader" && <TruckloaderTool toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} />}
           {!showLogin && page === "oos-tracker" && <OOSTracker toast={showToast} cred={cred} />}
+          {!showLogin && page === "backorder-resolver" && <BackorderResolver toast={showToast} cred={cred} />}
           {!showLogin && page === "vendor-contacts" && <VendorContactsPage contacts={vendorContacts} updateContacts={updateVendorContacts} toast={showToast} />}
           {!showLogin && page === "how-to" && <HowToGuide toast={showToast} />}
         </div>
