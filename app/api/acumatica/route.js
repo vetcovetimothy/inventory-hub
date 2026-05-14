@@ -172,6 +172,51 @@ const COLUMN_MAP = {
   ],
 };
 
+// === Cache TTLs (ms) ===
+// Only cache types where stale-by-a-few-minutes/hours is acceptable.
+// PO drafts, short-dating, hills-pawtree, replenishment data are intentionally NOT cached
+// because users expect them to reflect current Acumatica state.
+const CACHE_TTL = {
+  "ndc-lookup":       6 * 60 * 60 * 1000,  // 6h — generic NDCs change slowly
+  "stock-cross-ref":  6 * 60 * 60 * 1000,  // 6h — formulary cross-ref changes slowly
+  "item-xref":        6 * 60 * 60 * 1000,  // 6h — item cross-ref changes slowly
+  "uom-conversions": 24 * 60 * 60 * 1000,  // 24h — UOM conversions basically never change
+  "gen-pricing":      4 * 60 * 60 * 1000,  // 4h — generics avg cost
+  "gen-pricing-3prx": 4 * 60 * 60 * 1000,  // 4h — per-3PRx avg cost
+  "open-po-lines":    5 * 60 * 1000,       // 5min — used by OOS+Backorder, changes often but tolerates short staleness
+  "backorder":        5 * 60 * 1000,       // 5min — same
+};
+
+const KV_URL = process.env.KV_REST_API_URL;
+const KV_TOKEN = process.env.KV_REST_API_TOKEN;
+
+async function getCached(cacheKey) {
+  if (!KV_URL || !KV_TOKEN) return null;
+  try {
+    const resp = await fetch(KV_URL, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${KV_TOKEN}`, "Content-Type": "application/json" },
+      body: JSON.stringify(["GET", cacheKey]),
+    });
+    if (!resp.ok) return null;
+    const json = await resp.json();
+    if (!json.result) return null;
+    return JSON.parse(json.result);
+  } catch { return null; }
+}
+
+async function setCached(cacheKey, value, ttlMs) {
+  if (!KV_URL || !KV_TOKEN) return;
+  try {
+    // SET with PX (expire after TTL ms) — Upstash auto-evicts on expiry
+    await fetch(KV_URL, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${KV_TOKEN}`, "Content-Type": "application/json" },
+      body: JSON.stringify(["SET", cacheKey, JSON.stringify(value), "PX", String(ttlMs)]),
+    });
+  } catch { /* cache write failure is non-fatal */ }
+}
+
 export async function POST(request) {
   try {
     const body = await request.json();
@@ -179,6 +224,21 @@ export async function POST(request) {
 
     if (!type || !ENDPOINTS[type]) {
       return Response.json({ error: "Invalid type. Use: po, po-ggm, ndc-lookup, item-xref, short-dating, backorder, hills-pawtree, replenishment-needs, whse-replenish, gen-pricing, gen-pricing-3prx, uom-conversions, stock-cross-ref, open-po-lines" }, { status: 400 });
+    }
+
+    // Check cache before doing anything expensive (skip if ?refresh=1 in URL)
+    const url0 = new URL(request.url);
+    const skipCache = url0.searchParams.get("refresh") === "1";
+    const ttl = CACHE_TTL[type];
+    // Only cache types listed in CACHE_TTL, and only when no warehouse filter is applied
+    // (per-warehouse PO fetches and warehouse-filtered queries shouldn't share a cache key)
+    const cacheable = ttl && !warehouse;
+    const cacheKey = cacheable ? `acu-cache:${type}` : null;
+    if (cacheable && !skipCache) {
+      const cached = await getCached(cacheKey);
+      if (cached && cached.data) {
+        return Response.json({ data: cached.data, count: cached.data.length, _cache: "hit", _cachedAt: cached.cachedAt });
+      }
     }
 
     // Use service account credentials from env vars, or user-provided credentials
@@ -278,7 +338,8 @@ export async function POST(request) {
     }
 
     if (rawRows.length === 0) {
-      return Response.json({ data: [], count: 0 });
+      if (cacheable) await setCached(cacheKey, { data: [], cachedAt: Date.now() }, ttl);
+      return Response.json({ data: [], count: 0, _cache: "miss" });
     }
 
     // Resolve column names (Acumatica field names vary between instances)
@@ -310,7 +371,8 @@ export async function POST(request) {
       return obj;
     });
 
-    return Response.json({ data, count: data.length });
+    if (cacheable) await setCached(cacheKey, { data, cachedAt: Date.now() }, ttl);
+    return Response.json({ data, count: data.length, _cache: "miss" });
   } catch (err) {
     console.error("Acumatica proxy error:", err);
     return Response.json({ error: "Server error", detail: err.message }, { status: 500 });
