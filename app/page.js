@@ -263,6 +263,31 @@ function InfoTip({ text }) {
   </span>;
 }
 
+/* ═══════ CACHE STATUS HELPERS ═══════ */
+function formatRelativeTime(ms) {
+  if (!ms) return null;
+  var sec = Math.floor((Date.now() - ms) / 1000);
+  if (sec < 5) return "just now";
+  if (sec < 60) return sec + "s ago";
+  var min = Math.floor(sec / 60);
+  if (min < 60) return min + " min ago";
+  var hr = Math.floor(min / 60);
+  if (hr < 24) return hr + "h ago";
+  var day = Math.floor(hr / 24);
+  return day + "d ago";
+}
+function CacheStatus(props) {
+  var lastFetchedAt = props.lastFetchedAt, cacheHit = props.cacheHit, onRefresh = props.onRefresh, refreshing = props.refreshing, color = props.color || "#6B7280";
+  var _tick = useState(0), tick = _tick[0], setTick = _tick[1];
+  useEffect(function() { var id = setInterval(function() { setTick(function(t) { return t + 1; }); }, 30000); return function() { clearInterval(id); }; }, []);
+  if (!lastFetchedAt && !refreshing) return null;
+  var label = refreshing ? "Refreshing\u2026" : (cacheHit === true ? "Cached " : "Updated ") + (formatRelativeTime(lastFetchedAt) || "");
+  return <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, color: "#9CA3AF" }} title={lastFetchedAt ? new Date(lastFetchedAt).toLocaleString() : ""}>
+    <span>{label}</span>
+    {onRefresh && <button onClick={onRefresh} disabled={refreshing} title="Force fresh data" style={{ background: "transparent", border: "0.5px solid #E5E7EB", borderRadius: 6, padding: "2px 8px", cursor: refreshing ? "not-allowed" : "pointer", fontSize: 11, color: color, fontFamily: "'Varela Round', sans-serif", display: "inline-flex", alignItems: "center", gap: 4 }}>{refreshing ? "\u21BB" : "\u21BB Refresh"}</button>}
+  </span>;
+}
+
 /* ═══════ STYLES ═══════ */
 function makeStyles(accent) {
   return {
@@ -2491,6 +2516,7 @@ function FuzeTracker(props) {
     return function() { m = false; };
   }, [cred]);
 
+  var _lastFetched = useState(null), lastFetched = _lastFetched[0], setLastFetched = _lastFetched[1];
   var fetchSheet = useCallback(function(wh, silent) {
     if (!silent) setLoading(true);
     fetch("/api/sheets?wh=" + encodeURIComponent(wh) + "&_t=" + Date.now(), { cache: "no-store" })
@@ -2499,6 +2525,7 @@ function FuzeTracker(props) {
         if (json.error) { if (!silent) toast(json.error, "error"); setData([]); }
         else {
           setData(json.data || []);
+          setLastFetched(Date.now());
           if (!silent) toast("Loaded " + (json.count || 0) + " items for " + wh);
           kvPost("fuze-tracker-" + wh, { data: json.data || [], fetchedAt: Date.now() }).catch(function() {});
         }
@@ -2579,7 +2606,7 @@ function FuzeTracker(props) {
         <option value="landed">Landed</option>
       </select>
       <div style={{ flex: 1 }} />
-      <button onClick={function() { fetchSheet(whTab); }} disabled={loading} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}>{loading ? <><Spinner color={TOOL_COLOR} size={14} /> Refreshing...</> : <><IconRefresh /> Refresh</>}</button>
+      <CacheStatus lastFetchedAt={lastFetched} cacheHit={false} refreshing={loading} color={TOOL_COLOR} onRefresh={function() { fetchSheet(whTab); }} />
       <span style={{ fontSize: 12, color: "#6B7280" }}>{filtered.length}/{data.length}</span>
     </div>
 
@@ -2674,6 +2701,7 @@ function GGMTracker(props) {
     return function() { m = false; };
   }, [cred]);
 
+  var _lastFetched = useState(null), lastFetched = _lastFetched[0], setLastFetched = _lastFetched[1];
   var fetchSheet = useCallback(function(wh, silent) {
     if (!silent) setLoading(true);
     fetch("/api/sheets?wh=" + encodeURIComponent(wh) + "&_t=" + Date.now(), { cache: "no-store" })
@@ -2682,6 +2710,7 @@ function GGMTracker(props) {
         if (json.error) { if (!silent) toast(json.error, "error"); setData([]); }
         else {
           setData(json.data || []);
+          setLastFetched(Date.now());
           if (!silent) toast("Loaded " + (json.count || 0) + " items for " + wh);
           kvPost("ggm-tracker-" + wh, { data: json.data || [], fetchedAt: Date.now() }).catch(function() {});
         }
@@ -2758,7 +2787,7 @@ function GGMTracker(props) {
         <option value="received">Received</option>
       </select>
       <div style={{ flex: 1 }} />
-      <button onClick={function() { fetchSheet(whTab); }} disabled={loading} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}>{loading ? <><Spinner color={TOOL_COLOR} size={14} /> Refreshing...</> : <><IconRefresh /> Refresh</>}</button>
+      <CacheStatus lastFetchedAt={lastFetched} cacheHit={false} refreshing={loading} color={TOOL_COLOR} onRefresh={function() { fetchSheet(whTab); }} />
       <span style={{ fontSize: 12, color: "#6B7280" }}>{filtered.length}/{data.length}</span>
     </div>
 
@@ -3915,18 +3944,24 @@ function OOSTracker(props) {
   var TOOL_COLOR = "#EF4444";
   var _tab = useState("fuzerx"), tab = _tab[0], setTab = _tab[1];
   var _orderMap = useState({}), orderMap = _orderMap[0], setOrderMap = _orderMap[1];
+  var _orderMapLastFetched = useState(null), orderMapLastFetched = _orderMapLastFetched[0], setOrderMapLastFetched = _orderMapLastFetched[1];
+  var _orderMapLoading = useState(false), orderMapLoading = _orderMapLoading[0], setOrderMapLoading = _orderMapLoading[1];
+  var _orderMapCacheHit = useState(false), orderMapCacheHit = _orderMapCacheHit[0], setOrderMapCacheHit = _orderMapCacheHit[1];
   function normalizeNdc(s) { return (s || "").replace(/\D/g, ""); }
-  useEffect(function() {
-    var m = true;
-    var whs = ["TP-NY", "TP-OH", "TP-CA", "GGM-KY", "GGM-AZ"];
-    var sheetPromise = Promise.all(whs.map(function(wh) {
+  // Which Acumatica warehouses (and which Google Sheets) are relevant per OOS tab
+  var TAB_WAREHOUSES = { fuzerx: ["TP-NY", "TP-OH", "TP-CA"], gogomeds: ["GGM-KY", "GGM-AZ"], cgp: [] };
+  function loadOrderMap(forceFresh) {
+    var whsForTab = TAB_WAREHOUSES[tab] || [];
+    setOrderMapLoading(true);
+    var refreshParam = forceFresh ? "?refresh=1" : "";
+    var sheetPromise = Promise.all(whsForTab.map(function(wh) {
       return fetch("/api/sheets?wh=" + encodeURIComponent(wh) + "&_t=" + Date.now(), { cache: "no-store" })
         .then(function(r) { return r.ok ? r.json() : null; })
         .then(function(j) { return { wh: wh, rows: (j && j.data) || [] }; })
         .catch(function() { return { wh: wh, rows: [] }; });
     }));
     var openPoPromise = (cred && cred.username && cred.password)
-      ? fetch("/api/acumatica", {
+      ? fetch("/api/acumatica" + refreshParam, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ type: "open-po-lines", username: cred.username, password: cred.password }),
@@ -3943,7 +3978,6 @@ function OOSTracker(props) {
       var d = new Date(t); return isNaN(d.getTime()) ? null : d.getTime();
     }
     Promise.all([sheetPromise, openPoPromise, hillsMetaPromise]).then(function(all) {
-      if (!m) return;
       var sheetResults = all[0];
       var openPoJson = all[1];
       var hillsMetaResp = all[2];
@@ -4011,9 +4045,13 @@ function OOSTracker(props) {
         });
       }
       setOrderMap(map);
+      var ts = (openPoJson && openPoJson._cachedAt) || Date.now();
+      setOrderMapLastFetched(ts);
+      setOrderMapCacheHit(openPoJson && openPoJson._cache === "hit");
+      setOrderMapLoading(false);
     });
-    return function() { m = false; };
-  }, [cred]);
+  }
+  useEffect(function() { loadOrderMap(false); }, [cred, tab]);
   var _fuzeData = useState([]), fuzeData = _fuzeData[0], setFuzeData = _fuzeData[1];
   var _ggmData = useState([]), ggmData = _ggmData[0], setGgmData = _ggmData[1];
   var _cgpData = useState([]), cgpData = _cgpData[0], setCgpData = _cgpData[1];
@@ -4243,6 +4281,7 @@ function OOSTracker(props) {
         <select value={whFilter} onChange={function(e) { setWhFilter(e.target.value); }} style={Object.assign({}, S.sel, { padding: "8px 12px" })}><option value="all">All Warehouses</option>{warehouses.map(function(w) { return <option key={w} value={w}>{w}</option>; })}</select>
         <div style={{ flex: 1 }} />
         <span style={{ fontSize: 12, color: "#9CA3AF" }}>{filtered.length} of {data.length} items</span>
+        <CacheStatus lastFetchedAt={orderMapLastFetched} cacheHit={orderMapCacheHit} refreshing={orderMapLoading} color={TOOL_COLOR} onRefresh={function() { loadOrderMap(true); }} />
         <button onClick={function() { if (tab === "fuzerx") { setFuzeData([]); setFuzeName(null); saveDataToKV([], null, ggmData, ggmName, cgpData, cgpName); } else if (tab === "cgp") { setCgpData([]); setCgpName(null); saveDataToKV(fuzeData, fuzeName, ggmData, ggmName, [], null); } else { setGgmData([]); setGgmName(null); saveDataToKV(fuzeData, fuzeName, [], null, cgpData, cgpName); } }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}><IconTrash /> Replace CSV</button>
       </div>
       <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto" })}>
@@ -4355,17 +4394,26 @@ function BackorderResolver(props) {
   var _vf = useState("all"), vendorFilter = _vf[0], setVendorFilter = _vf[1];
   var _sf = useState("all"), statusFilter = _sf[0], setStatusFilter = _sf[1];
   var _sort = useState(null), sortState = _sort[0], setSortState = _sort[1];
+  var _lastFetched = useState(null), lastFetched = _lastFetched[0], setLastFetched = _lastFetched[1];
+  var _cacheHit = useState(false), cacheHit = _cacheHit[0], setCacheHit = _cacheHit[1];
   var KV_NOTES = "backorder-resolver-notes";
   var KV_STATUS = "backorder-resolver-status";
 
-  function fetchAll() {
+  function fetchAll(forceFresh) {
     if (!cred || !cred.username || !cred.password) { setErr("Login required to fetch from Acumatica"); return; }
     setLoading(true); setErr(null);
+    var refreshParam = forceFresh ? "?refresh=1" : "";
     Promise.all([
-      fetch("/api/acumatica", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "backorder", username: cred.username, password: cred.password }) }).then(function(r) { return r.json(); }),
-      fetch("/api/acumatica", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "open-po-lines", username: cred.username, password: cred.password }) }).then(function(r) { return r.json(); }),
+      fetch("/api/acumatica" + refreshParam, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "backorder", username: cred.username, password: cred.password }) }).then(function(r) { return r.json(); }),
+      fetch("/api/acumatica" + refreshParam, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "open-po-lines", username: cred.username, password: cred.password }) }).then(function(r) { return r.json(); }),
     ]).then(function(both) {
       var bo = both[0].data || []; var pos = both[1].data || [];
+      // Cache freshness based on the older of the two responses
+      var ts0 = both[0]._cachedAt || Date.now();
+      var ts1 = both[1]._cachedAt || Date.now();
+      var bothHit = both[0]._cache === "hit" && both[1]._cache === "hit";
+      setLastFetched(Math.min(ts0, ts1));
+      setCacheHit(bothHit);
       var openIds = {};
       pos.forEach(function(p) { var id = (p.InventoryID || "").trim(); var open = (parseFloat(p.OrderQty) || 0) - (parseFloat(p.QtyOnReceipts) || 0); if (id && open > 0) openIds[id] = true; });
       var filtered = bo.filter(function(r) {
@@ -4456,7 +4504,7 @@ function BackorderResolver(props) {
       </select>
       <div style={{ flex: 1 }} />
       <span style={{ fontSize: 12, color: "#6B7280" }}>{filtered.length}/{resolved.length}</span>
-      <button onClick={fetchAll} disabled={loading} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}>{loading ? <><Spinner color={TOOL_COLOR} size={14} /> Refreshing...</> : <><IconRefresh /> Refresh</>}</button>
+      <CacheStatus lastFetchedAt={lastFetched} cacheHit={cacheHit} refreshing={loading} color={TOOL_COLOR} onRefresh={function() { fetchAll(true); }} />
     </div>
 
     {err && <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", color: "#991B1B", padding: "10px 14px", borderRadius: 8, marginBottom: 12, fontSize: 13 }}>{err}</div>}
