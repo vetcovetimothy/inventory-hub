@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/backorder-check",
       "schedule": "0 12 * * *"
+    },
+    {
+      "path": "/api/cron/prewarm-cache",
+      "schedule": "0 11 * * *"
     }
   ]
 }
