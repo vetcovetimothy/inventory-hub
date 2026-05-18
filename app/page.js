@@ -1834,11 +1834,11 @@ function POImportTool(props) {
     } catch (err) { return null; }
   }, [cred]);
 
-  var fetchNdcMap = useCallback(async function() {
+  var fetchNdcMap = useCallback(async function(forceFresh) {
     if (!cred || !cred.username || !cred.password) { toast("Please log in first", "error"); return null; }
     setNdcLoading(true);
     try {
-      var resp = await fetch("/api/acumatica", {
+      var resp = await fetch("/api/acumatica" + (forceFresh ? "?refresh=1" : ""), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ type: "ndc-lookup", username: cred.username, password: cred.password }),
@@ -2085,7 +2085,8 @@ function POImportTool(props) {
         <div style={{ marginBottom: 16 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
             <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 500 }}>Vendor Type</div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#6B7280" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 12, color: "#6B7280" }}>
+              <button onClick={function() { fetchNdcMap(true).then(function(r) { if (r) toast("NDC map refreshed from Acumatica"); }); }} disabled={ndcLoading} title="Force re-fetch the Generic NDCs map from Acumatica, bypassing cache. Use this after you've just added or changed a generic in Acumatica." style={{ background: "transparent", border: "1px solid #E5E7EB", borderRadius: 6, padding: "5px 10px", fontSize: 11, color: TOOL_COLOR, cursor: ndcLoading ? "not-allowed" : "pointer", fontFamily: "'Varela Round', sans-serif", display: "inline-flex", alignItems: "center", gap: 5 }}>{ndcLoading ? "Refreshing\u2026" : "\u21BB Refresh NDC map"}</button>
               <span style={{ fontWeight: 500 }}>{"\u0394% Unit Cost Threshold"}</span>
               <input type="number" min="1" step="1" value={flagThreshold} onChange={function(e) { updateFlagThreshold(e.target.value); }} style={{ width: 64, padding: "5px 8px", border: "1px solid #E5E7EB", borderRadius: 6, fontSize: 12, color: "#374151", outline: "none", textAlign: "center", fontFamily: "'Varela Round', sans-serif", background: "#F9FAFB" }} />
               <span>%</span>
