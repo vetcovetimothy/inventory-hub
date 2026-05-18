@@ -4067,14 +4067,14 @@ function OOSTracker(props) {
   var OOS_KV_KEY = "oos-notes-shared";
   var OOS_DATA_KEY = "oos-data-shared";
   var OOS_NOTES_PERM_KEY = "oos-notes-permanent";
-  var OOS_NOTES_LASTSEEN_KEY = "oos-notes-lastseen";
-  var NOTE_EXPIRY_DAYS = 7; // Auto-clear notes after item is off the report for this long
+  var OOS_NOTES_MISS_KEY = "oos-notes-misscount";
+  var NOTE_EXPIRY_MISSES = 7; // Note clears when item has been missing from this many uploads in a row
   // Legacy keys (read-only, for one-time migration of surviving notes)
   var OOS_PNOTES_KEY = "oos-persistent-notes";
   var OOS_PREV_NOTES_KEY = "oos-previous-notes";
   var OOS_PREV_ITEMS_KEY = "oos-previous-items";
   var _permNotes = useState({}), permNotes = _permNotes[0], setPermNotes = _permNotes[1];
-  var _lastSeen = useState({}), lastSeen = _lastSeen[0], setLastSeen = _lastSeen[1];
+  var _missCount = useState({}), missCount = _missCount[0], setMissCount = _missCount[1];
   var _prevItems = useState({}), prevItems = _prevItems[0], setPrevItems = _prevItems[1];
 
   function getDailyReset() {
@@ -4134,48 +4134,36 @@ function OOSTracker(props) {
       var parsed = typeof d.data === "string" ? JSON.parse(d.data) : d.data;
       setPrevItems(parsed);
     }).catch(function() {});
-    // Load permanent notes + lastSeen map. On very first run (perm key doesn't exist), do a
+    // Load permanent notes + miss count map. On very first run (perm key doesn't exist), do a
     // one-time migration from the old pNotes + prevNotes buckets so surviving notes carry over.
-    // After loading, sweep: clear notes for any item whose lastSeen is older than NOTE_EXPIRY_DAYS.
+    // No time-based sweep — miss count only changes when a new CSV is uploaded.
     Promise.all([
       kvGet(OOS_NOTES_PERM_KEY).then(function(r) { return r.ok ? r.json() : null; }),
       kvGet(OOS_PNOTES_KEY).then(function(r) { return r.ok ? r.json() : null; }),
       kvGet(OOS_PREV_NOTES_KEY).then(function(r) { return r.ok ? r.json() : null; }),
-      kvGet(OOS_NOTES_LASTSEEN_KEY).then(function(r) { return r.ok ? r.json() : null; })
+      kvGet(OOS_NOTES_MISS_KEY).then(function(r) { return r.ok ? r.json() : null; })
     ]).then(function(results) {
       if (!m) return;
       var permRaw = results[0] && results[0].data ? (typeof results[0].data === "string" ? JSON.parse(results[0].data) : results[0].data) : null;
-      var seenRaw = results[3] && results[3].data ? (typeof results[3].data === "string" ? JSON.parse(results[3].data) : results[3].data) : {};
-      delete seenRaw._savedAt;
-      var notesToUse;
+      var missRaw = results[3] && results[3].data ? (typeof results[3].data === "string" ? JSON.parse(results[3].data) : results[3].data) : {};
+      delete missRaw._savedAt;
       if (permRaw && Object.keys(permRaw).filter(function(k) { return k !== "_savedAt"; }).length > 0) {
         // Already migrated — just load
         delete permRaw._savedAt;
-        notesToUse = permRaw;
+        setPermNotes(permRaw);
       } else {
         // First-ever load — merge from legacy buckets
         var legacyPrev = results[2] && results[2].data ? (typeof results[2].data === "string" ? JSON.parse(results[2].data) : results[2].data) : {};
         var legacyCur = results[1] && results[1].data ? (typeof results[1].data === "string" ? JSON.parse(results[1].data) : results[1].data) : {};
         delete legacyPrev._savedAt; delete legacyCur._savedAt;
-        notesToUse = Object.assign({}, legacyPrev, legacyCur);
-        // Seed lastSeen for migrated notes to "now" so the sweep doesn't immediately delete them
-        var nowTs = Date.now();
-        Object.keys(notesToUse).forEach(function(k) { if (!seenRaw[k]) seenRaw[k] = nowTs; });
-        kvPost(OOS_NOTES_LASTSEEN_KEY, Object.assign({}, seenRaw, { _savedAt: nowTs })).catch(function() {});
+        var merged = Object.assign({}, legacyPrev, legacyCur);
+        setPermNotes(merged);
+        // Seed missCount = 0 for migrated notes
+        Object.keys(merged).forEach(function(k) { if (missRaw[k] === undefined) missRaw[k] = 0; });
+        kvPost(OOS_NOTES_PERM_KEY, Object.assign({}, merged, { _savedAt: Date.now() })).catch(function() {});
+        kvPost(OOS_NOTES_MISS_KEY, Object.assign({}, missRaw, { _savedAt: Date.now() })).catch(function() {});
       }
-      // Sweep: clear notes for keys whose lastSeen is older than NOTE_EXPIRY_DAYS
-      var cutoff = Date.now() - NOTE_EXPIRY_DAYS * 24 * 60 * 60 * 1000;
-      var swept = {}; var changed = false;
-      Object.keys(notesToUse).forEach(function(k) {
-        var seenAt = seenRaw[k];
-        if (seenAt && seenAt < cutoff) { changed = true; return; }
-        swept[k] = notesToUse[k];
-      });
-      setPermNotes(swept);
-      setLastSeen(seenRaw);
-      if (changed || !permRaw || Object.keys(permRaw).filter(function(k) { return k !== "_savedAt"; }).length === 0) {
-        kvPost(OOS_NOTES_PERM_KEY, Object.assign({}, swept, { _savedAt: Date.now() })).catch(function() {});
-      }
+      setMissCount(missRaw);
     }).catch(function() {});
     return function() { m = false; };
   }, []);
@@ -4231,16 +4219,43 @@ function OOSTracker(props) {
     kvPost(OOS_DATA_KEY, { fuze: fuze, fuzeName: fuzeFn, ggm: ggm, ggmName: ggmFn, cgp: cgp, cgpName: cgpFn, _savedAt: Date.now() }).catch(function() {});
   }
 
-  function bumpLastSeen(rows, vendorTab) {
-    if (!rows || rows.length === 0) return;
-    var now = Date.now();
-    var u = Object.assign({}, lastSeen);
-    rows.forEach(function(r) {
-      var k = vendorTab + ":" + r.MANUFACTURER_NO + ":" + (r.WAREHOUSE_SLUG || "");
-      u[k] = now;
+  function applyUploadToMissCount(rows, vendorTab) {
+    // For every note key in this vendor tab:
+    //   - If item is in this upload: reset miss count to 0
+    //   - If item is NOT in this upload: miss count += 1
+    //   - If miss count >= NOTE_EXPIRY_MISSES: clear the note
+    var prefix = vendorTab + ":";
+    var seenKeys = {};
+    (rows || []).forEach(function(r) {
+      seenKeys[vendorTab + ":" + r.MANUFACTURER_NO + ":" + (r.WAREHOUSE_SLUG || "")] = true;
     });
-    setLastSeen(u);
-    kvPost(OOS_NOTES_LASTSEEN_KEY, Object.assign({}, u, { _savedAt: now })).catch(function() {});
+    var newMiss = Object.assign({}, missCount);
+    var newNotes = Object.assign({}, permNotes);
+    var notesChanged = false;
+    Object.keys(newNotes).forEach(function(k) {
+      if (k.indexOf(prefix) !== 0) return; // only touch keys for the vendor we just uploaded
+      if (seenKeys[k]) {
+        newMiss[k] = 0;
+      } else {
+        var c = (newMiss[k] || 0) + 1;
+        if (c >= NOTE_EXPIRY_MISSES) {
+          delete newNotes[k];
+          delete newMiss[k];
+          notesChanged = true;
+        } else {
+          newMiss[k] = c;
+        }
+      }
+    });
+    // Also initialize missCount = 0 for new keys in this upload (items with no note yet)
+    Object.keys(seenKeys).forEach(function(k) { if (newMiss[k] === undefined) newMiss[k] = 0; });
+    setMissCount(newMiss);
+    var now = Date.now();
+    kvPost(OOS_NOTES_MISS_KEY, Object.assign({}, newMiss, { _savedAt: now })).catch(function() {});
+    if (notesChanged) {
+      setPermNotes(newNotes);
+      kvPost(OOS_NOTES_PERM_KEY, Object.assign({}, newNotes, { _savedAt: now })).catch(function() {});
+    }
   }
 
   function handleFile(file, vendor) {
@@ -4251,7 +4266,7 @@ function OOSTracker(props) {
       if (vendor === "fuzerx") { setFuzeData(rows); setFuzeName(file.name); saveDataToKV(rows, file.name, ggmData, ggmName, cgpData, cgpName); }
       else if (vendor === "cgp") { setCgpData(rows); setCgpName(file.name); saveDataToKV(fuzeData, fuzeName, ggmData, ggmName, rows, file.name); }
       else { setGgmData(rows); setGgmName(file.name); saveDataToKV(fuzeData, fuzeName, rows, file.name, cgpData, cgpName); }
-      bumpLastSeen(rows, vendor);
+      applyUploadToMissCount(rows, vendor);
       setWhFilter("all"); setSearch("");
       toast("Loaded " + rows.length + " OOS items from " + file.name);
     };
