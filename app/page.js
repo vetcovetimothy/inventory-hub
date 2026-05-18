@@ -4066,11 +4066,15 @@ function OOSTracker(props) {
   var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
   var OOS_KV_KEY = "oos-notes-shared";
   var OOS_DATA_KEY = "oos-data-shared";
+  var OOS_NOTES_PERM_KEY = "oos-notes-permanent";
+  var OOS_NOTES_LASTSEEN_KEY = "oos-notes-lastseen";
+  var NOTE_EXPIRY_DAYS = 7; // Auto-clear notes after item is off the report for this long
+  // Legacy keys (read-only, for one-time migration of surviving notes)
   var OOS_PNOTES_KEY = "oos-persistent-notes";
   var OOS_PREV_NOTES_KEY = "oos-previous-notes";
   var OOS_PREV_ITEMS_KEY = "oos-previous-items";
-  var _persistentNotes = useState({}), pNotes = _persistentNotes[0], setPNotes = _persistentNotes[1];
-  var _prevNotes = useState({}), prevNotes = _prevNotes[0], setPrevNotes = _prevNotes[1];
+  var _permNotes = useState({}), permNotes = _permNotes[0], setPermNotes = _permNotes[1];
+  var _lastSeen = useState({}), lastSeen = _lastSeen[0], setLastSeen = _lastSeen[1];
   var _prevItems = useState({}), prevItems = _prevItems[0], setPrevItems = _prevItems[1];
 
   function getDailyReset() {
@@ -4130,32 +4134,47 @@ function OOSTracker(props) {
       var parsed = typeof d.data === "string" ? JSON.parse(d.data) : d.data;
       setPrevItems(parsed);
     }).catch(function() {});
-    // Load persistent notes — rotate to previous on daily reset
+    // Load permanent notes + lastSeen map. On very first run (perm key doesn't exist), do a
+    // one-time migration from the old pNotes + prevNotes buckets so surviving notes carry over.
+    // After loading, sweep: clear notes for any item whose lastSeen is older than NOTE_EXPIRY_DAYS.
     Promise.all([
+      kvGet(OOS_NOTES_PERM_KEY).then(function(r) { return r.ok ? r.json() : null; }),
       kvGet(OOS_PNOTES_KEY).then(function(r) { return r.ok ? r.json() : null; }),
-      kvGet(OOS_PREV_NOTES_KEY).then(function(r) { return r.ok ? r.json() : null; })
+      kvGet(OOS_PREV_NOTES_KEY).then(function(r) { return r.ok ? r.json() : null; }),
+      kvGet(OOS_NOTES_LASTSEEN_KEY).then(function(r) { return r.ok ? r.json() : null; })
     ]).then(function(results) {
       if (!m) return;
-      var pData = results[0] && results[0].data ? (typeof results[0].data === "string" ? JSON.parse(results[0].data) : results[0].data) : {};
-      var prevData = results[1] && results[1].data ? (typeof results[1].data === "string" ? JSON.parse(results[1].data) : results[1].data) : {};
-      var savedAt = pData._savedAt || 0;
-      var resetTime = getDailyReset();
-      if (savedAt && savedAt < resetTime) {
-        // Rotate: current becomes previous, clear current — but only if current actually has notes,
-        // otherwise keep whatever's already in prev so a skipped day doesn't wipe yesterday's data
-        delete pData._savedAt;
-        if (Object.keys(pData).length > 0) {
-          kvPost(OOS_PREV_NOTES_KEY, pData);
-          setPrevNotes(pData);
-        } else {
-          setPrevNotes(prevData);
-        }
-        kvPost(OOS_PNOTES_KEY, { _savedAt: Date.now() });
-        setPNotes({});
+      var permRaw = results[0] && results[0].data ? (typeof results[0].data === "string" ? JSON.parse(results[0].data) : results[0].data) : null;
+      var seenRaw = results[3] && results[3].data ? (typeof results[3].data === "string" ? JSON.parse(results[3].data) : results[3].data) : {};
+      delete seenRaw._savedAt;
+      var notesToUse;
+      if (permRaw && Object.keys(permRaw).filter(function(k) { return k !== "_savedAt"; }).length > 0) {
+        // Already migrated — just load
+        delete permRaw._savedAt;
+        notesToUse = permRaw;
       } else {
-        delete pData._savedAt;
-        setPNotes(pData);
-        setPrevNotes(prevData);
+        // First-ever load — merge from legacy buckets
+        var legacyPrev = results[2] && results[2].data ? (typeof results[2].data === "string" ? JSON.parse(results[2].data) : results[2].data) : {};
+        var legacyCur = results[1] && results[1].data ? (typeof results[1].data === "string" ? JSON.parse(results[1].data) : results[1].data) : {};
+        delete legacyPrev._savedAt; delete legacyCur._savedAt;
+        notesToUse = Object.assign({}, legacyPrev, legacyCur);
+        // Seed lastSeen for migrated notes to "now" so the sweep doesn't immediately delete them
+        var nowTs = Date.now();
+        Object.keys(notesToUse).forEach(function(k) { if (!seenRaw[k]) seenRaw[k] = nowTs; });
+        kvPost(OOS_NOTES_LASTSEEN_KEY, Object.assign({}, seenRaw, { _savedAt: nowTs })).catch(function() {});
+      }
+      // Sweep: clear notes for keys whose lastSeen is older than NOTE_EXPIRY_DAYS
+      var cutoff = Date.now() - NOTE_EXPIRY_DAYS * 24 * 60 * 60 * 1000;
+      var swept = {}; var changed = false;
+      Object.keys(notesToUse).forEach(function(k) {
+        var seenAt = seenRaw[k];
+        if (seenAt && seenAt < cutoff) { changed = true; return; }
+        swept[k] = notesToUse[k];
+      });
+      setPermNotes(swept);
+      setLastSeen(seenRaw);
+      if (changed || !permRaw || Object.keys(permRaw).filter(function(k) { return k !== "_savedAt"; }).length === 0) {
+        kvPost(OOS_NOTES_PERM_KEY, Object.assign({}, swept, { _savedAt: Date.now() })).catch(function() {});
       }
     }).catch(function() {});
     return function() { m = false; };
@@ -4169,10 +4188,10 @@ function OOSTracker(props) {
           delete parsed._savedAt; setNotes(parsed);
         }
       }).catch(function() {});
-      kvGet(OOS_PNOTES_KEY).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+      kvGet(OOS_NOTES_PERM_KEY).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
         if (d && d.data) {
           var parsed = typeof d.data === "string" ? JSON.parse(d.data) : d.data;
-          delete parsed._savedAt; setPNotes(parsed);
+          delete parsed._savedAt; setPermNotes(parsed);
         }
       }).catch(function() {});
     }, 8000);
@@ -4184,9 +4203,9 @@ function OOSTracker(props) {
 
   function updateNote(key, field, value) {
     if (field === "note") {
-      // Persistent notes keyed by tab:MANUFACTURER_NO:WAREHOUSE_SLUG
-      var pu = Object.assign({}, pNotes); pu[key] = value; setPNotes(pu);
-      kvPost(OOS_PNOTES_KEY, Object.assign({}, pu, { _savedAt: Date.now() })).catch(function() {});
+      // Permanent notes — no rotation, persist indefinitely
+      var pu = Object.assign({}, permNotes); pu[key] = value; setPermNotes(pu);
+      kvPost(OOS_NOTES_PERM_KEY, Object.assign({}, pu, { _savedAt: Date.now() })).catch(function() {});
     } else {
       // SD/BO go to daily-reset storage
       var u = Object.assign({}, notes); u[key] = Object.assign({}, u[key] || {}); u[key][field] = value; setNotes(u);
@@ -4212,6 +4231,18 @@ function OOSTracker(props) {
     kvPost(OOS_DATA_KEY, { fuze: fuze, fuzeName: fuzeFn, ggm: ggm, ggmName: ggmFn, cgp: cgp, cgpName: cgpFn, _savedAt: Date.now() }).catch(function() {});
   }
 
+  function bumpLastSeen(rows, vendorTab) {
+    if (!rows || rows.length === 0) return;
+    var now = Date.now();
+    var u = Object.assign({}, lastSeen);
+    rows.forEach(function(r) {
+      var k = vendorTab + ":" + r.MANUFACTURER_NO + ":" + (r.WAREHOUSE_SLUG || "");
+      u[k] = now;
+    });
+    setLastSeen(u);
+    kvPost(OOS_NOTES_LASTSEEN_KEY, Object.assign({}, u, { _savedAt: now })).catch(function() {});
+  }
+
   function handleFile(file, vendor) {
     if (!file) return;
     var reader = new FileReader();
@@ -4220,6 +4251,7 @@ function OOSTracker(props) {
       if (vendor === "fuzerx") { setFuzeData(rows); setFuzeName(file.name); saveDataToKV(rows, file.name, ggmData, ggmName, cgpData, cgpName); }
       else if (vendor === "cgp") { setCgpData(rows); setCgpName(file.name); saveDataToKV(fuzeData, fuzeName, ggmData, ggmName, rows, file.name); }
       else { setGgmData(rows); setGgmName(file.name); saveDataToKV(fuzeData, fuzeName, rows, file.name, cgpData, cgpName); }
+      bumpLastSeen(rows, vendor);
       setWhFilter("all"); setSearch("");
       toast("Loaded " + rows.length + " OOS items from " + file.name);
     };
@@ -4306,7 +4338,7 @@ function OOSTracker(props) {
             var whBg = r._wh === "Brooklyn" ? "#EFF6FF" : r._wh === "Ohio" ? "#ECFDF5" : r._wh === "Hayward" ? "#FFF7ED" : r._wh === "Miami" ? "#FFF1F2" : r._wh === "Kentucky" ? "#F5F3FF" : r._wh === "Arizona" ? "#FDF2F8" : r._wh === "Hills CA" ? "#FEF9C3" : r._wh === "Hills NJ" ? "#E0F2FE" : "#F3F4F6";
             var whColor = r._wh === "Brooklyn" ? "#2563EB" : r._wh === "Ohio" ? "#059669" : r._wh === "Hayward" ? "#D97706" : r._wh === "Miami" ? "#E11D48" : r._wh === "Kentucky" ? "#7C3AED" : r._wh === "Arizona" ? "#DB2777" : r._wh === "Hills CA" ? "#A16207" : r._wh === "Hills NJ" ? "#0369A1" : "#6B7280";
             return <tr key={i}>
-              <td style={S.td}><textarea value={pNotes[noteKey] !== undefined ? pNotes[noteKey] : (prevNotes[noteKey] || "")} onChange={function(e) { updateNote(noteKey, "note", e.target.value); e.target.style.height = "auto"; e.target.style.height = e.target.scrollHeight + "px"; }} placeholder="Add notes..." rows={1} style={Object.assign({}, S.inp, { padding: "5px 10px", fontSize: 12, resize: "none", overflow: "hidden", minHeight: 32, lineHeight: "1.4", display: "block", width: "100%" })} ref={function(el) { if (el) { el.style.height = "auto"; el.style.height = el.scrollHeight + "px"; } }} /></td>
+              <td style={S.td}><textarea value={permNotes[noteKey] !== undefined ? permNotes[noteKey] : ""} onChange={function(e) { updateNote(noteKey, "note", e.target.value); e.target.style.height = "auto"; e.target.style.height = e.target.scrollHeight + "px"; }} placeholder="Add notes..." rows={1} style={Object.assign({}, S.inp, { padding: "5px 10px", fontSize: 12, resize: "none", overflow: "hidden", minHeight: 32, lineHeight: "1.4", display: "block", width: "100%" })} ref={function(el) { if (el) { el.style.height = "auto"; el.style.height = el.scrollHeight + "px"; } }} /></td>
               <td style={Object.assign({}, S.td, { textAlign: "center" })}><button onClick={function() { updateNote(noteKey, "sd", !isSD); }} style={{ width: 20, height: 20, borderRadius: 4, border: isSD ? "2px solid #E879F9" : "2px solid #D1D5DB", background: isSD ? "#E879F9" : "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", transition: "all 0.15s" }}>{isSD && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}</button></td>
               <td style={Object.assign({}, S.td, { textAlign: "center" })}><button onClick={function() { updateNote(noteKey, "bo", !n.bo); }} style={{ width: 20, height: 20, borderRadius: 4, border: n.bo ? "2px solid #F97316" : "2px solid #D1D5DB", background: n.bo ? "#F97316" : "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", transition: "all 0.15s" }}>{n.bo && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}</button></td>
               <td style={Object.assign({}, S.td, { textAlign: "center" })}><span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 6, fontWeight: 600, background: isOld ? "#FFF7ED" : "#ECFDF5", color: isOld ? "#D97706" : "#059669" }}>{isOld ? "Old" : "New"}</span></td>
