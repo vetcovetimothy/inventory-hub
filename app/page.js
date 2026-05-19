@@ -2342,6 +2342,8 @@ function HillsTracker(props) {
     if (v === "VID0040" || v.toLowerCase().indexOf("pawtree") >= 0) return "CA - Pawtree";
     if (w.indexOf("CP-CA") >= 0) return "CA";
     if (w.indexOf("CP-NJ") >= 0) return "NJ";
+    if (w.indexOf("CP-FL") >= 0) return "FL";
+    if (w.indexOf("CP-TX") >= 0) return "TX";
     return w.replace("HILL-", "");
   }
 
@@ -2399,7 +2401,7 @@ function HillsTracker(props) {
     } else if (hpSort.col === "wh") {
       arr.sort(function(a, b) { var wa = simplifyWarehouse(a.Warehouse, a.Vendor); var wb = simplifyWarehouse(b.Warehouse, b.Vendor); return hpSort.dir === "desc" ? wb.localeCompare(wa) : wa.localeCompare(wb); });
     } else {
-      arr.sort(function(a, b) { var wa = simplifyWarehouse(a.Warehouse, a.Vendor); var wb = simplifyWarehouse(b.Warehouse, b.Vendor); var order = { "NJ": 0, "CA": 1, "CA - Pawtree": 2 }; var oa = order[wa] != null ? order[wa] : 3; var ob = order[wb] != null ? order[wb] : 3; if (oa !== ob) return oa - ob; return (a.PONumber || "").localeCompare(b.PONumber || ""); });
+      arr.sort(function(a, b) { var wa = simplifyWarehouse(a.Warehouse, a.Vendor); var wb = simplifyWarehouse(b.Warehouse, b.Vendor); var order = { "NJ": 0, "CA": 1, "FL": 2, "TX": 3, "CA - Pawtree": 4 }; var oa = order[wa] != null ? order[wa] : 5; var ob = order[wb] != null ? order[wb] : 5; if (oa !== ob) return oa - ob; return (a.PONumber || "").localeCompare(b.PONumber || ""); });
     }
     return arr;
   }, [data, hpSort]);
@@ -2446,7 +2448,7 @@ function HillsTracker(props) {
 
           return <tr key={i}>
             <td style={Object.assign({}, S.td, { fontWeight: 600, color: "#1F2937" })}>{po}</td>
-            <td style={S.td}><span style={Object.assign({}, S.badge(wh === "NJ" ? "blue" : wh.indexOf("Pawtree") >= 0 ? "purple" : "default"))}>{wh}</span></td>
+            <td style={S.td}><span style={Object.assign({}, S.badge(wh === "NJ" ? "blue" : wh === "FL" ? "danger" : wh === "TX" ? "success" : wh.indexOf("Pawtree") >= 0 ? "purple" : "default"))}>{wh}</span></td>
             <td style={Object.assign({}, S.td, { position: "relative" })}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span style={{ color: isOverdue ? "#DC2626" : "#374151" }}>{formatDate(r.DateOrdered)}</span>
