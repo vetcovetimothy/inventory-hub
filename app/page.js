@@ -3078,6 +3078,15 @@ function TruckloaderTool(props) {
   var TARGET = 42500;
   var MIN_WEIGHT = 35000;
   var TRUCK_COLORS = ["#d9ead3","#cfe2f3","#fff2cc","#f4cccc","#ead1dc","#d9d2e9","#fce5cd","#d0e0e3","#ccddff","#ccffcc","#ffe5cc","#e5ccff"];
+  // Truckloader warehouse map. Add new Hill's CP warehouses here.
+  // shortCode is used for CSV filename + email subject ("Vetcove <shortCode>").
+  // cpTo is the Central Pet recipient list for the email tab.
+  var WH_META = {
+    "HILL-CP-CA": { label: "California", shortCode: "CA", cpTo: "ap.petd.santafesprings@central.com, jcanter@centralpet.com, jspengler@central.com, hd-purchaseorders@vetcove.com" },
+    "HILL-CP-NJ": { label: "New Jersey", shortCode: "NJ", cpTo: "jcanter@centralpet.com, jspengler@central.com, hd-purchaseorders@vetcove.com, gcustode@central.com" },
+    "HILL-CP-FL": { label: "Tampa",      shortCode: "Tampa",  cpTo: "jcanter@centralpet.com, jspengler@central.com, hd-purchaseorders@vetcove.com" },
+    "HILL-CP-TX": { label: "Dallas",     shortCode: "Dallas", cpTo: "jcanter@centralpet.com, jspengler@central.com, hd-purchaseorders@vetcove.com" },
+  };
   var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
 
   var _wh = useState("HILL-CP-CA"), warehouse = _wh[0], setWarehouse = _wh[1];
@@ -3339,7 +3348,7 @@ function TruckloaderTool(props) {
   function exportTruckCSV(truck, whShort) {
     var now = new Date();
     var dateStr = (now.getMonth() + 1) + "." + ("0" + now.getDate()).slice(-2) + "." + String(now.getFullYear()).slice(-2);
-    var shortCode = warehouse === "HILL-CP-CA" ? "CA" : "NJ";
+    var shortCode = (WH_META[warehouse] && WH_META[warehouse].shortCode) || warehouse;
     var fileName = shortCode + " " + dateStr + " " + truck.label + ".csv";
     var lines = ["Inventory ID,Warehouse,Order Qty."];
     truck.assignments.forEach(function(a) {
@@ -3549,8 +3558,7 @@ function TruckloaderTool(props) {
       <div style={{ flex: 1, minWidth: 200 }}>
         <div style={{ fontSize: 11, color: "#9CA3AF", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 6 }}>Warehouse</div>
         <select value={warehouse} onChange={function(e) { setWarehouse(e.target.value); setOrderItems([]); setTruckGroups(null); setFillSuggestions(null); setFillAdded([]); setFillPals({}); setHillsDraftSent(false); setCpDraftSent(false); setStep("order"); }} style={Object.assign({}, S.sel, { width: "100%", maxWidth: 280 })}>
-          <option value="HILL-CP-CA">HILL-CP-CA (California)</option>
-          <option value="HILL-CP-NJ">HILL-CP-NJ (New Jersey)</option>
+          {Object.keys(WH_META).map(function(code) { return <option key={code} value={code}>{code} ({WH_META[code].label})</option>; })}
         </select>
       </div>
       <div style={{ flex: 1, minWidth: 260 }}>
@@ -3850,13 +3858,13 @@ function TruckloaderTool(props) {
     {/* EMAIL DRAFTS */}
     {step === "email" && <div>
       {(function() {
-        var isCA = warehouse === "HILL-CP-CA";
-        var whShort = isCA ? "CA" : "NJ";
+        var whMeta = WH_META[warehouse] || { shortCode: warehouse, cpTo: "jcanter@centralpet.com, jspengler@central.com, hd-purchaseorders@vetcove.com" };
+        var whShort = whMeta.shortCode;
         var now = new Date();
         var dateStr = (now.getMonth() + 1) + "." + ("0" + now.getDate()).slice(-2) + "." + now.getFullYear();
         var subject = dateStr + " Weekly Replenishment - Vetcove " + whShort;
         var hillsTo = "truckloador@hillspet.com, brian_shively@hillspet.com, hd-purchaseorders@vetcove.com";
-        var cpTo = isCA ? "ap.petd.santafesprings@central.com, jcanter@centralpet.com, jspengler@central.com, hd-purchaseorders@vetcove.com" : "jcanter@centralpet.com, jspengler@central.com, hd-purchaseorders@vetcove.com, gcustode@central.com";
+        var cpTo = whMeta.cpTo;
         var hillsBody = "<p>Hi, please find attached our weekly replenishment order. Please include the Purchase Order # on our packing list.</p><p>We look forward to confirmation of receipt. Let us know if you have any questions.</p><p>Thanks,</p>";
         var cpBody = "<p>Hi Central Pet team,</p><p>I've just placed this week's replenishment POs with Hill's. Attaching here to create in your systems. Hill's hasn't set delivery appointments yet.</p><p>Thanks,</p>";
 
@@ -4187,7 +4195,7 @@ function OOSTracker(props) {
     return function() { clearInterval(iv); };
   }, []);
 
-  var WH_MAP = { "TRUEPILL_BROOKLYN": "Brooklyn", "TRUEPILL_OHIO": "Ohio", "TRUEPILL_HAYWARD": "Hayward", "TRUEPILL_MIAMI": "Miami", "GOGOMEDS_KY": "Kentucky", "GOGOMEDS_AZ": "Arizona", "GOGOMEDS_KENTUCKY": "Kentucky", "GOGOMEDS_ARIZONA": "Arizona", "HILLS_CGP_WAREHOUSE_CA": "Hills CA", "HILLS_CGP_WAREHOUSE_NJ": "Hills NJ" };
+  var WH_MAP = { "TRUEPILL_BROOKLYN": "Brooklyn", "TRUEPILL_OHIO": "Ohio", "TRUEPILL_HAYWARD": "Hayward", "TRUEPILL_MIAMI": "Miami", "GOGOMEDS_KY": "Kentucky", "GOGOMEDS_AZ": "Arizona", "GOGOMEDS_KENTUCKY": "Kentucky", "GOGOMEDS_ARIZONA": "Arizona", "HILLS_CGP_WAREHOUSE_CA": "Hills CA", "HILLS_CGP_WAREHOUSE_NJ": "Hills NJ", "HILLS_CGP_WAREHOUSE_FL": "Hills FL", "HILLS_CGP_WAREHOUSE_TX": "Hills TX" };
   function mapWH(slug) { return WH_MAP[slug] || slug || "\u2014"; }
 
   function updateNote(key, field, value) {
@@ -4351,8 +4359,8 @@ function OOSTracker(props) {
             var autoSD = sdIds[String(r.MANUFACTURER_NO)] || false;
             var isSD = n.sd !== undefined ? n.sd : autoSD;
             var isOld = prevItems[tab + ":" + r.MANUFACTURER_NO];
-            var whBg = r._wh === "Brooklyn" ? "#EFF6FF" : r._wh === "Ohio" ? "#ECFDF5" : r._wh === "Hayward" ? "#FFF7ED" : r._wh === "Miami" ? "#FFF1F2" : r._wh === "Kentucky" ? "#F5F3FF" : r._wh === "Arizona" ? "#FDF2F8" : r._wh === "Hills CA" ? "#FEF9C3" : r._wh === "Hills NJ" ? "#E0F2FE" : "#F3F4F6";
-            var whColor = r._wh === "Brooklyn" ? "#2563EB" : r._wh === "Ohio" ? "#059669" : r._wh === "Hayward" ? "#D97706" : r._wh === "Miami" ? "#E11D48" : r._wh === "Kentucky" ? "#7C3AED" : r._wh === "Arizona" ? "#DB2777" : r._wh === "Hills CA" ? "#A16207" : r._wh === "Hills NJ" ? "#0369A1" : "#6B7280";
+            var whBg = r._wh === "Brooklyn" ? "#EFF6FF" : r._wh === "Ohio" ? "#ECFDF5" : r._wh === "Hayward" ? "#FFF7ED" : r._wh === "Miami" ? "#FFF1F2" : r._wh === "Kentucky" ? "#F5F3FF" : r._wh === "Arizona" ? "#FDF2F8" : r._wh === "Hills CA" ? "#FEF9C3" : r._wh === "Hills NJ" ? "#E0F2FE" : r._wh === "Hills FL" ? "#FFE4E6" : r._wh === "Hills TX" ? "#CCFBF1" : "#F3F4F6";
+            var whColor = r._wh === "Brooklyn" ? "#2563EB" : r._wh === "Ohio" ? "#059669" : r._wh === "Hayward" ? "#D97706" : r._wh === "Miami" ? "#E11D48" : r._wh === "Kentucky" ? "#7C3AED" : r._wh === "Arizona" ? "#DB2777" : r._wh === "Hills CA" ? "#A16207" : r._wh === "Hills NJ" ? "#0369A1" : r._wh === "Hills FL" ? "#BE123C" : r._wh === "Hills TX" ? "#0F766E" : "#6B7280";
             return <tr key={i}>
               <td style={S.td}><textarea value={permNotes[noteKey] !== undefined ? permNotes[noteKey] : ""} onChange={function(e) { updateNote(noteKey, "note", e.target.value); e.target.style.height = "auto"; e.target.style.height = e.target.scrollHeight + "px"; }} placeholder="Add notes..." rows={1} style={Object.assign({}, S.inp, { padding: "5px 10px", fontSize: 12, resize: "none", overflow: "hidden", minHeight: 32, lineHeight: "1.4", display: "block", width: "100%" })} ref={function(el) { if (el) { el.style.height = "auto"; el.style.height = el.scrollHeight + "px"; } }} /></td>
               <td style={Object.assign({}, S.td, { textAlign: "center" })}><button onClick={function() { updateNote(noteKey, "sd", !isSD); }} style={{ width: 20, height: 20, borderRadius: 4, border: isSD ? "2px solid #E879F9" : "2px solid #D1D5DB", background: isSD ? "#E879F9" : "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", transition: "all 0.15s" }}>{isSD && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}</button></td>
@@ -4364,7 +4372,7 @@ function OOSTracker(props) {
               <td style={S.td}><span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 6, fontWeight: 500, background: whBg, color: whColor }}>{r._wh}</span></td>
               <td style={S.td}>{(function() {
                 // Map OOS row's display warehouse to Acumatica warehouse codes
-                var OOS_TO_ACU = { "Brooklyn": ["TP-NY"], "Ohio": ["TP-OH"], "Hayward": ["TP-CA"], "Miami": ["TP-FL", "TP-MI"], "Kentucky": ["GGM-KY"], "Arizona": ["GGM-AZ"], "Hills CA": ["HILL-CP-CA"], "Hills NJ": ["HILL-CP-NJ"] };
+                var OOS_TO_ACU = { "Brooklyn": ["TP-NY"], "Ohio": ["TP-OH"], "Hayward": ["TP-CA"], "Miami": ["TP-FL", "TP-MI"], "Kentucky": ["GGM-KY"], "Arizona": ["GGM-AZ"], "Hills CA": ["HILL-CP-CA"], "Hills NJ": ["HILL-CP-NJ"], "Hills FL": ["HILL-CP-FL"], "Hills TX": ["HILL-CP-TX"] };
                 var allowed = OOS_TO_ACU[r._wh] || null;
                 var allMatches = orderMap[String(r.MANUFACTURER_NO)] || [];
                 var matches = allowed ? allMatches.filter(function(m) { return allowed.indexOf((m.wh || "").trim().toUpperCase()) >= 0; }) : allMatches;
