@@ -27,6 +27,115 @@ function detectVendor(text) {
   return "";
 }
 
+function parseGgmCrossoverText(text) {
+  var lines = text.split("\n").map(function(l) { return l.trim(); });
+  var fullText = lines.join("\n");
+
+  // PO Number (e.g., "PO #:\nPO455")
+  var poNumber = "";
+  var poInline = fullText.match(/PO\s*#:\s*([A-Z0-9]+)/i);
+  if (poInline) poNumber = poInline[1];
+
+  // Warehouse: default KY, detect AZ from address
+  var warehouse = "GGM-KY";
+  if (/\bAZ\s+\d{5}\b/.test(fullText)) warehouse = "GGM-AZ";
+
+  // Stated total ("TOTAL $9,486.87")
+  var statedAmount = null;
+  var totalMatch = fullText.match(/TOTAL\s*\$?([\d,]+\.\d{2})/i);
+  if (totalMatch) { var amt = parseFloat(totalMatch[1].replace(/,/g, "")); if (!isNaN(amt)) statedAmount = amt; }
+
+  var items = [];
+  var pricePattern = /^(\d+)\s+\$?([\d,]+\.\d{2})\s+\$?([\d,]+\.\d{2})\s*$/;
+  var inlinePricePattern = /^(.*?)\s+(\d+)\s+\$?([\d,]+\.\d{2})\s+\$?([\d,]+\.\d{2})\s*$/;
+
+  for (var i = 0; i < lines.length; i++) {
+    // Each row starts with "GGM Crossover NNNNNNN" (first 7 digits of NDC)
+    var headerMatch = lines[i].match(/GGM\s+Crossover\s+(\d{7})\s*$/i);
+    if (!headerMatch) continue;
+    var ndcPart1 = headerMatch[1];
+
+    // Next line starts with NNNN (last 4 digits of NDC), then optional description+price
+    var nextLine = (lines[i + 1] || "").trim();
+    var pMatch = nextLine.match(/^(\d{4})(?:\s+(.*))?$/);
+    if (!pMatch) continue;
+    var ndcPart2 = pMatch[1];
+    var restOfLine = (pMatch[2] || "").trim();
+    var part2Idx = i + 1;
+
+    // Combine 7+4 digits and format as 5-4-2 NDC
+    var ndcRaw = ndcPart1 + ndcPart2;
+    if (ndcRaw.length !== 11) continue;
+    var ndc = ndcRaw.slice(0, 5) + "-" + ndcRaw.slice(5, 9) + "-" + ndcRaw.slice(9, 11);
+
+    var descParts = [];
+    var qty = null, unitPrice = null, totalPrice = null;
+    var endIdx = part2Idx;
+
+    // Process the rest of the NDC line (description start, optionally with inline price)
+    if (restOfLine) {
+      var im0 = restOfLine.match(inlinePricePattern);
+      if (im0) {
+        if (im0[1].trim()) descParts.push(im0[1].trim());
+        qty = parseInt(im0[2]);
+        unitPrice = parseFloat(im0[3].replace(/,/g, ""));
+        totalPrice = parseFloat(im0[4].replace(/,/g, ""));
+      } else {
+        descParts.push(restOfLine);
+      }
+    }
+
+    // Scan subsequent lines for description continuation / price
+    if (qty == null) {
+      for (var j = part2Idx + 1; j < Math.min(lines.length, part2Idx + 12); j++) {
+        var l = lines[j];
+        if (!l) continue;
+        if (/^TOTAL/i.test(l)) break;
+        if (/GGM\s+Crossover\s+\d{7}/i.test(l)) break;
+
+        var pm = l.match(pricePattern);
+        if (pm) {
+          qty = parseInt(pm[1]);
+          unitPrice = parseFloat(pm[2].replace(/,/g, ""));
+          totalPrice = parseFloat(pm[3].replace(/,/g, ""));
+          endIdx = j;
+          break;
+        }
+        var im = l.match(inlinePricePattern);
+        if (im) {
+          if (im[1].trim()) descParts.push(im[1].trim());
+          qty = parseInt(im[2]);
+          unitPrice = parseFloat(im[3].replace(/,/g, ""));
+          totalPrice = parseFloat(im[4].replace(/,/g, ""));
+          endIdx = j;
+          break;
+        }
+        descParts.push(l);
+      }
+    }
+
+    if (qty == null) continue;
+    var drugName = descParts.join(" ").replace(/\s+/g, " ").trim();
+
+    items.push({
+      ndc: ndc,
+      drugName: drugName,
+      qty: qty,
+      totalPrice: totalPrice != null ? Math.round(totalPrice * 100) / 100 : null,
+      unitPrice: unitPrice != null ? Math.round(unitPrice * 100) / 100 : null,
+      warehouse: warehouse,
+      vendorSource: "GoGoMeds Crossover",
+      vendorItemId: "",
+      poNumber: poNumber,
+      storeName: "",
+    });
+
+    i = endIdx;
+  }
+
+  return { items: items, warehouse: warehouse, vendorSource: "GoGoMeds Crossover", poNumber: poNumber, storeName: "", statedAmount: statedAmount };
+}
+
 function parsePdfText(text) {
   var lines = text.split("\n");
 
@@ -123,6 +232,7 @@ export async function POST(req) {
   try {
     var body = await req.json();
     var pdfs = body.pdfs;
+    var vendorHint = body.vendorHint || "";
 
     if (!pdfs || pdfs.length === 0) {
       return Response.json({ error: "No PDFs provided" }, { status: 400 });
@@ -142,7 +252,9 @@ export async function POST(req) {
         var result = await extractText(new Uint8Array(buffer));
         var text = Array.isArray(result.text) ? result.text.join("\n") : result.text;
 
-        var parsed = parsePdfText(text);
+        var parsed = vendorHint === "ggm-crossovers"
+          ? parseGgmCrossoverText(text)
+          : parsePdfText(text);
         if (parsed.warehouse && !warehouse) warehouse = parsed.warehouse;
         if (parsed.vendorSource && !vendorSource) vendorSource = parsed.vendorSource;
         if (parsed.poNumber && !poNumber) poNumber = parsed.poNumber;
