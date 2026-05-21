@@ -1590,23 +1590,30 @@ function POImportTool(props) {
   // Persist results separately per vendor type so switching doesn't lose data
   var otherCache = useRef({ pdfs: [], results: [], editedPrices: {}, screenshotQtys: {}, error: null });
   var mckCache = useRef({ pdfs: [], results: [], mckPaste: "", mckParsed: null, mckFile: null, mckPortalPrices: {}, editedPrices: {}, screenshotQtys: {}, mckWarnings: [], error: null });
+  var ggmCache = useRef({ pdfs: [], results: [], editedPrices: {}, screenshotQtys: {}, error: null });
 
   function switchVendor(newVendor) {
     if (newVendor === vendor) return;
     // Save current state to cache
     if (vendor === "other") {
       otherCache.current = { pdfs: pdfs, results: results, editedPrices: editedPrices, screenshotQtys: screenshotQtys, error: error };
-    } else {
+    } else if (vendor === "mckesson") {
       mckCache.current = { pdfs: pdfs, results: results, mckPaste: mckPaste, mckParsed: mckParsed, mckFile: mckFile, mckPortalPrices: mckPortalPrices, editedPrices: editedPrices, screenshotQtys: screenshotQtys, mckWarnings: mckWarnings, error: error };
+    } else if (vendor === "ggm-crossovers") {
+      ggmCache.current = { pdfs: pdfs, results: results, editedPrices: editedPrices, screenshotQtys: screenshotQtys, error: error };
     }
     // Restore from cache
     if (newVendor === "other") {
       var c = otherCache.current;
       setPdfs(c.pdfs); setResults(c.results); setEditedPrices(c.editedPrices); setScreenshotQtys(c.screenshotQtys); setError(c.error);
       setMckWarnings([]);
-    } else {
+    } else if (newVendor === "mckesson") {
       var m = mckCache.current;
       setPdfs(m.pdfs); setResults(m.results); setMckPaste(m.mckPaste); setMckParsed(m.mckParsed); setMckFile(m.mckFile); setMckPortalPrices(m.mckPortalPrices); setEditedPrices(m.editedPrices); setScreenshotQtys(m.screenshotQtys); setMckWarnings(m.mckWarnings); setError(m.error);
+    } else if (newVendor === "ggm-crossovers") {
+      var g = ggmCache.current;
+      setPdfs(g.pdfs); setResults(g.results); setEditedPrices(g.editedPrices); setScreenshotQtys(g.screenshotQtys); setError(g.error);
+      setMckWarnings([]);
     }
     setVendor(newVendor);
   }
@@ -1889,7 +1896,7 @@ function POImportTool(props) {
         var parseResp = await fetch("/api/po-import", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ pdfs: [pdfs[pi]] }),
+          body: JSON.stringify({ pdfs: [pdfs[pi]], vendorHint: vendor }),
         });
         var parseJson = await parseResp.json();
         if (!parseResp.ok) throw new Error(parseJson.error || "Parse failed for " + pdfs[pi].name);
@@ -2093,7 +2100,7 @@ function POImportTool(props) {
             </div>
           </div>
           <div style={{ display: "flex", gap: 10 }}>
-            {[["other", "Keysource / Anda / Bloodworth"], ["mckesson", "McKesson"]].map(function(v) {
+            {[["other", "Keysource / Anda / Bloodworth"], ["mckesson", "McKesson"], ["ggm-crossovers", "GoGoMeds Crossovers"]].map(function(v) {
               return <button key={v[0]} onClick={function() { switchVendor(v[0]); }}
                 style={{ padding: "8px 18px", borderRadius: 8, border: "1px solid " + (vendor === v[0] ? TOOL_COLOR : "#E5E7EB"), background: vendor === v[0] ? TOOL_COLOR + "20" : "transparent", color: vendor === v[0] ? TOOL_COLOR : "#6B7280", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>{v[1]}</button>;
             })}
