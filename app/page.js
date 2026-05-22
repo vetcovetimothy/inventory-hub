@@ -3094,7 +3094,7 @@ function TruckloaderTool(props) {
     "HILL-CP-CA": { label: "California", shortCode: "CA", cpTo: "ap.petd.santafesprings@central.com, jcanter@centralpet.com, jspengler@central.com, hd-purchaseorders@vetcove.com" },
     "HILL-CP-NJ": { label: "New Jersey", shortCode: "NJ", cpTo: "jcanter@centralpet.com, jspengler@central.com, hd-purchaseorders@vetcove.com, gcustode@central.com" },
     "HILL-CP-FL": { label: "Tampa",      shortCode: "Tampa",  cpTo: "jcanter@centralpet.com, jspengler@central.com, hd-purchaseorders@vetcove.com" },
-    "HILL-CP-TX": { label: "Dallas",     shortCode: "Dallas", cpTo: "jcanter@centralpet.com, jspengler@central.com, hd-purchaseorders@vetcove.com" },
+    "HILL-CP-TX": { label: "Dallas",     shortCode: "Dallas", cpTo: "mcabrera@centralpet.com, jcanter@centralpet.com, jspengler@central.com, hd-purchaseorders@vetcove.com" },
   };
   var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
 
