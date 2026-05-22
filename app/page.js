@@ -3102,8 +3102,6 @@ function TruckloaderTool(props) {
   var _hm = useState(null), hillsMaster = _hm[0], setHillsMaster = _hm[1];
   var _hmLoad = useState(true), hmLoading = _hmLoad[0], setHmLoading = _hmLoad[1];
   var _replen = useState([]), replenData = _replen[0], setReplenData = _replen[1];
-  var _diag = useState(null), diag = _diag[0], setDiag = _diag[1];
-  var _showDiag = useState(false), showDiag = _showDiag[0], setShowDiag = _showDiag[1];
   var _rLoad = useState(false), replenLoading = _rLoad[0], setReplenLoading = _rLoad[1];
   var _order = useState([]), orderItems = _order[0], setOrderItems = _order[1];
   var _confirmRemove = useState(null), confirmRemove = _confirmRemove[0], setConfirmRemove = _confirmRemove[1];
@@ -3213,22 +3211,13 @@ function TruckloaderTool(props) {
       setReplenData(rows);
       // Filter by warehouse client-side (GI params don't pass through OData)
       var whRows = rows.filter(function(r) { return String(r.Warehouse || "").trim() === warehouse; });
-      // Track excluded rows with reasons for the diagnostic panel
-      var excluded = [];
+      // Filter: QtyAvail + OnPO + POPrepared < ReorderPoint (match Prepare Replenishment)
       var filtered = whRows.filter(function(r) {
         var avail = parseFloat(r.QtyAvailable) || 0;
         var onPO = parseFloat(r.OnPO) || 0;
         var poPrepared = parseFloat(r.POPrepared) || 0;
         var reorder = parseFloat(r.ReorderPoint) || 0;
-        if (reorder <= 0) {
-          excluded.push({ id: r.InventoryID, description: r.Description, avail: avail, onPO: onPO, poPrepared: poPrepared, reorder: reorder, maxQty: parseFloat(r.MaxQty) || 0, reason: "Reorder Point is 0 or blank in GI" });
-          return false;
-        }
-        if (avail + onPO + poPrepared >= reorder) {
-          excluded.push({ id: r.InventoryID, description: r.Description, avail: avail, onPO: onPO, poPrepared: poPrepared, reorder: reorder, maxQty: parseFloat(r.MaxQty) || 0, reason: "Avail+OnPO+POPrepared (" + (avail + onPO + poPrepared) + ") \u2265 ReorderPoint (" + reorder + ")" });
-          return false;
-        }
-        return true;
+        return (avail + onPO + poPrepared) < reorder && reorder > 0;
       });
       // Build order items with Hills Master lookup
       var items = filtered.map(function(r) {
@@ -3260,17 +3249,9 @@ function TruckloaderTool(props) {
           maxQty: maxQty,
           inHillsMaster: !!hm.unitsPerPallet,
         };
-      });
-      // Track items dropped by the caseNeed > 0 filter
-      items.forEach(function(x) {
-        if (x.caseNeed <= 0) {
-          excluded.push({ id: x.inventoryID, description: x.description, avail: x.qtyAvail, onPO: x.onPO, poPrepared: 0, reorder: x.reorderPt, maxQty: x.maxQty, reason: "Case Need = MaxQty (" + x.maxQty + ") - Avail - OnPO - POPrepared \u2264 0" });
-        }
-      });
-      items = items.filter(function(x) { return x.caseNeed > 0; });
+      }).filter(function(x) { return x.caseNeed > 0; });
       setOrderItems(items);
-      setDiag({ giTotal: rows.length, whTotal: whRows.length, kept: items.length, excluded: excluded });
-      toast("Loaded " + items.length + " items to order for " + warehouse + " (" + excluded.length + " excluded — see diagnostic)");
+      toast("Loaded " + items.length + " items to order for " + warehouse);
     } catch (err) { toast("Error: " + err.message, "error"); }
     setReplenLoading(false);
   }, [ok, lp, cred, warehouse, hillsMaster, hmLookup, toast]);
@@ -3651,49 +3632,6 @@ function TruckloaderTool(props) {
       <button onClick={function() { if (truckGroups) setStep("trucks"); else toast("Run Optimize Trucks first", "info"); }} style={S.pill(step === "trucks", "#059669")}>Truck Assignments{truckGroups ? " (" + truckGroups.filter(function(t) { return !t.isError; }).length + ")" : ""}</button>
       <button onClick={function() { setStep("fill"); }} style={S.pill(step === "fill", "#7C3AED")}>Fill Suggestions</button>
       <button onClick={function() { setStep("email"); }} style={S.pill(step === "email", "#3B82F6")}>Email</button>
-    </div>}
-
-    {/* GI DIAGNOSTIC */}
-    {step === "order" && diag && <div style={Object.assign({}, S.card, { padding: "12px 16px" })}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
-        <div style={{ fontSize: 12, color: "#6B7280" }}>
-          <span style={{ fontWeight: 600, color: "#374151" }}>GI Diagnostic:</span>{" "}
-          GI returned <span style={{ fontWeight: 600, color: "#374151" }}>{diag.giTotal}</span> total rows ·{" "}
-          <span style={{ fontWeight: 600, color: "#374151" }}>{diag.whTotal}</span> for {warehouse} ·{" "}
-          <span style={{ fontWeight: 600, color: "#059669" }}>{diag.kept}</span> kept ·{" "}
-          <span style={{ fontWeight: 600, color: diag.excluded.length > 0 ? "#D97706" : "#9CA3AF" }}>{diag.excluded.length}</span> excluded
-        </div>
-        {diag.excluded.length > 0 && <button onClick={function() { setShowDiag(!showDiag); }} style={Object.assign({}, S.btn("ghost"), { padding: "4px 12px", fontSize: 11 })}>{showDiag ? "Hide" : "Show"} excluded</button>}
-      </div>
-      {showDiag && diag.excluded.length > 0 && <div style={{ marginTop: 12, overflow: "auto", borderRadius: 8, border: "1px solid #E5E7EB", maxHeight: 360 }}>
-        <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 11 }}>
-          <thead><tr>
-            <th style={S.th}>Inventory ID</th>
-            <th style={S.th}>Description</th>
-            <th style={Object.assign({}, S.th, { textAlign: "right" })}>Avail</th>
-            <th style={Object.assign({}, S.th, { textAlign: "right" })}>On PO</th>
-            <th style={Object.assign({}, S.th, { textAlign: "right" })}>PO Prep.</th>
-            <th style={Object.assign({}, S.th, { textAlign: "right" })}>Reorder Pt</th>
-            <th style={Object.assign({}, S.th, { textAlign: "right" })}>Max Qty</th>
-            <th style={S.th}>Reason Excluded</th>
-          </tr></thead>
-          <tbody>{diag.excluded.map(function(ex, i) {
-            return <tr key={i}>
-              <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontWeight: 600 })}>{ex.id}</td>
-              <td style={Object.assign({}, S.td, { maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })} title={ex.description}>{ex.description}</td>
-              <td style={Object.assign({}, S.td, { textAlign: "right" })}>{ex.avail}</td>
-              <td style={Object.assign({}, S.td, { textAlign: "right" })}>{ex.onPO}</td>
-              <td style={Object.assign({}, S.td, { textAlign: "right" })}>{ex.poPrepared}</td>
-              <td style={Object.assign({}, S.td, { textAlign: "right" })}>{ex.reorder}</td>
-              <td style={Object.assign({}, S.td, { textAlign: "right" })}>{ex.maxQty}</td>
-              <td style={Object.assign({}, S.td, { color: "#D97706", fontSize: 11 })}>{ex.reason}</td>
-            </tr>;
-          })}</tbody>
-        </table>
-      </div>}
-      {diag.whTotal === 0 && <div style={{ marginTop: 8, padding: "8px 12px", background: "#FEF3C7", borderRadius: 6, fontSize: 11, color: "#92400E" }}>
-        <strong>No rows for {warehouse} in the GI.</strong> If items show in Prepare Replenishment in Acumatica but not here, the GI's source filter may need adjustment (e.g. <code>QtyAvail ≤ MinQty AND MinQty {">"} 0</code>) or the Inventory ID may not be in the GI's site filter.
-      </div>}
     </div>}
 
     {/* ORDER TABLE */}
