@@ -3116,6 +3116,9 @@ function TruckloaderTool(props) {
   var _fillPals = useState({}), fillPals = _fillPals[0], setFillPals = _fillPals[1];
   var _hillsDraftSent = useState(false), hillsDraftSent = _hillsDraftSent[0], setHillsDraftSent = _hillsDraftSent[1];
   var _cpDraftSent = useState(false), cpDraftSent = _cpDraftSent[0], setCpDraftSent = _cpDraftSent[1];
+  var _emailOverrides = useState({}), emailOverrides = _emailOverrides[0], setEmailOverrides = _emailOverrides[1];
+  var _editingEmail = useState(null), editingEmail = _editingEmail[0], setEditingEmail = _editingEmail[1];
+  var _emailEditValue = useState(""), emailEditValue = _emailEditValue[0], setEmailEditValue = _emailEditValue[1];
   var fileRef = useRef(null);
   var nsFileRef = useRef(null);
 
@@ -3139,6 +3142,15 @@ function TruckloaderTool(props) {
         setHmLoading(false);
       }
     })();
+    return function() { m = false; };
+  }, []);
+
+  // Load Email recipient overrides from KV (shared with team)
+  useEffect(function() {
+    var m = true;
+    kvGet("truckloader-email-overrides").then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+      if (m && d && d.data && typeof d.data === "object") setEmailOverrides(d.data);
+    }).catch(function() {});
     return function() { m = false; };
   }, []);
 
@@ -3566,7 +3578,7 @@ function TruckloaderTool(props) {
     <div style={Object.assign({}, S.card, { display: "flex", gap: 24, alignItems: "flex-start", flexWrap: "wrap" })}>
       <div style={{ flex: 1, minWidth: 200 }}>
         <div style={{ fontSize: 11, color: "#9CA3AF", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 6 }}>Warehouse</div>
-        <select value={warehouse} onChange={function(e) { setWarehouse(e.target.value); setOrderItems([]); setTruckGroups(null); setFillSuggestions(null); setFillAdded([]); setFillPals({}); setHillsDraftSent(false); setCpDraftSent(false); setStep("order"); }} style={Object.assign({}, S.sel, { width: "100%", maxWidth: 280 })}>
+        <select value={warehouse} onChange={function(e) { setWarehouse(e.target.value); setOrderItems([]); setTruckGroups(null); setFillSuggestions(null); setFillAdded([]); setFillPals({}); setHillsDraftSent(false); setCpDraftSent(false); setEditingEmail(null); setStep("order"); }} style={Object.assign({}, S.sel, { width: "100%", maxWidth: 280 })}>
           {Object.keys(WH_META).map(function(code) { return <option key={code} value={code}>{code} ({WH_META[code].label})</option>; })}
         </select>
       </div>
@@ -3872,8 +3884,17 @@ function TruckloaderTool(props) {
         var now = new Date();
         var dateStr = (now.getMonth() + 1) + "." + ("0" + now.getDate()).slice(-2) + "." + now.getFullYear();
         var subject = dateStr + " Weekly Replenishment - Vetcove " + whShort;
-        var hillsTo = "truckloador@hillspet.com, brian_shively@hillspet.com, hd-purchaseorders@vetcove.com";
-        var cpTo = whMeta.cpTo;
+        var defaultHillsTo = "truckloador@hillspet.com, brian_shively@hillspet.com, hd-purchaseorders@vetcove.com";
+        var whOverrides = emailOverrides[warehouse] || {};
+        var hillsTo = whOverrides.hillsTo != null ? whOverrides.hillsTo : defaultHillsTo;
+        var cpTo = whOverrides.cpTo != null ? whOverrides.cpTo : whMeta.cpTo;
+        function saveEmailOverride(field, value) {
+          var updated = Object.assign({}, emailOverrides);
+          updated[warehouse] = Object.assign({}, updated[warehouse] || {}, {});
+          updated[warehouse][field] = value;
+          setEmailOverrides(updated);
+          kvPost("truckloader-email-overrides", updated).catch(function() {});
+        }
         var hillsBody = "<p>Hi, please find attached our weekly replenishment order. Please include the Purchase Order # on our packing list.</p><p>We look forward to confirmation of receipt. Let us know if you have any questions.</p><p>Thanks,</p>";
         var cpBody = "<p>Hi Central Pet team,</p><p>I've just placed this week's replenishment POs with Hill's. Attaching here to create in your systems. Hill's hasn't set delivery appointments yet.</p><p>Thanks,</p>";
 
@@ -3899,7 +3920,7 @@ function TruckloaderTool(props) {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
               <div>
                 <div style={{ fontSize: 15, fontWeight: 600, color: "#1F2937", marginBottom: 4 }}>Hill{"'"}s Pet Nutrition</div>
-                <div style={{ fontSize: 11, color: "#9CA3AF" }}>{hillsTo}</div>
+                {editingEmail === "hills" ? <input value={emailEditValue} onChange={function(e) { setEmailEditValue(e.target.value); }} autoFocus onBlur={function() { saveEmailOverride("hillsTo", emailEditValue); setEditingEmail(null); }} onKeyDown={function(e) { if (e.key === "Enter") { saveEmailOverride("hillsTo", emailEditValue); setEditingEmail(null); } if (e.key === "Escape") setEditingEmail(null); }} placeholder="recipient1@example.com, recipient2@example.com" style={Object.assign({}, S.inp, { padding: "5px 9px", fontSize: 11, width: "100%" })} /> : <div style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ fontSize: 11, color: "#9CA3AF", wordBreak: "break-all", flex: 1 }}>{hillsTo}</span><button onClick={function() { setEmailEditValue(hillsTo); setEditingEmail("hills"); }} title="Edit recipients" style={{ background: "transparent", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 12, padding: 2, flexShrink: 0 }}>{"\u270E"}</button></div>}
               </div>
               {hillsDraftSent && <span style={{ fontSize: 11, color: "#059669", fontWeight: 500, display: "flex", alignItems: "center", gap: 4 }}><IconCheck /> Sent</span>}
             </div>
@@ -3917,7 +3938,7 @@ function TruckloaderTool(props) {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
               <div>
                 <div style={{ fontSize: 15, fontWeight: 600, color: "#1F2937", marginBottom: 4 }}>Central Pet</div>
-                <div style={{ fontSize: 11, color: "#9CA3AF" }}>{cpTo}</div>
+                {editingEmail === "cp" ? <input value={emailEditValue} onChange={function(e) { setEmailEditValue(e.target.value); }} autoFocus onBlur={function() { saveEmailOverride("cpTo", emailEditValue); setEditingEmail(null); }} onKeyDown={function(e) { if (e.key === "Enter") { saveEmailOverride("cpTo", emailEditValue); setEditingEmail(null); } if (e.key === "Escape") setEditingEmail(null); }} placeholder="recipient1@example.com, recipient2@example.com" style={Object.assign({}, S.inp, { padding: "5px 9px", fontSize: 11, width: "100%" })} /> : <div style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ fontSize: 11, color: "#9CA3AF", wordBreak: "break-all", flex: 1 }}>{cpTo}</span><button onClick={function() { setEmailEditValue(cpTo); setEditingEmail("cp"); }} title="Edit recipients" style={{ background: "transparent", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 12, padding: 2, flexShrink: 0 }}>{"\u270E"}</button></div>}
               </div>
               {cpDraftSent && <span style={{ fontSize: 11, color: "#059669", fontWeight: 500, display: "flex", alignItems: "center", gap: 4 }}><IconCheck /> Sent</span>}
             </div>
