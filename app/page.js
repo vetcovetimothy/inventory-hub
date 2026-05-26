@@ -3917,8 +3917,8 @@ function TruckloaderTool(props) {
 
           {/* Hill's Draft */}
           <div style={S.card}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
-              <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12, gap: 12 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 15, fontWeight: 600, color: "#1F2937", marginBottom: 4 }}>Hill{"'"}s Pet Nutrition</div>
                 {editingEmail === "hills" ? <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
                   <textarea value={emailEditValue} onChange={function(e) { setEmailEditValue(e.target.value); }} autoFocus onKeyDown={function(e) { if (e.key === "Escape") setEditingEmail(null); }} placeholder="recipient1@example.com, recipient2@example.com" rows={2} style={Object.assign({}, S.inp, { padding: "8px 12px", fontSize: 13, lineHeight: 1.5, color: "#374151", width: "100%", resize: "vertical", fontFamily: "'Varela Round', sans-serif" })} />
@@ -3941,8 +3941,8 @@ function TruckloaderTool(props) {
 
           {/* Central Pet Draft */}
           <div style={S.card}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
-              <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12, gap: 12 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 15, fontWeight: 600, color: "#1F2937", marginBottom: 4 }}>Central Pet</div>
                 {editingEmail === "cp" ? <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
                   <textarea value={emailEditValue} onChange={function(e) { setEmailEditValue(e.target.value); }} autoFocus onKeyDown={function(e) { if (e.key === "Escape") setEditingEmail(null); }} placeholder="recipient1@example.com, recipient2@example.com" rows={2} style={Object.assign({}, S.inp, { padding: "8px 12px", fontSize: 13, lineHeight: 1.5, color: "#374151", width: "100%", resize: "vertical", fontFamily: "'Varela Round', sans-serif" })} />
