@@ -1551,11 +1551,11 @@ function CycleCountTool(props) {
         });
         output.forEach(function(row) {
           var dohRow = dohMap[row.inventoryId + "|" + wh];
-          if (!dohRow) { row.dailyRunRate = null; return; }
+          if (!dohRow) { row.dailyRunRate = null; row.convertedDailyRunRate = null; return; }
           row.dohDescription = dohRow.description;
           row.dohOnHand = dohRow.onHand;
           row.dohDaysOnHand = dohRow.daysOnHand;
-          if (dohRow.daysOnHand <= 0) { row.dailyRunRate = null; return; }
+          if (dohRow.daysOnHand <= 0) { row.dailyRunRate = null; row.convertedDailyRunRate = null; return; }
           var drrInBase = dohRow.onHand / dohRow.daysOnHand;
           var salesUnit = (row.uom || "").toUpperCase();
           var drrInSales = drrInBase;
@@ -1580,7 +1580,8 @@ function CycleCountTool(props) {
               convSource = "pkg";
             }
           }
-          row.dailyRunRate = Math.round(drrInSales * 100) / 100;
+          row.dailyRunRate = Math.round(drrInBase * 100) / 100;
+          row.convertedDailyRunRate = Math.round(drrInSales * 100) / 100;
           row.drrConvSource = convSource;
         });
       }
@@ -1610,11 +1611,11 @@ function CycleCountTool(props) {
   }
 
   function downloadDrrCSV() {
-    var header = "Inventory ID,NDC,Location Code,Description,Fuze's Counts,Our Counts,Adjustment,Daily Run Rate,Days of Supply\r\n";
+    var header = "Inventory ID,NDC,Location Code,Description,Fuze's Counts,Our Counts,Adjustment,Daily Run Rate,Converted Daily Run Rate,Days of Supply\r\n";
     var lines = results.map(function(r) {
       var daysOfSupply = "";
-      if (r.dailyRunRate && r.dailyRunRate > 0) {
-        daysOfSupply = Math.round((r.quantity / r.dailyRunRate) * 10) / 10;
+      if (r.convertedDailyRunRate && r.convertedDailyRunRate > 0) {
+        daysOfSupply = Math.round((r.quantity / r.convertedDailyRunRate) * 10) / 10;
       }
       return [
         r.inventoryId,
@@ -1625,6 +1626,7 @@ function CycleCountTool(props) {
         r.stockQty,
         r.quantity,
         r.dailyRunRate != null ? r.dailyRunRate : "",
+        r.convertedDailyRunRate != null ? r.convertedDailyRunRate : "",
         daysOfSupply,
       ].map(function(v) { return "\"" + String(v == null ? "" : v).replace(/"/g, '""') + "\""; }).join(",");
     });
