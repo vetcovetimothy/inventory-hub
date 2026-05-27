@@ -1534,7 +1534,7 @@ function CycleCountTool(props) {
   }
 
   function downloadDrrCSV() {
-    var header = "Inventory ID,NDC,Location Code,Description,Fuze's Counts,Our Counts,Adjustment,Days of Supply\r\n";
+    var header = "Inventory ID,NDC,Location Code,Description,Fuze's Counts,Our Counts,Adjustment,Daily Run Rate,Days of Supply\r\n";
     var lines = results.map(function(r) {
       var daysOfSupply = "";
       if (r.dailyRunRate && r.dailyRunRate > 0) {
@@ -1543,11 +1543,12 @@ function CycleCountTool(props) {
       return [
         r.inventoryId,
         r.ndc,
-        r.location,
+        r.warehouse,
         r.dohDescription || "",
         r.reportedQty,
         r.stockQty,
         r.quantity,
+        r.dailyRunRate != null ? r.dailyRunRate : "",
         daysOfSupply,
       ].map(function(v) { return "\"" + String(v == null ? "" : v).replace(/"/g, '""') + "\""; }).join(",");
     });
@@ -1555,7 +1556,7 @@ function CycleCountTool(props) {
     var blob = new Blob([csv], { type: "text/csv" });
     var url = URL.createObjectURL(blob);
     var a = document.createElement("a");
-    a.href = url; a.download = "CC_DRR_" + warehouse.trim() + "_" + new Date().toISOString().slice(5, 10).replace("-", "_") + ".csv"; a.click();
+    a.href = url; a.download = "CC_Check_" + warehouse.trim() + "_" + new Date().toISOString().slice(5, 10).replace("-", "_") + ".csv"; a.click();
     URL.revokeObjectURL(url);
   }
 
@@ -1642,7 +1643,7 @@ function CycleCountTool(props) {
           {loading ? "Processing..." : "Generate Cycle Count"}
         </button>
         {results.length > 0 && <button onClick={downloadCSV} style={Object.assign({}, S.btn("ghost"), { padding: "10px 16px" })}><IconDL /> Download CSV</button>}
-        {results.length > 0 && dohRows && dohRows.length > 0 && <button onClick={downloadDrrCSV} style={Object.assign({}, S.btn("ghost"), { padding: "10px 16px" })}><IconDL /> Download DRR CSV</button>}
+        {results.length > 0 && dohRows && dohRows.length > 0 && <button onClick={downloadDrrCSV} style={Object.assign({}, S.btn("ghost"), { padding: "10px 16px" })}><IconDL /> Download Cycle Count Check CSV</button>}
         {results.length > 0 && <span style={{ fontSize: 12, color: "#6B7280" }}>{results.length} items</span>}
         {(ndcText.trim() || vendorFile || results.length > 0) && <button onClick={function() { setNdcText(""); setVendorFile(null); setVendorRows(null); setCsvWarehouses([]); setCsvWhSelected(""); setCsvWhCounts({}); setWarehouse(""); setResults([]); setErrors([]); setSftpFile(null); setSftpRows(null); }} style={Object.assign({}, S.btn("ghost"), { padding: "10px 16px", marginLeft: "auto" })}><IconTrash /> Clear</button>}
       </div>
