@@ -1569,10 +1569,17 @@ function CycleCountTool(props) {
           var drrInSales = drrInBase;
           var convSource = "none";
           var conv = (salesUnit && uomMap && uomMap[row.inventoryId]) ? uomMap[row.inventoryId][salesUnit] : null;
-          if (conv && conv.fromUnit && mainUom && conv.fromUnit === mainUom) {
-            // Step 5: multiply by the GI's Conversion Factor (works for any factor, incl. 1)
-            drrInSales = drrInBase * conv.factor;
-            convSource = "gi";
+          if (conv && conv.factor) {
+            // Match FromUnit to TP-DOH's Main UOM when available; if Main UOM is missing
+            // from the TP-DOH file (older cache), trust the GI's FromUnit (which is the
+            // base unit by Acumatica convention).
+            if (!mainUom || conv.fromUnit === mainUom) {
+              // Step 5: multiply DRR by the GI's Conversion Factor (1 for same-unit, N otherwise)
+              drrInSales = drrInBase * conv.factor;
+              convSource = mainUom ? "gi" : "gi-no-mainUom";
+            } else {
+              convSource = "gi-uom-mismatch:" + conv.fromUnit + "≠" + mainUom;
+            }
           } else if (salesUnit && row.pkgSize > 0) {
             // Fallback: Package Size from vendor CSV when GI has no matching row.
             // Only apply if Stock Items confirms Base ≠ Sales.
