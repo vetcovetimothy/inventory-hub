@@ -4019,6 +4019,14 @@ function OOSTracker(props) {
         }).then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; })
       : Promise.resolve(null);
     var hillsMetaPromise = kvGet("hills-pawtree-meta").then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; });
+    // NDC <-> Inventory ID cross-reference (only needed for tabs that use sheets)
+    var needsNdcLookup = whsForTab.length > 0 && cred && cred.username && cred.password;
+    var crossRefPromise = needsNdcLookup
+      ? fetch("/api/acumatica", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "stock-cross-ref", username: cred.username, password: cred.password }) }).then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; })
+      : Promise.resolve(null);
+    var ndcLookupPromise = needsNdcLookup
+      ? fetch("/api/acumatica", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "ndc-lookup", username: cred.username, password: cred.password }) }).then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; })
+      : Promise.resolve(null);
     function parseDateLoose(s) {
       if (!s) return null;
       var t = String(s).split("T")[0];
@@ -4028,21 +4036,57 @@ function OOSTracker(props) {
       if (us) { var y = parseInt(us[3]); if (y < 100) y += 2000; return new Date(y, parseInt(us[1]) - 1, parseInt(us[2])).getTime(); }
       var d = new Date(t); return isNaN(d.getTime()) ? null : d.getTime();
     }
-    Promise.all([sheetPromise, openPoPromise, hillsMetaPromise]).then(function(all) {
+    Promise.all([sheetPromise, openPoPromise, hillsMetaPromise, crossRefPromise, ndcLookupPromise]).then(function(all) {
       var sheetResults = all[0];
       var openPoJson = all[1];
       var hillsMetaResp = all[2];
-      // Build Inventory ID -> [tracker entries] map for proximity matching
+      var crossRefJson = all[3];
+      var ndcLookupJson = all[4];
+      // Build NDC -> [Inventory IDs] map (branded + GEN- can both map to same NDC)
+      var ndcToInvIds = {};
+      // Reverse: Inventory ID -> NDC (used so we can look up an Acumatica PO's NDC)
+      var invIdToNdc = {};
+      function addNdcMapping(ndc, invId) {
+        if (!ndc || !invId) return;
+        if (!ndcToInvIds[ndc]) ndcToInvIds[ndc] = [];
+        if (ndcToInvIds[ndc].indexOf(invId) < 0) ndcToInvIds[ndc].push(invId);
+        if (!invIdToNdc[invId]) invIdToNdc[invId] = ndc;
+      }
+      if (crossRefJson && crossRefJson.data) {
+        crossRefJson.data.forEach(function(row) {
+          addNdcMapping(normalizeNdc(row.NDC), (row.InventoryID || "").trim());
+        });
+      }
+      if (ndcLookupJson && ndcLookupJson.data) {
+        ndcLookupJson.data.forEach(function(row) {
+          addNdcMapping(normalizeNdc(row.AlternateID), (row.InventoryID || "").trim());
+        });
+      }
+      // Build tracker proximity map, dual-keyed under (sheet Inventory ID) + (NDC-resolved Inventory IDs) + (raw NDC fallback)
+      // Each entry stores `source` so we can attribute the ETA in the UI.
       var trackerByInvId = {};
       sheetResults.forEach(function(rs) {
-        var isFuze = rs.wh.indexOf("TP-") === 0;
+        var sourceLabel = rs.wh.indexOf("TP-") === 0 ? "Fuze" : (rs.wh.indexOf("GGM-") === 0 ? "GGM" : "Sheet");
         rs.rows.forEach(function(r) {
-          var trackerInvId = (r["Inventory ID"] || "").trim();
           var eta = r["Expected Arrival"] || "";
+          if (!eta) return;
           var orderDate = r["Order Date"] || "";
-          if (!trackerInvId || !eta) return;
-          if (!trackerByInvId[trackerInvId]) trackerByInvId[trackerInvId] = [];
-          trackerByInvId[trackerInvId].push({ eta: eta, orderDateMs: parseDateLoose(orderDate) });
+          var orderDateMs = parseDateLoose(orderDate);
+          var sheetInvId = (r["Inventory ID"] || "").trim();
+          var sheetNdc = normalizeNdc(r["NDC"]);
+          // Collect every key this row should be indexed under
+          var keys = [];
+          if (sheetInvId) keys.push(sheetInvId);
+          if (sheetNdc && ndcToInvIds[sheetNdc]) {
+            ndcToInvIds[sheetNdc].forEach(function(id) { if (keys.indexOf(id) < 0) keys.push(id); });
+          }
+          if (sheetNdc) keys.push("NDC:" + sheetNdc);
+          if (keys.length === 0) return;
+          var entry = { eta: eta, orderDateMs: orderDateMs, source: sourceLabel };
+          keys.forEach(function(key) {
+            if (!trackerByInvId[key]) trackerByInvId[key] = [];
+            trackerByInvId[key].push(entry);
+          });
         });
       });
       // Hills KV meta: { "P0001234": { eta: "5/15/2026", notes: "..." } }
@@ -4052,6 +4096,23 @@ function OOSTracker(props) {
         Object.keys(raw || {}).forEach(function(po) {
           if (raw[po] && raw[po].eta) hillsMeta[po] = raw[po].eta;
         });
+      }
+      // Find best tracker entry for a given Acumatica PO's Inventory ID + Order Date
+      function bestTrackerEta(invId, orderDateMs) {
+        // Try keys in priority order: direct Inventory ID, then NDC-resolved (via reverse map)
+        var candidates = trackerByInvId[invId] || [];
+        if (candidates.length === 0) {
+          var ndc = invIdToNdc[invId];
+          if (ndc) candidates = trackerByInvId["NDC:" + ndc] || [];
+        }
+        if (candidates.length === 0 || !orderDateMs) return null;
+        var best = null, bestDelta = Infinity;
+        candidates.forEach(function(t) {
+          if (!t.orderDateMs) return;
+          var delta = Math.abs(t.orderDateMs - orderDateMs);
+          if (delta < bestDelta && delta <= 14 * 86400000) { bestDelta = delta; best = t; }
+        });
+        return best;
       }
       // Build final map from Open PO Lines, enriched with ETA where possible
       var map = {};
@@ -4070,18 +4131,15 @@ function OOSTracker(props) {
           var orderDateMs = parseDateLoose(orderDate);
           // ETA resolution priority:
           // 1) Hills KV (matches by Acumatica PO# directly)
-          // 2) Closest-in-time tracker entry for same Inventory ID (within 14 days)
+          // 2) Tracker sheet (matches by Inventory ID or NDC-resolved Inventory ID, within 14 days of Order Date)
           var eta = "";
+          var etaSource = "";
           if (po && hillsMeta[po]) {
             eta = hillsMeta[po];
-          } else if (trackerByInvId[invId] && orderDateMs) {
-            var best = null, bestDelta = Infinity;
-            trackerByInvId[invId].forEach(function(t) {
-              if (!t.orderDateMs) return;
-              var delta = Math.abs(t.orderDateMs - orderDateMs);
-              if (delta < bestDelta && delta <= 14 * 86400000) { bestDelta = delta; best = t; }
-            });
-            if (best) eta = best.eta;
+            etaSource = "Hills KV";
+          } else {
+            var best = bestTrackerEta(invId, orderDateMs);
+            if (best) { eta = best.eta; etaSource = best.source; }
           }
           if (!map[invId]) map[invId] = [];
           map[invId].push({
@@ -4089,6 +4147,7 @@ function OOSTracker(props) {
             po: po,
             orderDate: orderDate,
             expectedArrival: eta,
+            etaSource: etaSource,
             orderQty: orderQty,
             qtyReceived: qtyReceived,
             received: outstanding <= 0,
@@ -4449,7 +4508,7 @@ function OOSTracker(props) {
                             <span style={{ fontWeight: 600, opacity: 0.7 }}>Order Date</span>
                             <span style={{ fontWeight: 500 }}>{ordStr}</span>
                           </span>}
-                          {etaStr && <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, color: m.received ? "#9CA3AF" : "#9A3412", background: m.received ? "#F9FAFB" : "#FFEDD5", padding: "2px 7px", borderRadius: 999, whiteSpace: "nowrap" }}>
+                          {etaStr && <span title={m.etaSource ? "ETA source: " + m.etaSource : ""} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, color: m.received ? "#9CA3AF" : "#9A3412", background: m.received ? "#F9FAFB" : "#FFEDD5", padding: "2px 7px", borderRadius: 999, whiteSpace: "nowrap", cursor: m.etaSource ? "help" : "default" }}>
                             <span style={{ fontWeight: 700, opacity: 0.85 }}>ETA</span>
                             <span style={{ fontWeight: 600 }}>{etaStr}</span>
                           </span>}
