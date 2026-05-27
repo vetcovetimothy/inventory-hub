@@ -1157,6 +1157,7 @@ function DropZone(props) {
 /* ═══════ CYCLE COUNTING TOOL ═══════ */
 function CycleCountTool(props) {
   var toast = props.toast;
+  var cred = props.cred;
   var TOOL_COLOR = props.toolColor || "#14B8A6";
   var isSftp = props.sftp || false;
   var _ndcText = useState(""), ndcText = _ndcText[0], setNdcText = _ndcText[1];
@@ -1175,6 +1176,7 @@ function CycleCountTool(props) {
   var _dohRows = useState(null), dohRows = _dohRows[0], setDohRows = _dohRows[1];
   var _dohMeta = useState(null), dohMeta = _dohMeta[0], setDohMeta = _dohMeta[1];
   var _dohLoading = useState(false), dohLoading = _dohLoading[0], setDohLoading = _dohLoading[1];
+  var _uomMap = useState(null), uomMap = _uomMap[0], setUomMap = _uomMap[1];
   var _warehouse = useState(""), warehouse = _warehouse[0], setWarehouse = _warehouse[1];
   var _results = useState([]), results = _results[0], setResults = _results[1];
   var _errors = useState([]), errors = _errors[0], setErrors = _errors[1];
@@ -1242,6 +1244,34 @@ function CycleCountTool(props) {
     } catch (e) { /* localStorage unavailable, ignore */ }
   }, []);
 
+  // Fetch UOM conversion map whenever DOH is available + cred is set. Cached server-side 24h.
+  useEffect(function() {
+    if (!dohRows || dohRows.length === 0) return;
+    if (!cred || !cred.username || !cred.password) return;
+    if (uomMap) return; // already fetched this session
+    var cancelled = false;
+    fetch("/api/acumatica", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "uom-conversions", username: cred.username, password: cred.password }),
+    }).then(function(r) { return r.ok ? r.json() : null; }).then(function(json) {
+      if (cancelled || !json || !json.data) return;
+      var map = {};
+      json.data.forEach(function(row) {
+        var invId = (row.InventoryID || "").trim();
+        if (!invId) return;
+        var toUnit = (row.ToUnit || "").trim().toUpperCase();
+        var factor = parseFloat(row.ConversionFactor);
+        if (!toUnit || isNaN(factor) || factor <= 0) return;
+        var op = (row.MultiplyDivide || "Multiply").toLowerCase().indexOf("div") >= 0 ? "Divide" : "Multiply";
+        if (!map[invId]) map[invId] = {};
+        map[invId][toUnit] = { factor: factor, op: op };
+      });
+      setUomMap(map);
+    }).catch(function() { /* silent — DRR will fall back to no conversion */ });
+    return function() { cancelled = true; };
+  }, [dohRows, cred]);
+
   function handleDohUpload(file) {
     if (!file) return;
     setDohFile(file);
@@ -1258,6 +1288,7 @@ function CycleCountTool(props) {
           productCode: String(r["Product code"] || "").trim(),
           description: String(r["Product description"] || "").trim(),
           locationCode: String(r["Location code"] || "").trim(),
+          mainUom: String(r["Main unit of measure"] || "").trim(),
           onHand: parseFloat(r["On hand"]) || 0,
           daysOnHand: parseFloat(r["Days on hand"]) || 0,
         };
@@ -1489,6 +1520,8 @@ function CycleCountTool(props) {
       });
 
       // If TP-DOH file is loaded, enrich each result with Daily Run Rate
+      // DRR is calculated at the Sales Unit level — On Hand is converted from TP-DOH's
+      // "Main unit of measure" into Sales Unit using the uom-conversions map.
       if (dohRows && dohRows.length > 0) {
         var dohMap = {};
         dohRows.forEach(function(r) {
@@ -1498,14 +1531,26 @@ function CycleCountTool(props) {
         });
         output.forEach(function(row) {
           var dohRow = dohMap[row.inventoryId + "|" + wh];
-          if (dohRow) {
-            row.dohDescription = dohRow.description;
-            row.dohOnHand = dohRow.onHand;
-            row.dohDaysOnHand = dohRow.daysOnHand;
-            row.dailyRunRate = dohRow.daysOnHand > 0 ? Math.round((dohRow.onHand / dohRow.daysOnHand) * 100) / 100 : null;
-          } else {
-            row.dailyRunRate = null;
+          if (!dohRow) { row.dailyRunRate = null; return; }
+          row.dohDescription = dohRow.description;
+          row.dohOnHand = dohRow.onHand;
+          row.dohDaysOnHand = dohRow.daysOnHand;
+          // Convert On Hand from TP-DOH's Main UOM into the Sales Unit (the lowest level)
+          var mainUom = (dohRow.mainUom || "").toUpperCase();
+          var salesUnit = (row.uom || "").toUpperCase();
+          var onHandInSalesUnit = dohRow.onHand;
+          if (mainUom && salesUnit && mainUom !== salesUnit && uomMap && uomMap[row.inventoryId]) {
+            // The map is keyed by toUnit (the non-base unit); fromUnit is the base/Sales Unit.
+            // Look up the entry for MainUOM, which tells us how to convert base ↔ MainUOM.
+            var conv = uomMap[row.inventoryId][mainUom];
+            if (conv) {
+              // convFactor = base units per 1 MainUOM (match existing convention in route.js usages)
+              var convFactor = conv.op === "Divide" ? (1 / conv.factor) : conv.factor;
+              onHandInSalesUnit = dohRow.onHand * convFactor;
+            }
+            // If no conv entry, fall through with unconverted onHand (best-effort)
           }
+          row.dailyRunRate = dohRow.daysOnHand > 0 ? Math.round((onHandInSalesUnit / dohRow.daysOnHand) * 100) / 100 : null;
         });
       }
 
@@ -5148,7 +5193,7 @@ export default function Hub() {
           {!showLogin && page === "short-dating" && <TrackerTool toolKey="short-dating" toolLabel="Short-Dating Tracker" toolColor="#E879F9" demoData={SD_DEMO} columns={sdColumns} emailConfig={sdEmail} toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} contacts={vendorContacts} />}
           {!showLogin && page === "backorder" && <TrackerTool toolKey="backorder" toolLabel="Backorder Tracker" toolColor="#F97316" demoData={BKO_DEMO} columns={bkoColumns} emailConfig={bkoEmail} skipVendors={BKO_SKIP} toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} contacts={vendorContacts} />}
           {!showLogin && page === "po-import" && <POImportTool toast={showToast} cred={cred} ok={ok} lp={promptLogin} />}
-          {!showLogin && page === "cycle-count" && <CycleCountTool key="cc-standard" toast={showToast} />}
+          {!showLogin && page === "cycle-count" && <CycleCountTool key="cc-standard" toast={showToast} cred={cred} />}
           {!showLogin && page === "fuze-tracker" && <FuzeTracker toast={showToast} cred={cred} />}
           {!showLogin && page === "ggm-tracker" && <GGMTracker toast={showToast} cred={cred} />}
           {!showLogin && page === "hills-pawtree" && <HillsTracker toast={showToast} ok={ok} lp={promptLogin} cred={cred} />}
