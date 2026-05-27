@@ -1176,7 +1176,6 @@ function CycleCountTool(props) {
   var _dohRows = useState(null), dohRows = _dohRows[0], setDohRows = _dohRows[1];
   var _dohMeta = useState(null), dohMeta = _dohMeta[0], setDohMeta = _dohMeta[1];
   var _dohLoading = useState(false), dohLoading = _dohLoading[0], setDohLoading = _dohLoading[1];
-  var _uomMap = useState(null), uomMap = _uomMap[0], setUomMap = _uomMap[1];
   var _warehouse = useState(""), warehouse = _warehouse[0], setWarehouse = _warehouse[1];
   var _results = useState([]), results = _results[0], setResults = _results[1];
   var _errors = useState([]), errors = _errors[0], setErrors = _errors[1];
@@ -1208,7 +1207,7 @@ function CycleCountTool(props) {
     }).then(function(json) {
       if (json.error) { toast("Stock Items parse error: " + json.error, "error"); setStockLoading(false); return; }
       // Only keep the two columns we need to minimize storage
-      var trimmed = json.rows.map(function(r) { return { "Inventory ID": r["Inventory ID"] || "", "Sales Unit": r["Sales Unit"] || "" }; }).filter(function(r) { return r["Inventory ID"]; });
+      var trimmed = json.rows.map(function(r) { return { "Inventory ID": r["Inventory ID"] || "", "Sales Unit": r["Sales Unit"] || "", "Base Unit": r["Base Unit"] || "" }; }).filter(function(r) { return r["Inventory ID"]; });
       setStockRows(trimmed);
       var meta = { date: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }), count: trimmed.length, name: file.name };
       setStockMeta(meta);
@@ -1243,34 +1242,6 @@ function CycleCountTool(props) {
       }
     } catch (e) { /* localStorage unavailable, ignore */ }
   }, []);
-
-  // Fetch UOM conversion map whenever DOH is available + cred is set. Cached server-side 24h.
-  useEffect(function() {
-    if (!dohRows || dohRows.length === 0) return;
-    if (!cred || !cred.username || !cred.password) return;
-    if (uomMap) return; // already fetched this session
-    var cancelled = false;
-    fetch("/api/acumatica", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: "uom-conversions", username: cred.username, password: cred.password }),
-    }).then(function(r) { return r.ok ? r.json() : null; }).then(function(json) {
-      if (cancelled || !json || !json.data) return;
-      var map = {};
-      json.data.forEach(function(row) {
-        var invId = (row.InventoryID || "").trim();
-        if (!invId) return;
-        var toUnit = (row.ToUnit || "").trim().toUpperCase();
-        var factor = parseFloat(row.ConversionFactor);
-        if (!toUnit || isNaN(factor) || factor <= 0) return;
-        var op = (row.MultiplyDivide || "Multiply").toLowerCase().indexOf("div") >= 0 ? "Divide" : "Multiply";
-        if (!map[invId]) map[invId] = {};
-        map[invId][toUnit] = { factor: factor, op: op };
-      });
-      setUomMap(map);
-    }).catch(function() { /* silent — DRR will fall back to no conversion */ });
-    return function() { cancelled = true; };
-  }, [dohRows, cred]);
 
   function handleDohUpload(file) {
     if (!file) return;
@@ -1470,12 +1441,17 @@ function CycleCountTool(props) {
         });
       }
 
-      // Build Inventory ID → Sales Unit map from cached stock items
+      // Build Inventory ID → Sales Unit + Base Unit maps from cached stock items
       var salesUnitMap = {};
+      var baseUnitMap = {};
       stockRows.forEach(function(r) {
         var invId = String(r["Inventory ID"] || "").trim();
         var salesUnit = String(r["Sales Unit"] || "").trim();
-        if (invId) salesUnitMap[invId] = salesUnit;
+        var baseUnit = String(r["Base Unit"] || "").trim();
+        if (invId) {
+          salesUnitMap[invId] = salesUnit;
+          baseUnitMap[invId] = baseUnit;
+        }
       });
 
       // Process each NDC
@@ -1496,6 +1472,7 @@ function CycleCountTool(props) {
         var reportedQty = Math.round((isSftp && sftpMap.hasOwnProperty(ndcClean) ? sftpMap[ndcClean] : (parseFloat(vendorRow["Reported Qty"]) || 0)) * 10) / 10;
         var stockQty = Math.round((parseFloat(vendorRow["Stock Qty"]) || 0) * 10) / 10;
         var quantity = Math.round((reportedQty - stockQty) * 10) / 10;
+        var pkgSize = parseFloat(vendorRow["Package Size"]) || 0;
 
         // Location: GEN- or UNV- items use NDC without dashes, others use warehouse code
         var location = (invId.startsWith("GEN-") || invId.startsWith("UNV-")) ? ndcClean : wh;
@@ -1516,14 +1493,14 @@ function CycleCountTool(props) {
           ndcClean: ndcClean,
           reportedQty: reportedQty,
           stockQty: stockQty,
+          pkgSize: pkgSize,
         });
       });
 
       // If TP-DOH file is loaded, enrich each result with Daily Run Rate.
-      // DRR is calculated at the Sales Unit level — Pharm Admin reports adjustments
-      // in Sales Unit (e.g. 473 mL for a single 16-oz bottle of cleanser), but TP-DOH's
-      // "Main unit of measure" is typically the Base Unit (e.g. BOTTLE). So we convert
-      // TP-DOH's On Hand from Base → Sales Unit before computing the run rate.
+      // Approach: compute DRR in TP-DOH's native unit (the Base Unit for the item),
+      // then multiply by Package Size when Base != Sales Unit. Package Size from
+      // Pharm Admin is the count of Sales Units per Base Unit (e.g. 473 mL per BOTTLE).
       if (dohRows && dohRows.length > 0) {
         var dohMap = {};
         dohRows.forEach(function(r) {
@@ -1537,20 +1514,15 @@ function CycleCountTool(props) {
           row.dohDescription = dohRow.description;
           row.dohOnHand = dohRow.onHand;
           row.dohDaysOnHand = dohRow.daysOnHand;
-          var mainUom = (dohRow.mainUom || "").toUpperCase();
+          if (dohRow.daysOnHand <= 0) { row.dailyRunRate = null; return; }
+          var drrInBase = dohRow.onHand / dohRow.daysOnHand;
+          var baseUnit = (baseUnitMap[row.inventoryId] || "").toUpperCase();
           var salesUnit = (row.uom || "").toUpperCase();
-          var onHandInSalesUnit = dohRow.onHand;
-          // Convert only when Base (mainUom) differs from Sales Unit. The uom-conversions
-          // map is keyed by ToUnit; for an entry From=Base To=SalesUnit, the op tells us
-          // how to go Base → SalesUnit:
-          //   op="Multiply": base × factor = salesUnit (e.g. 1 BOTTLE × 473 = 473 ML)
-          //   op="Divide":   base / factor = salesUnit (e.g. 100 TABLET / 100 = 1 BT100)
-          if (mainUom && salesUnit && mainUom !== salesUnit && uomMap && uomMap[row.inventoryId] && uomMap[row.inventoryId][salesUnit]) {
-            var conv = uomMap[row.inventoryId][salesUnit];
-            var convFactor = conv.op === "Divide" ? (1 / conv.factor) : conv.factor;
-            onHandInSalesUnit = dohRow.onHand * convFactor;
+          var drrInSales = drrInBase;
+          if (baseUnit && salesUnit && baseUnit !== salesUnit && row.pkgSize > 0) {
+            drrInSales = drrInBase * row.pkgSize;
           }
-          row.dailyRunRate = dohRow.daysOnHand > 0 ? Math.round((onHandInSalesUnit / dohRow.daysOnHand) * 100) / 100 : null;
+          row.dailyRunRate = Math.round(drrInSales * 100) / 100;
         });
       }
 
