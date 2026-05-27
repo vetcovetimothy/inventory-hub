@@ -1534,13 +1534,14 @@ function CycleCountTool(props) {
       });
 
       // If TP-DOH file is loaded, enrich each result with Daily Run Rate.
-      // Conversion priority:
-      //   1. uomMap from Acumatica's Stock Item UOM Conversions GI (authoritative)
-      //   2. Package Size from vendor CSV (fallback when GI has no entry)
-      // The GI returns rows keyed by (InventoryID, ToUnit). For an entry with
-      // From=Base To=SalesUnit, op tells us how to go Base → SalesUnit:
-      //   "Multiply": drrInBase × factor = drrInSales
-      //   "Divide":   drrInBase / factor = drrInSales
+      // Conversion follows Acumatica's Stock Item UOM Conversions GI convention:
+      //   For rows where FromUnit=Base, ToUnit=SalesUnit:
+      //     op="Divide" + factor N  → 1 Base = N Sales (e.g. 1 BOTTLE = 473 ML).
+      //         Multiply drrInBase by N to get drrInSales.
+      //     op="Multiply" + factor N → 1 Sales = N Base (rare for sales unit).
+      //         Divide drrInBase by N.
+      //     op="Multiply" + factor 1 → identity (Base==Sales). No conversion.
+      // Package Size from the vendor CSV is a fallback when the GI has no entry.
       if (dohRows && dohRows.length > 0) {
         var dohMap = {};
         dohRows.forEach(function(r) {
@@ -1556,24 +1557,28 @@ function CycleCountTool(props) {
           row.dohDaysOnHand = dohRow.daysOnHand;
           if (dohRow.daysOnHand <= 0) { row.dailyRunRate = null; return; }
           var drrInBase = dohRow.onHand / dohRow.daysOnHand;
-          var baseUnit = (baseUnitMap[row.inventoryId] || "").toUpperCase();
           var salesUnit = (row.uom || "").toUpperCase();
           var drrInSales = drrInBase;
           var convSource = "none";
-          if (baseUnit && salesUnit && baseUnit !== salesUnit) {
-            // Try GI first
-            if (uomMap && uomMap[row.inventoryId] && uomMap[row.inventoryId][salesUnit]) {
-              var conv = uomMap[row.inventoryId][salesUnit];
-              var convFactor = conv.op === "Divide" ? (1 / conv.factor) : conv.factor;
-              drrInSales = drrInBase * convFactor;
+
+          // Tier 1: Acumatica GI lookup (authoritative)
+          var conv = (salesUnit && uomMap && uomMap[row.inventoryId]) ? uomMap[row.inventoryId][salesUnit] : null;
+          if (conv && conv.baseUnit) {
+            if (conv.baseUnit === salesUnit) {
+              convSource = "same-unit";
+            } else {
+              var multiplier = conv.op === "Divide" ? conv.factor : (1 / conv.factor);
+              drrInSales = drrInBase * multiplier;
               convSource = "gi";
-            } else if (row.pkgSize > 0) {
-              // Fallback to Package Size from vendor CSV
+            }
+          } else if (salesUnit && row.pkgSize > 0) {
+            // Tier 2: Package Size fallback when GI has no entry. Only when Stock
+            // Items confirms Base ≠ Sales (otherwise pkgSize is not a conversion factor).
+            var baseUnitFromStock = (baseUnitMap[row.inventoryId] || "").toUpperCase();
+            if (baseUnitFromStock && baseUnitFromStock !== salesUnit) {
               drrInSales = drrInBase * row.pkgSize;
               convSource = "pkg";
             }
-          } else if (baseUnit && salesUnit && baseUnit === salesUnit) {
-            convSource = "same-unit";
           }
           row.dailyRunRate = Math.round(drrInSales * 100) / 100;
           row.drrConvSource = convSource;
