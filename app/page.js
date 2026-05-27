@@ -1176,6 +1176,8 @@ function CycleCountTool(props) {
   var _dohRows = useState(null), dohRows = _dohRows[0], setDohRows = _dohRows[1];
   var _dohMeta = useState(null), dohMeta = _dohMeta[0], setDohMeta = _dohMeta[1];
   var _dohLoading = useState(false), dohLoading = _dohLoading[0], setDohLoading = _dohLoading[1];
+  var _uomMap = useState(null), uomMap = _uomMap[0], setUomMap = _uomMap[1];
+  var _uomMapStatus = useState("idle"), uomMapStatus = _uomMapStatus[0], setUomMapStatus = _uomMapStatus[1];
   var _warehouse = useState(""), warehouse = _warehouse[0], setWarehouse = _warehouse[1];
   var _results = useState([]), results = _results[0], setResults = _results[1];
   var _errors = useState([]), errors = _errors[0], setErrors = _errors[1];
@@ -1242,6 +1244,40 @@ function CycleCountTool(props) {
       }
     } catch (e) { /* localStorage unavailable, ignore */ }
   }, []);
+
+  // Fetch UOM conversion map eagerly when cred is available. Forces server-side
+  // refresh on first load to bypass the 24h KV cache (which may be stale).
+  useEffect(function() {
+    if (!cred || !cred.username || !cred.password) return;
+    if (uomMap) return;
+    var cancelled = false;
+    setUomMapStatus("loading");
+    fetch("/api/acumatica", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "uom-conversions", username: cred.username, password: cred.password, refresh: true }),
+    }).then(function(r) { return r.ok ? r.json() : null; }).then(function(json) {
+      if (cancelled) return;
+      if (!json || !json.data) { setUomMapStatus("failed"); return; }
+      // Build nested map: { invId: { TO_UOM: { factor, op, fromUnit, baseUnit } } }
+      var map = {};
+      json.data.forEach(function(row) {
+        var invId = (row.InventoryID || "").trim();
+        if (!invId) return;
+        var toUnit = (row.ToUnit || "").trim().toUpperCase();
+        var fromUnit = (row.FromUnit || "").trim().toUpperCase();
+        var baseUnit = (row.BaseUnit || "").trim().toUpperCase();
+        var factor = parseFloat(row.ConversionFactor);
+        if (!toUnit || isNaN(factor) || factor <= 0) return;
+        var op = (row.MultiplyDivide || "Multiply").toLowerCase().indexOf("div") >= 0 ? "Divide" : "Multiply";
+        if (!map[invId]) map[invId] = {};
+        map[invId][toUnit] = { factor: factor, op: op, fromUnit: fromUnit, baseUnit: baseUnit };
+      });
+      setUomMap(map);
+      setUomMapStatus("loaded:" + Object.keys(map).length);
+    }).catch(function() { if (!cancelled) setUomMapStatus("failed"); });
+    return function() { cancelled = true; };
+  }, [cred]);
 
   function handleDohUpload(file) {
     if (!file) return;
@@ -1498,9 +1534,13 @@ function CycleCountTool(props) {
       });
 
       // If TP-DOH file is loaded, enrich each result with Daily Run Rate.
-      // Approach: compute DRR in TP-DOH's native unit (the Base Unit for the item),
-      // then multiply by Package Size when Base != Sales Unit. Package Size from
-      // Pharm Admin is the count of Sales Units per Base Unit (e.g. 473 mL per BOTTLE).
+      // Conversion priority:
+      //   1. uomMap from Acumatica's Stock Item UOM Conversions GI (authoritative)
+      //   2. Package Size from vendor CSV (fallback when GI has no entry)
+      // The GI returns rows keyed by (InventoryID, ToUnit). For an entry with
+      // From=Base To=SalesUnit, op tells us how to go Base → SalesUnit:
+      //   "Multiply": drrInBase × factor = drrInSales
+      //   "Divide":   drrInBase / factor = drrInSales
       if (dohRows && dohRows.length > 0) {
         var dohMap = {};
         dohRows.forEach(function(r) {
@@ -1519,10 +1559,24 @@ function CycleCountTool(props) {
           var baseUnit = (baseUnitMap[row.inventoryId] || "").toUpperCase();
           var salesUnit = (row.uom || "").toUpperCase();
           var drrInSales = drrInBase;
-          if (baseUnit && salesUnit && baseUnit !== salesUnit && row.pkgSize > 0) {
-            drrInSales = drrInBase * row.pkgSize;
+          var convSource = "none";
+          if (baseUnit && salesUnit && baseUnit !== salesUnit) {
+            // Try GI first
+            if (uomMap && uomMap[row.inventoryId] && uomMap[row.inventoryId][salesUnit]) {
+              var conv = uomMap[row.inventoryId][salesUnit];
+              var convFactor = conv.op === "Divide" ? (1 / conv.factor) : conv.factor;
+              drrInSales = drrInBase * convFactor;
+              convSource = "gi";
+            } else if (row.pkgSize > 0) {
+              // Fallback to Package Size from vendor CSV
+              drrInSales = drrInBase * row.pkgSize;
+              convSource = "pkg";
+            }
+          } else if (baseUnit && salesUnit && baseUnit === salesUnit) {
+            convSource = "same-unit";
           }
           row.dailyRunRate = Math.round(drrInSales * 100) / 100;
+          row.drrConvSource = convSource;
         });
       }
 
@@ -1628,6 +1682,15 @@ function CycleCountTool(props) {
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(20,184,166,0.08)", border: "1px solid rgba(20,184,166,0.25)", borderRadius: 10 }}>
               <span style={{ color: TOOL_COLOR, fontSize: 13 }}>{"\u2713"} {dohMeta.name} — {dohMeta.count.toLocaleString()} items (loaded {dohMeta.date})</span>
               <button onClick={function() { setDohRows(null); setDohMeta(null); try { localStorage.removeItem("tpdoh-cache"); } catch (e) {} }} style={{ background: "transparent", border: "none", color: "#9CA3AF", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 4px", marginLeft: "auto" }}>{"\u00D7"}</button>
+            </div>
+            <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 6, paddingLeft: 4 }}>
+              UOM conversions: {
+                uomMapStatus === "idle" ? "not loaded (set Acumatica creds)" :
+                uomMapStatus === "loading" ? "loading..." :
+                uomMapStatus === "failed" ? "failed to load" :
+                uomMapStatus.indexOf("loaded:") === 0 ? (uomMapStatus.split(":")[1] + " items from Acumatica GI") :
+                uomMapStatus
+              }
             </div>
             <label style={{ display: "inline-block", marginTop: 8, fontSize: 12, color: TOOL_COLOR, cursor: "pointer", textDecoration: "underline" }}>
               {dohLoading ? "Uploading..." : "Replace with new file"}
