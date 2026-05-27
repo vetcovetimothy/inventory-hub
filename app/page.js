@@ -1534,14 +1534,15 @@ function CycleCountTool(props) {
       });
 
       // If TP-DOH file is loaded, enrich each result with Daily Run Rate.
-      // Conversion follows Acumatica's Stock Item UOM Conversions GI convention:
-      //   For rows where FromUnit=Base, ToUnit=SalesUnit:
-      //     op="Divide" + factor N  → 1 Base = N Sales (e.g. 1 BOTTLE = 473 ML).
-      //         Multiply drrInBase by N to get drrInSales.
-      //     op="Multiply" + factor N → 1 Sales = N Base (rare for sales unit).
-      //         Divide drrInBase by N.
-      //     op="Multiply" + factor 1 → identity (Base==Sales). No conversion.
-      // Package Size from the vendor CSV is a fallback when the GI has no entry.
+      // Recipe:
+      //   1. drrInBase = TP-DOH On Hand ÷ Days on Hand (in TP-DOH's Main Unit of Measure)
+      //   2. Get TP-DOH's Main UOM for the item (from the TP-DOH row)
+      //   3. Get Sales Unit for the item (from Stock Items)
+      //   4. In Stock Item UOM Conversions GI, find the row where
+      //      InventoryID matches AND FromUnit == TP-DOH Main UOM AND ToUnit == Sales Unit
+      //   5. Multiply DRR by that row's Conversion Factor (factor is 1 for same-unit rows
+      //      like PACK→PACK, which still applies as a no-op)
+      // Days of Supply = Adjustment ÷ Converted DRR
       if (dohRows && dohRows.length > 0) {
         var dohMap = {};
         dohRows.forEach(function(r) {
@@ -1556,30 +1557,32 @@ function CycleCountTool(props) {
           row.dohOnHand = dohRow.onHand;
           row.dohDaysOnHand = dohRow.daysOnHand;
           if (dohRow.daysOnHand <= 0) { row.dailyRunRate = null; row.convertedDailyRunRate = null; return; }
+
+          // Step 1: DRR in TP-DOH's native unit
           var drrInBase = dohRow.onHand / dohRow.daysOnHand;
+
+          // Step 2 & 3: get the FROM unit (TP-DOH Main UOM) and TO unit (Stock Items Sales Unit)
+          var mainUom = (dohRow.mainUom || "").toUpperCase();
           var salesUnit = (row.uom || "").toUpperCase();
+
+          // Step 4: find GI row matching FromUnit=mainUom AND ToUnit=salesUnit
           var drrInSales = drrInBase;
           var convSource = "none";
-
-          // Tier 1: Acumatica GI lookup (authoritative)
           var conv = (salesUnit && uomMap && uomMap[row.inventoryId]) ? uomMap[row.inventoryId][salesUnit] : null;
-          if (conv && conv.baseUnit) {
-            if (conv.baseUnit === salesUnit) {
-              convSource = "same-unit";
-            } else {
-              var multiplier = conv.op === "Divide" ? conv.factor : (1 / conv.factor);
-              drrInSales = drrInBase * multiplier;
-              convSource = "gi";
-            }
+          if (conv && conv.fromUnit && mainUom && conv.fromUnit === mainUom) {
+            // Step 5: multiply by the GI's Conversion Factor (works for any factor, incl. 1)
+            drrInSales = drrInBase * conv.factor;
+            convSource = "gi";
           } else if (salesUnit && row.pkgSize > 0) {
-            // Tier 2: Package Size fallback when GI has no entry. Only when Stock
-            // Items confirms Base ≠ Sales (otherwise pkgSize is not a conversion factor).
+            // Fallback: Package Size from vendor CSV when GI has no matching row.
+            // Only apply if Stock Items confirms Base ≠ Sales.
             var baseUnitFromStock = (baseUnitMap[row.inventoryId] || "").toUpperCase();
             if (baseUnitFromStock && baseUnitFromStock !== salesUnit) {
               drrInSales = drrInBase * row.pkgSize;
               convSource = "pkg";
             }
           }
+
           row.dailyRunRate = Math.round(drrInBase * 100) / 100;
           row.convertedDailyRunRate = Math.round(drrInSales * 100) / 100;
           row.drrConvSource = convSource;
