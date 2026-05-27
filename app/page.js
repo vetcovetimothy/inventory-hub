@@ -1519,9 +1519,11 @@ function CycleCountTool(props) {
         });
       });
 
-      // If TP-DOH file is loaded, enrich each result with Daily Run Rate
-      // DRR is calculated at the Sales Unit level — On Hand is converted from TP-DOH's
-      // "Main unit of measure" into Sales Unit using the uom-conversions map.
+      // If TP-DOH file is loaded, enrich each result with Daily Run Rate.
+      // DRR is calculated at the Sales Unit level — Pharm Admin reports adjustments
+      // in Sales Unit (e.g. 473 mL for a single 16-oz bottle of cleanser), but TP-DOH's
+      // "Main unit of measure" is typically the Base Unit (e.g. BOTTLE). So we convert
+      // TP-DOH's On Hand from Base → Sales Unit before computing the run rate.
       if (dohRows && dohRows.length > 0) {
         var dohMap = {};
         dohRows.forEach(function(r) {
@@ -1535,20 +1537,18 @@ function CycleCountTool(props) {
           row.dohDescription = dohRow.description;
           row.dohOnHand = dohRow.onHand;
           row.dohDaysOnHand = dohRow.daysOnHand;
-          // Convert On Hand from TP-DOH's Main UOM into the Sales Unit (the lowest level)
           var mainUom = (dohRow.mainUom || "").toUpperCase();
           var salesUnit = (row.uom || "").toUpperCase();
           var onHandInSalesUnit = dohRow.onHand;
-          if (mainUom && salesUnit && mainUom !== salesUnit && uomMap && uomMap[row.inventoryId]) {
-            // The map is keyed by toUnit (the non-base unit); fromUnit is the base/Sales Unit.
-            // Look up the entry for MainUOM, which tells us how to convert base ↔ MainUOM.
-            var conv = uomMap[row.inventoryId][mainUom];
-            if (conv) {
-              // convFactor = base units per 1 MainUOM (match existing convention in route.js usages)
-              var convFactor = conv.op === "Divide" ? (1 / conv.factor) : conv.factor;
-              onHandInSalesUnit = dohRow.onHand * convFactor;
-            }
-            // If no conv entry, fall through with unconverted onHand (best-effort)
+          // Convert only when Base (mainUom) differs from Sales Unit. The uom-conversions
+          // map is keyed by ToUnit; for an entry From=Base To=SalesUnit, the op tells us
+          // how to go Base → SalesUnit:
+          //   op="Multiply": base × factor = salesUnit (e.g. 1 BOTTLE × 473 = 473 ML)
+          //   op="Divide":   base / factor = salesUnit (e.g. 100 TABLET / 100 = 1 BT100)
+          if (mainUom && salesUnit && mainUom !== salesUnit && uomMap && uomMap[row.inventoryId] && uomMap[row.inventoryId][salesUnit]) {
+            var conv = uomMap[row.inventoryId][salesUnit];
+            var convFactor = conv.op === "Divide" ? (1 / conv.factor) : conv.factor;
+            onHandInSalesUnit = dohRow.onHand * convFactor;
           }
           row.dailyRunRate = dohRow.daysOnHand > 0 ? Math.round((onHandInSalesUnit / dohRow.daysOnHand) * 100) / 100 : null;
         });
