@@ -1171,6 +1171,10 @@ function CycleCountTool(props) {
   var _stockRows = useState(null), stockRows = _stockRows[0], setStockRows = _stockRows[1];
   var _stockMeta = useState(null), stockMeta = _stockMeta[0], setStockMeta = _stockMeta[1];
   var _stockLoading = useState(false), stockLoading = _stockLoading[0], setStockLoading = _stockLoading[1];
+  var _dohFile = useState(null), dohFile = _dohFile[0], setDohFile = _dohFile[1];
+  var _dohRows = useState(null), dohRows = _dohRows[0], setDohRows = _dohRows[1];
+  var _dohMeta = useState(null), dohMeta = _dohMeta[0], setDohMeta = _dohMeta[1];
+  var _dohLoading = useState(false), dohLoading = _dohLoading[0], setDohLoading = _dohLoading[1];
   var _warehouse = useState(""), warehouse = _warehouse[0], setWarehouse = _warehouse[1];
   var _results = useState([]), results = _results[0], setResults = _results[1];
   var _errors = useState([]), errors = _errors[0], setErrors = _errors[1];
@@ -1218,6 +1222,65 @@ function CycleCountTool(props) {
     }).catch(function(err) {
       toast("Failed to parse Stock Items: " + err.message, "error");
       setStockLoading(false);
+    });
+  }
+  // Load TP-DOH from localStorage on mount, but only if saved date == today
+  useEffect(function() {
+    try {
+      var saved = localStorage.getItem("tpdoh-cache");
+      if (saved) {
+        var parsed = JSON.parse(saved);
+        var today = new Date().toLocaleDateString();
+        if (parsed && parsed.savedDate === today && parsed.rows && parsed.rows.length > 0) {
+          setDohRows(parsed.rows);
+          setDohMeta({ date: parsed.savedDate, count: parsed.rows.length, name: parsed.name || "TP-DOH" });
+        } else {
+          // Stale — clear it
+          localStorage.removeItem("tpdoh-cache");
+        }
+      }
+    } catch (e) { /* localStorage unavailable, ignore */ }
+  }, []);
+
+  function handleDohUpload(file) {
+    if (!file) return;
+    setDohFile(file);
+    setDohLoading(true);
+    var formData = new FormData();
+    formData.append("file", file);
+    fetch("/api/parse-xlsx", { method: "POST", body: formData }).then(function(resp) {
+      return resp.json();
+    }).then(function(json) {
+      if (json.error) { toast("TP-DOH parse error: " + json.error, "error"); setDohLoading(false); setDohFile(null); return; }
+      // Keep only the columns we need — strip Meta data tab values if they leaked in
+      var trimmed = (json.rows || []).map(function(r) {
+        return {
+          productCode: String(r["Product code"] || "").trim(),
+          description: String(r["Product description"] || "").trim(),
+          locationCode: String(r["Location code"] || "").trim(),
+          onHand: parseFloat(r["On hand"]) || 0,
+          daysOnHand: parseFloat(r["Days on hand"]) || 0,
+        };
+      }).filter(function(r) { return r.productCode; });
+      if (trimmed.length === 0) {
+        toast("TP-DOH file has no valid rows — make sure 'Report data' is the first sheet", "error");
+        setDohLoading(false); setDohFile(null); return;
+      }
+      setDohRows(trimmed);
+      var today = new Date().toLocaleDateString();
+      var meta = { date: today, count: trimmed.length, name: file.name };
+      setDohMeta(meta);
+      try {
+        localStorage.setItem("tpdoh-cache", JSON.stringify({ rows: trimmed, savedDate: today, name: file.name }));
+        toast("TP-DOH loaded — " + trimmed.length + " items (today only)", "success");
+      } catch (e) {
+        toast("TP-DOH loaded but failed to cache locally", "error");
+      }
+      setDohLoading(false);
+      setDohFile(null);
+    }).catch(function(err) {
+      toast("Failed to parse TP-DOH: " + err.message, "error");
+      setDohLoading(false); setDohFile(null);
     });
   }
   // SFTP BOH report handler
@@ -1425,6 +1488,27 @@ function CycleCountTool(props) {
         });
       });
 
+      // If TP-DOH file is loaded, enrich each result with Daily Run Rate
+      if (dohRows && dohRows.length > 0) {
+        var dohMap = {};
+        dohRows.forEach(function(r) {
+          if (r.productCode && r.locationCode) {
+            dohMap[r.productCode + "|" + r.locationCode] = r;
+          }
+        });
+        output.forEach(function(row) {
+          var dohRow = dohMap[row.inventoryId + "|" + wh];
+          if (dohRow) {
+            row.dohDescription = dohRow.description;
+            row.dohOnHand = dohRow.onHand;
+            row.dohDaysOnHand = dohRow.daysOnHand;
+            row.dailyRunRate = dohRow.daysOnHand > 0 ? Math.round((dohRow.onHand / dohRow.daysOnHand) * 100) / 100 : null;
+          } else {
+            row.dailyRunRate = null;
+          }
+        });
+      }
+
       setResults(output);
       setErrors(errs);
       toast("Processed " + output.length + " items" + (errs.length > 0 ? ", " + errs.length + " warnings" : ""));
@@ -1446,6 +1530,32 @@ function CycleCountTool(props) {
     var url = URL.createObjectURL(blob);
     var a = document.createElement("a");
     a.href = url; a.download = "CC_" + warehouse.trim() + "_" + new Date().toISOString().slice(5, 10).replace("-", "_") + ".csv"; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function downloadDrrCSV() {
+    var header = "Inventory ID,NDC,Location Code,Description,Fuze's Counts,Our Counts,Adjustment,Days of Supply\r\n";
+    var lines = results.map(function(r) {
+      var daysOfSupply = "";
+      if (r.dailyRunRate && r.dailyRunRate > 0) {
+        daysOfSupply = Math.round((r.quantity / r.dailyRunRate) * 10) / 10;
+      }
+      return [
+        r.inventoryId,
+        r.ndc,
+        r.location,
+        r.dohDescription || "",
+        r.reportedQty,
+        r.stockQty,
+        r.quantity,
+        daysOfSupply,
+      ].map(function(v) { return "\"" + String(v == null ? "" : v).replace(/"/g, '""') + "\""; }).join(",");
+    });
+    var csv = header + lines.join("\r\n");
+    var blob = new Blob([csv], { type: "text/csv" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url; a.download = "CC_DRR_" + warehouse.trim() + "_" + new Date().toISOString().slice(5, 10).replace("-", "_") + ".csv"; a.click();
     URL.revokeObjectURL(url);
   }
 
@@ -1508,6 +1618,22 @@ function CycleCountTool(props) {
             <DropZone accept=".xlsx,.xls" label="Stock Items XLSX" sublabel="Drop file or click to browse" icon="spreadsheet" color={TOOL_COLOR} disabled={stockLoading} onFiles={function(files) { handleStockUpload(files[0]); }} />
             {stockLoading && <p style={{ color: TOOL_COLOR, fontSize: 12, marginTop: 6 }}>Parsing and saving...</p>}
           </div>}
+
+          <div style={{ fontSize: 14, color: "#374151", fontWeight: 600, marginBottom: 8, marginTop: 20, display: "flex", alignItems: "center", gap: 6 }}>{isSftp ? "6" : "5"}. TP-DOH Netstock File <span style={{ fontSize: 11, fontWeight: 400, color: "#9CA3AF" }}>(optional, resets daily)</span></div>
+          <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 6 }}>Provides Daily Run Rate (On Hand ÷ Days on Hand) for a second export. Reupload each day.</div>
+          {dohRows && dohMeta ? <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(20,184,166,0.08)", border: "1px solid rgba(20,184,166,0.25)", borderRadius: 10 }}>
+              <span style={{ color: TOOL_COLOR, fontSize: 13 }}>{"\u2713"} {dohMeta.name} — {dohMeta.count.toLocaleString()} items (loaded {dohMeta.date})</span>
+              <button onClick={function() { setDohRows(null); setDohMeta(null); try { localStorage.removeItem("tpdoh-cache"); } catch (e) {} }} style={{ background: "transparent", border: "none", color: "#9CA3AF", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 4px", marginLeft: "auto" }}>{"\u00D7"}</button>
+            </div>
+            <label style={{ display: "inline-block", marginTop: 8, fontSize: 12, color: TOOL_COLOR, cursor: "pointer", textDecoration: "underline" }}>
+              {dohLoading ? "Uploading..." : "Replace with new file"}
+              <input type="file" accept=".xlsx,.xls" onChange={function(e) { if (e.target.files[0]) handleDohUpload(e.target.files[0]); }} style={{ display: "none" }} disabled={dohLoading} />
+            </label>
+          </div> : <div>
+            <DropZone accept=".xlsx,.xls" label="TP-DOH Netstock File" sublabel="Drop XLSX or click to browse" icon="spreadsheet" color={TOOL_COLOR} disabled={dohLoading} onFiles={function(files) { handleDohUpload(files[0]); }} />
+            {dohLoading && <p style={{ color: TOOL_COLOR, fontSize: 12, marginTop: 6 }}>Parsing...</p>}
+          </div>}
         </div>
       </div>
 
@@ -1516,6 +1642,7 @@ function CycleCountTool(props) {
           {loading ? "Processing..." : "Generate Cycle Count"}
         </button>
         {results.length > 0 && <button onClick={downloadCSV} style={Object.assign({}, S.btn("ghost"), { padding: "10px 16px" })}><IconDL /> Download CSV</button>}
+        {results.length > 0 && dohRows && dohRows.length > 0 && <button onClick={downloadDrrCSV} style={Object.assign({}, S.btn("ghost"), { padding: "10px 16px" })}><IconDL /> Download DRR CSV</button>}
         {results.length > 0 && <span style={{ fontSize: 12, color: "#6B7280" }}>{results.length} items</span>}
         {(ndcText.trim() || vendorFile || results.length > 0) && <button onClick={function() { setNdcText(""); setVendorFile(null); setVendorRows(null); setCsvWarehouses([]); setCsvWhSelected(""); setCsvWhCounts({}); setWarehouse(""); setResults([]); setErrors([]); setSftpFile(null); setSftpRows(null); }} style={Object.assign({}, S.btn("ghost"), { padding: "10px 16px", marginLeft: "auto" })}><IconTrash /> Clear</button>}
       </div>
