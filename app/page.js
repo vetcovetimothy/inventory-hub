@@ -867,8 +867,10 @@ function WHT(props) {
       if (sn.done) return; // skip already-done rows
       if (!orderNbr) return; // skip rows without a PO# (shouldn't happen on shipping, but safe)
       var vendorRef = (sn.notes || "").trim();
-      var label = getVendorLabel(vendorName); // "Truecommerce" | "EDI" | null
-      var isEDI = label === "EDI" || label === "Truecommerce";
+      var label = getVendorLabel(vendorName); // "Truecommerce" | "Website Ordering" | null
+      // Any labeled vendor skips email (they get orders via their channel: Truecommerce/EDI, Website portal, etc.)
+      // Only unlabeled vendors get the Acumatica email sent.
+      var isManualChannel = label !== null;
       if (!vendorRef) {
         missing.push({ key: key, vendorName: vendorName, orderNbr: orderNbr });
       } else {
@@ -877,7 +879,7 @@ function WHT(props) {
           vendorName: vendorName,
           orderNbr: orderNbr,
           vendorRef: vendorRef,
-          shouldEmail: !isEDI,
+          shouldEmail: !isManualChannel,
           label: label
         });
       }
@@ -950,7 +952,7 @@ function WHT(props) {
       }
       var s = resp.summary || {};
       if (resp.ok) {
-        toast("Processed " + s.successCount + " POs: " + s.emailedCount + " emailed, " + (s.successCount - s.emailedCount) + " EDI/skip", "success");
+        toast("Processed " + s.successCount + " POs: " + s.emailedCount + " emailed, " + (s.successCount - s.emailedCount) + " released (no email)", "success");
       } else {
         toast(s.successCount + " succeeded, " + s.failedCount + " failed \u2014 see results", "error");
       }
@@ -1070,7 +1072,7 @@ function WHT(props) {
           <div onClick={function(e) { e.stopPropagation(); }} style={{ background: "#FFFFFF", borderRadius: 12, padding: 24, maxWidth: 640, width: "92%", maxHeight: "80vh", overflow: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
             <div style={{ fontSize: 18, fontWeight: 700, color: "#1F2937", marginBottom: 8 }}>Confirm Process All POs</div>
             <div style={{ fontSize: 13, color: "#374151", marginBottom: 16, lineHeight: 1.5 }}>
-              About to process <strong>{p.length} POs</strong> in Acumatica: {emailCount} will be released and emailed, {ediCount} will be released without email (EDI/Truecommerce). <strong>This is irreversible</strong> — emails sent cannot be unsent.
+              About to process <strong>{p.length} POs</strong> in Acumatica: {emailCount} will be released and emailed, {ediCount} will be released without email (Truecommerce / Website Ordering vendors). <strong>This is irreversible</strong> — emails sent cannot be unsent.
             </div>
             <div style={{ border: "1px solid #E5E7EB", borderRadius: 8, maxHeight: 280, overflow: "auto", marginBottom: 16 }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
@@ -1108,7 +1110,7 @@ function WHT(props) {
                 <tbody>{rs.map(function(row, i) {
                   var resultText, resultColor;
                   if (row.ok && row.emailed) { resultText = "\u2713 Released + Emailed"; resultColor = "#059669"; }
-                  else if (row.ok && row.emailSkipped) { resultText = "\u2713 Released (EDI \u2014 no email)"; resultColor = "#059669"; }
+                  else if (row.ok && row.emailSkipped) { resultText = "\u2713 Released (no email)"; resultColor = "#059669"; }
                   else if (row.ok && row.emailError) { resultText = "\u26A0 Released but email failed"; resultColor = "#D97706"; }
                   else if (row.stage === "status-check") { resultText = "\u2717 Skipped: " + (row.currentStatus || "not on hold"); resultColor = "#DC2626"; }
                   else if (row.stage === "read-po") { resultText = "\u2717 PO not found"; resultColor = "#DC2626"; }
