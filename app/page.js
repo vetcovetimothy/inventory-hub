@@ -587,6 +587,9 @@ function TrackerTool(props) {
 /* ═══════ PO WAREHOUSE TOOL ═══════ */
 function WHT(props) {
   var whKey = props.whKey, cfg = props.cfg, toast = props.toast, ok = props.ok, lp = props.lp, cred = props.cred, gmail = props.gmail, SHIP_RULES = props.shipRules || {};
+  var vendorChannels = props.vendorChannels || {};
+  var updateVendorChannels = props.updateVendorChannels;
+  var vendorContacts = props.vendorContacts || {};
   var isGGM = whKey.indexOf("GGM") === 0;
   var _sp = useState("overview"), subPage = _sp[0], setSubPage = _sp[1];
   var _d = useState([]), data = _d[0], setData = _d[1];
@@ -849,53 +852,92 @@ function WHT(props) {
     }
   }
 
-  // ─── Acumatica: Process All POs (release + email per vendor label) ───
+  // ─── Acumatica: Process All POs ───
   var _acuProc = useState(false), acuProcLoading = _acuProc[0], setAcuProcLoading = _acuProc[1];
   var _acuProcConfirm = useState(false), acuProcConfirm = _acuProcConfirm[0], setAcuProcConfirm = _acuProcConfirm[1];
   var _acuProcResult = useState(null), acuProcResult = _acuProcResult[0], setAcuProcResult = _acuProcResult[1];
+  // For categorize modal: { unlabeledVendors: [...], pendingChannels: { vendor: "Email"|... } }
+  var _acuCat = useState(null), acuCategorize = _acuCat[0], setAcuCategorize = _acuCat[1];
 
-  // Build the list of POs ready to be processed.
-  // A PO is "ready" when its vendor group has a non-empty Vendor Ref (sn.notes)
-  // and is not already marked done.
+  // Resolve a vendor's channel from vendorChannels first, then fall back to legacy VENDOR_LABELS.
+  // Legacy labels: "Truecommerce" -> "TrueCommerce EDI"; "Website Ordering" -> "Website Ordering".
+  // Returns "Email" | "TrueCommerce EDI" | "Website Ordering" | null (unset).
+  function getEffectiveChannel(vendorName) {
+    var c = vendorChannels[vendorName];
+    if (c === "Email" || c === "TrueCommerce EDI" || c === "Website Ordering") return c;
+    var legacy = getVendorLabel(vendorName);
+    if (legacy === "Truecommerce") return "TrueCommerce EDI";
+    if (legacy === "Website Ordering") return "Website Ordering";
+    return null;
+  }
+
+  // Build the list of POs ready to be processed. Reports:
+  //   processable:    ready to fire (all info present)
+  //   missingRef:     vendor exists, channel set, but no Vendor Ref entered
+  //   missingVendor:  vendor not in Vendor Contacts at all
+  //   unlabeled:      vendor in Vendor Contacts but no channel set
   function buildProcessablePOs() {
     var processable = [];
-    var missing = [];
+    var missingRef = [];
+    var missingVendor = [];
+    var unlabeledSet = {};
     Object.keys(vendorGroups).forEach(function(key) {
       var parts = key.split(" || ");
       var vendorName = parts[0], orderNbr = parts[1] || "";
       var sn = shipNotes[key] || {};
-      if (sn.done) return; // skip already-done rows
-      if (!orderNbr) return; // skip rows without a PO# (shouldn't happen on shipping, but safe)
+      if (sn.done) return;
+      if (!orderNbr) return;
       var vendorRef = (sn.notes || "").trim();
-      var label = getVendorLabel(vendorName); // "Truecommerce" | "Website Ordering" | null
-      // Any labeled vendor skips email (they get orders via their channel: Truecommerce/EDI, Website portal, etc.)
-      // Only unlabeled vendors get the Acumatica email sent.
-      var isManualChannel = label !== null;
-      if (!vendorRef) {
-        missing.push({ key: key, vendorName: vendorName, orderNbr: orderNbr });
-      } else {
-        processable.push({
-          key: key,
-          vendorName: vendorName,
-          orderNbr: orderNbr,
-          vendorRef: vendorRef,
-          shouldEmail: !isManualChannel,
-          label: label
-        });
+      // Check vendor existence in Vendor Contacts
+      var inContacts = vendorContacts.hasOwnProperty(vendorName);
+      if (!inContacts) {
+        missingVendor.push({ key: key, vendorName: vendorName, orderNbr: orderNbr });
+        return;
       }
+      var channel = getEffectiveChannel(vendorName);
+      if (!channel) {
+        unlabeledSet[vendorName] = true;
+        // Still record so we know which keys are blocked
+        return;
+      }
+      if (!vendorRef) {
+        missingRef.push({ key: key, vendorName: vendorName, orderNbr: orderNbr });
+        return;
+      }
+      processable.push({
+        key: key,
+        vendorName: vendorName,
+        orderNbr: orderNbr,
+        vendorRef: vendorRef,
+        channel: channel
+      });
     });
-    return { processable: processable, missing: missing };
+    return { processable: processable, missingRef: missingRef, missingVendor: missingVendor, unlabeledVendors: Object.keys(unlabeledSet) };
   }
 
-  // The button click handler. Validates, then either fires the request or
-  // opens the confirmation modal depending on batch size.
   function onProcessAllPOsClick() {
     if (!cred || !cred.username || !cred.password) { toast("Acumatica credentials required", "error"); lp && lp(); return; }
     var built = buildProcessablePOs();
-    if (built.missing.length > 0) {
-      var miss = built.missing.slice(0, 3).map(function(m) { return m.vendorName + " (" + m.orderNbr + ")"; }).join(", ");
-      var more = built.missing.length > 3 ? " +" + (built.missing.length - 3) + " more" : "";
-      toast("Missing Vendor Ref for: " + miss + more, "error");
+    // (1) Vendors missing from Vendor Contacts entirely
+    if (built.missingVendor.length > 0) {
+      var miss = built.missingVendor.slice(0, 3).map(function(m) { return m.vendorName; });
+      var unique = Array.from(new Set(miss));
+      var more = built.missingVendor.length > 3 ? " (+" + (built.missingVendor.length - 3) + " more)" : "";
+      toast("Add these vendors first in Settings > Vendor Contacts: " + unique.join(", ") + more, "error");
+      return;
+    }
+    // (2) Vendors that exist but have no channel set → open categorize modal
+    if (built.unlabeledVendors.length > 0) {
+      var pending = {};
+      built.unlabeledVendors.forEach(function(v) { pending[v] = ""; });
+      setAcuCategorize({ vendors: built.unlabeledVendors, pending: pending });
+      return;
+    }
+    // (3) Missing Vendor Ref on some rows
+    if (built.missingRef.length > 0) {
+      var miss2 = built.missingRef.slice(0, 3).map(function(m) { return m.vendorName + " (" + m.orderNbr + ")"; }).join(", ");
+      var more2 = built.missingRef.length > 3 ? " +" + (built.missingRef.length - 3) + " more" : "";
+      toast("Missing Vendor Ref for: " + miss2 + more2, "error");
       return;
     }
     if (built.processable.length === 0) {
@@ -903,16 +945,56 @@ function WHT(props) {
       return;
     }
     if (built.processable.length >= 5) {
-      setAcuProcConfirm(true); // open modal; user clicks Confirm to actually fire
+      setAcuProcConfirm(true);
     } else {
       processAllPOs(built.processable);
     }
   }
 
+  // Called when user confirms the categorize modal.
+  // Saves the picked channels to KV, then auto-continues the Process All POs flow.
+  function onCategorizeConfirm() {
+    if (!acuCategorize) return;
+    var pending = acuCategorize.pending || {};
+    // Validate: every unlabeled vendor must have a non-empty channel pick
+    var unfilled = acuCategorize.vendors.filter(function(v) { return !pending[v]; });
+    if (unfilled.length > 0) {
+      toast("Pick a channel for: " + unfilled.slice(0, 3).join(", ") + (unfilled.length > 3 ? "..." : ""), "error");
+      return;
+    }
+    // Save all picks at once
+    var newChannels = Object.assign({}, vendorChannels);
+    acuCategorize.vendors.forEach(function(v) { newChannels[v] = pending[v]; });
+    updateVendorChannels && updateVendorChannels(newChannels);
+    setAcuCategorize(null);
+    // Auto-continue: re-trigger the Process All POs flow.
+    // The dropdown writes update synchronously to React state; small timeout
+    // ensures the next render sees vendorChannels updated.
+    setTimeout(function() {
+      // Build a fresh list using the new channels. Since vendorChannels prop
+      // may not have updated by the time this runs, we re-derive locally.
+      onProcessAllPOsClick();
+    }, 0);
+  }
+
+  // Called when user cancels the categorize modal.
+  // Saves whatever they DID pick (partial), then aborts without continuing.
+  function onCategorizeCancel() {
+    if (!acuCategorize) { setAcuCategorize(null); return; }
+    var pending = acuCategorize.pending || {};
+    var newChannels = Object.assign({}, vendorChannels);
+    var saved = 0;
+    acuCategorize.vendors.forEach(function(v) { if (pending[v]) { newChannels[v] = pending[v]; saved++; } });
+    if (saved > 0) {
+      updateVendorChannels && updateVendorChannels(newChannels);
+      toast("Saved " + saved + " channel" + (saved > 1 ? "s" : "") + ". Click Process All POs again to continue.", "success");
+    }
+    setAcuCategorize(null);
+  }
+
   async function processAllPOs(processable) {
     setAcuProcConfirm(false);
     if (!processable) {
-      // Called from confirmation modal — rebuild
       var built = buildProcessablePOs();
       if (built.processable.length === 0) { toast("Nothing to process", "error"); return; }
       processable = built.processable;
@@ -921,7 +1003,7 @@ function WHT(props) {
     setAcuProcResult(null);
     try {
       var posPayload = processable.map(function(p) {
-        return { orderNbr: p.orderNbr, vendorRef: p.vendorRef, shouldEmail: p.shouldEmail };
+        return { orderNbr: p.orderNbr, vendorRef: p.vendorRef, channel: p.channel };
       });
       var res = await fetch("/api/acumatica-process-pos", {
         method: "POST",
@@ -934,7 +1016,6 @@ function WHT(props) {
         toast("Unexpected response from Acumatica", "error");
         return;
       }
-      // Mark successful POs as done in shipNotes
       var updatedNotes = Object.assign({}, shipNotes);
       var changed = false;
       resp.results.forEach(function(r, i) {
@@ -952,7 +1033,7 @@ function WHT(props) {
       }
       var s = resp.summary || {};
       if (resp.ok) {
-        toast("Processed " + s.successCount + " POs: " + s.emailedCount + " emailed, " + (s.successCount - s.emailedCount) + " released (no email)", "success");
+        toast("Processed " + s.successCount + " POs: " + s.emailedCount + " emailed, " + s.vendorRefOnlyCount + " vendor-ref only", "success");
       } else {
         toast(s.successCount + " succeeded, " + s.failedCount + " failed \u2014 see results", "error");
       }
@@ -1041,7 +1122,7 @@ function WHT(props) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <div style={{ fontSize: 12, color: "#6B7280" }}>{(function() { var keys = Object.keys(vendorGroups); var doneCount = keys.filter(function(k) { return (shipNotes[k] || {}).done; }).length; return doneCount > 0 ? <span style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ color: "#059669", fontWeight: 600 }}>{doneCount}/{keys.length} completed</span><span style={{ color: "#D1D5DB" }}>{"\u00B7"}</span><span>{keys.length - doneCount} remaining</span></span> : keys.length + " vendors"; })()}</div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          {data.length > 0 && <button disabled={!ok || acuProcLoading} onClick={onProcessAllPOsClick} title={!ok ? "Acumatica credentials required" : "Set Vendor Ref + Remove Hold + Email each PO (EDI vendors skip email)"} style={Object.assign({}, S.btn(), { padding: "8px 14px", fontSize: 12, background: (!ok || acuProcLoading) ? "#9CA3AF" : "#1E40AF", borderColor: (!ok || acuProcLoading) ? "#9CA3AF" : "#1E40AF", cursor: (!ok || acuProcLoading) ? "not-allowed" : "pointer" })}>{acuProcLoading ? <><Spinner /> Processing...</> : <>{"\u2192"} Process All POs</>}</button>}
+          {data.length > 0 && <button disabled={!ok || acuProcLoading} onClick={onProcessAllPOsClick} title={!ok ? "Acumatica credentials required" : "Per PO: write Vendor Ref, then for Email vendors release Hold + email; for TrueCommerce EDI / Website Ordering vendors leave on Hold."} style={Object.assign({}, S.btn(), { padding: "8px 14px", fontSize: 12, background: (!ok || acuProcLoading) ? "#9CA3AF" : "#1E40AF", borderColor: (!ok || acuProcLoading) ? "#9CA3AF" : "#1E40AF", cursor: (!ok || acuProcLoading) ? "not-allowed" : "pointer" })}>{acuProcLoading ? <><Spinner /> Processing...</> : <>{"\u2192"} Process All POs</>}</button>}
           <Gate ok={ok} prompt={lp} style={Object.assign({}, S.btn(), { padding: "8px 16px", fontSize: 12 })} onClick={fetchData} disabled={loading}>{loading ? <><Spinner /> Fetching...</> : <><IconRefresh /> Re-fetch</>}</Gate>
         </div>
       </div>
@@ -1062,22 +1143,58 @@ function WHT(props) {
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#93BBFC" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></svg>
       </a>
 
+      {/* Categorize Vendors Modal — shown when some vendors have no channel set */}
+      {acuCategorize && <div onClick={onCategorizeCancel} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+        <div onClick={function(e) { e.stopPropagation(); }} style={{ background: "#FFFFFF", borderRadius: 12, padding: 24, maxWidth: 620, width: "92%", maxHeight: "80vh", overflow: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+          <div style={{ fontSize: 18, fontWeight: 700, color: "#1F2937", marginBottom: 8 }}>Set Channel for {acuCategorize.vendors.length} Vendor{acuCategorize.vendors.length > 1 ? "s" : ""}</div>
+          <div style={{ fontSize: 13, color: "#374151", marginBottom: 16, lineHeight: 1.5 }}>
+            These vendors don't have a channel set yet. Pick how Acumatica should handle their POs. Your choices save to Vendor Contacts and will be remembered for future runs.
+          </div>
+          <div style={{ border: "1px solid #E5E7EB", borderRadius: 8, overflow: "auto", maxHeight: 360, marginBottom: 16 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead><tr style={{ background: "#F9FAFB", position: "sticky", top: 0 }}><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>Vendor</th><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600, width: 220 }}>Channel</th></tr></thead>
+              <tbody>{acuCategorize.vendors.map(function(vname) {
+                return <tr key={vname} style={{ borderBottom: "1px solid #F3F4F6" }}>
+                  <td style={{ padding: "8px 12px", color: "#1F2937" }}>{vname}</td>
+                  <td style={{ padding: "8px 12px" }}>
+                    <select value={acuCategorize.pending[vname] || ""} onChange={function(ev) { var p = Object.assign({}, acuCategorize.pending); p[vname] = ev.target.value; setAcuCategorize(Object.assign({}, acuCategorize, { pending: p })); }} style={{ padding: "5px 8px", fontSize: 12, width: "100%", borderRadius: 6, border: "1px solid #D1D5DB" }}>
+                      <option value="">— select —</option>
+                      <option value="Email">Email</option>
+                      <option value="TrueCommerce EDI">TrueCommerce EDI</option>
+                      <option value="Website Ordering">Website Ordering</option>
+                    </select>
+                  </td>
+                </tr>;
+              })}</tbody>
+            </table>
+          </div>
+          <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
+            <button onClick={onCategorizeCancel} style={S.btn("ghost")}>Cancel</button>
+            <button onClick={onCategorizeConfirm} style={Object.assign({}, S.btn(), { background: "#1E40AF", borderColor: "#1E40AF" })}>Save &amp; Continue</button>
+          </div>
+        </div>
+      </div>}
+
       {/* Process All POs — Confirmation Modal (only shown for 5+ POs) */}
       {acuProcConfirm && (function() {
         var built = buildProcessablePOs();
         var p = built.processable;
-        var emailCount = p.filter(function(x) { return x.shouldEmail; }).length;
-        var ediCount = p.length - emailCount;
+        var emailCount = p.filter(function(x) { return x.channel === "Email"; }).length;
+        var holdCount = p.length - emailCount;
         return <div onClick={function() { setAcuProcConfirm(false); }} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-          <div onClick={function(e) { e.stopPropagation(); }} style={{ background: "#FFFFFF", borderRadius: 12, padding: 24, maxWidth: 640, width: "92%", maxHeight: "80vh", overflow: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+          <div onClick={function(e) { e.stopPropagation(); }} style={{ background: "#FFFFFF", borderRadius: 12, padding: 24, maxWidth: 720, width: "94%", maxHeight: "80vh", overflow: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
             <div style={{ fontSize: 18, fontWeight: 700, color: "#1F2937", marginBottom: 8 }}>Confirm Process All POs</div>
             <div style={{ fontSize: 13, color: "#374151", marginBottom: 16, lineHeight: 1.5 }}>
-              About to process <strong>{p.length} POs</strong> in Acumatica: {emailCount} will be released and emailed, {ediCount} will be released without email (Truecommerce / Website Ordering vendors). <strong>This is irreversible</strong> — emails sent cannot be unsent.
+              About to process <strong>{p.length} POs</strong>: {emailCount} will be released and emailed; {holdCount} will get Vendor Ref written but stay On Hold (TrueCommerce EDI / Website Ordering). <strong>Email is irreversible</strong> — sent emails cannot be unsent.
             </div>
-            <div style={{ border: "1px solid #E5E7EB", borderRadius: 8, maxHeight: 280, overflow: "auto", marginBottom: 16 }}>
+            <div style={{ border: "1px solid #E5E7EB", borderRadius: 8, maxHeight: 320, overflow: "auto", marginBottom: 16 }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-                <thead><tr style={{ background: "#F9FAFB", position: "sticky", top: 0 }}><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>Vendor</th><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>PO #</th><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>Vendor Ref</th><th style={{ padding: "8px 12px", textAlign: "center", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>Action</th></tr></thead>
-                <tbody>{p.map(function(row, i) { return <tr key={i} style={{ borderBottom: "1px solid #F3F4F6" }}><td style={{ padding: "6px 12px", color: "#1F2937" }}>{row.vendorName}{row.label && <span style={{ marginLeft: 6, fontSize: 10, padding: "1px 6px", borderRadius: 8, background: row.label === "Truecommerce" ? "#EFF6FF" : "#FFF7ED", color: row.label === "Truecommerce" ? "#2563EB" : "#C2410C", fontWeight: 600 }}>{row.label}</span>}</td><td style={{ padding: "6px 12px", color: "#374151", fontFamily: "monospace" }}>{row.orderNbr}</td><td style={{ padding: "6px 12px", color: "#374151", fontFamily: "monospace" }}>{row.vendorRef}</td><td style={{ padding: "6px 12px", textAlign: "center", color: row.shouldEmail ? "#059669" : "#C2410C", fontWeight: 600 }}>{row.shouldEmail ? "Release + Email" : "Release only"}</td></tr>; })}</tbody>
+                <thead><tr style={{ background: "#F9FAFB", position: "sticky", top: 0 }}><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>Vendor</th><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>PO #</th><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>Vendor Ref</th><th style={{ padding: "8px 12px", textAlign: "center", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>Channel</th><th style={{ padding: "8px 12px", textAlign: "center", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>Action</th></tr></thead>
+                <tbody>{p.map(function(row, i) {
+                  var actionText = row.channel === "Email" ? "Release + Email" : "Vendor Ref only";
+                  var actionColor = row.channel === "Email" ? "#059669" : "#C2410C";
+                  return <tr key={i} style={{ borderBottom: "1px solid #F3F4F6" }}><td style={{ padding: "6px 12px", color: "#1F2937" }}>{row.vendorName}</td><td style={{ padding: "6px 12px", color: "#374151", fontFamily: "monospace" }}>{row.orderNbr}</td><td style={{ padding: "6px 12px", color: "#374151", fontFamily: "monospace" }}>{row.vendorRef}</td><td style={{ padding: "6px 12px", textAlign: "center", color: "#6B7280", fontSize: 11 }}>{row.channel}</td><td style={{ padding: "6px 12px", textAlign: "center", color: actionColor, fontWeight: 600 }}>{actionText}</td></tr>;
+                })}</tbody>
               </table>
             </div>
             <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
@@ -1094,7 +1211,7 @@ function WHT(props) {
         var s = r.summary || {};
         var rs = Array.isArray(r.results) ? r.results : [];
         return <div onClick={function() { setAcuProcResult(null); }} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-          <div onClick={function(e) { e.stopPropagation(); }} style={{ background: "#FFFFFF", borderRadius: 12, padding: 24, maxWidth: 720, width: "94%", maxHeight: "85vh", overflow: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+          <div onClick={function(e) { e.stopPropagation(); }} style={{ background: "#FFFFFF", borderRadius: 12, padding: 24, maxWidth: 760, width: "94%", maxHeight: "85vh", overflow: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
               <div style={{ fontSize: 18, fontWeight: 700, color: "#1F2937" }}>Process Results</div>
               <button onClick={function() { setAcuProcResult(null); }} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#6B7280" }}>{"\u00D7"}</button>
@@ -1102,20 +1219,21 @@ function WHT(props) {
             <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
               <div style={{ padding: "8px 14px", background: "#ECFDF5", color: "#059669", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>{s.successCount || 0} succeeded</div>
               <div style={{ padding: "8px 14px", background: "#EFF6FF", color: "#2563EB", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>{s.emailedCount || 0} emailed</div>
+              <div style={{ padding: "8px 14px", background: "#FFF7ED", color: "#C2410C", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>{s.vendorRefOnlyCount || 0} vendor-ref only</div>
               {s.failedCount > 0 && <div style={{ padding: "8px 14px", background: "#FEF2F2", color: "#DC2626", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>{s.failedCount} failed</div>}
             </div>
             <div style={{ border: "1px solid #E5E7EB", borderRadius: 8, overflow: "auto", maxHeight: "55vh" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-                <thead><tr style={{ background: "#F9FAFB", position: "sticky", top: 0 }}><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>PO #</th><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>Vendor Ref</th><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>Result</th></tr></thead>
+                <thead><tr style={{ background: "#F9FAFB", position: "sticky", top: 0 }}><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>PO #</th><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>Vendor Ref</th><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>Channel</th><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>Result</th></tr></thead>
                 <tbody>{rs.map(function(row, i) {
                   var resultText, resultColor;
                   if (row.ok && row.emailed) { resultText = "\u2713 Released + Emailed"; resultColor = "#059669"; }
-                  else if (row.ok && row.emailSkipped) { resultText = "\u2713 Released (no email)"; resultColor = "#059669"; }
+                  else if (row.ok && row.emailSkipped) { resultText = "\u2713 Vendor Ref written (still On Hold)"; resultColor = "#059669"; }
                   else if (row.ok && row.emailError) { resultText = "\u26A0 Released but email failed"; resultColor = "#D97706"; }
                   else if (row.stage === "status-check") { resultText = "\u2717 Skipped: " + (row.currentStatus || "not on hold"); resultColor = "#DC2626"; }
                   else if (row.stage === "read-po") { resultText = "\u2717 PO not found"; resultColor = "#DC2626"; }
                   else { resultText = "\u2717 " + (row.error || row.stage || "unknown error"); resultColor = "#DC2626"; }
-                  return <tr key={i} style={{ borderBottom: "1px solid #F3F4F6" }}><td style={{ padding: "6px 12px", color: "#1F2937", fontFamily: "monospace" }}>{row.orderNbr}</td><td style={{ padding: "6px 12px", color: "#374151", fontFamily: "monospace" }}>{row.requestedVendorRef || ""}</td><td style={{ padding: "6px 12px", color: resultColor, fontWeight: 600 }}>{resultText}{row.emailError && row.emailError.errorDetails ? <div style={{ fontSize: 10, color: "#9CA3AF", fontWeight: 400, marginTop: 2 }}>{row.emailError.errorDetails.map(function(e) { return e.message; }).join("; ")}</div> : null}</td></tr>;
+                  return <tr key={i} style={{ borderBottom: "1px solid #F3F4F6" }}><td style={{ padding: "6px 12px", color: "#1F2937", fontFamily: "monospace" }}>{row.orderNbr}</td><td style={{ padding: "6px 12px", color: "#374151", fontFamily: "monospace" }}>{row.requestedVendorRef || ""}</td><td style={{ padding: "6px 12px", color: "#6B7280", fontSize: 11 }}>{row.channel || ""}</td><td style={{ padding: "6px 12px", color: resultColor, fontWeight: 600 }}>{resultText}{row.emailError && row.emailError.errorDetails ? <div style={{ fontSize: 10, color: "#9CA3AF", fontWeight: 400, marginTop: 2 }}>{row.emailError.errorDetails.map(function(e) { return e.message; }).join("; ")}</div> : null}</td></tr>;
                 })}</tbody>
               </table>
             </div>
@@ -5318,6 +5436,8 @@ function BackorderResolver(props) {
 /* ═══════ VENDOR CONTACTS PAGE ═══════ */
 function VendorContactsPage(props) {
   var contacts = props.contacts, updateContacts = props.updateContacts, toast = props.toast;
+  var channels = props.channels || {};
+  var updateChannels = props.updateChannels;
   var S = useMemo(function() { return makeStyles("#6366F1"); }, []);
   var _editing = useState(null), editing = _editing[0], setEditing = _editing[1];
   var _newVendor = useState(""), newVendor = _newVendor[0], setNewVendor = _newVendor[1];
@@ -5329,6 +5449,12 @@ function VendorContactsPage(props) {
     if (search) { var s = search.toLowerCase(); entries = entries.filter(function(e) { return e[0].toLowerCase().indexOf(s) >= 0 || e[1].toLowerCase().indexOf(s) >= 0; }); }
     return entries.sort(function(a, b) { return a[0].localeCompare(b[0]); });
   }, [contacts, search]);
+
+  function setChannel(vendor, ch) {
+    var u = Object.assign({}, channels);
+    if (!ch) { delete u[vendor]; } else { u[vendor] = ch; }
+    updateChannels && updateChannels(u);
+  }
 
   return <div>
     <div style={Object.assign({}, S.card, { display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" })}>
@@ -5343,25 +5469,34 @@ function VendorContactsPage(props) {
     </div>
     <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto" })}>
       <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 13 }}>
-        <thead><tr><th style={Object.assign({}, S.th, { width: "30%" })}>Vendor</th><th style={S.th}>Email(s)</th><th style={Object.assign({}, S.th, { width: 100 })}>Actions</th></tr></thead>
+        <thead><tr><th style={Object.assign({}, S.th, { width: "26%" })}>Vendor</th><th style={S.th}>Email(s)</th><th style={Object.assign({}, S.th, { width: 180 })}>Channel</th><th style={Object.assign({}, S.th, { width: 100 })}>Actions</th></tr></thead>
         <tbody>{sorted.map(function(e) {
           var vendor = e[0], email = e[1];
           var isEditing = editing === vendor;
+          var ch = channels[vendor] || "";
           return <tr key={vendor}>
             <td style={Object.assign({}, S.td, { fontWeight: 500, color: "#374151" })}>{vendor}</td>
             <td style={S.td}>{isEditing ? <input value={editEmail} onChange={function(ev) { setEditEmail(ev.target.value); }} style={Object.assign({}, S.inp, { padding: "5px 10px", fontSize: 13, width: "100%" })} autoFocus onKeyDown={function(ev) { if (ev.key === "Enter") { var u = Object.assign({}, contacts); u[vendor] = editEmail.trim(); updateContacts(u); setEditing(null); toast("Updated " + vendor); } if (ev.key === "Escape") setEditing(null); }} /> : <span style={{ color: "#6B7280" }}>{email}</span>}</td>
+            <td style={S.td}>
+              <select value={ch} onChange={function(ev) { setChannel(vendor, ev.target.value); }} style={Object.assign({}, S.sel, { padding: "5px 8px", fontSize: 12, width: "100%" })}>
+                <option value="">— select —</option>
+                <option value="Email">Email</option>
+                <option value="TrueCommerce EDI">TrueCommerce EDI</option>
+                <option value="Website Ordering">Website Ordering</option>
+              </select>
+            </td>
             <td style={Object.assign({}, S.td, { textAlign: "center" })}>{isEditing ? <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
               <button onClick={function() { var u = Object.assign({}, contacts); u[vendor] = editEmail.trim(); updateContacts(u); setEditing(null); toast("Updated " + vendor); }} style={Object.assign({}, S.btn(), { padding: "4px 10px", fontSize: 11 })}>Save</button>
               <button onClick={function() { setEditing(null); }} style={Object.assign({}, S.btn("ghost"), { padding: "4px 10px", fontSize: 11 })}>Cancel</button>
             </div> : <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
               <button onClick={function() { setEditing(vendor); setEditEmail(email); }} style={{ background: "none", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 14, padding: 4 }} title="Edit">{"\u270E"}</button>
-              <button onClick={function() { if (confirm("Remove " + vendor + "?")) { var u = Object.assign({}, contacts); delete u[vendor]; updateContacts(u); toast("Removed " + vendor); } }} style={{ background: "none", border: "none", cursor: "pointer", color: "#D1D5DB", fontSize: 14, padding: 4 }} title="Delete">{"\u2715"}</button>
+              <button onClick={function() { if (confirm("Remove " + vendor + "?")) { var u = Object.assign({}, contacts); delete u[vendor]; updateContacts(u); var uc = Object.assign({}, channels); delete uc[vendor]; updateChannels && updateChannels(uc); toast("Removed " + vendor); } }} style={{ background: "none", border: "none", cursor: "pointer", color: "#D1D5DB", fontSize: 14, padding: 4 }} title="Delete">{"\u2715"}</button>
             </div>}</td>
           </tr>;
         })}</tbody>
       </table>
     </div>
-    <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 8 }}>Shared with team &middot; Used by Short-Dating and Backorder email drafts</div>
+    <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 8 }}>Shared with team &middot; Channel controls how PO Tools handles vendors (Email = send Acumatica email; TrueCommerce EDI / Website Ordering = write Vendor Ref only, keep On Hold)</div>
   </div>;
 }
 
@@ -5433,14 +5568,16 @@ export default function Hub() {
   var _gm = useState(null), gmail = _gm[0], setGmail = _gm[1];
   var _sr = useState(function() { var saved = sGet("shipping-rules-v2"); return saved || Object.assign({}, DEFAULT_SHIP_RULES); }), shipRules = _sr[0], setShipRules = _sr[1];
   var _vc = useState(Object.assign({}, CONTACTS)), vendorContacts = _vc[0], setVendorContacts = _vc[1];
+  var _vch = useState({}), vendorChannels = _vch[0], setVendorChannels = _vch[1];
   var _sideCol = useState(function() { return sGet("sidebar-collapsed") || {}; }), sideCollapsed = _sideCol[0], setSideCollapsed = _sideCol[1];
   var _sideHide = useState(false), sidebarHidden = _sideHide[0], setSidebarHidden = _sideHide[1];
   function toggleSection(key) { var u = Object.assign({}, sideCollapsed); u[key] = !u[key]; setSideCollapsed(u); sSet("sidebar-collapsed", u); }
   function updateShipRules(newRules) { setShipRules(newRules); sSet("shipping-rules-v2", newRules); kvPost("shipping-rules-v2", newRules).catch(function() {}); }
   function updateVendorContacts(newContacts) { setVendorContacts(newContacts); kvPost("vendor-contacts", newContacts).catch(function() {}); }
+  function updateVendorChannels(newChannels) { setVendorChannels(newChannels); kvPost("vendor-channels", newChannels).catch(function() {}); }
 
   var showToast = useCallback(function(m, t) { setToast({ m: m, t: t || "success" }); setTimeout(function() { setToast(null); }, 3500); }, []);
-  useEffect(function() { var mt = true; (async function() { var s = sGet("user-credentials"); if (mt && s && s.username && s.password) { setCred(s); setOk(true); } var g = getGmailToken(); if (mt && g && g.token) { setGmail(g); } if (mt) setCredLoading(false); kvGet("vendor-contacts").then(function(r) { return r.ok ? r.json() : null; }).then(function(d) { if (mt && d && d.data && typeof d.data === "object" && Object.keys(d.data).length > 0) { setVendorContacts(d.data); } }).catch(function() {}); kvGet("shipping-rules-v2").then(function(r) { return r.ok ? r.json() : null; }).then(function(d) { if (mt && d && d.data && typeof d.data === "object" && Object.keys(d.data).length > 0) { setShipRules(d.data); } }).catch(function() {}); })(); return function() { mt = false; }; }, []);
+  useEffect(function() { var mt = true; (async function() { var s = sGet("user-credentials"); if (mt && s && s.username && s.password) { setCred(s); setOk(true); } var g = getGmailToken(); if (mt && g && g.token) { setGmail(g); } if (mt) setCredLoading(false); kvGet("vendor-contacts").then(function(r) { return r.ok ? r.json() : null; }).then(function(d) { if (mt && d && d.data && typeof d.data === "object" && Object.keys(d.data).length > 0) { setVendorContacts(d.data); } }).catch(function() {}); kvGet("vendor-channels").then(function(r) { return r.ok ? r.json() : null; }).then(function(d) { if (mt && d && d.data && typeof d.data === "object" && Object.keys(d.data).length > 0) { setVendorChannels(d.data); } }).catch(function() {}); kvGet("shipping-rules-v2").then(function(r) { return r.ok ? r.json() : null; }).then(function(d) { if (mt && d && d.data && typeof d.data === "object" && Object.keys(d.data).length > 0) { setShipRules(d.data); } }).catch(function() {}); })(); return function() { mt = false; }; }, []);
 
   // Handle Gmail OAuth callback (reads token from URL hash)
   useEffect(function() {
@@ -5629,7 +5766,7 @@ export default function Hub() {
 
           {page === "rules" && !showLogin && <ShippingRulesPage shipRules={shipRules} updateShipRules={updateShipRules} toast={showToast} />}
 
-          {!showLogin && Object.entries(WH).map(function(e) { return <div key={e[0]} style={{ display: page === e[0] ? "block" : "none" }}><WHT whKey={e[0]} cfg={e[1]} toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} shipRules={shipRules} /></div>; })}
+          {!showLogin && Object.entries(WH).map(function(e) { return <div key={e[0]} style={{ display: page === e[0] ? "block" : "none" }}><WHT whKey={e[0]} cfg={e[1]} toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} shipRules={shipRules} vendorChannels={vendorChannels} updateVendorChannels={updateVendorChannels} vendorContacts={vendorContacts} /></div>; })}
           {!showLogin && page === "short-dating" && <TrackerTool toolKey="short-dating" toolLabel="Short-Dating Tracker" toolColor="#E879F9" demoData={SD_DEMO} columns={sdColumns} emailConfig={sdEmail} toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} contacts={vendorContacts} />}
           {!showLogin && page === "backorder" && <TrackerTool toolKey="backorder" toolLabel="Backorder Tracker" toolColor="#F97316" demoData={BKO_DEMO} columns={bkoColumns} emailConfig={bkoEmail} skipVendors={BKO_SKIP} toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} contacts={vendorContacts} />}
           {!showLogin && page === "po-import" && <POImportTool toast={showToast} cred={cred} ok={ok} lp={promptLogin} />}
@@ -5640,7 +5777,7 @@ export default function Hub() {
           {!showLogin && page === "truckloader" && <TruckloaderTool toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} />}
           {!showLogin && page === "oos-tracker" && <OOSTracker toast={showToast} cred={cred} />}
           {!showLogin && page === "backorder-resolver" && <BackorderResolver toast={showToast} cred={cred} />}
-          {!showLogin && page === "vendor-contacts" && <VendorContactsPage contacts={vendorContacts} updateContacts={updateVendorContacts} toast={showToast} />}
+          {!showLogin && page === "vendor-contacts" && <VendorContactsPage contacts={vendorContacts} updateContacts={updateVendorContacts} channels={vendorChannels} updateChannels={updateVendorChannels} toast={showToast} />}
           {!showLogin && page === "how-to" && <HowToGuide toast={showToast} />}
         </div>
       </div>
