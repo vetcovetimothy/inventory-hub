@@ -923,7 +923,7 @@ function WHT(props) {
       var miss = built.missingVendor.slice(0, 3).map(function(m) { return m.vendorName; });
       var unique = Array.from(new Set(miss));
       var more = built.missingVendor.length > 3 ? " (+" + (built.missingVendor.length - 3) + " more)" : "";
-      toast("Add these vendors first in Settings > Vendor Contacts: " + unique.join(", ") + more, "error");
+      toast("Add these vendors first in Settings > Vendor Settings: " + unique.join(", ") + more, "error");
       return;
     }
     // (2) Vendors that exist but have no channel set → open categorize modal
@@ -3592,7 +3592,7 @@ function HowToGuide(props) {
       <Step n="2" color="#3B82F6">Review the order table. Items are grouped by vendor with shipping cost status shown. Short-dating items are flagged red, sell-off items orange. Flagged items sort to the top.</Step>
       <Step n="3" color="#3B82F6">Add shipping notes per vendor if needed. These are saved and shared with your team via KV storage.</Step>
       <Step n="4" color="#3B82F6">Click "Generate Email Drafts" to create one Gmail draft per vendor with the order details as an attached spreadsheet. Drafts appear in your Gmail ready to review and send.</Step>
-      <Note>Data syncs across devices. If someone else fetches POs, your view updates within 8 seconds. Shipping rules (free shipping thresholds, fee calculations) are configurable under Settings {">"} Shipping Rules.</Note>
+      <Note>Data syncs across devices. If someone else fetches POs, your view updates within 8 seconds. Shipping rules (free shipping thresholds, fee calculations) are configurable under Settings {">"} Vendor Settings.</Note>
       <Note>For TP warehouses (Brooklyn, Ohio, Hayward), email is blocked when flagged items are present to prevent accidentally ordering short-dated product. GoGoMeds is exempt from this rule.</Note>
     </Section>
 
@@ -5434,7 +5434,7 @@ function BackorderResolver(props) {
 }
 
 /* ═══════ VENDOR CONTACTS PAGE ═══════ */
-function VendorContactsPage(props) {
+function VendorSettingsPage(props) {
   var contacts = props.contacts, updateContacts = props.updateContacts, toast = props.toast;
   var channels = props.channels || {};
   var updateChannels = props.updateChannels;
@@ -5446,23 +5446,44 @@ function VendorContactsPage(props) {
   var _newEmail = useState(""), newEmail = _newEmail[0], setNewEmail = _newEmail[1];
   var _editEmail = useState(""), editEmail = _editEmail[0], setEditEmail = _editEmail[1];
   var _editChannel = useState(""), editChannel = _editChannel[0], setEditChannel = _editChannel[1];
+  var _editRule = useState(""), editRule = _editRule[0], setEditRule = _editRule[1];
   var _search = useState(""), search = _search[0], setSearch = _search[1];
-  var sorted = useMemo(function() {
-    // Keep vendors even if their email is empty — they're visible so user can click pencil to add an email later.
-    var entries = Object.entries(contacts).filter(function(e) { return !!e[0]; });
-    if (search) { var s = search.toLowerCase(); entries = entries.filter(function(e) { return e[0].toLowerCase().indexOf(s) >= 0 || (e[1] || "").toLowerCase().indexOf(s) >= 0; }); }
-    return entries.sort(function(a, b) { return a[0].localeCompare(b[0]); });
-  }, [contacts, search]);
 
-  // Add a contact. Also seeds an empty shipping rule for the vendor if one
-  // doesn't already exist, so the vendor shows up on Shipping Rules immediately.
-  function addContact() {
+  // Union of all vendor names across contacts, channels, and shipRules — so that
+  // legacy vendors that exist only in shipRules (and not yet in contacts) still
+  // show up on this combined page.
+  var allVendors = useMemo(function() {
+    var set = {};
+    Object.keys(contacts || {}).forEach(function(v) { if (v) set[v] = true; });
+    Object.keys(channels || {}).forEach(function(v) { if (v) set[v] = true; });
+    Object.keys(shipRules || {}).forEach(function(v) { if (v) set[v] = true; });
+    return Object.keys(set);
+  }, [contacts, channels, shipRules]);
+
+  var sorted = useMemo(function() {
+    var rows = allVendors.map(function(v) {
+      return { vendor: v, email: contacts[v] || "", channel: channels[v] || "", rule: shipRules[v] || "" };
+    });
+    if (search) {
+      var s = search.toLowerCase();
+      rows = rows.filter(function(r) {
+        return r.vendor.toLowerCase().indexOf(s) >= 0
+            || r.email.toLowerCase().indexOf(s) >= 0
+            || r.channel.toLowerCase().indexOf(s) >= 0
+            || r.rule.toLowerCase().indexOf(s) >= 0;
+      });
+    }
+    return rows.sort(function(a, b) { return a.vendor.localeCompare(b.vendor); });
+  }, [allVendors, contacts, channels, shipRules, search]);
+
+  // Add a new vendor. Email and rule are both optional; vendor name is required.
+  function addVendor() {
     var v = newVendor.trim(), e = newEmail.trim();
     if (!v) { toast("Enter vendor name", "error"); return; }
     var u = Object.assign({}, contacts);
-    u[v] = e; // email may be empty — that's allowed
+    u[v] = e;
     updateContacts(u);
-    // Sync to Shipping Rules — only add if not already present (don't overwrite).
+    // Seed an empty shipping rule entry if one doesn't exist
     if (updateShipRules && !shipRules.hasOwnProperty(v)) {
       var sr = Object.assign({}, shipRules);
       sr[v] = "";
@@ -5472,28 +5493,35 @@ function VendorContactsPage(props) {
     toast("Added " + v);
   }
 
-  // Save an in-place edit (both email and channel come out together)
+  // Save the in-place edit. All four fields (email, channel, rule) come out together.
   function saveEdit(vendor) {
-    var u = Object.assign({}, contacts); u[vendor] = editEmail.trim(); updateContacts(u);
-    // Save channel pick (may be empty string, which means "unset")
+    var uc = Object.assign({}, contacts);
+    uc[vendor] = editEmail.trim();
+    updateContacts(uc);
+
     if (updateChannels) {
-      var uc = Object.assign({}, channels);
-      if (editChannel) { uc[vendor] = editChannel; } else { delete uc[vendor]; }
-      updateChannels(uc);
+      var uch = Object.assign({}, channels);
+      if (editChannel) { uch[vendor] = editChannel; } else { delete uch[vendor]; }
+      updateChannels(uch);
     }
+
+    if (updateShipRules) {
+      var ur = Object.assign({}, shipRules);
+      ur[vendor] = editRule.trim();
+      updateShipRules(ur);
+    }
+
     setEditing(null);
     toast("Updated " + vendor);
   }
 
-  // Remove the vendor everywhere: contacts, channels, shipping rules.
+  // Remove vendor everywhere
   function removeVendor(vendor) {
-    var hasRule = shipRules.hasOwnProperty(vendor) && shipRules[vendor];
-    var msg = "Remove " + vendor + "?";
-    if (hasRule) msg += "\n\nThis will also delete its shipping rule.";
+    var msg = "Remove " + vendor + "?\n\nThis will delete its email, channel, and shipping rule.";
     if (!confirm(msg)) return;
-    var u = Object.assign({}, contacts); delete u[vendor]; updateContacts(u);
-    if (updateChannels) { var uc = Object.assign({}, channels); delete uc[vendor]; updateChannels(uc); }
-    if (updateShipRules) { var sr = Object.assign({}, shipRules); delete sr[vendor]; updateShipRules(sr); }
+    var uc = Object.assign({}, contacts); delete uc[vendor]; updateContacts(uc);
+    if (updateChannels) { var uch = Object.assign({}, channels); delete uch[vendor]; updateChannels(uch); }
+    if (updateShipRules) { var ur = Object.assign({}, shipRules); delete ur[vendor]; updateShipRules(ur); }
     toast("Removed " + vendor);
   }
 
@@ -5501,23 +5529,26 @@ function VendorContactsPage(props) {
     <div style={Object.assign({}, S.card, { display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" })}>
       <input value={newVendor} onChange={function(e) { setNewVendor(e.target.value); }} placeholder="Vendor name..." style={Object.assign({}, S.inp, { padding: "8px 14px", flex: 1, minWidth: 180 })} />
       <input value={newEmail} onChange={function(e) { setNewEmail(e.target.value); }} placeholder="email1@example.com, email2@example.com (optional)" style={Object.assign({}, S.inp, { padding: "8px 14px", flex: 2, minWidth: 280 })} />
-      <button onClick={addContact} style={S.btn()}>+ Add</button>
+      <button onClick={addVendor} style={S.btn()}>+ Add</button>
     </div>
     <div style={{ display: "flex", gap: 10, marginBottom: 16, alignItems: "center" }}>
-      <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search vendors or emails..." style={Object.assign({}, S.inp, { padding: "8px 14px", width: 300 })} />
+      <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search vendors, emails, channels, or rules..." style={Object.assign({}, S.inp, { padding: "8px 14px", width: 360 })} />
       <div style={{ flex: 1 }} />
       <span style={{ fontSize: 12, color: "#9CA3AF" }}>{sorted.length} vendors</span>
     </div>
     <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto" })}>
       <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 13 }}>
-        <thead><tr><th style={Object.assign({}, S.th, { width: "26%" })}>Vendor</th><th style={S.th}>Email(s)</th><th style={Object.assign({}, S.th, { width: 180 })}>Channel</th><th style={Object.assign({}, S.th, { width: 100 })}>Actions</th></tr></thead>
-        <tbody>{sorted.map(function(e) {
-          var vendor = e[0], email = e[1];
+        <thead><tr><th style={Object.assign({}, S.th, { width: "20%" })}>Vendor</th><th style={Object.assign({}, S.th, { width: "22%" })}>Email(s)</th><th style={S.th}>Shipping Rule</th><th style={Object.assign({}, S.th, { width: 170 })}>Channel</th><th style={Object.assign({}, S.th, { width: 140 })}>Actions</th></tr></thead>
+        <tbody>{sorted.map(function(row) {
+          var vendor = row.vendor, email = row.email, ch = row.channel, rule = row.rule;
           var isEditing = editing === vendor;
-          var ch = channels[vendor] || "";
           return <tr key={vendor}>
             <td style={Object.assign({}, S.td, { fontWeight: 500, color: "#374151" })}>{vendor}</td>
-            <td style={S.td}>{isEditing ? <input value={editEmail} onChange={function(ev) { setEditEmail(ev.target.value); }} placeholder="email1@example.com, email2@example.com (optional)" style={Object.assign({}, S.inp, { padding: "5px 10px", fontSize: 13, width: "100%" })} autoFocus onKeyDown={function(ev) { if (ev.key === "Enter") { saveEdit(vendor); } if (ev.key === "Escape") setEditing(null); }} /> : (email ? <span style={{ color: "#6B7280" }}>{email}</span> : <span style={{ color: "#9CA3AF", fontStyle: "italic", fontSize: 12 }}>no email set</span>)}</td>
+
+            <td style={S.td}>{isEditing ? <input value={editEmail} onChange={function(ev) { setEditEmail(ev.target.value); }} placeholder="email1@example.com (optional)" style={Object.assign({}, S.inp, { padding: "5px 10px", fontSize: 13, width: "100%" })} autoFocus onKeyDown={function(ev) { if (ev.key === "Enter") { saveEdit(vendor); } if (ev.key === "Escape") setEditing(null); }} /> : (email ? <span style={{ color: "#6B7280" }}>{email}</span> : <span style={{ color: "#9CA3AF", fontStyle: "italic", fontSize: 12 }}>no email set</span>)}</td>
+
+            <td style={S.td}>{isEditing ? <input value={editRule} onChange={function(ev) { setEditRule(ev.target.value); }} placeholder="e.g. min:5000; message:Free Shipping; else:Not Free Shipping" style={Object.assign({}, S.inp, { padding: "5px 10px", fontSize: 13, width: "100%" })} onKeyDown={function(ev) { if (ev.key === "Enter") { saveEdit(vendor); } if (ev.key === "Escape") setEditing(null); }} /> : (rule ? <span style={{ color: "#6B7280" }}>{rule}</span> : <span style={{ color: "#9CA3AF", fontStyle: "italic", fontSize: 12 }}>no rule set</span>)}</td>
+
             <td style={S.td}>{isEditing ? (
               <select value={editChannel} onChange={function(ev) { setEditChannel(ev.target.value); }} style={Object.assign({}, S.sel, { padding: "5px 8px", fontSize: 12, width: "100%" })}>
                 <option value="">— select —</option>
@@ -5528,67 +5559,22 @@ function VendorContactsPage(props) {
             ) : (
               ch ? <span style={{ fontSize: 11, padding: "3px 9px", borderRadius: 10, fontWeight: 600, background: ch === "Email" ? "#ECFDF5" : ch === "TrueCommerce EDI" ? "#EFF6FF" : "#FFF7ED", color: ch === "Email" ? "#059669" : ch === "TrueCommerce EDI" ? "#2563EB" : "#C2410C" }}>{ch}</span> : <span style={{ fontSize: 11, color: "#9CA3AF", fontStyle: "italic" }}>not set</span>
             )}</td>
-            <td style={Object.assign({}, S.td, { textAlign: "center" })}>{isEditing ? <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
+
+            <td style={Object.assign({}, S.td, { textAlign: "center" })}>{isEditing ? <div style={{ display: "flex", gap: 4, justifyContent: "center", alignItems: "center" }}>
               <button onClick={function() { saveEdit(vendor); }} style={Object.assign({}, S.btn(), { padding: "4px 10px", fontSize: 11 })}>Save</button>
               <button onClick={function() { setEditing(null); }} style={Object.assign({}, S.btn("ghost"), { padding: "4px 10px", fontSize: 11 })}>Cancel</button>
+              <button onClick={function() { removeVendor(vendor); }} style={{ background: "none", border: "none", cursor: "pointer", color: "#DC2626", fontSize: 14, padding: 4, marginLeft: 4 }} title="Delete vendor">{"\u2715"}</button>
             </div> : <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
-              <button onClick={function() { setEditing(vendor); setEditEmail(email); setEditChannel(ch); }} style={{ background: "none", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 14, padding: 4 }} title="Edit">{"\u270E"}</button>
-              <button onClick={function() { removeVendor(vendor); }} style={{ background: "none", border: "none", cursor: "pointer", color: "#D1D5DB", fontSize: 14, padding: 4 }} title="Delete">{"\u2715"}</button>
+              <button onClick={function() { setEditing(vendor); setEditEmail(email); setEditChannel(ch); setEditRule(rule); }} style={{ background: "none", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 14, padding: 4 }} title="Edit">{"\u270E"}</button>
             </div>}</td>
           </tr>;
         })}</tbody>
       </table>
     </div>
-    <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 8 }}>Shared with team &middot; Adding or deleting a vendor here also adds/removes the corresponding Shipping Rule. Channel controls PO Tools behavior (Email = Acumatica email; TrueCommerce EDI / Website Ordering = write Vendor Ref only, keep On Hold).</div>
+    <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 8 }}>Shared with team &middot; Channel controls PO Tools behavior (Email = Acumatica email; TrueCommerce EDI / Website Ordering = write Vendor Ref only, keep On Hold). Shipping Rule controls free-shipping logic on PO Tools.</div>
   </div>;
 }
 
-/* ═══════ SHIPPING RULES PAGE ═══════ */
-function ShippingRulesPage(props) {
-  var shipRules = props.shipRules, updateShipRules = props.updateShipRules, toast = props.toast;
-  var S = useMemo(function() { return makeStyles("#3B82F6"); }, []);
-  var _editing = useState(null), editing = _editing[0], setEditing = _editing[1];
-  var _newVendor = useState(""), newVendor = _newVendor[0], setNewVendor = _newVendor[1];
-  var _newRule = useState(""), newRule = _newRule[0], setNewRule = _newRule[1];
-  var _editRule = useState(""), editRule = _editRule[0], setEditRule = _editRule[1];
-  var _search = useState(""), search = _search[0], setSearch = _search[1];
-  var sorted = useMemo(function() {
-    // Keep vendors even if their rule is empty — they're visible so user can click pencil to add a rule.
-    var entries = Object.entries(shipRules).filter(function(e) { return !!e[0]; });
-    if (search) { var s = search.toLowerCase(); entries = entries.filter(function(e) { return e[0].toLowerCase().indexOf(s) >= 0 || (e[1] || "").toLowerCase().indexOf(s) >= 0; }); }
-    return entries.sort(function(a, b) { return a[0].localeCompare(b[0]); });
-  }, [shipRules, search]);
-
-  return <div>
-    <div style={{ display: "flex", gap: 10, marginBottom: 16, alignItems: "center" }}>
-      <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search vendors or rules..." style={Object.assign({}, S.inp, { padding: "8px 14px", width: 300 })} />
-      <div style={{ flex: 1 }} />
-      <span style={{ fontSize: 12, color: "#9CA3AF" }}>{sorted.length} vendors</span>
-    </div>
-    <div style={{ fontSize: 11, color: "#9CA3AF", marginBottom: 12 }}>Vendors are managed in <strong>Settings &gt; Vendor Contacts</strong>. Edit the rule expression here.</div>
-    <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto" })}>
-      <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 13 }}>
-        <thead><tr><th style={Object.assign({}, S.th, { width: "30%" })}>Vendor</th><th style={S.th}>Rule</th><th style={Object.assign({}, S.th, { width: 100 })}>Actions</th></tr></thead>
-        <tbody>{sorted.map(function(e) {
-          var vendor = e[0], rule = e[1];
-          var isEditing = editing === vendor;
-          return <tr key={vendor}>
-            <td style={Object.assign({}, S.td, { fontWeight: 500, color: "#374151" })}>{vendor}</td>
-            <td style={S.td}>{isEditing ? <input value={editRule} onChange={function(ev) { setEditRule(ev.target.value); }} placeholder="e.g. min:5000; message:Free Shipping; else:Not Free Shipping" style={Object.assign({}, S.inp, { padding: "5px 10px", fontSize: 13, width: "100%" })} autoFocus onKeyDown={function(ev) { if (ev.key === "Enter") { var u = Object.assign({}, shipRules); u[vendor] = editRule.trim(); updateShipRules(u); setEditing(null); toast("Updated " + vendor); } if (ev.key === "Escape") setEditing(null); }} /> : (rule ? <span style={{ color: "#6B7280" }}>{rule}</span> : <span style={{ color: "#9CA3AF", fontStyle: "italic", fontSize: 12 }}>no rule set</span>)}</td>
-            <td style={Object.assign({}, S.td, { textAlign: "center" })}>{isEditing ? <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
-              <button onClick={function() { var u = Object.assign({}, shipRules); u[vendor] = editRule.trim(); updateShipRules(u); setEditing(null); toast("Updated " + vendor); }} style={Object.assign({}, S.btn(), { padding: "4px 10px", fontSize: 11 })}>Save</button>
-              <button onClick={function() { setEditing(null); }} style={Object.assign({}, S.btn("ghost"), { padding: "4px 10px", fontSize: 11 })}>Cancel</button>
-            </div> : <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
-              <button onClick={function() { setEditing(vendor); setEditRule(rule); }} style={{ background: "none", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 14, padding: 4 }} title="Edit">{"\u270E"}</button>
-              <button onClick={function() { if (confirm("Remove " + vendor + "?")) { var u = Object.assign({}, shipRules); delete u[vendor]; updateShipRules(u); toast("Removed " + vendor); } }} style={{ background: "none", border: "none", cursor: "pointer", color: "#D1D5DB", fontSize: 14, padding: 4 }} title="Delete">{"\u2715"}</button>
-            </div>}</td>
-          </tr>;
-        })}</tbody>
-      </table>
-    </div>
-    <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 8 }}>Shared with team &middot; Used by PO warehouse tools to determine free shipping eligibility</div>
-  </div>;
-}
 
 /* ═══════ MAIN HUB ═══════ */
 export default function Hub() {
@@ -5726,8 +5712,8 @@ export default function Hub() {
   );
 
   var isWH = page in WH;
-  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "backorder-resolver" ? "#14B8A6" : page === "po-import" ? "#06B6D4" : page === "cycle-count" ? "#14B8A6" : page === "fuze-tracker" ? "#F59E0B" : page === "ggm-tracker" ? "#8B5CF6" : page === "hills-pawtree" ? "#10B981" : page === "truckloader" ? "#D97706" : page === "oos-tracker" ? "#EF4444" : page === "vendor-contacts" ? "#6366F1" : page === "how-to" ? "#6B7280" : "#3B82F6";
-  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "backorder-resolver" ? "Backorder Resolver" : page === "po-import" ? "Generic PO Translator" : page === "cycle-count" ? "Cycle Counting" : page === "fuze-tracker" ? "Fuze Tracker" : page === "ggm-tracker" ? "GGM Tracker" : page === "hills-pawtree" ? "Hills & Pawtree Tracker" : page === "truckloader" ? "Truckloader" : page === "oos-tracker" ? "OOS Tracker" : page === "vendor-contacts" ? "Vendor Contacts" : page === "how-to" ? "How-To Guide" : showLogin ? "Login" : "Shipping Rules";
+  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "backorder-resolver" ? "#14B8A6" : page === "po-import" ? "#06B6D4" : page === "cycle-count" ? "#14B8A6" : page === "fuze-tracker" ? "#F59E0B" : page === "ggm-tracker" ? "#8B5CF6" : page === "hills-pawtree" ? "#10B981" : page === "truckloader" ? "#D97706" : page === "oos-tracker" ? "#EF4444" : page === "vendor-settings" ? "#6366F1" : page === "how-to" ? "#6B7280" : "#3B82F6";
+  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "backorder-resolver" ? "Backorder Resolver" : page === "po-import" ? "Generic PO Translator" : page === "cycle-count" ? "Cycle Counting" : page === "fuze-tracker" ? "Fuze Tracker" : page === "ggm-tracker" ? "GGM Tracker" : page === "hills-pawtree" ? "Hills & Pawtree Tracker" : page === "truckloader" ? "Truckloader" : page === "oos-tracker" ? "OOS Tracker" : page === "vendor-settings" ? "Vendor Settings" : page === "how-to" ? "How-To Guide" : showLogin ? "Login" : "Vendor Settings";
 
   function SideLink(p) {
     var active = page === p.id && !showLogin;
@@ -5769,8 +5755,7 @@ export default function Hub() {
         })()}
         <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 8 }}>
           <div style={{ padding: "8px 20px" }}><span style={{ fontSize: 10, fontWeight: 500, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "1px" }}>Settings</span></div>
-          <div onClick={function() { setPagePersist("rules"); setShowLogin(false); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", margin: "1px 12px", fontSize: 13, cursor: "pointer", fontWeight: page === "rules" && !showLogin ? 500 : 400, color: page === "rules" && !showLogin ? "#93bbfc" : "rgba(255,255,255,0.55)", background: page === "rules" && !showLogin ? "rgba(96,165,250,0.15)" : "transparent", borderRadius: 8 }}><IconTruck /> Shipping Rules</div>
-          <div onClick={function() { setPagePersist("vendor-contacts"); setShowLogin(false); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", margin: "1px 12px", fontSize: 13, cursor: "pointer", fontWeight: page === "vendor-contacts" && !showLogin ? 500 : 400, color: page === "vendor-contacts" && !showLogin ? "#93bbfc" : "rgba(255,255,255,0.55)", background: page === "vendor-contacts" && !showLogin ? "rgba(96,165,250,0.15)" : "transparent", borderRadius: 8 }}><IconMail /> Vendor Contacts</div>
+          <div onClick={function() { setPagePersist("vendor-settings"); setShowLogin(false); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", margin: "1px 12px", fontSize: 13, cursor: "pointer", fontWeight: page === "vendor-settings" && !showLogin ? 500 : 400, color: page === "vendor-settings" && !showLogin ? "#93bbfc" : "rgba(255,255,255,0.55)", background: page === "vendor-settings" && !showLogin ? "rgba(96,165,250,0.15)" : "transparent", borderRadius: 8 }}><IconMail /> Vendor Settings</div>
           <div onClick={function() { setPagePersist("how-to"); setShowLogin(false); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", margin: "1px 12px", fontSize: 13, cursor: "pointer", fontWeight: page === "how-to" && !showLogin ? 500 : 400, color: page === "how-to" && !showLogin ? "#93bbfc" : "rgba(255,255,255,0.55)", background: page === "how-to" && !showLogin ? "rgba(96,165,250,0.15)" : "transparent", borderRadius: 8 }}><IconCSV /> How-To Guide</div>
         </div>
         <div style={{ flex: 1 }} />
@@ -5804,8 +5789,6 @@ export default function Hub() {
         <div style={{ padding: 32, flex: 1 }}>
           {showLogin && <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 400 }}><div style={{ background: "#FFFFFF", border: "1px solid #E5E7EB", borderRadius: 12, padding: 32, width: 400, textAlign: "center" }}><div style={{ width: 56, height: 56, borderRadius: 14, background: "rgba(59,130,246,0.15)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}><IconKey /></div><h2 style={{ fontSize: 20, fontWeight: 700, color: "#1F2937", margin: "0 0 4px" }}>Acumatica Login</h2><p style={{ color: "#9CA3AF", fontSize: 11, margin: "0 0 24px" }}>Shared across all tools</p><div style={{ textAlign: "left", display: "flex", flexDirection: "column", gap: 12 }}><div><label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 4 }}>Username</label><input style={{ background: "#F8F9FB", border: "1px solid #E5E7EB", borderRadius: 8, padding: "8px 12px", color: "#374151", fontSize: 13, outline: "none", width: "100%" }} value={cred.username} onChange={function(e) { setCred({ username: e.target.value, password: cred.password }); }} placeholder="your.username" /></div><div><label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 4 }}>Password</label><input style={{ background: "#F8F9FB", border: "1px solid #E5E7EB", borderRadius: 8, padding: "8px 12px", color: "#374151", fontSize: 13, outline: "none", width: "100%" }} type="password" value={cred.password} onChange={function(e) { setCred({ username: cred.username, password: e.target.value }); }} placeholder="\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" /></div><button onClick={login} disabled={loginLoading} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, width: "100%", background: "#3B82F6", color: "#fff", border: "none", borderRadius: 8, padding: "10px 16px", fontSize: 13, fontWeight: 600, cursor: loginLoading ? "wait" : "pointer", marginTop: 8, opacity: loginLoading ? 0.7 : 1 }}>{loginLoading ? <><Spinner color="#fff" size={14} /> Verifying...</> : "Connect"}</button></div></div></div>}
 
-          {page === "rules" && !showLogin && <ShippingRulesPage shipRules={shipRules} updateShipRules={updateShipRules} toast={showToast} />}
-
           {!showLogin && Object.entries(WH).map(function(e) { return <div key={e[0]} style={{ display: page === e[0] ? "block" : "none" }}><WHT whKey={e[0]} cfg={e[1]} toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} shipRules={shipRules} vendorChannels={vendorChannels} updateVendorChannels={updateVendorChannels} vendorContacts={vendorContacts} /></div>; })}
           {!showLogin && page === "short-dating" && <TrackerTool toolKey="short-dating" toolLabel="Short-Dating Tracker" toolColor="#E879F9" demoData={SD_DEMO} columns={sdColumns} emailConfig={sdEmail} toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} contacts={vendorContacts} />}
           {!showLogin && page === "backorder" && <TrackerTool toolKey="backorder" toolLabel="Backorder Tracker" toolColor="#F97316" demoData={BKO_DEMO} columns={bkoColumns} emailConfig={bkoEmail} skipVendors={BKO_SKIP} toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} contacts={vendorContacts} />}
@@ -5817,7 +5800,7 @@ export default function Hub() {
           {!showLogin && page === "truckloader" && <TruckloaderTool toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} />}
           {!showLogin && page === "oos-tracker" && <OOSTracker toast={showToast} cred={cred} />}
           {!showLogin && page === "backorder-resolver" && <BackorderResolver toast={showToast} cred={cred} />}
-          {!showLogin && page === "vendor-contacts" && <VendorContactsPage contacts={vendorContacts} updateContacts={updateVendorContacts} channels={vendorChannels} updateChannels={updateVendorChannels} shipRules={shipRules} updateShipRules={updateShipRules} toast={showToast} />}
+          {!showLogin && (page === "vendor-settings" || page === "vendor-contacts" || page === "rules") && <VendorSettingsPage contacts={vendorContacts} updateContacts={updateVendorContacts} channels={vendorChannels} updateChannels={updateVendorChannels} shipRules={shipRules} updateShipRules={updateShipRules} toast={showToast} />}
           {!showLogin && page === "how-to" && <HowToGuide toast={showToast} />}
         </div>
       </div>
