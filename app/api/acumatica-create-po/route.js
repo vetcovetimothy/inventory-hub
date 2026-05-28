@@ -25,9 +25,9 @@ const API_VERSION = "25.200.001";
 const HILLS_VENDOR_ID = "VID0024";
 
 const WAREHOUSE_TO_LOCATION = {
-  "HILL-CP-CA": "MAIN",
-  "HILL-CP-NJ": "HILL-CP-NJ"
-  "HILL-CP-FL": "HILL-CP-FL"
+  "HILL-CP-CA": "MAIN",          // CA uses the "Primary Location" / MAIN code on the vendor
+  "HILL-CP-NJ": "HILL-CP-NJ",
+  "HILL-CP-FL": "HILL-CP-FL",
   "HILL-CP-TX": "HILL-CP-TX"
 };
 
