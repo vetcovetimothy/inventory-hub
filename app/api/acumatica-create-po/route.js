@@ -132,6 +132,7 @@ export async function POST(req) {
           note: "PO was created but VendorRef was not set. Set it manually in Acumatica, or delete the PO and re-run."
         },
         status: refResult.status,
+        errorDetails: refResult.errorDetails,
         rawBody: refResult.rawBody
       };
       break;
@@ -195,7 +196,7 @@ async function createOnePO(cookies, { location, warehouse, description, lines })
     let errorDetails = null;
     try {
       const parsed = JSON.parse(text);
-      errorDetails = extractLineErrors(parsed);
+      errorDetails = extractAllErrors(parsed);
     } catch {}
     return {
       ok: false,
@@ -254,7 +255,12 @@ async function setVendorRef(cookies, { id, orderNbr }) {
 
   const text = await res.text();
   if (!res.ok) {
-    return { ok: false, status: res.status, rawBody: text.slice(0, 1500) };
+    let errorDetails = null;
+    try {
+      const parsed = JSON.parse(text);
+      errorDetails = extractAllErrors(parsed);
+    } catch {}
+    return { ok: false, status: res.status, errorDetails, rawBody: text.slice(0, 1500) };
   }
   let parsed = null;
   try { parsed = JSON.parse(text); } catch {}
@@ -262,25 +268,54 @@ async function setVendorRef(cookies, { id, orderNbr }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-function extractLineErrors(parsed) {
+// Walk the entire response body and pull out every embedded `error` property.
+// Acumatica puts errors on individual fields (both header and line) in addition
+// to a generic top-level wrapper. We surface all of them so the UI can show
+// the specific field that failed (e.g. "Location 'HILL-CP-CA' cannot be found"),
+// not just the generic wrapper.
+function extractAllErrors(parsed) {
   const errors = [];
-  if (parsed?.error) errors.push({ scope: "header", message: parsed.error });
-  if (Array.isArray(parsed?.Details)) {
+  if (!parsed || typeof parsed !== "object") return errors;
+
+  // Header-level field errors: walk top-level keys for { value, error } shapes.
+  Object.keys(parsed).forEach(k => {
+    if (k === "Details" || k === "_links" || k === "custom") return;
+    const v = parsed[k];
+    if (v && typeof v === "object" && typeof v.error === "string") {
+      errors.push({
+        scope: "header",
+        field: k,
+        value: v.value,
+        message: v.error
+      });
+    }
+  });
+
+  // Line-level errors: same walk inside each detail row.
+  if (Array.isArray(parsed.Details)) {
     parsed.Details.forEach((d, idx) => {
       Object.keys(d || {}).forEach(k => {
         const v = d[k];
-        if (v && typeof v === "object" && v.error) {
+        if (v && typeof v === "object" && typeof v.error === "string") {
           errors.push({
             scope: "line",
             lineIndex: idx,
             inventoryID: d?.InventoryID?.value,
             field: k,
+            value: v.value,
             message: v.error
           });
         }
       });
     });
   }
+
+  // Only add the generic wrapper if we found NO specific field errors —
+  // otherwise it's just noise on top of the real messages.
+  if (errors.length === 0 && typeof parsed.error === "string") {
+    errors.push({ scope: "wrapper", message: parsed.error });
+  }
+
   return errors;
 }
 
