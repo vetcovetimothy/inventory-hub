@@ -785,30 +785,21 @@ function WHT(props) {
 
   // ─── Acumatica: remove flagged lines from existing POs ───
   var _acuRemove = useState(false), acuRemoveLoading = _acuRemove[0], setAcuRemoveLoading = _acuRemove[1];
-
-  // Removes a set of (PO# + InventoryID) pairs from Acumatica, then drops them from the local view.
-  // pairs: [{ orderNbr, inventoryID, skuNDC }] — skuNDC is just for display in error messages
-  // ALL rows must be currently flagged. Refuses POs that aren't On Hold.
   async function removeFromAcumatica(pairs) {
     if (!pairs || pairs.length === 0) return;
     if (!cred || !cred.username || !cred.password) { toast("Acumatica credentials required", "error"); lp && lp(); return; }
-
-    // Filter out rows without an InventoryID (data hygiene safety net)
     var validPairs = pairs.filter(function(p) { return p && p.orderNbr && p.inventoryID; });
     var missingCount = pairs.length - validPairs.length;
     if (validPairs.length === 0) {
       toast(missingCount > 0 ? "No Inventory IDs available for the selected lines \u2014 try Re-fetch" : "Nothing to remove", "error");
       return;
     }
-
-    // Group InventoryIDs by PO number
     var byPO = {};
     validPairs.forEach(function(p) {
       if (!byPO[p.orderNbr]) byPO[p.orderNbr] = [];
       if (byPO[p.orderNbr].indexOf(p.inventoryID) < 0) byPO[p.orderNbr].push(p.inventoryID);
     });
     var removals = Object.keys(byPO).map(function(po) { return { orderNbr: po, skus: byPO[po] }; });
-
     setAcuRemoveLoading(true);
     try {
       var res = await fetch("/api/acumatica-remove-po-lines", {
@@ -817,12 +808,7 @@ function WHT(props) {
         body: JSON.stringify({ username: cred.username, password: cred.password, removals: removals })
       });
       var resp = await res.json();
-      if (!resp || !Array.isArray(resp.results)) {
-        toast("Unexpected response from Acumatica", "error");
-        return;
-      }
-
-      // Build a set of (PO# + InventoryID) keys that were actually removed
+      if (!resp || !Array.isArray(resp.results)) { toast("Unexpected response from Acumatica", "error"); return; }
       var removedKeys = new Set();
       var removedCount = 0;
       var failedSummaries = [];
@@ -833,26 +819,20 @@ function WHT(props) {
             if (rl.inventoryID) removedKeys.add(r.orderNbr + "::" + String(rl.inventoryID).trim().toUpperCase());
           });
         } else if (!r.ok) {
-          var why = r.stage === "status-check"
-            ? r.orderNbr + " (status: " + (r.currentStatus || "unknown") + ", must be On Hold)"
-            : r.orderNbr + " (" + (r.error || r.stage) + ")";
+          var why = r.stage === "status-check" ? r.orderNbr + " (status: " + (r.currentStatus || "unknown") + ", must be On Hold)" : r.orderNbr + " (" + (r.error || r.stage) + ")";
           failedSummaries.push(why);
         }
       });
-
-      // Drop removed rows from data, then persist
       if (removedKeys.size > 0) {
         var nextData = data.filter(function(row) {
           var inv = String(row.InventoryID || "").trim().toUpperCase();
-          if (!inv) return true; // keep rows we can't identify by InventoryID
+          if (!inv) return true;
           var k = (row.OrderNbr || "") + "::" + inv;
           return !removedKeys.has(k);
         });
         setData(nextData);
         try { persist(nextData, emailSent, runBy, runTime, shipNotes); } catch (e) {}
       }
-
-      // Toast
       if (removedCount > 0 && failedSummaries.length === 0) {
         toast("Removed " + removedCount + " line" + (removedCount > 1 ? "s" : "") + " from Acumatica", "success");
       } else if (removedCount > 0 && failedSummaries.length > 0) {
@@ -866,6 +846,118 @@ function WHT(props) {
       toast("Network error: " + err.message, "error");
     } finally {
       setAcuRemoveLoading(false);
+    }
+  }
+
+  // ─── Acumatica: Process All POs (release + email per vendor label) ───
+  var _acuProc = useState(false), acuProcLoading = _acuProc[0], setAcuProcLoading = _acuProc[1];
+  var _acuProcConfirm = useState(false), acuProcConfirm = _acuProcConfirm[0], setAcuProcConfirm = _acuProcConfirm[1];
+  var _acuProcResult = useState(null), acuProcResult = _acuProcResult[0], setAcuProcResult = _acuProcResult[1];
+
+  // Build the list of POs ready to be processed.
+  // A PO is "ready" when its vendor group has a non-empty Vendor Ref (sn.notes)
+  // and is not already marked done.
+  function buildProcessablePOs() {
+    var processable = [];
+    var missing = [];
+    Object.keys(vendorGroups).forEach(function(key) {
+      var parts = key.split(" || ");
+      var vendorName = parts[0], orderNbr = parts[1] || "";
+      var sn = shipNotes[key] || {};
+      if (sn.done) return; // skip already-done rows
+      if (!orderNbr) return; // skip rows without a PO# (shouldn't happen on shipping, but safe)
+      var vendorRef = (sn.notes || "").trim();
+      var label = getVendorLabel(vendorName); // "Truecommerce" | "EDI" | null
+      var isEDI = label === "EDI" || label === "Truecommerce";
+      if (!vendorRef) {
+        missing.push({ key: key, vendorName: vendorName, orderNbr: orderNbr });
+      } else {
+        processable.push({
+          key: key,
+          vendorName: vendorName,
+          orderNbr: orderNbr,
+          vendorRef: vendorRef,
+          shouldEmail: !isEDI,
+          label: label
+        });
+      }
+    });
+    return { processable: processable, missing: missing };
+  }
+
+  // The button click handler. Validates, then either fires the request or
+  // opens the confirmation modal depending on batch size.
+  function onProcessAllPOsClick() {
+    if (!cred || !cred.username || !cred.password) { toast("Acumatica credentials required", "error"); lp && lp(); return; }
+    var built = buildProcessablePOs();
+    if (built.missing.length > 0) {
+      var miss = built.missing.slice(0, 3).map(function(m) { return m.vendorName + " (" + m.orderNbr + ")"; }).join(", ");
+      var more = built.missing.length > 3 ? " +" + (built.missing.length - 3) + " more" : "";
+      toast("Missing Vendor Ref for: " + miss + more, "error");
+      return;
+    }
+    if (built.processable.length === 0) {
+      toast("Nothing to process \u2014 all rows are done or missing data", "error");
+      return;
+    }
+    if (built.processable.length >= 5) {
+      setAcuProcConfirm(true); // open modal; user clicks Confirm to actually fire
+    } else {
+      processAllPOs(built.processable);
+    }
+  }
+
+  async function processAllPOs(processable) {
+    setAcuProcConfirm(false);
+    if (!processable) {
+      // Called from confirmation modal — rebuild
+      var built = buildProcessablePOs();
+      if (built.processable.length === 0) { toast("Nothing to process", "error"); return; }
+      processable = built.processable;
+    }
+    setAcuProcLoading(true);
+    setAcuProcResult(null);
+    try {
+      var posPayload = processable.map(function(p) {
+        return { orderNbr: p.orderNbr, vendorRef: p.vendorRef, shouldEmail: p.shouldEmail };
+      });
+      var res = await fetch("/api/acumatica-process-pos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: cred.username, password: cred.password, pos: posPayload })
+      });
+      var resp = await res.json();
+      setAcuProcResult({ resp: resp, requested: processable });
+      if (!resp || !Array.isArray(resp.results)) {
+        toast("Unexpected response from Acumatica", "error");
+        return;
+      }
+      // Mark successful POs as done in shipNotes
+      var updatedNotes = Object.assign({}, shipNotes);
+      var changed = false;
+      resp.results.forEach(function(r, i) {
+        if (r.ok) {
+          var key = processable[i] && processable[i].key;
+          if (key) {
+            updatedNotes[key] = Object.assign({}, updatedNotes[key] || {}, { done: true });
+            changed = true;
+          }
+        }
+      });
+      if (changed) {
+        setShipNotes(updatedNotes);
+        try { persist(data, emailSent, runBy, runTime, updatedNotes); } catch (e) {}
+      }
+      var s = resp.summary || {};
+      if (resp.ok) {
+        toast("Processed " + s.successCount + " POs: " + s.emailedCount + " emailed, " + (s.successCount - s.emailedCount) + " EDI/skip", "success");
+      } else {
+        toast(s.successCount + " succeeded, " + s.failedCount + " failed \u2014 see results", "error");
+      }
+    } catch (err) {
+      toast("Network error: " + err.message, "error");
+    } finally {
+      setAcuProcLoading(false);
     }
   }
 
@@ -946,7 +1038,10 @@ function WHT(props) {
     {subPage === "shipping" && <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <div style={{ fontSize: 12, color: "#6B7280" }}>{(function() { var keys = Object.keys(vendorGroups); var doneCount = keys.filter(function(k) { return (shipNotes[k] || {}).done; }).length; return doneCount > 0 ? <span style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ color: "#059669", fontWeight: 600 }}>{doneCount}/{keys.length} completed</span><span style={{ color: "#D1D5DB" }}>{"\u00B7"}</span><span>{keys.length - doneCount} remaining</span></span> : keys.length + " vendors"; })()}</div>
-        <Gate ok={ok} prompt={lp} style={Object.assign({}, S.btn(), { padding: "8px 16px", fontSize: 12 })} onClick={fetchData} disabled={loading}>{loading ? <><Spinner /> Fetching...</> : <><IconRefresh /> Re-fetch</>}</Gate>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {data.length > 0 && <button disabled={!ok || acuProcLoading} onClick={onProcessAllPOsClick} title={!ok ? "Acumatica credentials required" : "Set Vendor Ref + Remove Hold + Email each PO (EDI vendors skip email)"} style={Object.assign({}, S.btn(), { padding: "8px 14px", fontSize: 12, background: (!ok || acuProcLoading) ? "#9CA3AF" : "#1E40AF", borderColor: (!ok || acuProcLoading) ? "#9CA3AF" : "#1E40AF", cursor: (!ok || acuProcLoading) ? "not-allowed" : "pointer" })}>{acuProcLoading ? <><Spinner /> Processing...</> : <>{"\u2192"} Process All POs</>}</button>}
+          <Gate ok={ok} prompt={lp} style={Object.assign({}, S.btn(), { padding: "8px 16px", fontSize: 12 })} onClick={fetchData} disabled={loading}>{loading ? <><Spinner /> Fetching...</> : <><IconRefresh /> Re-fetch</>}</Gate>
+        </div>
       </div>
       {data.length > 0 ? <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto" })}>
         <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
@@ -964,6 +1059,70 @@ function WHT(props) {
         </div>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#93BBFC" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></svg>
       </a>
+
+      {/* Process All POs — Confirmation Modal (only shown for 5+ POs) */}
+      {acuProcConfirm && (function() {
+        var built = buildProcessablePOs();
+        var p = built.processable;
+        var emailCount = p.filter(function(x) { return x.shouldEmail; }).length;
+        var ediCount = p.length - emailCount;
+        return <div onClick={function() { setAcuProcConfirm(false); }} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div onClick={function(e) { e.stopPropagation(); }} style={{ background: "#FFFFFF", borderRadius: 12, padding: 24, maxWidth: 640, width: "92%", maxHeight: "80vh", overflow: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ fontSize: 18, fontWeight: 700, color: "#1F2937", marginBottom: 8 }}>Confirm Process All POs</div>
+            <div style={{ fontSize: 13, color: "#374151", marginBottom: 16, lineHeight: 1.5 }}>
+              About to process <strong>{p.length} POs</strong> in Acumatica: {emailCount} will be released and emailed, {ediCount} will be released without email (EDI/Truecommerce). <strong>This is irreversible</strong> — emails sent cannot be unsent.
+            </div>
+            <div style={{ border: "1px solid #E5E7EB", borderRadius: 8, maxHeight: 280, overflow: "auto", marginBottom: 16 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <thead><tr style={{ background: "#F9FAFB", position: "sticky", top: 0 }}><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>Vendor</th><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>PO #</th><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>Vendor Ref</th><th style={{ padding: "8px 12px", textAlign: "center", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>Action</th></tr></thead>
+                <tbody>{p.map(function(row, i) { return <tr key={i} style={{ borderBottom: "1px solid #F3F4F6" }}><td style={{ padding: "6px 12px", color: "#1F2937" }}>{row.vendorName}{row.label && <span style={{ marginLeft: 6, fontSize: 10, padding: "1px 6px", borderRadius: 8, background: row.label === "Truecommerce" ? "#EFF6FF" : "#FFF7ED", color: row.label === "Truecommerce" ? "#2563EB" : "#C2410C", fontWeight: 600 }}>{row.label}</span>}</td><td style={{ padding: "6px 12px", color: "#374151", fontFamily: "monospace" }}>{row.orderNbr}</td><td style={{ padding: "6px 12px", color: "#374151", fontFamily: "monospace" }}>{row.vendorRef}</td><td style={{ padding: "6px 12px", textAlign: "center", color: row.shouldEmail ? "#059669" : "#C2410C", fontWeight: 600 }}>{row.shouldEmail ? "Release + Email" : "Release only"}</td></tr>; })}</tbody>
+              </table>
+            </div>
+            <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
+              <button onClick={function() { setAcuProcConfirm(false); }} style={S.btn("ghost")}>Cancel</button>
+              <button onClick={function() { processAllPOs(p); }} style={Object.assign({}, S.btn(), { background: "#1E40AF", borderColor: "#1E40AF" })}>Yes, Process {p.length} POs</button>
+            </div>
+          </div>
+        </div>;
+      })()}
+
+      {/* Process All POs — Results Modal */}
+      {acuProcResult && (function() {
+        var r = acuProcResult.resp || {};
+        var s = r.summary || {};
+        var rs = Array.isArray(r.results) ? r.results : [];
+        return <div onClick={function() { setAcuProcResult(null); }} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div onClick={function(e) { e.stopPropagation(); }} style={{ background: "#FFFFFF", borderRadius: 12, padding: 24, maxWidth: 720, width: "94%", maxHeight: "85vh", overflow: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <div style={{ fontSize: 18, fontWeight: 700, color: "#1F2937" }}>Process Results</div>
+              <button onClick={function() { setAcuProcResult(null); }} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#6B7280" }}>{"\u00D7"}</button>
+            </div>
+            <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+              <div style={{ padding: "8px 14px", background: "#ECFDF5", color: "#059669", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>{s.successCount || 0} succeeded</div>
+              <div style={{ padding: "8px 14px", background: "#EFF6FF", color: "#2563EB", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>{s.emailedCount || 0} emailed</div>
+              {s.failedCount > 0 && <div style={{ padding: "8px 14px", background: "#FEF2F2", color: "#DC2626", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>{s.failedCount} failed</div>}
+            </div>
+            <div style={{ border: "1px solid #E5E7EB", borderRadius: 8, overflow: "auto", maxHeight: "55vh" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <thead><tr style={{ background: "#F9FAFB", position: "sticky", top: 0 }}><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>PO #</th><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>Vendor Ref</th><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>Result</th></tr></thead>
+                <tbody>{rs.map(function(row, i) {
+                  var resultText, resultColor;
+                  if (row.ok && row.emailed) { resultText = "\u2713 Released + Emailed"; resultColor = "#059669"; }
+                  else if (row.ok && row.emailSkipped) { resultText = "\u2713 Released (EDI \u2014 no email)"; resultColor = "#059669"; }
+                  else if (row.ok && row.emailError) { resultText = "\u26A0 Released but email failed"; resultColor = "#D97706"; }
+                  else if (row.stage === "status-check") { resultText = "\u2717 Skipped: " + (row.currentStatus || "not on hold"); resultColor = "#DC2626"; }
+                  else if (row.stage === "read-po") { resultText = "\u2717 PO not found"; resultColor = "#DC2626"; }
+                  else { resultText = "\u2717 " + (row.error || row.stage || "unknown error"); resultColor = "#DC2626"; }
+                  return <tr key={i} style={{ borderBottom: "1px solid #F3F4F6" }}><td style={{ padding: "6px 12px", color: "#1F2937", fontFamily: "monospace" }}>{row.orderNbr}</td><td style={{ padding: "6px 12px", color: "#374151", fontFamily: "monospace" }}>{row.requestedVendorRef || ""}</td><td style={{ padding: "6px 12px", color: resultColor, fontWeight: 600 }}>{resultText}{row.emailError && row.emailError.errorDetails ? <div style={{ fontSize: 10, color: "#9CA3AF", fontWeight: 400, marginTop: 2 }}>{row.emailError.errorDetails.map(function(e) { return e.message; }).join("; ")}</div> : null}</td></tr>;
+                })}</tbody>
+              </table>
+            </div>
+            <div style={{ marginTop: 16, textAlign: "right" }}>
+              <button onClick={function() { setAcuProcResult(null); }} style={S.btn()}>Close</button>
+            </div>
+          </div>
+        </div>;
+      })()}
     </div>}
 
     {/* Price Check Modal */}
