@@ -5448,8 +5448,9 @@ function VendorContactsPage(props) {
   var _editChannel = useState(""), editChannel = _editChannel[0], setEditChannel = _editChannel[1];
   var _search = useState(""), search = _search[0], setSearch = _search[1];
   var sorted = useMemo(function() {
-    var entries = Object.entries(contacts).filter(function(e) { return e[0] && e[1]; });
-    if (search) { var s = search.toLowerCase(); entries = entries.filter(function(e) { return e[0].toLowerCase().indexOf(s) >= 0 || e[1].toLowerCase().indexOf(s) >= 0; }); }
+    // Keep vendors even if their email is empty — they're visible so user can click pencil to add an email later.
+    var entries = Object.entries(contacts).filter(function(e) { return !!e[0]; });
+    if (search) { var s = search.toLowerCase(); entries = entries.filter(function(e) { return e[0].toLowerCase().indexOf(s) >= 0 || (e[1] || "").toLowerCase().indexOf(s) >= 0; }); }
     return entries.sort(function(a, b) { return a[0].localeCompare(b[0]); });
   }, [contacts, search]);
 
@@ -5457,9 +5458,9 @@ function VendorContactsPage(props) {
   // doesn't already exist, so the vendor shows up on Shipping Rules immediately.
   function addContact() {
     var v = newVendor.trim(), e = newEmail.trim();
-    if (!v || !e) { toast("Enter vendor name and email", "error"); return; }
+    if (!v) { toast("Enter vendor name", "error"); return; }
     var u = Object.assign({}, contacts);
-    u[v] = e;
+    u[v] = e; // email may be empty — that's allowed
     updateContacts(u);
     // Sync to Shipping Rules — only add if not already present (don't overwrite).
     if (updateShipRules && !shipRules.hasOwnProperty(v)) {
@@ -5499,7 +5500,7 @@ function VendorContactsPage(props) {
   return <div>
     <div style={Object.assign({}, S.card, { display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" })}>
       <input value={newVendor} onChange={function(e) { setNewVendor(e.target.value); }} placeholder="Vendor name..." style={Object.assign({}, S.inp, { padding: "8px 14px", flex: 1, minWidth: 180 })} />
-      <input value={newEmail} onChange={function(e) { setNewEmail(e.target.value); }} placeholder="email1@example.com, email2@example.com" style={Object.assign({}, S.inp, { padding: "8px 14px", flex: 2, minWidth: 280 })} />
+      <input value={newEmail} onChange={function(e) { setNewEmail(e.target.value); }} placeholder="email1@example.com, email2@example.com (optional)" style={Object.assign({}, S.inp, { padding: "8px 14px", flex: 2, minWidth: 280 })} />
       <button onClick={addContact} style={S.btn()}>+ Add</button>
     </div>
     <div style={{ display: "flex", gap: 10, marginBottom: 16, alignItems: "center" }}>
@@ -5516,7 +5517,7 @@ function VendorContactsPage(props) {
           var ch = channels[vendor] || "";
           return <tr key={vendor}>
             <td style={Object.assign({}, S.td, { fontWeight: 500, color: "#374151" })}>{vendor}</td>
-            <td style={S.td}>{isEditing ? <input value={editEmail} onChange={function(ev) { setEditEmail(ev.target.value); }} style={Object.assign({}, S.inp, { padding: "5px 10px", fontSize: 13, width: "100%" })} autoFocus onKeyDown={function(ev) { if (ev.key === "Enter") { saveEdit(vendor); } if (ev.key === "Escape") setEditing(null); }} /> : <span style={{ color: "#6B7280" }}>{email}</span>}</td>
+            <td style={S.td}>{isEditing ? <input value={editEmail} onChange={function(ev) { setEditEmail(ev.target.value); }} placeholder="email1@example.com, email2@example.com (optional)" style={Object.assign({}, S.inp, { padding: "5px 10px", fontSize: 13, width: "100%" })} autoFocus onKeyDown={function(ev) { if (ev.key === "Enter") { saveEdit(vendor); } if (ev.key === "Escape") setEditing(null); }} /> : (email ? <span style={{ color: "#6B7280" }}>{email}</span> : <span style={{ color: "#9CA3AF", fontStyle: "italic", fontSize: 12 }}>no email set</span>)}</td>
             <td style={S.td}>{isEditing ? (
               <select value={editChannel} onChange={function(ev) { setEditChannel(ev.target.value); }} style={Object.assign({}, S.sel, { padding: "5px 8px", fontSize: 12, width: "100%" })}>
                 <option value="">— select —</option>
