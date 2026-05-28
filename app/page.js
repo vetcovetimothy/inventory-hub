@@ -4042,15 +4042,25 @@ function TruckloaderTool(props) {
               Partial PO created: <b>{acuResult.failure.partialPO.orderNbr}</b> — {acuResult.failure.partialPO.note}
             </div>}
             {acuResult.failure.errorDetails && acuResult.failure.errorDetails.length > 0 && <div style={{ fontSize: 12, color: "#991B1B", marginTop: 6 }}>
-              <div style={{ fontWeight: 600, marginBottom: 4 }}>Error details:</div>
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>What Acumatica reported:</div>
               {acuResult.failure.errorDetails.map(function(e, ei) {
-                return <div key={ei} style={{ fontFamily: "monospace", fontSize: 11, marginBottom: 2 }}>
-                  {e.scope === "line" ? "Line " + (e.lineIndex + 1) + " (" + e.inventoryID + ") — " + e.field + ": " : ""}{e.message}
+                var label;
+                if (e.scope === "line") {
+                  label = "Line " + (e.lineIndex + 1) + (e.inventoryID ? " (item " + e.inventoryID + ")" : "") + " — " + e.field;
+                } else if (e.scope === "header") {
+                  label = "Header field " + e.field;
+                } else {
+                  label = "Acumatica";
+                }
+                return <div key={ei} style={{ background: "#FFF", borderLeft: "3px solid " + (e.scope === "header" ? "#B91C1C" : e.scope === "line" ? "#D97706" : "#6B7280"), padding: "6px 10px", marginBottom: 4, borderRadius: 4 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: "#374151", marginBottom: 2 }}>{label}</div>
+                  <div style={{ fontSize: 12, color: "#1F2937" }}>{e.message}</div>
+                  {e.value !== undefined && e.value !== null && e.value !== "" && <div style={{ fontSize: 10, fontFamily: "monospace", color: "#6B7280", marginTop: 2 }}>value sent: {String(e.value)}</div>}
                 </div>;
               })}
             </div>}
-            {!acuResult.failure.errorDetails && acuResult.failure.rawBody && <details style={{ fontSize: 11, marginTop: 6 }}>
-              <summary style={{ cursor: "pointer", color: "#991B1B" }}>Raw error from Acumatica</summary>
+            {acuResult.failure.rawBody && <details style={{ fontSize: 11, marginTop: 8 }}>
+              <summary style={{ cursor: "pointer", color: "#6B7280" }}>Show technical details</summary>
               <pre style={{ background: "#FFF", padding: 8, borderRadius: 4, overflow: "auto", maxHeight: 200, marginTop: 4 }}>{acuResult.failure.rawBody}</pre>
             </details>}
           </div>}
