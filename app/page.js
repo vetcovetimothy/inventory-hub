@@ -783,6 +783,89 @@ function WHT(props) {
   }, [whKey, cred, cfg.label, toast, ok, lp, persist]);
   var clearAll = useCallback(async function() { if (!ok) { lp(); return; } setData([]); setSearch(""); setVendorFilter("all"); setFlagsOnly(false); setEmailSent(false); setConfirmClear(false); setRunBy(null); setRunTime(null); setSubPage("overview"); setShipNotes({}); sDel("wh-data-" + whKey); sDel("ship-notes-" + whKey); try { await kvPost(kvKey, {}); } catch (e) {} toast(cfg.label + ": Cleared"); }, [cfg.label, toast, ok, lp, kvKey, whKey]);
 
+  // ─── Acumatica: remove flagged lines from existing POs ───
+  var _acuRemove = useState(false), acuRemoveLoading = _acuRemove[0], setAcuRemoveLoading = _acuRemove[1];
+
+  // Removes a set of (PO# + SKU) pairs from Acumatica, then drops them from the local view.
+  // pairs: [{ orderNbr, skuNDC }] — usually one entry for single-line removal, many for bulk.
+  // ALL rows must be currently flagged (short-dating). Refuses POs that aren't On Hold.
+  async function removeFromAcumatica(pairs) {
+    if (!pairs || pairs.length === 0) return;
+    if (!cred || !cred.username || !cred.password) { toast("Acumatica credentials required", "error"); lp && lp(); return; }
+
+    // Group SKUs by PO number — one call covers many POs
+    var byPO = {};
+    pairs.forEach(function(p) {
+      if (!p || !p.orderNbr || !p.skuNDC) return;
+      if (!byPO[p.orderNbr]) byPO[p.orderNbr] = [];
+      if (byPO[p.orderNbr].indexOf(p.skuNDC) < 0) byPO[p.orderNbr].push(p.skuNDC);
+    });
+    var removals = Object.keys(byPO).map(function(po) { return { orderNbr: po, skus: byPO[po] }; });
+    if (removals.length === 0) { toast("Nothing to remove", "error"); return; }
+
+    setAcuRemoveLoading(true);
+    try {
+      var res = await fetch("/api/acumatica-remove-po-lines", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: cred.username, password: cred.password, removals: removals })
+      });
+      var resp = await res.json();
+      if (!resp || !Array.isArray(resp.results)) {
+        toast("Unexpected response from Acumatica", "error");
+        return;
+      }
+
+      // Build a set of (PO#, SKU/NDC, InventoryID, AlternateID) tuples that were actually removed,
+      // so we can drop the matching rows from local state.
+      var removedKeys = new Set();
+      var removedCount = 0;
+      var failedSummaries = [];
+      resp.results.forEach(function(r) {
+        if (r.ok && Array.isArray(r.removedLines)) {
+          r.removedLines.forEach(function(rl) {
+            removedCount++;
+            // Match local rows by PO# + (SKUNDC matches inventoryID OR alternateID)
+            if (rl.inventoryID) removedKeys.add(r.orderNbr + "::" + String(rl.inventoryID).toUpperCase());
+            if (rl.alternateID) removedKeys.add(r.orderNbr + "::" + String(rl.alternateID).toUpperCase());
+          });
+        } else if (!r.ok) {
+          var why = r.stage === "status-check"
+            ? r.orderNbr + " (status: " + (r.currentStatus || "unknown") + ", must be On Hold)"
+            : r.orderNbr + " (" + (r.error || r.stage) + ")";
+          failedSummaries.push(why);
+        }
+      });
+
+      // Drop removed rows from data, then persist.
+      if (removedKeys.size > 0) {
+        var nextData = data.filter(function(row) {
+          var sku = String(row.SKUNDC || "").toUpperCase();
+          var k = (row.OrderNbr || "") + "::" + sku;
+          return !removedKeys.has(k);
+        });
+        setData(nextData);
+        try { persist(nextData, emailSent, runBy, runTime, shipNotes); } catch (e) {}
+      }
+
+      // Build the toast message
+      if (removedCount > 0 && failedSummaries.length === 0) {
+        toast("Removed " + removedCount + " line" + (removedCount > 1 ? "s" : "") + " from Acumatica", "success");
+      } else if (removedCount > 0 && failedSummaries.length > 0) {
+        toast("Removed " + removedCount + ". Skipped: " + failedSummaries.join("; "), "error");
+      } else if (failedSummaries.length > 0) {
+        toast("No lines removed. " + failedSummaries.join("; "), "error");
+      } else {
+        toast("No matching lines found to remove", "error");
+      }
+    } catch (err) {
+      toast("Network error: " + err.message, "error");
+    } finally {
+      setAcuRemoveLoading(false);
+    }
+  }
+
+
   var vendorGroups = useMemo(function() { var g = {}; data.forEach(function(r) { var key = r.VendorName + " || " + (r.OrderNbr || ""); if (!g[key]) g[key] = []; g[key].push(r); }); return g; }, [data]);
   var vendorTotals = useMemo(function() { var t = {}; Object.entries(vendorGroups).forEach(function(e) { t[e[0]] = e[1].reduce(function(s, r) { return s + r.TotalPrice; }, 0); }); return t; }, [vendorGroups]);
   var uniqueVendors = useMemo(function() { return Array.from(new Set(data.map(function(r) { return r.VendorName; }))).sort(); }, [data]);
@@ -836,7 +919,7 @@ function WHT(props) {
     </div>}
 
     {subPage === "data" && <div>
-      {flagCount > 0 && <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 10, padding: "14px 20px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}><IconAlert /><span style={{ fontSize: 13, color: "#DC2626" }}><strong>Flagged:</strong>{flags.s.length > 0 && " " + flags.s.length + " Short-Dating"}{flags.so.length > 0 && " " + flags.so.length + " Sell-Off"}</span></div>}
+      {flagCount > 0 && <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 10, padding: "14px 20px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}><IconAlert /><span style={{ fontSize: 13, color: "#DC2626", flex: 1 }}><strong>Flagged:</strong>{flags.s.length > 0 && " " + flags.s.length + " Short-Dating"}{flags.so.length > 0 && " " + flags.so.length + " Sell-Off"}</span>{flags.s.length > 0 && <button disabled={!ok || acuRemoveLoading} onClick={function() { var shortPairs = flags.s.map(function(idx) { var r = data[idx]; return { orderNbr: r.OrderNbr, skuNDC: r.SKUNDC }; }).filter(function(p) { return p.orderNbr && p.skuNDC; }); removeFromAcumatica(shortPairs); }} title={!ok ? "Acumatica credentials required" : "Remove all short-dating lines from their POs in Acumatica. POs must be On Hold."} style={Object.assign({}, S.btn(), { padding: "6px 12px", fontSize: 12, background: (!ok || acuRemoveLoading) ? "#9CA3AF" : "#DC2626", borderColor: (!ok || acuRemoveLoading) ? "#9CA3AF" : "#DC2626", opacity: (!ok || acuRemoveLoading) ? 0.7 : 1, cursor: (!ok || acuRemoveLoading) ? "not-allowed" : "pointer" })}>{acuRemoveLoading ? <><Spinner /> Removing...</> : "Remove All Short-Dating from POs"}</button>}</div>}
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
         <input style={Object.assign({}, S.inp, { maxWidth: 260 })} placeholder="Search..." value={search} onChange={function(e) { setSearch(e.target.value); }} />
         <select style={S.sel} value={vendorFilter} onChange={function(e) { setVendorFilter(e.target.value); }}><option value="all">All Vendors</option>{uniqueVendors.map(function(v) { return <option key={v} value={v}>{v}</option>; })}</select>
@@ -850,8 +933,8 @@ function WHT(props) {
         </div>}
         <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto", maxHeight: "calc(100vh - 260px)" })}>
         <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
-          <thead><tr><th style={Object.assign({}, S.th, { width: 32 })}></th>{["SKU", "Description", "Qty", "Vendor", "PO #"].concat(!isGGM ? ["Reorder", "Max", "Lead", "Min", "Avail"] : []).concat(["Price", "Total", "Flag"]).map(function(h) { var isSorted = poSort.col === h; return <th key={h} onClick={function() { setPoSort(isSorted ? { col: h, dir: poSort.dir === "asc" ? "desc" : "asc" } : { col: h, dir: h === "Qty" || h === "Price" || h === "Total" || h === "Avail" || h === "Reorder" || h === "Max" || h === "Lead" || h === "Min" ? "desc" : "asc" }); }} style={Object.assign({}, S.th, { cursor: "pointer", userSelect: "none" })}>{h}{isSorted ? (poSort.dir === "desc" ? " \u25BE" : " \u25B4") : ""}</th>; })}</tr></thead>
-          <tbody>{filtered.map(function(r, i) { var f = getFlag(r); var bg = f === "short" ? "rgba(220,38,38,0.04)" : f === "selloff" ? "rgba(217,119,6,0.04)" : "transparent"; var tc = f === "short" ? "#DC2626" : f === "selloff" ? "#D97706" : "#374151"; var fmt = function(v) { var n = parseFloat(v); if (isNaN(n)) return v; return n % 1 === 0 ? String(Math.round(n)) : n.toFixed(2); }; var dismissKey = r.SKUNDC + ":" + r.OrderNbr; var isDone = dismissed[dismissKey]; return <tr key={i} style={{ background: bg, opacity: isDone ? 0.4 : 1, transition: "opacity 0.15s" }}><td style={Object.assign({}, S.td, { textAlign: "center", padding: "8px 4px" })}>{f ? <button onClick={function() { var u = Object.assign({}, dismissed); if (isDone) { delete u[dismissKey]; } else { u[dismissKey] = true; } setDismissed(u); }} style={{ width: 20, height: 20, borderRadius: 4, border: isDone ? "2px solid #059669" : "2px solid #D1D5DB", background: isDone ? "#059669" : "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", transition: "all 0.15s", flexShrink: 0 }}>{isDone && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}</button> : null}</td><td style={Object.assign({}, S.td, { color: tc, minWidth: 120, whiteSpace: "nowrap" })}>{r.SKUNDC}</td><td style={Object.assign({}, S.td, { color: tc, minWidth: 180, maxWidth: 350 })}><CopyCell text={r.Description} toast={toast} color={tc} accentColor={cfg.color} /></td><td style={Object.assign({}, S.td, { color: tc })}>{fmt(r.OrderQty)}</td><td style={Object.assign({}, S.td, { color: tc })}>{r.VendorName}</td><td style={Object.assign({}, S.td, { color: tc })}>{r.OrderNbr}</td>{!isGGM && <><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.ReorderPoint)}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.MaxQty)}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.LeadTime)}d</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.MinOrderQty)}</td><td style={Object.assign({}, S.td, { color: r.QtyAvailable < 0 ? "#DC2626" : tc, textAlign: "right" })}>{fmt(r.QtyAvailable)}</td></>}<td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>${r.Price.toFixed(2)}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>${r.TotalPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td><td style={S.td}>{f ? <span style={S.badge(f === "short" ? "danger" : "warning")}>{f === "short" ? "Short" : "Sell-Off"}</span> : "\u2014"}</td></tr>; })}</tbody>
+          <thead><tr><th style={Object.assign({}, S.th, { width: 32 })}></th>{["SKU", "Description", "Qty", "Vendor", "PO #"].concat(!isGGM ? ["Reorder", "Max", "Lead", "Min", "Avail"] : []).concat(["Price", "Total", "Flag"]).map(function(h) { var isSorted = poSort.col === h; return <th key={h} onClick={function() { setPoSort(isSorted ? { col: h, dir: poSort.dir === "asc" ? "desc" : "asc" } : { col: h, dir: h === "Qty" || h === "Price" || h === "Total" || h === "Avail" || h === "Reorder" || h === "Max" || h === "Lead" || h === "Min" ? "desc" : "asc" }); }} style={Object.assign({}, S.th, { cursor: "pointer", userSelect: "none" })}>{h}{isSorted ? (poSort.dir === "desc" ? " \u25BE" : " \u25B4") : ""}</th>; })}<th style={Object.assign({}, S.th, { width: 80 })}></th></tr></thead>
+          <tbody>{filtered.map(function(r, i) { var f = getFlag(r); var bg = f === "short" ? "rgba(220,38,38,0.04)" : f === "selloff" ? "rgba(217,119,6,0.04)" : "transparent"; var tc = f === "short" ? "#DC2626" : f === "selloff" ? "#D97706" : "#374151"; var fmt = function(v) { var n = parseFloat(v); if (isNaN(n)) return v; return n % 1 === 0 ? String(Math.round(n)) : n.toFixed(2); }; var dismissKey = r.SKUNDC + ":" + r.OrderNbr; var isDone = dismissed[dismissKey]; return <tr key={i} style={{ background: bg, opacity: isDone ? 0.4 : 1, transition: "opacity 0.15s" }}><td style={Object.assign({}, S.td, { textAlign: "center", padding: "8px 4px" })}>{f ? <button onClick={function() { var u = Object.assign({}, dismissed); if (isDone) { delete u[dismissKey]; } else { u[dismissKey] = true; } setDismissed(u); }} style={{ width: 20, height: 20, borderRadius: 4, border: isDone ? "2px solid #059669" : "2px solid #D1D5DB", background: isDone ? "#059669" : "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", transition: "all 0.15s", flexShrink: 0 }}>{isDone && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}</button> : null}</td><td style={Object.assign({}, S.td, { color: tc, minWidth: 120, whiteSpace: "nowrap" })}>{r.SKUNDC}</td><td style={Object.assign({}, S.td, { color: tc, minWidth: 180, maxWidth: 350 })}><CopyCell text={r.Description} toast={toast} color={tc} accentColor={cfg.color} /></td><td style={Object.assign({}, S.td, { color: tc })}>{fmt(r.OrderQty)}</td><td style={Object.assign({}, S.td, { color: tc })}>{r.VendorName}</td><td style={Object.assign({}, S.td, { color: tc })}>{r.OrderNbr}</td>{!isGGM && <><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.ReorderPoint)}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.MaxQty)}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.LeadTime)}d</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.MinOrderQty)}</td><td style={Object.assign({}, S.td, { color: r.QtyAvailable < 0 ? "#DC2626" : tc, textAlign: "right" })}>{fmt(r.QtyAvailable)}</td></>}<td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>${r.Price.toFixed(2)}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>${r.TotalPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td><td style={S.td}>{f ? <span style={S.badge(f === "short" ? "danger" : "warning")}>{f === "short" ? "Short" : "Sell-Off"}</span> : "\u2014"}</td><td style={Object.assign({}, S.td, { textAlign: "center", padding: "8px 4px" })}>{f ? <button disabled={!ok || acuRemoveLoading} onClick={function() { removeFromAcumatica([{ orderNbr: r.OrderNbr, skuNDC: r.SKUNDC }]); }} title={!ok ? "Acumatica credentials required" : "Remove this line from " + r.OrderNbr + " in Acumatica (PO must be On Hold)"} style={{ background: "transparent", border: "1px solid " + ((!ok || acuRemoveLoading) ? "#D1D5DB" : "#DC2626"), color: (!ok || acuRemoveLoading) ? "#9CA3AF" : "#DC2626", padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: (!ok || acuRemoveLoading) ? "not-allowed" : "pointer" }}>Remove</button> : null}</td></tr>; })}</tbody>
         </table>
       </div></div> : <div style={Object.assign({}, S.card, { textAlign: "center", padding: 48, color: "#9CA3AF" })}>Run fetch first.</div>}
     </div>}
