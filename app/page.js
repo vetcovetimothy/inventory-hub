@@ -1123,8 +1123,8 @@ function WHT(props) {
     {subPage === "shipping" && <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <div style={{ fontSize: 12, color: "#6B7280" }}>{(function() { var keys = Object.keys(vendorGroups); var doneCount = keys.filter(function(k) { return (shipNotes[k] || {}).done; }).length; return doneCount > 0 ? <span style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ color: "#059669", fontWeight: 600 }}>{doneCount}/{keys.length} completed</span><span style={{ color: "#D1D5DB" }}>{"\u00B7"}</span><span>{keys.length - doneCount} remaining</span></span> : keys.length + " vendors"; })()}</div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          {data.length > 0 && <button disabled={!ok || acuProcLoading} onClick={onProcessAllPOsClick} title={!ok ? "Acumatica credentials required" : "Per PO: write Vendor Ref, then for Email vendors release Hold + email; for TrueCommerce EDI / Website Ordering vendors leave on Hold."} style={Object.assign({}, S.btn(), { padding: "8px 14px", fontSize: 12, background: (!ok || acuProcLoading) ? "#9CA3AF" : "#1E40AF", borderColor: (!ok || acuProcLoading) ? "#9CA3AF" : "#1E40AF", cursor: (!ok || acuProcLoading) ? "not-allowed" : "pointer" })}>{acuProcLoading ? <><Spinner /> Processing...</> : <>{"\u2192"} Process All POs</>}</button>}
+        <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
+          {data.length > 0 && <button disabled={!ok || acuProcLoading} onClick={onProcessAllPOsClick} title={!ok ? "Acumatica credentials required" : "Per PO: write Vendor Ref, then for Email vendors release Hold + email; for TrueCommerce EDI / Website Ordering vendors leave on Hold."} style={Object.assign({}, S.btn(), { padding: "8px 14px", fontSize: 12, background: (!ok || acuProcLoading) ? "#9CA3AF" : "#8B5A6B", borderColor: (!ok || acuProcLoading) ? "#9CA3AF" : "#8B5A6B", cursor: (!ok || acuProcLoading) ? "not-allowed" : "pointer" })}>{acuProcLoading ? <><Spinner /> Processing...</> : <>{"\u2192"} Process All POs</>}</button>}
           <Gate ok={ok} prompt={lp} style={Object.assign({}, S.btn(), { padding: "8px 16px", fontSize: 12 })} onClick={fetchData} disabled={loading}>{loading ? <><Spinner /> Fetching...</> : <><IconRefresh /> Re-fetch</>}</Gate>
         </div>
       </div>
@@ -1172,7 +1172,7 @@ function WHT(props) {
           </div>
           <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
             <button onClick={onCategorizeCancel} style={S.btn("ghost")}>Cancel</button>
-            <button onClick={onCategorizeConfirm} style={Object.assign({}, S.btn(), { background: "#1E40AF", borderColor: "#1E40AF" })}>Save &amp; Continue</button>
+            <button onClick={onCategorizeConfirm} style={Object.assign({}, S.btn(), { background: "#8B5A6B", borderColor: "#8B5A6B" })}>Save &amp; Continue</button>
           </div>
         </div>
       </div>}
@@ -1201,7 +1201,7 @@ function WHT(props) {
             </div>
             <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
               <button onClick={function() { setAcuProcConfirm(false); }} style={S.btn("ghost")}>Cancel</button>
-              <button onClick={function() { processAllPOs(p); }} style={Object.assign({}, S.btn(), { background: "#1E40AF", borderColor: "#1E40AF" })}>Yes, Process {p.length} POs</button>
+              <button onClick={function() { processAllPOs(p); }} style={Object.assign({}, S.btn(), { background: "#8B5A6B", borderColor: "#8B5A6B" })}>Yes, Process {p.length} POs</button>
             </div>
           </div>
         </div>;
