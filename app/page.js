@@ -3590,6 +3590,61 @@ function TruckloaderTool(props) {
     else toast(trucks.length + " trucks optimized" + dohNote + "!");
   }
 
+  // ─── Acumatica PO creation state + handler ───
+  var _acuLoading = useState(false), acuLoading = _acuLoading[0], setAcuLoading = _acuLoading[1];
+  var _acuConfirm = useState(false), acuConfirm = _acuConfirm[0], setAcuConfirm = _acuConfirm[1];
+  var _acuResult  = useState(null),  acuResult  = _acuResult[0],  setAcuResult  = _acuResult[1];
+
+  async function createPOsInAcumatica() {
+    setAcuConfirm(false);
+    if (!truckGroups || truckGroups.length === 0) { toast("No trucks to create", "error"); return; }
+    if (!cred || !cred.username || !cred.password) { toast("Acumatica credentials required", "error"); lp && lp(); return; }
+
+    var validTrucks = truckGroups.filter(function(t) { return !t.isError; });
+    if (validTrucks.length === 0) { toast("No valid trucks to create", "error"); return; }
+
+    var trucksPayload = validTrucks.map(function(t) {
+      return {
+        label: t.label,
+        lines: t.assignments.filter(function(a) { return !a.error; }).map(function(a) {
+          return {
+            inventoryID: String(a.inventoryID),
+            orderQty: Number.isInteger(a.orderQty) ? a.orderQty : Math.round(a.orderQty)
+          };
+        })
+      };
+    }).filter(function(t) { return t.lines.length > 0; });
+
+    if (trucksPayload.length === 0) { toast("No valid lines in any truck", "error"); return; }
+
+    setAcuLoading(true);
+    setAcuResult(null);
+    try {
+      var res = await fetch("/api/acumatica-create-po", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: cred.username,
+          password: cred.password,
+          warehouse: warehouse,
+          trucks: trucksPayload
+        })
+      });
+      var data = await res.json();
+      setAcuResult(data);
+      if (data.ok) {
+        toast("Created " + (data.succeeded || []).length + " PO(s) in Acumatica", "success");
+      } else {
+        toast("PO creation stopped: " + ((data.failure && data.failure.stage) || data.stage || "error"), "error");
+      }
+    } catch (err) {
+      setAcuResult({ ok: false, stage: "network", error: String(err) });
+      toast("Network error: " + err.message, "error");
+    } finally {
+      setAcuLoading(false);
+    }
+  }
+
   // CSV export for a single truck
   function exportTruckCSV(truck, whShort) {
     var now = new Date();
@@ -3930,8 +3985,83 @@ function TruckloaderTool(props) {
         <div style={{ display: "flex", gap: 8 }}>
           <button onClick={function() { setStep("order"); setTruckGroups(null); }} style={S.btn("ghost")}><IconRefresh /> Re-edit Order</button>
           <button onClick={exportAllCSVs} style={S.btn()}><IconDL /> Export All CSVs</button>
+          <button onClick={function() { setAcuConfirm(true); }} disabled={acuLoading} style={Object.assign({}, S.btn(), { background: acuLoading ? "#9CA3AF" : "#1E40AF", borderColor: acuLoading ? "#9CA3AF" : "#1E40AF" })}>
+            {acuLoading ? <><Spinner /> Creating POs...</> : <>{"\u2192"} Create POs in Acumatica</>}
+          </button>
         </div>
       </div>
+
+      {/* ─── Acumatica confirmation modal ─── */}
+      {acuConfirm && <div onClick={function() { setAcuConfirm(false); }} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+        <div onClick={function(e) { e.stopPropagation(); }} style={{ background: "#fff", borderRadius: 12, padding: 24, maxWidth: 480, width: "90%", boxShadow: "0 20px 50px rgba(0,0,0,0.3)" }}>
+          <div style={{ fontSize: 18, fontWeight: 600, color: "#1F2937", marginBottom: 12 }}>Create POs in Acumatica?</div>
+          <div style={{ fontSize: 14, color: "#4B5563", marginBottom: 8 }}>
+            This will create <b>{truckGroups ? truckGroups.filter(function(t) { return !t.isError; }).length : 0} purchase order(s)</b> in Acumatica for vendor <b>Hill's (VID0024)</b> at warehouse <b>{warehouse}</b>.
+          </div>
+          <div style={{ fontSize: 13, color: "#6B7280", background: "#FEF3C7", border: "1px solid #FCD34D", borderRadius: 8, padding: "10px 12px", marginBottom: 16 }}>
+            All POs will be created with status <b>On Hold</b>. They will not release, print, or email Hill's until you manually click <b>Remove Hold</b> in Acumatica.
+          </div>
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <button onClick={function() { setAcuConfirm(false); }} style={S.btn("ghost")}>Cancel</button>
+            <button onClick={createPOsInAcumatica} style={Object.assign({}, S.btn(), { background: "#1E40AF", borderColor: "#1E40AF" })}>Yes, Create POs</button>
+          </div>
+        </div>
+      </div>}
+
+      {/* ─── Acumatica results modal ─── */}
+      {acuResult && <div onClick={function() { setAcuResult(null); }} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+        <div onClick={function(e) { e.stopPropagation(); }} style={{ background: "#fff", borderRadius: 12, padding: 24, maxWidth: 600, width: "90%", maxHeight: "80vh", overflow: "auto", boxShadow: "0 20px 50px rgba(0,0,0,0.3)" }}>
+          <div style={{ fontSize: 18, fontWeight: 600, color: acuResult.ok ? "#059669" : "#DC2626", marginBottom: 12 }}>
+            {acuResult.ok ? "All POs created" : "Stopped on failure"}
+          </div>
+          {acuResult.succeeded && acuResult.succeeded.length > 0 && <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 13, color: "#374151", fontWeight: 600, marginBottom: 8 }}>Created in Acumatica ({acuResult.succeeded.length}):</div>
+            <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 13 }}>
+              <thead><tr>
+                <th style={Object.assign({}, S.th, { textAlign: "left" })}>Truck</th>
+                <th style={Object.assign({}, S.th, { textAlign: "left" })}>PO Number</th>
+                <th style={Object.assign({}, S.th, { textAlign: "right" })}>Lines</th>
+                <th style={Object.assign({}, S.th, { textAlign: "right" })}>Total</th>
+              </tr></thead>
+              <tbody>{acuResult.succeeded.map(function(s) {
+                return <tr key={s.orderNbr}>
+                  <td style={S.td}>{s.truckLabel}</td>
+                  <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontWeight: 600 })}>{s.orderNbr}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "right" })}>{s.lineCount}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "right" })}>${(s.orderTotal || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                </tr>;
+              })}</tbody>
+            </table>
+            <div style={{ fontSize: 12, color: "#6B7280", marginTop: 8 }}>All POs are <b>On Hold</b>. Review in Acumatica before removing hold.</div>
+          </div>}
+          {acuResult.failure && <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 8, padding: 12, marginBottom: 12 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "#991B1B", marginBottom: 4 }}>
+              Failed on: {acuResult.failure.truckLabel} ({acuResult.failure.stage})
+            </div>
+            {acuResult.failure.partialPO && <div style={{ fontSize: 12, color: "#991B1B", marginBottom: 4 }}>
+              Partial PO created: <b>{acuResult.failure.partialPO.orderNbr}</b> — {acuResult.failure.partialPO.note}
+            </div>}
+            {acuResult.failure.errorDetails && acuResult.failure.errorDetails.length > 0 && <div style={{ fontSize: 12, color: "#991B1B", marginTop: 6 }}>
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>Error details:</div>
+              {acuResult.failure.errorDetails.map(function(e, ei) {
+                return <div key={ei} style={{ fontFamily: "monospace", fontSize: 11, marginBottom: 2 }}>
+                  {e.scope === "line" ? "Line " + (e.lineIndex + 1) + " (" + e.inventoryID + ") — " + e.field + ": " : ""}{e.message}
+                </div>;
+              })}
+            </div>}
+            {!acuResult.failure.errorDetails && acuResult.failure.rawBody && <details style={{ fontSize: 11, marginTop: 6 }}>
+              <summary style={{ cursor: "pointer", color: "#991B1B" }}>Raw error from Acumatica</summary>
+              <pre style={{ background: "#FFF", padding: 8, borderRadius: 4, overflow: "auto", maxHeight: 200, marginTop: 4 }}>{acuResult.failure.rawBody}</pre>
+            </details>}
+          </div>}
+          {acuResult.error && <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 8, padding: 12, marginBottom: 12, fontSize: 13, color: "#991B1B" }}>
+            {acuResult.error}
+          </div>}
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <button onClick={function() { setAcuResult(null); }} style={S.btn()}>Done</button>
+          </div>
+        </div>
+      </div>}
 
       {/* TRUCK SUMMARY TABLE */}
       <div style={Object.assign({}, S.card, { marginTop: 0 })}>
