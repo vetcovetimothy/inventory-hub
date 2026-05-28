@@ -4647,7 +4647,9 @@ function TruckloaderTool(props) {
         var defaultHillsTo = "truckloador@hillspet.com, brian_shively@hillspet.com, hd-purchaseorders@vetcove.com";
         var whOverrides = emailOverrides[warehouse] || {};
         var hillsTo = whOverrides.hillsTo != null ? whOverrides.hillsTo : defaultHillsTo;
+        var hillsCc = whOverrides.hillsCc != null ? whOverrides.hillsCc : "";
         var cpTo = whOverrides.cpTo != null ? whOverrides.cpTo : whMeta.cpTo;
+        var cpCc = whOverrides.cpCc != null ? whOverrides.cpCc : "";
         function saveEmailOverride(field, value) {
           var updated = Object.assign({}, emailOverrides);
           updated[warehouse] = Object.assign({}, updated[warehouse] || {}, {});
@@ -4661,7 +4663,9 @@ function TruckloaderTool(props) {
         async function createDraft(type) {
           if (!gmail || !gmail.token) { toast("Connect Gmail first (bottom-left)", "error"); return; }
           try {
-            var payload = type === "hills" ? { to: hillsTo, subject: subject, htmlBody: hillsBody, attachments: [] } : { to: cpTo, subject: subject, htmlBody: cpBody, attachments: [] };
+            var payload = type === "hills"
+              ? { to: hillsTo, cc: hillsCc, subject: subject, htmlBody: hillsBody, attachments: [] }
+              : { to: cpTo, cc: cpCc, subject: subject, htmlBody: cpBody, attachments: [] };
             var result = await postGmailDrafts([payload], gmail.token);
             if (result.failed > 0) throw new Error("Draft creation failed");
             if (type === "hills") setHillsDraftSent(true); else setCpDraftSent(true);
@@ -4679,14 +4683,31 @@ function TruckloaderTool(props) {
           <div style={S.card}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12, gap: 12 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 15, fontWeight: 600, color: "#1F2937", marginBottom: 4 }}>Hill{"'"}s Pet Nutrition</div>
-                {editingEmail === "hills" ? <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
-                  <textarea value={emailEditValue} onChange={function(e) { setEmailEditValue(e.target.value); }} autoFocus onKeyDown={function(e) { if (e.key === "Escape") setEditingEmail(null); }} placeholder="recipient1@example.com, recipient2@example.com" rows={2} style={Object.assign({}, S.inp, { padding: "8px 12px", fontSize: 13, lineHeight: 1.5, color: "#374151", width: "100%", resize: "vertical", fontFamily: "'Varela Round', sans-serif" })} />
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <button onClick={function() { saveEmailOverride("hillsTo", emailEditValue); setEditingEmail(null); }} style={Object.assign({}, S.btn(), { padding: "5px 14px", fontSize: 11 })}>Save</button>
-                    <button onClick={function() { setEditingEmail(null); }} style={Object.assign({}, S.btn("ghost"), { padding: "5px 14px", fontSize: 11 })}>Cancel</button>
-                  </div>
-                </div> : <div style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ fontSize: 11, color: "#9CA3AF", wordBreak: "break-all", flex: 1 }}>{hillsTo}</span><button onClick={function() { setEmailEditValue(hillsTo); setEditingEmail("hills"); }} title="Edit recipients" style={{ background: "transparent", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 12, padding: 2, flexShrink: 0 }}>{"\u270E"}</button></div>}
+                <div style={{ fontSize: 15, fontWeight: 600, color: "#1F2937", marginBottom: 8 }}>Hill{"'"}s Pet Nutrition</div>
+
+                {/* To row */}
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 6 }}>
+                  <span style={{ fontSize: 11, color: "#6B7280", fontWeight: 600, minWidth: 26, paddingTop: 1 }}>To:</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>{editingEmail === "hills" ? <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    <textarea value={emailEditValue} onChange={function(e) { setEmailEditValue(e.target.value); }} autoFocus onKeyDown={function(e) { if (e.key === "Escape") setEditingEmail(null); }} placeholder="recipient1@example.com, recipient2@example.com" rows={2} style={Object.assign({}, S.inp, { padding: "8px 12px", fontSize: 13, lineHeight: 1.5, color: "#374151", width: "100%", resize: "vertical", fontFamily: "'Varela Round', sans-serif" })} />
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button onClick={function() { saveEmailOverride("hillsTo", emailEditValue); setEditingEmail(null); }} style={Object.assign({}, S.btn(), { padding: "5px 14px", fontSize: 11 })}>Save</button>
+                      <button onClick={function() { setEditingEmail(null); }} style={Object.assign({}, S.btn("ghost"), { padding: "5px 14px", fontSize: 11 })}>Cancel</button>
+                    </div>
+                  </div> : <div style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ fontSize: 11, color: "#9CA3AF", wordBreak: "break-all", flex: 1 }}>{hillsTo}</span><button onClick={function() { setEmailEditValue(hillsTo); setEditingEmail("hills"); }} title="Edit To recipients" style={{ background: "transparent", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 12, padding: 2, flexShrink: 0 }}>{"\u270E"}</button></div>}</div>
+                </div>
+
+                {/* Cc row */}
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                  <span style={{ fontSize: 11, color: "#6B7280", fontWeight: 600, minWidth: 26, paddingTop: 1 }}>Cc:</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>{editingEmail === "hills-cc" ? <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    <textarea value={emailEditValue} onChange={function(e) { setEmailEditValue(e.target.value); }} autoFocus onKeyDown={function(e) { if (e.key === "Escape") setEditingEmail(null); }} placeholder="cc1@example.com, cc2@example.com (optional)" rows={2} style={Object.assign({}, S.inp, { padding: "8px 12px", fontSize: 13, lineHeight: 1.5, color: "#374151", width: "100%", resize: "vertical", fontFamily: "'Varela Round', sans-serif" })} />
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button onClick={function() { saveEmailOverride("hillsCc", emailEditValue); setEditingEmail(null); }} style={Object.assign({}, S.btn(), { padding: "5px 14px", fontSize: 11 })}>Save</button>
+                      <button onClick={function() { setEditingEmail(null); }} style={Object.assign({}, S.btn("ghost"), { padding: "5px 14px", fontSize: 11 })}>Cancel</button>
+                    </div>
+                  </div> : <div style={{ display: "flex", alignItems: "center", gap: 6 }}>{hillsCc ? <span style={{ fontSize: 11, color: "#9CA3AF", wordBreak: "break-all", flex: 1 }}>{hillsCc}</span> : <span style={{ fontSize: 11, color: "#9CA3AF", fontStyle: "italic", flex: 1 }}>no CC set</span>}<button onClick={function() { setEmailEditValue(hillsCc); setEditingEmail("hills-cc"); }} title="Edit Cc recipients" style={{ background: "transparent", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 12, padding: 2, flexShrink: 0 }}>{"\u270E"}</button></div>}</div>
+                </div>
               </div>
               {hillsDraftSent && <span style={{ fontSize: 11, color: "#059669", fontWeight: 500, display: "flex", alignItems: "center", gap: 4 }}><IconCheck /> Sent</span>}
             </div>
@@ -4703,14 +4724,31 @@ function TruckloaderTool(props) {
           <div style={S.card}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12, gap: 12 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 15, fontWeight: 600, color: "#1F2937", marginBottom: 4 }}>Central Pet</div>
-                {editingEmail === "cp" ? <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
-                  <textarea value={emailEditValue} onChange={function(e) { setEmailEditValue(e.target.value); }} autoFocus onKeyDown={function(e) { if (e.key === "Escape") setEditingEmail(null); }} placeholder="recipient1@example.com, recipient2@example.com" rows={2} style={Object.assign({}, S.inp, { padding: "8px 12px", fontSize: 13, lineHeight: 1.5, color: "#374151", width: "100%", resize: "vertical", fontFamily: "'Varela Round', sans-serif" })} />
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <button onClick={function() { saveEmailOverride("cpTo", emailEditValue); setEditingEmail(null); }} style={Object.assign({}, S.btn(), { padding: "5px 14px", fontSize: 11 })}>Save</button>
-                    <button onClick={function() { setEditingEmail(null); }} style={Object.assign({}, S.btn("ghost"), { padding: "5px 14px", fontSize: 11 })}>Cancel</button>
-                  </div>
-                </div> : <div style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ fontSize: 11, color: "#9CA3AF", wordBreak: "break-all", flex: 1 }}>{cpTo}</span><button onClick={function() { setEmailEditValue(cpTo); setEditingEmail("cp"); }} title="Edit recipients" style={{ background: "transparent", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 12, padding: 2, flexShrink: 0 }}>{"\u270E"}</button></div>}
+                <div style={{ fontSize: 15, fontWeight: 600, color: "#1F2937", marginBottom: 8 }}>Central Pet</div>
+
+                {/* To row */}
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 6 }}>
+                  <span style={{ fontSize: 11, color: "#6B7280", fontWeight: 600, minWidth: 26, paddingTop: 1 }}>To:</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>{editingEmail === "cp" ? <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    <textarea value={emailEditValue} onChange={function(e) { setEmailEditValue(e.target.value); }} autoFocus onKeyDown={function(e) { if (e.key === "Escape") setEditingEmail(null); }} placeholder="recipient1@example.com, recipient2@example.com" rows={2} style={Object.assign({}, S.inp, { padding: "8px 12px", fontSize: 13, lineHeight: 1.5, color: "#374151", width: "100%", resize: "vertical", fontFamily: "'Varela Round', sans-serif" })} />
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button onClick={function() { saveEmailOverride("cpTo", emailEditValue); setEditingEmail(null); }} style={Object.assign({}, S.btn(), { padding: "5px 14px", fontSize: 11 })}>Save</button>
+                      <button onClick={function() { setEditingEmail(null); }} style={Object.assign({}, S.btn("ghost"), { padding: "5px 14px", fontSize: 11 })}>Cancel</button>
+                    </div>
+                  </div> : <div style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ fontSize: 11, color: "#9CA3AF", wordBreak: "break-all", flex: 1 }}>{cpTo}</span><button onClick={function() { setEmailEditValue(cpTo); setEditingEmail("cp"); }} title="Edit To recipients" style={{ background: "transparent", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 12, padding: 2, flexShrink: 0 }}>{"\u270E"}</button></div>}</div>
+                </div>
+
+                {/* Cc row */}
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                  <span style={{ fontSize: 11, color: "#6B7280", fontWeight: 600, minWidth: 26, paddingTop: 1 }}>Cc:</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>{editingEmail === "cp-cc" ? <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    <textarea value={emailEditValue} onChange={function(e) { setEmailEditValue(e.target.value); }} autoFocus onKeyDown={function(e) { if (e.key === "Escape") setEditingEmail(null); }} placeholder="cc1@example.com, cc2@example.com (optional)" rows={2} style={Object.assign({}, S.inp, { padding: "8px 12px", fontSize: 13, lineHeight: 1.5, color: "#374151", width: "100%", resize: "vertical", fontFamily: "'Varela Round', sans-serif" })} />
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button onClick={function() { saveEmailOverride("cpCc", emailEditValue); setEditingEmail(null); }} style={Object.assign({}, S.btn(), { padding: "5px 14px", fontSize: 11 })}>Save</button>
+                      <button onClick={function() { setEditingEmail(null); }} style={Object.assign({}, S.btn("ghost"), { padding: "5px 14px", fontSize: 11 })}>Cancel</button>
+                    </div>
+                  </div> : <div style={{ display: "flex", alignItems: "center", gap: 6 }}>{cpCc ? <span style={{ fontSize: 11, color: "#9CA3AF", wordBreak: "break-all", flex: 1 }}>{cpCc}</span> : <span style={{ fontSize: 11, color: "#9CA3AF", fontStyle: "italic", flex: 1 }}>no CC set</span>}<button onClick={function() { setEmailEditValue(cpCc); setEditingEmail("cp-cc"); }} title="Edit Cc recipients" style={{ background: "transparent", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 12, padding: 2, flexShrink: 0 }}>{"\u270E"}</button></div>}</div>
+                </div>
               </div>
               {cpDraftSent && <span style={{ fontSize: 11, color: "#059669", fontWeight: 500, display: "flex", alignItems: "center", gap: 4 }}><IconCheck /> Sent</span>}
             </div>
