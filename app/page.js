@@ -1019,13 +1019,15 @@ function WHT(props) {
       var updatedNotes = Object.assign({}, shipNotes);
       var changed = false;
       resp.results.forEach(function(r, i) {
-        if (r.ok) {
-          var key = processable[i] && processable[i].key;
-          if (key) {
-            updatedNotes[key] = Object.assign({}, updatedNotes[key] || {}, { done: true });
-            changed = true;
-          }
-        }
+        if (!r.ok) return;
+        var p = processable[i];
+        if (!p || !p.key) return;
+        // Only auto-checkmark Email channel POs (fully handled by the tool).
+        // TrueCommerce EDI / Website Ordering POs still need a manual follow-up
+        // (Truecommerce submission, website order), so leave them unchecked.
+        if (p.channel !== "Email") return;
+        updatedNotes[p.key] = Object.assign({}, updatedNotes[p.key] || {}, { done: true });
+        changed = true;
       });
       if (changed) {
         setShipNotes(updatedNotes);
