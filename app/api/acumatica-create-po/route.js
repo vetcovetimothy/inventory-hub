@@ -24,12 +24,9 @@ const API_VERSION = "25.200.001";
 
 const HILLS_VENDOR_ID = "VID0024";
 
-// Warehouse → vendor Location mapping (1:1 at Vetcove)
 const WAREHOUSE_TO_LOCATION = {
   "HILL-CP-CA": "HILL-CP-CA",
   "HILL-CP-NJ": "HILL-CP-NJ"
-  // "HILL-CP-TX": "HILL-CP-TX",  // not yet in Acumatica
-  // "HILL-CP-FL": "HILL-CP-FL",  // not yet in Acumatica
 };
 
 const BRANCH = "VETCOVE";
@@ -101,7 +98,6 @@ export async function POST(req) {
     const truck = trucks[i];
     const description = `${shortCode} ${truck.label}`;
 
-    // Step A: create the PO
     const createResult = await createOnePO(cookies, {
       location, warehouse, description, lines: truck.lines
     });
@@ -119,8 +115,10 @@ export async function POST(req) {
       break;
     }
 
-    // Step B: set VendorRef = OrderNbr using the id we just got
-    const refResult = await setVendorRefById(cookies, createResult.id, createResult.orderNbr);
+    const refResult = await setVendorRef(cookies, {
+      id: createResult.id,
+      orderNbr: createResult.orderNbr
+    });
 
     if (!refResult.ok) {
       failure = {
@@ -162,8 +160,6 @@ export async function POST(req) {
   });
 }
 
-// ─────────────────────────────────────────────────────────────────────────
-// Create ONE purchase order with all its lines. Returns the id GUID too.
 // ─────────────────────────────────────────────────────────────────────────
 async function createOnePO(cookies, { location, warehouse, description, lines }) {
   const url = `${BASE}/entity/Default/${API_VERSION}/PurchaseOrder?$expand=Details`;
@@ -228,19 +224,19 @@ async function createOnePO(cookies, { location, warehouse, description, lines })
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Update an existing PO's VendorRef using its id GUID.
-// PUT /PurchaseOrder/{id} treats the call as an update, not a create.
+// Update VendorRef on an existing PO.
+// PUT to the base entity URL with `id` in the body = update mode.
+// `id` is required so Acumatica knows we're updating, not creating.
 // ─────────────────────────────────────────────────────────────────────────
-async function setVendorRefById(cookies, id, orderNbr) {
-  if (!id) {
-    return { ok: false, status: 0, rawBody: "createOnePO returned no id" };
-  }
-  if (!orderNbr) {
-    return { ok: false, status: 0, rawBody: "createOnePO returned no OrderNbr" };
-  }
+async function setVendorRef(cookies, { id, orderNbr }) {
+  if (!id) return { ok: false, status: 0, rawBody: "createOnePO returned no id" };
+  if (!orderNbr) return { ok: false, status: 0, rawBody: "createOnePO returned no OrderNbr" };
 
-  const url = `${BASE}/entity/Default/${API_VERSION}/PurchaseOrder/${id}`;
+  const url = `${BASE}/entity/Default/${API_VERSION}/PurchaseOrder`;
   const payload = {
+    id: id,
+    OrderType: { value: "Normal" },
+    OrderNbr:  { value: orderNbr },
     VendorRef: { value: orderNbr }
   };
 
@@ -258,7 +254,6 @@ async function setVendorRefById(cookies, id, orderNbr) {
   if (!res.ok) {
     return { ok: false, status: res.status, rawBody: text.slice(0, 1500) };
   }
-
   let parsed = null;
   try { parsed = JSON.parse(text); } catch {}
   return { ok: true, vendorRef: parsed?.VendorRef?.value };
