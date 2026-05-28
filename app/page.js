@@ -786,22 +786,28 @@ function WHT(props) {
   // ─── Acumatica: remove flagged lines from existing POs ───
   var _acuRemove = useState(false), acuRemoveLoading = _acuRemove[0], setAcuRemoveLoading = _acuRemove[1];
 
-  // Removes a set of (PO# + SKU) pairs from Acumatica, then drops them from the local view.
-  // pairs: [{ orderNbr, skuNDC }] — usually one entry for single-line removal, many for bulk.
-  // ALL rows must be currently flagged (short-dating). Refuses POs that aren't On Hold.
+  // Removes a set of (PO# + InventoryID) pairs from Acumatica, then drops them from the local view.
+  // pairs: [{ orderNbr, inventoryID, skuNDC }] — skuNDC is just for display in error messages
+  // ALL rows must be currently flagged. Refuses POs that aren't On Hold.
   async function removeFromAcumatica(pairs) {
     if (!pairs || pairs.length === 0) return;
     if (!cred || !cred.username || !cred.password) { toast("Acumatica credentials required", "error"); lp && lp(); return; }
 
-    // Group SKUs by PO number — one call covers many POs
+    // Filter out rows without an InventoryID (data hygiene safety net)
+    var validPairs = pairs.filter(function(p) { return p && p.orderNbr && p.inventoryID; });
+    var missingCount = pairs.length - validPairs.length;
+    if (validPairs.length === 0) {
+      toast(missingCount > 0 ? "No Inventory IDs available for the selected lines \u2014 try Re-fetch" : "Nothing to remove", "error");
+      return;
+    }
+
+    // Group InventoryIDs by PO number
     var byPO = {};
-    pairs.forEach(function(p) {
-      if (!p || !p.orderNbr || !p.skuNDC) return;
+    validPairs.forEach(function(p) {
       if (!byPO[p.orderNbr]) byPO[p.orderNbr] = [];
-      if (byPO[p.orderNbr].indexOf(p.skuNDC) < 0) byPO[p.orderNbr].push(p.skuNDC);
+      if (byPO[p.orderNbr].indexOf(p.inventoryID) < 0) byPO[p.orderNbr].push(p.inventoryID);
     });
     var removals = Object.keys(byPO).map(function(po) { return { orderNbr: po, skus: byPO[po] }; });
-    if (removals.length === 0) { toast("Nothing to remove", "error"); return; }
 
     setAcuRemoveLoading(true);
     try {
@@ -816,8 +822,7 @@ function WHT(props) {
         return;
       }
 
-      // Build a set of (PO#, SKU/NDC, InventoryID, AlternateID) tuples that were actually removed,
-      // so we can drop the matching rows from local state.
+      // Build a set of (PO# + InventoryID) keys that were actually removed
       var removedKeys = new Set();
       var removedCount = 0;
       var failedSummaries = [];
@@ -825,9 +830,7 @@ function WHT(props) {
         if (r.ok && Array.isArray(r.removedLines)) {
           r.removedLines.forEach(function(rl) {
             removedCount++;
-            // Match local rows by PO# + (SKUNDC matches inventoryID OR alternateID)
-            if (rl.inventoryID) removedKeys.add(r.orderNbr + "::" + String(rl.inventoryID).toUpperCase());
-            if (rl.alternateID) removedKeys.add(r.orderNbr + "::" + String(rl.alternateID).toUpperCase());
+            if (rl.inventoryID) removedKeys.add(r.orderNbr + "::" + String(rl.inventoryID).trim().toUpperCase());
           });
         } else if (!r.ok) {
           var why = r.stage === "status-check"
@@ -837,18 +840,19 @@ function WHT(props) {
         }
       });
 
-      // Drop removed rows from data, then persist.
+      // Drop removed rows from data, then persist
       if (removedKeys.size > 0) {
         var nextData = data.filter(function(row) {
-          var sku = String(row.SKUNDC || "").toUpperCase();
-          var k = (row.OrderNbr || "") + "::" + sku;
+          var inv = String(row.InventoryID || "").trim().toUpperCase();
+          if (!inv) return true; // keep rows we can't identify by InventoryID
+          var k = (row.OrderNbr || "") + "::" + inv;
           return !removedKeys.has(k);
         });
         setData(nextData);
         try { persist(nextData, emailSent, runBy, runTime, shipNotes); } catch (e) {}
       }
 
-      // Build the toast message
+      // Toast
       if (removedCount > 0 && failedSummaries.length === 0) {
         toast("Removed " + removedCount + " line" + (removedCount > 1 ? "s" : "") + " from Acumatica", "success");
       } else if (removedCount > 0 && failedSummaries.length > 0) {
@@ -874,7 +878,7 @@ function WHT(props) {
   var flagCount = flags.s.length + flags.so.length;
   var emailBlocked = !isGGM && (flags.s.length > 0 || flags.so.length > 0);
   var getFlag = function(r) { var mc = (r.MovementClass || "").toLowerCase().trim(); if (mc === "short-dating") return "short"; if (mc === "sell-off item") return "selloff"; return null; };
-  var filtered = useMemo(function() { var d = data.slice(); if (search) { var s = search.toLowerCase(); d = d.filter(function(r) { return r.SKUNDC.toLowerCase().indexOf(s) >= 0 || r.Description.toLowerCase().indexOf(s) >= 0 || r.VendorName.toLowerCase().indexOf(s) >= 0; }); } if (vendorFilter !== "all") d = d.filter(function(r) { return r.VendorName === vendorFilter; }); if (flagsOnly) { var fi = new Set(flags.s.concat(flags.so)); d = d.filter(function(r) { return fi.has(data.indexOf(r)); }); } if (poSort.col) { var col = poSort.col; var dir = poSort.dir; d.sort(function(a, b) { var va, vb; if (col === "Qty") { va = parseFloat(a.OrderQty) || 0; vb = parseFloat(b.OrderQty) || 0; } else if (col === "Vendor") { va = a.VendorName || ""; vb = b.VendorName || ""; return dir === "desc" ? vb.localeCompare(va) : va.localeCompare(vb); } else if (col === "PO #") { va = a.OrderNbr || ""; vb = b.OrderNbr || ""; return dir === "desc" ? vb.localeCompare(va) : va.localeCompare(vb); } else if (col === "SKU") { va = a.SKUNDC || ""; vb = b.SKUNDC || ""; return dir === "desc" ? vb.localeCompare(va) : va.localeCompare(vb); } else if (col === "Description") { va = a.Description || ""; vb = b.Description || ""; return dir === "desc" ? vb.localeCompare(va) : va.localeCompare(vb); } else if (col === "Reorder") { va = parseFloat(a.ReorderPoint) || 0; vb = parseFloat(b.ReorderPoint) || 0; } else if (col === "Max") { va = parseFloat(a.MaxQty) || 0; vb = parseFloat(b.MaxQty) || 0; } else if (col === "Lead") { va = parseFloat(a.LeadTime) || 0; vb = parseFloat(b.LeadTime) || 0; } else if (col === "Min") { va = parseFloat(a.MinOrderQty) || 0; vb = parseFloat(b.MinOrderQty) || 0; } else if (col === "Avail") { va = parseFloat(a.QtyAvailable) || 0; vb = parseFloat(b.QtyAvailable) || 0; } else if (col === "Price") { va = a.Price || 0; vb = b.Price || 0; } else if (col === "Total") { va = a.TotalPrice || 0; vb = b.TotalPrice || 0; } else if (col === "Flag") { va = getFlag(a) ? 0 : 1; vb = getFlag(b) ? 0 : 1; } else { return 0; } return dir === "desc" ? vb - va : va - vb; }); } else { d.sort(function(a, b) { var fa = getFlag(a) ? 0 : 1; var fb = getFlag(b) ? 0 : 1; return fa - fb; }); } return d; }, [data, search, vendorFilter, flagsOnly, flags, poSort]);
+  var filtered = useMemo(function() { var d = data.slice(); if (search) { var s = search.toLowerCase(); d = d.filter(function(r) { return r.SKUNDC.toLowerCase().indexOf(s) >= 0 || (r.InventoryID || "").toLowerCase().indexOf(s) >= 0 || r.Description.toLowerCase().indexOf(s) >= 0 || r.VendorName.toLowerCase().indexOf(s) >= 0; }); } if (vendorFilter !== "all") d = d.filter(function(r) { return r.VendorName === vendorFilter; }); if (flagsOnly) { var fi = new Set(flags.s.concat(flags.so)); d = d.filter(function(r) { return fi.has(data.indexOf(r)); }); } if (poSort.col) { var col = poSort.col; var dir = poSort.dir; d.sort(function(a, b) { var va, vb; if (col === "Qty") { va = parseFloat(a.OrderQty) || 0; vb = parseFloat(b.OrderQty) || 0; } else if (col === "Vendor") { va = a.VendorName || ""; vb = b.VendorName || ""; return dir === "desc" ? vb.localeCompare(va) : va.localeCompare(vb); } else if (col === "PO #") { va = a.OrderNbr || ""; vb = b.OrderNbr || ""; return dir === "desc" ? vb.localeCompare(va) : va.localeCompare(vb); } else if (col === "SKU") { va = a.SKUNDC || ""; vb = b.SKUNDC || ""; return dir === "desc" ? vb.localeCompare(va) : va.localeCompare(vb); } else if (col === "InventoryID") { va = a.InventoryID || ""; vb = b.InventoryID || ""; return dir === "desc" ? vb.localeCompare(va) : va.localeCompare(vb); } else if (col === "Description") { va = a.Description || ""; vb = b.Description || ""; return dir === "desc" ? vb.localeCompare(va) : va.localeCompare(vb); } else if (col === "Reorder") { va = parseFloat(a.ReorderPoint) || 0; vb = parseFloat(b.ReorderPoint) || 0; } else if (col === "Max") { va = parseFloat(a.MaxQty) || 0; vb = parseFloat(b.MaxQty) || 0; } else if (col === "Lead") { va = parseFloat(a.LeadTime) || 0; vb = parseFloat(b.LeadTime) || 0; } else if (col === "Min") { va = parseFloat(a.MinOrderQty) || 0; vb = parseFloat(b.MinOrderQty) || 0; } else if (col === "Avail") { va = parseFloat(a.QtyAvailable) || 0; vb = parseFloat(b.QtyAvailable) || 0; } else if (col === "Price") { va = a.Price || 0; vb = b.Price || 0; } else if (col === "Total") { va = a.TotalPrice || 0; vb = b.TotalPrice || 0; } else if (col === "Flag") { va = getFlag(a) ? 0 : 1; vb = getFlag(b) ? 0 : 1; } else { return 0; } return dir === "desc" ? vb - va : va - vb; }); } else { d.sort(function(a, b) { var fa = getFlag(a) ? 0 : 1; var fb = getFlag(b) ? 0 : 1; return fa - fb; }); } return d; }, [data, search, vendorFilter, flagsOnly, flags, poSort]);
   var todayStr = new Date().toLocaleDateString("en-US", { month: "numeric", day: "numeric" });
   function fillTemplate(text) {
     if (!text) return text;
@@ -919,7 +923,7 @@ function WHT(props) {
     </div>}
 
     {subPage === "data" && <div>
-      {flagCount > 0 && <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 10, padding: "14px 20px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}><IconAlert /><span style={{ fontSize: 13, color: "#DC2626", flex: 1 }}><strong>Flagged:</strong>{flags.s.length > 0 && " " + flags.s.length + " Short-Dating"}{flags.so.length > 0 && " " + flags.so.length + " Sell-Off"}</span>{flags.s.length > 0 && <button disabled={!ok || acuRemoveLoading} onClick={function() { var shortPairs = flags.s.map(function(idx) { var r = data[idx]; return { orderNbr: r.OrderNbr, skuNDC: r.SKUNDC }; }).filter(function(p) { return p.orderNbr && p.skuNDC; }); removeFromAcumatica(shortPairs); }} title={!ok ? "Acumatica credentials required" : "Remove all short-dating lines from their POs in Acumatica. POs must be On Hold."} style={Object.assign({}, S.btn(), { padding: "6px 12px", fontSize: 12, background: (!ok || acuRemoveLoading) ? "#9CA3AF" : "#DC2626", borderColor: (!ok || acuRemoveLoading) ? "#9CA3AF" : "#DC2626", opacity: (!ok || acuRemoveLoading) ? 0.7 : 1, cursor: (!ok || acuRemoveLoading) ? "not-allowed" : "pointer" })}>{acuRemoveLoading ? <><Spinner /> Removing...</> : "Remove All Short-Dating from POs"}</button>}</div>}
+      {flagCount > 0 && <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 10, padding: "14px 20px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}><IconAlert /><span style={{ fontSize: 13, color: "#DC2626", flex: 1 }}><strong>Flagged:</strong>{flags.s.length > 0 && " " + flags.s.length + " Short-Dating"}{flags.so.length > 0 && " " + flags.so.length + " Sell-Off"}</span>{flags.s.length > 0 && <button disabled={!ok || acuRemoveLoading} onClick={function() { var shortPairs = flags.s.map(function(idx) { var r = data[idx]; return { orderNbr: r.OrderNbr, inventoryID: String(r.InventoryID || "").trim(), skuNDC: r.SKUNDC }; }); removeFromAcumatica(shortPairs); }} title={!ok ? "Acumatica credentials required" : "Remove all short-dating lines from their POs in Acumatica. POs must be On Hold."} style={Object.assign({}, S.btn(), { padding: "6px 12px", fontSize: 12, background: (!ok || acuRemoveLoading) ? "#9CA3AF" : "#DC2626", borderColor: (!ok || acuRemoveLoading) ? "#9CA3AF" : "#DC2626", opacity: (!ok || acuRemoveLoading) ? 0.7 : 1, cursor: (!ok || acuRemoveLoading) ? "not-allowed" : "pointer" })}>{acuRemoveLoading ? <><Spinner /> Removing...</> : "Remove All Short-Dating from POs"}</button>}</div>}
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
         <input style={Object.assign({}, S.inp, { maxWidth: 260 })} placeholder="Search..." value={search} onChange={function(e) { setSearch(e.target.value); }} />
         <select style={S.sel} value={vendorFilter} onChange={function(e) { setVendorFilter(e.target.value); }}><option value="all">All Vendors</option>{uniqueVendors.map(function(v) { return <option key={v} value={v}>{v}</option>; })}</select>
@@ -933,8 +937,8 @@ function WHT(props) {
         </div>}
         <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto", maxHeight: "calc(100vh - 260px)" })}>
         <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
-          <thead><tr><th style={Object.assign({}, S.th, { width: 32 })}></th>{["SKU", "Description", "Qty", "Vendor", "PO #"].concat(!isGGM ? ["Reorder", "Max", "Lead", "Min", "Avail"] : []).concat(["Price", "Total", "Flag"]).map(function(h) { var isSorted = poSort.col === h; return <th key={h} onClick={function() { setPoSort(isSorted ? { col: h, dir: poSort.dir === "asc" ? "desc" : "asc" } : { col: h, dir: h === "Qty" || h === "Price" || h === "Total" || h === "Avail" || h === "Reorder" || h === "Max" || h === "Lead" || h === "Min" ? "desc" : "asc" }); }} style={Object.assign({}, S.th, { cursor: "pointer", userSelect: "none" })}>{h}{isSorted ? (poSort.dir === "desc" ? " \u25BE" : " \u25B4") : ""}</th>; })}<th style={Object.assign({}, S.th, { width: 80 })}></th></tr></thead>
-          <tbody>{filtered.map(function(r, i) { var f = getFlag(r); var bg = f === "short" ? "rgba(220,38,38,0.04)" : f === "selloff" ? "rgba(217,119,6,0.04)" : "transparent"; var tc = f === "short" ? "#DC2626" : f === "selloff" ? "#D97706" : "#374151"; var fmt = function(v) { var n = parseFloat(v); if (isNaN(n)) return v; return n % 1 === 0 ? String(Math.round(n)) : n.toFixed(2); }; var dismissKey = r.SKUNDC + ":" + r.OrderNbr; var isDone = dismissed[dismissKey]; return <tr key={i} style={{ background: bg, opacity: isDone ? 0.4 : 1, transition: "opacity 0.15s" }}><td style={Object.assign({}, S.td, { textAlign: "center", padding: "8px 4px" })}>{f ? <button onClick={function() { var u = Object.assign({}, dismissed); if (isDone) { delete u[dismissKey]; } else { u[dismissKey] = true; } setDismissed(u); }} style={{ width: 20, height: 20, borderRadius: 4, border: isDone ? "2px solid #059669" : "2px solid #D1D5DB", background: isDone ? "#059669" : "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", transition: "all 0.15s", flexShrink: 0 }}>{isDone && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}</button> : null}</td><td style={Object.assign({}, S.td, { color: tc, minWidth: 120, whiteSpace: "nowrap" })}>{r.SKUNDC}</td><td style={Object.assign({}, S.td, { color: tc, minWidth: 180, maxWidth: 350 })}><CopyCell text={r.Description} toast={toast} color={tc} accentColor={cfg.color} /></td><td style={Object.assign({}, S.td, { color: tc })}>{fmt(r.OrderQty)}</td><td style={Object.assign({}, S.td, { color: tc })}>{r.VendorName}</td><td style={Object.assign({}, S.td, { color: tc })}>{r.OrderNbr}</td>{!isGGM && <><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.ReorderPoint)}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.MaxQty)}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.LeadTime)}d</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.MinOrderQty)}</td><td style={Object.assign({}, S.td, { color: r.QtyAvailable < 0 ? "#DC2626" : tc, textAlign: "right" })}>{fmt(r.QtyAvailable)}</td></>}<td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>${r.Price.toFixed(2)}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>${r.TotalPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td><td style={S.td}>{f ? <span style={S.badge(f === "short" ? "danger" : "warning")}>{f === "short" ? "Short" : "Sell-Off"}</span> : "\u2014"}</td><td style={Object.assign({}, S.td, { textAlign: "center", padding: "8px 4px" })}>{f ? <button disabled={!ok || acuRemoveLoading} onClick={function() { removeFromAcumatica([{ orderNbr: r.OrderNbr, skuNDC: r.SKUNDC }]); }} title={!ok ? "Acumatica credentials required" : "Remove this line from " + r.OrderNbr + " in Acumatica (PO must be On Hold)"} style={{ background: "transparent", border: "1px solid " + ((!ok || acuRemoveLoading) ? "#D1D5DB" : "#DC2626"), color: (!ok || acuRemoveLoading) ? "#9CA3AF" : "#DC2626", padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: (!ok || acuRemoveLoading) ? "not-allowed" : "pointer" }}>Remove</button> : null}</td></tr>; })}</tbody>
+          <thead><tr><th style={Object.assign({}, S.th, { width: 32 })}></th>{["InventoryID", "SKU", "Description", "Qty", "Vendor", "PO #"].concat(!isGGM ? ["Reorder", "Max", "Lead", "Min", "Avail"] : []).concat(["Price", "Total", "Flag"]).map(function(h) { var isSorted = poSort.col === h; return <th key={h} onClick={function() { setPoSort(isSorted ? { col: h, dir: poSort.dir === "asc" ? "desc" : "asc" } : { col: h, dir: h === "Qty" || h === "Price" || h === "Total" || h === "Avail" || h === "Reorder" || h === "Max" || h === "Lead" || h === "Min" ? "desc" : "asc" }); }} style={Object.assign({}, S.th, { cursor: "pointer", userSelect: "none" })}>{h === "InventoryID" ? "Inv ID" : h}{isSorted ? (poSort.dir === "desc" ? " \u25BE" : " \u25B4") : ""}</th>; })}<th style={Object.assign({}, S.th, { width: 80 })}></th></tr></thead>
+          <tbody>{filtered.map(function(r, i) { var f = getFlag(r); var bg = f === "short" ? "rgba(220,38,38,0.04)" : f === "selloff" ? "rgba(217,119,6,0.04)" : "transparent"; var tc = f === "short" ? "#DC2626" : f === "selloff" ? "#D97706" : "#374151"; var fmt = function(v) { var n = parseFloat(v); if (isNaN(n)) return v; return n % 1 === 0 ? String(Math.round(n)) : n.toFixed(2); }; var dismissKey = r.SKUNDC + ":" + r.OrderNbr; var isDone = dismissed[dismissKey]; return <tr key={i} style={{ background: bg, opacity: isDone ? 0.4 : 1, transition: "opacity 0.15s" }}><td style={Object.assign({}, S.td, { textAlign: "center", padding: "8px 4px" })}>{f ? <button onClick={function() { var u = Object.assign({}, dismissed); if (isDone) { delete u[dismissKey]; } else { u[dismissKey] = true; } setDismissed(u); }} style={{ width: 20, height: 20, borderRadius: 4, border: isDone ? "2px solid #059669" : "2px solid #D1D5DB", background: isDone ? "#059669" : "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", transition: "all 0.15s", flexShrink: 0 }}>{isDone && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}</button> : null}</td><td style={Object.assign({}, S.td, { color: tc, minWidth: 90, whiteSpace: "nowrap", fontFamily: "monospace", fontSize: 11 })}>{r.InventoryID || "\u2014"}</td><td style={Object.assign({}, S.td, { color: tc, minWidth: 120, whiteSpace: "nowrap" })}>{r.SKUNDC}</td><td style={Object.assign({}, S.td, { color: tc, minWidth: 180, maxWidth: 350 })}><CopyCell text={r.Description} toast={toast} color={tc} accentColor={cfg.color} /></td><td style={Object.assign({}, S.td, { color: tc })}>{fmt(r.OrderQty)}</td><td style={Object.assign({}, S.td, { color: tc })}>{r.VendorName}</td><td style={Object.assign({}, S.td, { color: tc })}>{r.OrderNbr}</td>{!isGGM && <><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.ReorderPoint)}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.MaxQty)}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.LeadTime)}d</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.MinOrderQty)}</td><td style={Object.assign({}, S.td, { color: r.QtyAvailable < 0 ? "#DC2626" : tc, textAlign: "right" })}>{fmt(r.QtyAvailable)}</td></>}<td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>${r.Price.toFixed(2)}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>${r.TotalPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td><td style={S.td}>{f ? <span style={S.badge(f === "short" ? "danger" : "warning")}>{f === "short" ? "Short" : "Sell-Off"}</span> : "\u2014"}</td><td style={Object.assign({}, S.td, { textAlign: "center", padding: "8px 4px" })}>{f ? <button disabled={!ok || acuRemoveLoading || !r.InventoryID} onClick={function() { removeFromAcumatica([{ orderNbr: r.OrderNbr, inventoryID: String(r.InventoryID || "").trim(), skuNDC: r.SKUNDC }]); }} title={!ok ? "Acumatica credentials required" : !r.InventoryID ? "No Inventory ID for this line \u2014 try Re-fetch" : "Remove this line from " + r.OrderNbr + " in Acumatica (PO must be On Hold)"} style={{ background: "transparent", border: "1px solid " + ((!ok || acuRemoveLoading || !r.InventoryID) ? "#D1D5DB" : "#DC2626"), color: (!ok || acuRemoveLoading || !r.InventoryID) ? "#9CA3AF" : "#DC2626", padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: (!ok || acuRemoveLoading || !r.InventoryID) ? "not-allowed" : "pointer" }}>Remove</button> : null}</td></tr>; })}</tbody>
         </table>
       </div></div> : <div style={Object.assign({}, S.card, { textAlign: "center", padding: 48, color: "#9CA3AF" })}>Run fetch first.</div>}
     </div>}
