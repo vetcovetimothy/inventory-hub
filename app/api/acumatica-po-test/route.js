@@ -1,14 +1,13 @@
 /**
  * POST /api/acumatica-po-test
  *
- * READ-ONLY test of the Acumatica contract-based REST API.
- * Logs in, reads one purchase order, logs out. Creates nothing.
+ * READ-ONLY exploration of the Acumatica contract-based REST API.
  *
- * Body: { username: string, password: string }
+ * Body:
+ *   { username, password }                    — reads first PO (any vendor)
+ *   { username, password, vendorID }          — reads first PO for that vendor, with line details
  *
- * Returns:
- *   200 { ok: true, po: {...} }    — success, with the PO data
- *   200 { ok: false, stage: "...", status: 401, body: "..." } — failed at some stage, with details
+ * Returns JSON with what came back, or details about where things failed.
  */
 
 const BASE = process.env.ACUMATICA_BASE_URL || "https://vetcove.acumatica.com";
@@ -22,14 +21,12 @@ export async function POST(req) {
     return json({ ok: false, stage: "parse-body", error: "Invalid JSON body" });
   }
 
-  const { username, password } = body || {};
+  const { username, password, vendorID } = body || {};
   if (!username || !password) {
     return json({ ok: false, stage: "validate-input", error: "username and password required" });
   }
 
   // --- Stage 1: Login ---
-  // The contract-based REST API requires a session login at /entity/auth/login.
-  // The response sets cookies that authenticate subsequent /entity/Default/... calls.
   let cookies = "";
   try {
     const loginRes = await fetch(`${BASE}/entity/auth/login`, {
@@ -37,43 +34,36 @@ export async function POST(req) {
       headers: { "Content-Type": "application/json", "Accept": "application/json" },
       body: JSON.stringify({ name: username, password: password })
     });
-
     if (!loginRes.ok) {
       const text = await loginRes.text();
-      return json({
-        ok: false,
-        stage: "login",
-        status: loginRes.status,
-        statusText: loginRes.statusText,
-        body: text.slice(0, 500)
-      });
+      return json({ ok: false, stage: "login", status: loginRes.status, body: text.slice(0, 500) });
     }
-
-    // Capture session cookies from the login response.
     const setCookie = loginRes.headers.get("set-cookie") || "";
     cookies = setCookie.split(",").map(c => c.split(";")[0].trim()).filter(Boolean).join("; ");
   } catch (err) {
     return json({ ok: false, stage: "login", error: String(err) });
   }
 
-  // --- Stage 2: Read one purchase order ---
+  // --- Stage 2: Read a PO ---
+  // If vendorID provided, filter and expand details. Otherwise just $top=1.
+  let url;
+  if (vendorID) {
+    const filter = encodeURIComponent(`VendorID eq '${vendorID}'`);
+    url = `${BASE}/entity/Default/${API_VERSION}/PurchaseOrder?$filter=${filter}&$top=1&$expand=Details`;
+  } else {
+    url = `${BASE}/entity/Default/${API_VERSION}/PurchaseOrder?$top=1`;
+  }
+
   let poData = null;
   try {
-    const readRes = await fetch(`${BASE}/entity/Default/${API_VERSION}/PurchaseOrder?$top=1`, {
+    const readRes = await fetch(url, {
       method: "GET",
       headers: { "Accept": "application/json", "Cookie": cookies }
     });
-
     const text = await readRes.text();
     if (!readRes.ok) {
       await logout(cookies);
-      return json({
-        ok: false,
-        stage: "read-po",
-        status: readRes.status,
-        statusText: readRes.statusText,
-        body: text.slice(0, 1000)
-      });
+      return json({ ok: false, stage: "read-po", status: readRes.status, body: text.slice(0, 1000) });
     }
     try {
       poData = JSON.parse(text);
@@ -86,21 +76,40 @@ export async function POST(req) {
     return json({ ok: false, stage: "read-po", error: String(err) });
   }
 
-  // --- Stage 3: Logout (be polite, free the session) ---
   await logout(cookies);
 
-  // Summarize what came back so we don't dump a giant PO object on the screen.
   const first = Array.isArray(poData) && poData.length > 0 ? poData[0] : null;
-  const summary = first ? {
-    OrderNbr: first.OrderNbr?.value,
-    OrderType: first.OrderType?.value,
-    VendorID: first.VendorID?.value,
-    Status: first.Status?.value,
-    Date: first.Date?.value,
-    fieldCount: Object.keys(first).length
-  } : { note: "No POs returned (empty array)" };
+  if (!first) {
+    return json({ ok: true, stage: "done", note: "No POs returned for that filter", queryUrl: url });
+  }
 
-  return json({ ok: true, stage: "done", apiVersion: API_VERSION, sample: summary });
+  // Build a structured summary so we can see the shape clearly without dumping everything.
+  const headerFields = {};
+  Object.keys(first).forEach(k => {
+    const v = first[k];
+    if (v && typeof v === "object" && "value" in v) headerFields[k] = v.value;
+  });
+
+  const details = Array.isArray(first.Details) ? first.Details.map(d => {
+    const out = {};
+    Object.keys(d).forEach(k => {
+      const v = d[k];
+      if (v && typeof v === "object" && "value" in v) out[k] = v.value;
+    });
+    return out;
+  }) : [];
+
+  return json({
+    ok: true,
+    stage: "done",
+    apiVersion: API_VERSION,
+    queryUrl: url,
+    headerFieldNames: Object.keys(first),
+    headerValues: headerFields,
+    detailLineCount: details.length,
+    firstDetailFieldNames: details[0] ? Object.keys(details[0]) : [],
+    firstDetailValues: details[0] || null
+  });
 }
 
 async function logout(cookies) {
@@ -109,9 +118,7 @@ async function logout(cookies) {
       method: "POST",
       headers: { "Cookie": cookies }
     });
-  } catch {
-    // best-effort; ignore failures
-  }
+  } catch {}
 }
 
 function json(payload) {
