@@ -45,6 +45,7 @@ const COLUMN_MAP = {
     { label: "QtyAvailable",  keys: ["QtyAvailable", "QtyAvail"] },
     { label: "Price",         keys: ["Price", "UnitCost", "LastCost"] },
     { label: "MovementClass", keys: ["MovementClass", "MovementClassDescr"] },
+    { label: "InventoryID",   keys: ["InventoryID", "InventoryID_2", "InventoryId", "InventoryCD", "InventoryCd"] },
   ],
   "po-ggm": [
     { label: "SKUNDC",        keys: ["SKUNDC", "SkuNDC", "SKU_NDC", "SKU/NDC", "SKU", "NDC", "InventoryID", "InventoryId", "InventoryCd", "InventoryCD", "ItemID", "ItemId", "Inventory ID"] },
@@ -60,6 +61,7 @@ const COLUMN_MAP = {
     { label: "QtyAvailable",  keys: ["QtyAvailable", "QtyAvail"] },
     { label: "Price",         keys: ["Price", "UnitCost", "LastCost"] },
     { label: "MovementClass", keys: ["MovementClass", "Movement Class"] },
+    { label: "InventoryID",   keys: ["InventoryID", "InventoryID_2", "InventoryId", "InventoryCD", "InventoryCd"] },
   ],
   "ndc-lookup": [
     { label: "InventoryID",   keys: ["InventoryID", "InventoryId", "InventoryCd", "InventoryCD"] },
