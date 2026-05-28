@@ -4,19 +4,9 @@
  * Acumatica contract-based REST API tester.
  *
  * Body:
- *   { username, password }                                 — reads first PO (any vendor)
- *   { username, password, vendorID }                       — reads first PO for vendor, with details
- *   { username, password, mode: "create-test-po" }         — creates ONE held test PO for Hill's
- *
- * The create mode hardcodes safe values:
- *   - VendorID: VID0024 (Hill's)
- *   - Location: MAIN
- *   - Branch: VETCOVE
- *   - Warehouse: HILL-CP-CA
- *   - InventoryID: 605087, OrderQty: 1
- *   - Hold: true  (will NOT release, print, or email — safe to delete)
- *
- * Returns the new PO's OrderNbr on success.
+ *   { username, password }                          — reads first PO (any vendor)
+ *   { username, password, vendorID }                — reads first PO for vendor with details
+ *   { username, password, mode: "create-test-po" }  — creates ONE held test PO for Hill's
  */
 
 const BASE = process.env.ACUMATICA_BASE_URL || "https://vetcove.acumatica.com";
@@ -35,7 +25,6 @@ export async function POST(req) {
     return json({ ok: false, stage: "validate-input", error: "username and password required" });
   }
 
-  // --- Stage 1: Login ---
   let cookies = "";
   try {
     const loginRes = await fetch(`${BASE}/entity/auth/login`, {
@@ -53,7 +42,6 @@ export async function POST(req) {
     return json({ ok: false, stage: "login", error: String(err) });
   }
 
-  // --- Branch on mode ---
   let result;
   try {
     if (mode === "create-test-po") {
@@ -74,22 +62,24 @@ export async function POST(req) {
 
 // ─────────────────────────────────────────────────────────────────────────
 // CREATE: a single held test PO for Hill's
+// Values match the recent real PO008480 to minimize variables.
 // ─────────────────────────────────────────────────────────────────────────
 async function createTestPO(cookies) {
   const url = `${BASE}/entity/Default/${API_VERSION}/PurchaseOrder?$expand=Details`;
 
   const payload = {
     VendorID: { value: "VID0024" },
-    Location: { value: "MAIN" },
+    Location: { value: "HILL-CP-NJ" },
     Branch:   { value: "VETCOVE" },
     Hold:     { value: true },
     Description: { value: "TEST PO via Inventory Hub — safe to delete" },
     Details: [
       {
         BranchID:    { value: "VETCOVE" },
-        InventoryID: { value: "605087" },
-        WarehouseID: { value: "HILL-CP-CA" },
-        OrderQty:    { value: 1 }
+        InventoryID: { value: "10404" },
+        WarehouseID: { value: "HILL-CP-NJ" },
+        OrderQty:    { value: 1 },
+        UOM:         { value: "BAG" }
       }
     ]
   };
@@ -112,7 +102,7 @@ async function createTestPO(cookies) {
       status: res.status,
       statusText: res.statusText,
       payloadSent: payload,
-      body: text.slice(0, 2000)
+      body: text.slice(0, 2500)
     };
   }
 
@@ -145,14 +135,13 @@ async function createTestPO(cookies) {
         UOM: d?.UOM?.value,
         UnitCost: d?.UnitCost?.value,
         ExtendedCost: d?.ExtendedCost?.value,
-        OrderType: d?.OrderType?.value
+        OrderType: d?.OrderType?.value,
+        LineType: d?.LineType?.value
       })) : []
     }
   };
 }
 
-// ─────────────────────────────────────────────────────────────────────────
-// READ helpers (unchanged from before)
 // ─────────────────────────────────────────────────────────────────────────
 async function readPOByVendor(cookies, vendorID) {
   const filter = encodeURIComponent(`VendorID eq '${vendorID}'`);
@@ -203,7 +192,6 @@ async function readAndSummarize(cookies, url) {
   };
 }
 
-// ─────────────────────────────────────────────────────────────────────────
 async function logout(cookies) {
   try {
     await fetch(`${BASE}/entity/auth/logout`, { method: "POST", headers: { "Cookie": cookies } });
