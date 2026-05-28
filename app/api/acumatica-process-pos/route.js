@@ -17,23 +17,19 @@
  *       {
  *         orderNbr:  string,        // e.g. "PO008627"
  *         vendorRef: string,        // required, non-empty
- *         shouldEmail: boolean      // true for normal vendors, false for EDI/Truecommerce
+ *         channel:   string         // "Email" | "TrueCommerce EDI" | "Website Ordering"
  *       },
  *       ...
  *     ]
  *   }
  *
- * Per-PO behavior:
- *   1. Read PO → verify it's On Hold. Skip if not (status-check refusal).
- *   2. PUT VendorRef + Hold:false in a single call.
- *   3. If shouldEmail===true: POST EmailPurchaseOrder, poll status until 204.
- *   4. Report success/failure with details.
+ * Per-PO behavior by channel:
+ *   - "Email":             Write VendorRef + Hold:false + invoke EmailPurchaseOrder action
+ *   - "TrueCommerce EDI":  Write VendorRef ONLY (keep PO On Hold, no email)
+ *   - "Website Ordering":  Write VendorRef ONLY (keep PO On Hold, no email)
  *
- * Errors on one PO do NOT stop the batch. Each PO's result is reported.
- *
- * IMPORTANT — this route is intentionally permissive about which vendor a PO
- * belongs to (no VID0048 safety check). The frontend is responsible for
- * passing the right shouldEmail flag based on the vendor's label.
+ * All POs must be On Hold to be processed (status check applies to all channels).
+ * Errors on one PO do NOT stop the batch.
  */
 
 const BASE = process.env.ACUMATICA_BASE_URL || "https://vetcove.acumatica.com";
@@ -67,8 +63,11 @@ export async function POST(req) {
     if (typeof p.vendorRef !== "string" || !p.vendorRef.trim()) {
       return json({ ok: false, stage: "validate-input", error: `pos[${i}].vendorRef is required (non-empty)` });
     }
-    if (typeof p.shouldEmail !== "boolean") {
-      return json({ ok: false, stage: "validate-input", error: `pos[${i}].shouldEmail must be boolean` });
+    if (typeof p.channel !== "string" || !p.channel) {
+      return json({ ok: false, stage: "validate-input", error: `pos[${i}].channel is required (Email, TrueCommerce EDI, or Website Ordering)` });
+    }
+    if (p.channel !== "Email" && p.channel !== "TrueCommerce EDI" && p.channel !== "Website Ordering") {
+      return json({ ok: false, stage: "validate-input", error: `pos[${i}].channel must be 'Email', 'TrueCommerce EDI', or 'Website Ordering' (got '${p.channel}')` });
     }
   }
 
@@ -94,11 +93,11 @@ export async function POST(req) {
   const results = [];
   for (let i = 0; i < pos.length; i++) {
     const p = pos[i];
-    const result = await processOnePO(cookies, p.orderNbr, p.vendorRef.trim(), p.shouldEmail);
+    const result = await processOnePO(cookies, p.orderNbr, p.vendorRef.trim(), p.channel);
     results.push(Object.assign({
       orderNbr: p.orderNbr,
       requestedVendorRef: p.vendorRef.trim(),
-      shouldEmail: p.shouldEmail
+      channel: p.channel
     }, result));
   }
 
@@ -107,19 +106,21 @@ export async function POST(req) {
   // Summary
   const successCount = results.filter(r => r.ok).length;
   const emailedCount = results.filter(r => r.ok && r.emailed).length;
-  const releasedCount = results.filter(r => r.ok && r.released).length;
+  const vendorRefOnlyCount = results.filter(r => r.ok && !r.emailed).length;
   const failedCount = results.filter(r => !r.ok).length;
 
   return json({
     ok: failedCount === 0,
     stage: failedCount === 0 ? "all-done" : "completed-with-failures",
-    summary: { successCount, emailedCount, releasedCount, failedCount, totalCount: results.length },
+    summary: { successCount, emailedCount, vendorRefOnlyCount, failedCount, totalCount: results.length },
     results
   });
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-async function processOnePO(cookies, orderNbr, vendorRef, shouldEmail) {
+async function processOnePO(cookies, orderNbr, vendorRef, channel) {
+  const isEmailChannel = channel === "Email";
+
   // Step 1: Read the PO → verify status
   const readResult = await readPO(cookies, orderNbr);
   if (!readResult.ok) {
@@ -136,17 +137,20 @@ async function processOnePO(cookies, orderNbr, vendorRef, shouldEmail) {
     };
   }
 
-  // Step 2: PUT VendorRef + Hold:false in one call
+  // Step 2: PUT VendorRef. If Email channel, also set Hold:false in the same call.
+  // For TrueCommerce EDI / Website Ordering, only the VendorRef changes.
   const putUrl = `${BASE}/entity/Default/${API_VERSION}/PurchaseOrder`;
   const putPayload = {
     id: po.id,
     OrderType: { value: po?.Type?.value || "Normal" },
     OrderNbr:  { value: orderNbr },
-    VendorRef: { value: vendorRef },
-    Hold:      { value: false }
+    VendorRef: { value: vendorRef }
   };
+  if (isEmailChannel) {
+    putPayload.Hold = { value: false };
+  }
 
-  let releaseStatus = null;
+  let putStatusAfter = null;
   try {
     const res = await fetch(putUrl, {
       method: "PUT",
@@ -163,106 +167,114 @@ async function processOnePO(cookies, orderNbr, vendorRef, shouldEmail) {
       try { errorDetails = extractAllErrors(JSON.parse(text)); } catch {}
       return {
         ok: false,
-        stage: "release",
+        stage: isEmailChannel ? "release" : "write-vendor-ref",
         status: res.status,
         errorDetails,
         rawBody: text.slice(0, 1500),
-        error: `Acumatica rejected release for ${orderNbr}`
+        error: `Acumatica rejected ${isEmailChannel ? "release" : "vendor-ref write"} for ${orderNbr}`
       };
     }
     let updated;
     try { updated = JSON.parse(text); } catch {}
-    releaseStatus = updated?.Status?.value;
+    putStatusAfter = updated?.Status?.value;
   } catch (err) {
-    return { ok: false, stage: "release", error: String(err) };
+    return { ok: false, stage: isEmailChannel ? "release" : "write-vendor-ref", error: String(err) };
   }
 
-  // Step 3: If shouldEmail, invoke EmailPurchaseOrder
+  // If not Email channel, we're done. Return success.
+  if (!isEmailChannel) {
+    return {
+      ok: true,
+      stage: "done",
+      released: false,                  // hold was NOT removed
+      vendorRefWritten: true,
+      statusAfter: putStatusAfter,      // should still be "On Hold"
+      emailed: false,
+      emailSkipped: true
+    };
+  }
+
+  // Step 3 (Email channel only): Invoke EmailPurchaseOrder
+  const emailUrl = `${BASE}/entity/Default/${API_VERSION}/PurchaseOrder/EmailPurchaseOrder`;
+  const emailPayload = {
+    entity: {
+      id: po.id,
+      OrderType: { value: po?.Type?.value || "Normal" },
+      OrderNbr:  { value: orderNbr }
+    }
+  };
+
   let emailed = false;
   let emailError = null;
   let emailPollAttempts = 0;
   let emailFinalStatus = null;
+  const emailStart = Date.now();
 
-  if (shouldEmail) {
-    const emailUrl = `${BASE}/entity/Default/${API_VERSION}/PurchaseOrder/EmailPurchaseOrder`;
-    const emailPayload = {
-      entity: {
-        id: po.id,
-        OrderType: { value: po?.Type?.value || "Normal" },
-        OrderNbr:  { value: orderNbr }
+  try {
+    const emailRes = await fetch(emailUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Cookie": cookies
+      },
+      body: JSON.stringify(emailPayload)
+    });
+    const emailText = await emailRes.text();
+    const initialStatus = emailRes.status;
+    const locationHeader = emailRes.headers.get("location");
+
+    if (initialStatus !== 202 && initialStatus !== 200 && initialStatus !== 204) {
+      let errorDetails = null;
+      try { errorDetails = extractAllErrors(JSON.parse(emailText)); } catch {}
+      emailError = {
+        stage: "invoke-email",
+        status: initialStatus,
+        errorDetails,
+        rawBody: emailText.slice(0, 1500)
+      };
+    } else if (initialStatus === 202 && locationHeader) {
+      const pollUrl = locationHeader.startsWith("http") ? locationHeader : (BASE + locationHeader);
+      const pollDeadline = Date.now() + POLL_TIMEOUT_MS;
+      let lastPollStatus = 202;
+      while (Date.now() < pollDeadline) {
+        await sleep(POLL_INTERVAL_MS);
+        emailPollAttempts++;
+        const pollRes = await fetch(pollUrl, {
+          method: "GET",
+          headers: { "Accept": "application/json", "Cookie": cookies }
+        });
+        lastPollStatus = pollRes.status;
+        if (pollRes.status === 204 || pollRes.status === 200) break;
+        if (pollRes.status >= 400) {
+          const pollText = await pollRes.text();
+          emailError = { stage: "poll-status", status: pollRes.status, rawBody: pollText.slice(0, 1500) };
+          break;
+        }
       }
-    };
-
-    try {
-      const emailStart = Date.now();
-      const emailRes = await fetch(emailUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "application/json",
-          "Cookie": cookies
-        },
-        body: JSON.stringify(emailPayload)
-      });
-      const emailText = await emailRes.text();
-      const initialStatus = emailRes.status;
-      const locationHeader = emailRes.headers.get("location");
-
-      if (initialStatus !== 202 && initialStatus !== 200 && initialStatus !== 204) {
-        let errorDetails = null;
-        try { errorDetails = extractAllErrors(JSON.parse(emailText)); } catch {}
-        emailError = {
-          stage: "invoke-email",
-          status: initialStatus,
-          errorDetails,
-          rawBody: emailText.slice(0, 1500)
-        };
-      } else if (initialStatus === 202 && locationHeader) {
-        // Poll until completion or timeout
-        const pollUrl = locationHeader.startsWith("http") ? locationHeader : (BASE + locationHeader);
-        const pollDeadline = Date.now() + POLL_TIMEOUT_MS;
-        let lastPollStatus = 202;
-        while (Date.now() < pollDeadline) {
-          await sleep(POLL_INTERVAL_MS);
-          emailPollAttempts++;
-          const pollRes = await fetch(pollUrl, {
-            method: "GET",
-            headers: { "Accept": "application/json", "Cookie": cookies }
-          });
-          lastPollStatus = pollRes.status;
-          if (pollRes.status === 204 || pollRes.status === 200) break;
-          if (pollRes.status >= 400) {
-            const pollText = await pollRes.text();
-            emailError = { stage: "poll-status", status: pollRes.status, rawBody: pollText.slice(0, 1500) };
-            break;
-          }
-        }
-        emailFinalStatus = lastPollStatus;
-        if (!emailError && (lastPollStatus === 204 || lastPollStatus === 200)) {
-          emailed = true;
-        } else if (!emailError && lastPollStatus === 202) {
-          emailError = { stage: "poll-status", error: `Email poll timeout after ${POLL_TIMEOUT_MS}ms` };
-        }
-      } else {
-        // Synchronous success (200/204 immediately)
+      emailFinalStatus = lastPollStatus;
+      if (!emailError && (lastPollStatus === 204 || lastPollStatus === 200)) {
         emailed = true;
-        emailFinalStatus = initialStatus;
+      } else if (!emailError && lastPollStatus === 202) {
+        emailError = { stage: "poll-status", error: `Email poll timeout after ${POLL_TIMEOUT_MS}ms` };
       }
-    } catch (err) {
-      emailError = { stage: "invoke-email", error: String(err) };
+    } else {
+      emailed = true;
+      emailFinalStatus = initialStatus;
     }
+  } catch (err) {
+    emailError = { stage: "invoke-email", error: String(err) };
   }
 
-  // Successful result. The release worked; email may or may not have.
-  // We still count this as "ok" if release succeeded, but report any email issue.
   const overallOk = !emailError;
   return {
     ok: overallOk,
     stage: overallOk ? "done" : "email-failed",
     released: true,
-    statusAfterRelease: releaseStatus,
+    vendorRefWritten: true,
+    statusAfter: putStatusAfter,
     emailed,
-    emailSkipped: !shouldEmail,
+    emailSkipped: false,
     emailPollAttempts,
     emailFinalStatus,
     emailError
