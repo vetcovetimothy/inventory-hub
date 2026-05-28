@@ -5438,11 +5438,14 @@ function VendorContactsPage(props) {
   var contacts = props.contacts, updateContacts = props.updateContacts, toast = props.toast;
   var channels = props.channels || {};
   var updateChannels = props.updateChannels;
+  var shipRules = props.shipRules || {};
+  var updateShipRules = props.updateShipRules;
   var S = useMemo(function() { return makeStyles("#6366F1"); }, []);
   var _editing = useState(null), editing = _editing[0], setEditing = _editing[1];
   var _newVendor = useState(""), newVendor = _newVendor[0], setNewVendor = _newVendor[1];
   var _newEmail = useState(""), newEmail = _newEmail[0], setNewEmail = _newEmail[1];
   var _editEmail = useState(""), editEmail = _editEmail[0], setEditEmail = _editEmail[1];
+  var _editChannel = useState(""), editChannel = _editChannel[0], setEditChannel = _editChannel[1];
   var _search = useState(""), search = _search[0], setSearch = _search[1];
   var sorted = useMemo(function() {
     var entries = Object.entries(contacts).filter(function(e) { return e[0] && e[1]; });
@@ -5450,17 +5453,54 @@ function VendorContactsPage(props) {
     return entries.sort(function(a, b) { return a[0].localeCompare(b[0]); });
   }, [contacts, search]);
 
-  function setChannel(vendor, ch) {
-    var u = Object.assign({}, channels);
-    if (!ch) { delete u[vendor]; } else { u[vendor] = ch; }
-    updateChannels && updateChannels(u);
+  // Add a contact. Also seeds an empty shipping rule for the vendor if one
+  // doesn't already exist, so the vendor shows up on Shipping Rules immediately.
+  function addContact() {
+    var v = newVendor.trim(), e = newEmail.trim();
+    if (!v || !e) { toast("Enter vendor name and email", "error"); return; }
+    var u = Object.assign({}, contacts);
+    u[v] = e;
+    updateContacts(u);
+    // Sync to Shipping Rules — only add if not already present (don't overwrite).
+    if (updateShipRules && !shipRules.hasOwnProperty(v)) {
+      var sr = Object.assign({}, shipRules);
+      sr[v] = "";
+      updateShipRules(sr);
+    }
+    setNewVendor(""); setNewEmail("");
+    toast("Added " + v);
+  }
+
+  // Save an in-place edit (both email and channel come out together)
+  function saveEdit(vendor) {
+    var u = Object.assign({}, contacts); u[vendor] = editEmail.trim(); updateContacts(u);
+    // Save channel pick (may be empty string, which means "unset")
+    if (updateChannels) {
+      var uc = Object.assign({}, channels);
+      if (editChannel) { uc[vendor] = editChannel; } else { delete uc[vendor]; }
+      updateChannels(uc);
+    }
+    setEditing(null);
+    toast("Updated " + vendor);
+  }
+
+  // Remove the vendor everywhere: contacts, channels, shipping rules.
+  function removeVendor(vendor) {
+    var hasRule = shipRules.hasOwnProperty(vendor) && shipRules[vendor];
+    var msg = "Remove " + vendor + "?";
+    if (hasRule) msg += "\n\nThis will also delete its shipping rule.";
+    if (!confirm(msg)) return;
+    var u = Object.assign({}, contacts); delete u[vendor]; updateContacts(u);
+    if (updateChannels) { var uc = Object.assign({}, channels); delete uc[vendor]; updateChannels(uc); }
+    if (updateShipRules) { var sr = Object.assign({}, shipRules); delete sr[vendor]; updateShipRules(sr); }
+    toast("Removed " + vendor);
   }
 
   return <div>
     <div style={Object.assign({}, S.card, { display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" })}>
       <input value={newVendor} onChange={function(e) { setNewVendor(e.target.value); }} placeholder="Vendor name..." style={Object.assign({}, S.inp, { padding: "8px 14px", flex: 1, minWidth: 180 })} />
       <input value={newEmail} onChange={function(e) { setNewEmail(e.target.value); }} placeholder="email1@example.com, email2@example.com" style={Object.assign({}, S.inp, { padding: "8px 14px", flex: 2, minWidth: 280 })} />
-      <button onClick={function() { if (!newVendor.trim() || !newEmail.trim()) { toast("Enter vendor name and email", "error"); return; } var u = Object.assign({}, contacts); u[newVendor.trim()] = newEmail.trim(); updateContacts(u); setNewVendor(""); setNewEmail(""); toast("Added " + newVendor.trim()); }} style={S.btn()}>+ Add</button>
+      <button onClick={addContact} style={S.btn()}>+ Add</button>
     </div>
     <div style={{ display: "flex", gap: 10, marginBottom: 16, alignItems: "center" }}>
       <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search vendors or emails..." style={Object.assign({}, S.inp, { padding: "8px 14px", width: 300 })} />
@@ -5476,27 +5516,29 @@ function VendorContactsPage(props) {
           var ch = channels[vendor] || "";
           return <tr key={vendor}>
             <td style={Object.assign({}, S.td, { fontWeight: 500, color: "#374151" })}>{vendor}</td>
-            <td style={S.td}>{isEditing ? <input value={editEmail} onChange={function(ev) { setEditEmail(ev.target.value); }} style={Object.assign({}, S.inp, { padding: "5px 10px", fontSize: 13, width: "100%" })} autoFocus onKeyDown={function(ev) { if (ev.key === "Enter") { var u = Object.assign({}, contacts); u[vendor] = editEmail.trim(); updateContacts(u); setEditing(null); toast("Updated " + vendor); } if (ev.key === "Escape") setEditing(null); }} /> : <span style={{ color: "#6B7280" }}>{email}</span>}</td>
-            <td style={S.td}>
-              <select value={ch} onChange={function(ev) { setChannel(vendor, ev.target.value); }} style={Object.assign({}, S.sel, { padding: "5px 8px", fontSize: 12, width: "100%" })}>
+            <td style={S.td}>{isEditing ? <input value={editEmail} onChange={function(ev) { setEditEmail(ev.target.value); }} style={Object.assign({}, S.inp, { padding: "5px 10px", fontSize: 13, width: "100%" })} autoFocus onKeyDown={function(ev) { if (ev.key === "Enter") { saveEdit(vendor); } if (ev.key === "Escape") setEditing(null); }} /> : <span style={{ color: "#6B7280" }}>{email}</span>}</td>
+            <td style={S.td}>{isEditing ? (
+              <select value={editChannel} onChange={function(ev) { setEditChannel(ev.target.value); }} style={Object.assign({}, S.sel, { padding: "5px 8px", fontSize: 12, width: "100%" })}>
                 <option value="">— select —</option>
                 <option value="Email">Email</option>
                 <option value="TrueCommerce EDI">TrueCommerce EDI</option>
                 <option value="Website Ordering">Website Ordering</option>
               </select>
-            </td>
+            ) : (
+              ch ? <span style={{ fontSize: 11, padding: "3px 9px", borderRadius: 10, fontWeight: 600, background: ch === "Email" ? "#ECFDF5" : ch === "TrueCommerce EDI" ? "#EFF6FF" : "#FFF7ED", color: ch === "Email" ? "#059669" : ch === "TrueCommerce EDI" ? "#2563EB" : "#C2410C" }}>{ch}</span> : <span style={{ fontSize: 11, color: "#9CA3AF", fontStyle: "italic" }}>not set</span>
+            )}</td>
             <td style={Object.assign({}, S.td, { textAlign: "center" })}>{isEditing ? <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
-              <button onClick={function() { var u = Object.assign({}, contacts); u[vendor] = editEmail.trim(); updateContacts(u); setEditing(null); toast("Updated " + vendor); }} style={Object.assign({}, S.btn(), { padding: "4px 10px", fontSize: 11 })}>Save</button>
+              <button onClick={function() { saveEdit(vendor); }} style={Object.assign({}, S.btn(), { padding: "4px 10px", fontSize: 11 })}>Save</button>
               <button onClick={function() { setEditing(null); }} style={Object.assign({}, S.btn("ghost"), { padding: "4px 10px", fontSize: 11 })}>Cancel</button>
             </div> : <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
-              <button onClick={function() { setEditing(vendor); setEditEmail(email); }} style={{ background: "none", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 14, padding: 4 }} title="Edit">{"\u270E"}</button>
-              <button onClick={function() { if (confirm("Remove " + vendor + "?")) { var u = Object.assign({}, contacts); delete u[vendor]; updateContacts(u); var uc = Object.assign({}, channels); delete uc[vendor]; updateChannels && updateChannels(uc); toast("Removed " + vendor); } }} style={{ background: "none", border: "none", cursor: "pointer", color: "#D1D5DB", fontSize: 14, padding: 4 }} title="Delete">{"\u2715"}</button>
+              <button onClick={function() { setEditing(vendor); setEditEmail(email); setEditChannel(ch); }} style={{ background: "none", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 14, padding: 4 }} title="Edit">{"\u270E"}</button>
+              <button onClick={function() { removeVendor(vendor); }} style={{ background: "none", border: "none", cursor: "pointer", color: "#D1D5DB", fontSize: 14, padding: 4 }} title="Delete">{"\u2715"}</button>
             </div>}</td>
           </tr>;
         })}</tbody>
       </table>
     </div>
-    <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 8 }}>Shared with team &middot; Channel controls how PO Tools handles vendors (Email = send Acumatica email; TrueCommerce EDI / Website Ordering = write Vendor Ref only, keep On Hold)</div>
+    <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 8 }}>Shared with team &middot; Adding or deleting a vendor here also adds/removes the corresponding Shipping Rule. Channel controls PO Tools behavior (Email = Acumatica email; TrueCommerce EDI / Website Ordering = write Vendor Ref only, keep On Hold).</div>
   </div>;
 }
 
@@ -5777,7 +5819,7 @@ export default function Hub() {
           {!showLogin && page === "truckloader" && <TruckloaderTool toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} />}
           {!showLogin && page === "oos-tracker" && <OOSTracker toast={showToast} cred={cred} />}
           {!showLogin && page === "backorder-resolver" && <BackorderResolver toast={showToast} cred={cred} />}
-          {!showLogin && page === "vendor-contacts" && <VendorContactsPage contacts={vendorContacts} updateContacts={updateVendorContacts} channels={vendorChannels} updateChannels={updateVendorChannels} toast={showToast} />}
+          {!showLogin && page === "vendor-contacts" && <VendorContactsPage contacts={vendorContacts} updateContacts={updateVendorContacts} channels={vendorChannels} updateChannels={updateVendorChannels} shipRules={shipRules} updateShipRules={updateShipRules} toast={showToast} />}
           {!showLogin && page === "how-to" && <HowToGuide toast={showToast} />}
         </div>
       </div>
