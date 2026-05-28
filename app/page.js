@@ -5552,22 +5552,19 @@ function ShippingRulesPage(props) {
   var _editRule = useState(""), editRule = _editRule[0], setEditRule = _editRule[1];
   var _search = useState(""), search = _search[0], setSearch = _search[1];
   var sorted = useMemo(function() {
-    var entries = Object.entries(shipRules).filter(function(e) { return e[0] && e[1]; });
-    if (search) { var s = search.toLowerCase(); entries = entries.filter(function(e) { return e[0].toLowerCase().indexOf(s) >= 0 || e[1].toLowerCase().indexOf(s) >= 0; }); }
+    // Keep vendors even if their rule is empty — they're visible so user can click pencil to add a rule.
+    var entries = Object.entries(shipRules).filter(function(e) { return !!e[0]; });
+    if (search) { var s = search.toLowerCase(); entries = entries.filter(function(e) { return e[0].toLowerCase().indexOf(s) >= 0 || (e[1] || "").toLowerCase().indexOf(s) >= 0; }); }
     return entries.sort(function(a, b) { return a[0].localeCompare(b[0]); });
   }, [shipRules, search]);
 
   return <div>
-    <div style={Object.assign({}, S.card, { display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" })}>
-      <input value={newVendor} onChange={function(e) { setNewVendor(e.target.value); }} placeholder="Vendor name..." style={Object.assign({}, S.inp, { padding: "8px 14px", flex: 1, minWidth: 180 })} />
-      <input value={newRule} onChange={function(e) { setNewRule(e.target.value); }} placeholder="e.g. min:5000; message:Free Shipping; else:Not Free Shipping" style={Object.assign({}, S.inp, { padding: "8px 14px", flex: 2, minWidth: 280 })} />
-      <button onClick={function() { if (!newVendor.trim() || !newRule.trim()) { toast("Enter vendor name and rule", "error"); return; } var u = Object.assign({}, shipRules); u[newVendor.trim()] = newRule.trim(); updateShipRules(u); setNewVendor(""); setNewRule(""); toast("Added " + newVendor.trim()); }} style={S.btn()}>+ Add</button>
-    </div>
     <div style={{ display: "flex", gap: 10, marginBottom: 16, alignItems: "center" }}>
       <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search vendors or rules..." style={Object.assign({}, S.inp, { padding: "8px 14px", width: 300 })} />
       <div style={{ flex: 1 }} />
       <span style={{ fontSize: 12, color: "#9CA3AF" }}>{sorted.length} vendors</span>
     </div>
+    <div style={{ fontSize: 11, color: "#9CA3AF", marginBottom: 12 }}>Vendors are managed in <strong>Settings &gt; Vendor Contacts</strong>. Edit the rule expression here.</div>
     <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto" })}>
       <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 13 }}>
         <thead><tr><th style={Object.assign({}, S.th, { width: "30%" })}>Vendor</th><th style={S.th}>Rule</th><th style={Object.assign({}, S.th, { width: 100 })}>Actions</th></tr></thead>
@@ -5576,7 +5573,7 @@ function ShippingRulesPage(props) {
           var isEditing = editing === vendor;
           return <tr key={vendor}>
             <td style={Object.assign({}, S.td, { fontWeight: 500, color: "#374151" })}>{vendor}</td>
-            <td style={S.td}>{isEditing ? <input value={editRule} onChange={function(ev) { setEditRule(ev.target.value); }} style={Object.assign({}, S.inp, { padding: "5px 10px", fontSize: 13, width: "100%" })} autoFocus onKeyDown={function(ev) { if (ev.key === "Enter") { var u = Object.assign({}, shipRules); u[vendor] = editRule.trim(); updateShipRules(u); setEditing(null); toast("Updated " + vendor); } if (ev.key === "Escape") setEditing(null); }} /> : <span style={{ color: "#6B7280" }}>{rule}</span>}</td>
+            <td style={S.td}>{isEditing ? <input value={editRule} onChange={function(ev) { setEditRule(ev.target.value); }} placeholder="e.g. min:5000; message:Free Shipping; else:Not Free Shipping" style={Object.assign({}, S.inp, { padding: "5px 10px", fontSize: 13, width: "100%" })} autoFocus onKeyDown={function(ev) { if (ev.key === "Enter") { var u = Object.assign({}, shipRules); u[vendor] = editRule.trim(); updateShipRules(u); setEditing(null); toast("Updated " + vendor); } if (ev.key === "Escape") setEditing(null); }} /> : (rule ? <span style={{ color: "#6B7280" }}>{rule}</span> : <span style={{ color: "#9CA3AF", fontStyle: "italic", fontSize: 12 }}>no rule set</span>)}</td>
             <td style={Object.assign({}, S.td, { textAlign: "center" })}>{isEditing ? <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
               <button onClick={function() { var u = Object.assign({}, shipRules); u[vendor] = editRule.trim(); updateShipRules(u); setEditing(null); toast("Updated " + vendor); }} style={Object.assign({}, S.btn(), { padding: "4px 10px", fontSize: 11 })}>Save</button>
               <button onClick={function() { setEditing(null); }} style={Object.assign({}, S.btn("ghost"), { padding: "4px 10px", fontSize: 11 })}>Cancel</button>
