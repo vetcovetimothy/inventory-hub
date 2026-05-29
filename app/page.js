@@ -2273,7 +2273,7 @@ function CycleCountTool(props) {
                 {flaggedRows.length > 0 && <input type="checkbox" checked={allApproved} ref={function(el) { if (el) el.indeterminate = someApproved; }} onChange={toggleApproveAll} title={allApproved ? "Uncheck all" : "Approve all flagged"} style={{ cursor: "pointer", width: 14, height: 14 }} />}
               </div>
             </th>}
-            {["Inventory ID", "Warehouse", "Location", "Quantity", "UOM", "NDC", "Reported Qty", "Stock Qty"].map(function(h) { return <th key={h} style={S.th}>{h}</th>; })}
+            {["Inventory ID", "Warehouse", "Location", "UOM", "NDC", "Reported Qty", "Stock Qty", "Adjustment Quantity"].map(function(h) { return <th key={h} style={S.th}>{h}</th>; })}
             {hasDoh && <th style={S.th}>DRR</th>}
             {hasDoh && <th style={S.th}>Days of Supply</th>}
           </tr></thead>
@@ -2294,11 +2294,11 @@ function CycleCountTool(props) {
               <td style={Object.assign({}, S.td, { color: r.inventoryId.startsWith("GEN-") ? "#059669" : r.inventoryId.startsWith("UNV-") ? "#2563EB" : "#374151" })}>{r.inventoryId}</td>
               <td style={S.td}>{r.warehouse}</td>
               <td style={S.td}>{r.location}</td>
-              <td style={Object.assign({}, S.td, { color: r.quantity < 0 ? "#DC2626" : "#374151" })}>{r.quantity.toFixed(1)}</td>
               <td style={S.td}>{r.uom}</td>
               <td style={Object.assign({}, S.td, { color: "#6B7280" })}>{r.ndc}</td>
               <td style={Object.assign({}, S.td, { color: "#6B7280" })}>{r.reportedQty.toFixed(1)}</td>
               <td style={Object.assign({}, S.td, { color: "#6B7280" })}>{r.stockQty.toFixed(1)}</td>
+              <td style={Object.assign({}, S.td, { color: r.quantity < 0 ? "#DC2626" : "#374151" })}>{r.quantity.toFixed(1)}</td>
               {hasDoh && <td style={Object.assign({}, S.td, { color: "#6B7280", fontSize: 12 })}>{r.convertedDailyRunRate != null ? r.convertedDailyRunRate : "—"}</td>}
               {hasDoh && <td style={Object.assign({}, S.td, { color: dosColor, fontWeight: r.isFlagged ? 600 : 400, fontSize: 12 })}>{dosDisplay}{r.flagReason === "no DRR" ? " (no DRR)" : ""}</td>}
             </tr>;
