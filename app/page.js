@@ -1577,6 +1577,9 @@ function CycleCountTool(props) {
   var _results = useState([]), results = _results[0], setResults = _results[1];
   var _errors = useState([]), errors = _errors[0], setErrors = _errors[1];
   var _loading = useState(false), loading = _loading[0], setLoading = _loading[1];
+  // approvals: { inventoryId: true } — flagged rows the user has approved for CC upload.
+  // Reset every time results are regenerated.
+  var _approvals = useState({}), approvals = _approvals[0], setApprovals = _approvals[1];
 
   // Load cached stock items from localStorage on mount
   useEffect(function() {
@@ -1831,7 +1834,7 @@ function CycleCountTool(props) {
     if (!stockRows || stockRows.length === 0) { toast("Upload the Stock Items XLSX first", "error"); return; }
     if (!warehouse.trim()) { toast("Enter a warehouse code for output", "error"); return; }
 
-    setLoading(true); setResults([]); setErrors([]);
+    setLoading(true); setResults([]); setErrors([]); setApprovals({});
     try {
       // Parse NDCs from pasted text — extract NDCs with dashes, skip blanks
       var ndcLines = ndcText.split("\n").map(function(l) { return l.trim(); }).filter(function(l) { return l.length > 0 && /\d/.test(l); });
@@ -2005,6 +2008,42 @@ function CycleCountTool(props) {
           row.convertedDailyRunRate = Math.round(drrInSales * 100) / 100;
           row.drrConvSource = convSource;
         });
+
+        // Compute Days of Supply change + flag status for each row.
+        // Rules:
+        //   - DoS = Adjustment / Converted DRR (positive = supply added, negative = supply removed)
+        //   - Flag when |DoS| > 7 days
+        //   - Also flag when Adjustment is non-zero but DRR is missing/zero (impact unknown — needs approval)
+        //   - Adjustment of 0 is never flagged (no supply change either way)
+        output.forEach(function(row) {
+          var adj = row.quantity;
+          var crr = row.convertedDailyRunRate;
+          if (adj === 0) {
+            row.daysOfSupply = 0;
+            row.isFlagged = false;
+            row.flagReason = "";
+          } else if (crr == null || crr <= 0) {
+            row.daysOfSupply = null;
+            row.isFlagged = true;
+            row.flagReason = "no DRR";
+          } else {
+            row.daysOfSupply = Math.round((adj / crr) * 10) / 10;
+            if (Math.abs(row.daysOfSupply) > 7) {
+              row.isFlagged = true;
+              row.flagReason = "|DoS| > 7";
+            } else {
+              row.isFlagged = false;
+              row.flagReason = "";
+            }
+          }
+        });
+      } else {
+        // No DOH file → no flags at all
+        output.forEach(function(row) {
+          row.daysOfSupply = null;
+          row.isFlagged = false;
+          row.flagReason = "";
+        });
       }
 
       setResults(output);
@@ -2017,9 +2056,27 @@ function CycleCountTool(props) {
     }
   }
 
+  // CC upload routing:
+  //   - If no DOH file: include everything (today's behavior, no flag UI shown)
+  //   - If DOH file loaded: include unflagged rows + flagged rows that have been approved
+  function getUploadRows() {
+    var hasDoh = dohRows && dohRows.length > 0;
+    if (!hasDoh) return results;
+    return results.filter(function(r) {
+      if (!r.isFlagged) return true;
+      return !!approvals[r.inventoryId];
+    });
+  }
+
+  // CC check routing: flagged rows that have NOT been approved (only meaningful when DOH is loaded)
+  function getCheckRows() {
+    return results.filter(function(r) { return r.isFlagged && !approvals[r.inventoryId]; });
+  }
+
   function downloadCSV() {
+    var rows = getUploadRows();
     var header = "Inventory ID,Warehouse,Location,Quantity,UOM\r\n";
-    var lines = results.map(function(r) {
+    var lines = rows.map(function(r) {
       return [r.inventoryId, r.warehouse, r.location, r.quantity, r.uom]
         .map(function(v) { return "\"" + String(v == null ? "" : v).replace(/"/g, '""') + "\""; }).join(",");
     });
@@ -2032,12 +2089,10 @@ function CycleCountTool(props) {
   }
 
   function downloadDrrCSV() {
+    var rows = getCheckRows();
     var header = "Inventory ID,NDC,Location Code,Description,Fuze's Counts,Our Counts,Adjustment,Daily Run Rate,Converted Daily Run Rate,Days of Supply\r\n";
-    var lines = results.map(function(r) {
-      var daysOfSupply = "";
-      if (r.convertedDailyRunRate && r.convertedDailyRunRate > 0) {
-        daysOfSupply = Math.round((r.quantity / r.convertedDailyRunRate) * 10) / 10;
-      }
+    var lines = rows.map(function(r) {
+      var daysOfSupply = r.daysOfSupply != null ? r.daysOfSupply : "";
       return [
         r.inventoryId,
         r.ndc,
@@ -2150,10 +2205,10 @@ function CycleCountTool(props) {
         <button onClick={processData} disabled={loading} style={Object.assign({}, S.btn(), { padding: "10px 20px", opacity: loading ? 0.5 : 1 })}>
           {loading ? "Processing..." : "Generate Cycle Count"}
         </button>
-        {results.length > 0 && <button onClick={downloadCSV} style={Object.assign({}, S.btn("ghost"), { padding: "10px 16px" })}><IconDL /> CC upload</button>}
-        {results.length > 0 && dohRows && dohRows.length > 0 && <button onClick={downloadDrrCSV} style={Object.assign({}, S.btn("ghost"), { padding: "10px 16px" })}><IconDL /> CC check</button>}
+        {results.length > 0 && <button onClick={downloadCSV} style={Object.assign({}, S.btn("ghost"), { padding: "10px 16px" })}><IconDL /> CC upload{dohRows && dohRows.length > 0 ? " (" + getUploadRows().length + ")" : ""}</button>}
+        {results.length > 0 && dohRows && dohRows.length > 0 && getCheckRows().length > 0 && <button onClick={downloadDrrCSV} style={Object.assign({}, S.btn("ghost"), { padding: "10px 16px" })}><IconDL /> CC check ({getCheckRows().length})</button>}
         {results.length > 0 && <span style={{ fontSize: 12, color: "#6B7280" }}>{results.length} items</span>}
-        {(ndcText.trim() || vendorFile || results.length > 0) && <button onClick={function() { setNdcText(""); setVendorFile(null); setVendorRows(null); setCsvWarehouses([]); setCsvWhSelected(""); setCsvWhCounts({}); setWarehouse(""); setResults([]); setErrors([]); setSftpFile(null); setSftpRows(null); }} style={Object.assign({}, S.btn("ghost"), { padding: "10px 16px", marginLeft: "auto" })}><IconTrash /> Clear</button>}
+        {(ndcText.trim() || vendorFile || results.length > 0) && <button onClick={function() { setNdcText(""); setVendorFile(null); setVendorRows(null); setCsvWarehouses([]); setCsvWhSelected(""); setCsvWhCounts({}); setWarehouse(""); setResults([]); setErrors([]); setSftpFile(null); setSftpRows(null); setApprovals({}); }} style={Object.assign({}, S.btn("ghost"), { padding: "10px 16px", marginLeft: "auto" })}><IconTrash /> Clear</button>}
       </div>
     </div>
 
@@ -2163,25 +2218,85 @@ function CycleCountTool(props) {
       })}
     </div>}
 
-    {results.length > 0 && <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto", maxHeight: "calc(100vh - 300px)" })}>
-      <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
-        <thead><tr>
-          {["Inventory ID", "Warehouse", "Location", "Quantity", "UOM", "NDC", "Reported Qty", "Stock Qty"].map(function(h) { return <th key={h} style={S.th}>{h}</th>; })}
-        </tr></thead>
-        <tbody>{results.map(function(r, i) {
-          return <tr key={i} style={{ background: r.quantity < 0 ? "rgba(220,38,38,0.04)" : "transparent" }}>
-            <td style={Object.assign({}, S.td, { color: r.inventoryId.startsWith("GEN-") ? "#059669" : r.inventoryId.startsWith("UNV-") ? "#2563EB" : "#374151" })}>{r.inventoryId}</td>
-            <td style={S.td}>{r.warehouse}</td>
-            <td style={S.td}>{r.location}</td>
-            <td style={Object.assign({}, S.td, { color: r.quantity < 0 ? "#DC2626" : "#374151" })}>{r.quantity.toFixed(1)}</td>
-            <td style={S.td}>{r.uom}</td>
-            <td style={Object.assign({}, S.td, { color: "#6B7280" })}>{r.ndc}</td>
-            <td style={Object.assign({}, S.td, { color: "#6B7280" })}>{r.reportedQty.toFixed(1)}</td>
-            <td style={Object.assign({}, S.td, { color: "#6B7280" })}>{r.stockQty.toFixed(1)}</td>
-          </tr>;
-        })}</tbody>
-      </table>
-    </div>}
+    {results.length > 0 && (function() {
+      var hasDoh = dohRows && dohRows.length > 0;
+      // Sort: flagged first (descending by |DoS|, with no-DRR flagged rows at the very top),
+      // then unflagged in original order.
+      var sortedResults = results.slice();
+      if (hasDoh) {
+        sortedResults.sort(function(a, b) {
+          if (a.isFlagged !== b.isFlagged) return a.isFlagged ? -1 : 1;
+          if (a.isFlagged) {
+            // No-DRR flagged rows first (most uncertain)
+            var aNoDrr = a.daysOfSupply == null;
+            var bNoDrr = b.daysOfSupply == null;
+            if (aNoDrr !== bNoDrr) return aNoDrr ? -1 : 1;
+            return Math.abs(b.daysOfSupply || 0) - Math.abs(a.daysOfSupply || 0);
+          }
+          return 0;
+        });
+      }
+      var flaggedCount = sortedResults.filter(function(r) { return r.isFlagged; }).length;
+      function toggleApproval(invId) {
+        var u = Object.assign({}, approvals);
+        if (u[invId]) { delete u[invId]; } else { u[invId] = true; }
+        setApprovals(u);
+      }
+      function approveAll() {
+        var u = Object.assign({}, approvals);
+        sortedResults.forEach(function(r) { if (r.isFlagged) u[r.inventoryId] = true; });
+        setApprovals(u);
+      }
+      function approveNone() {
+        var u = Object.assign({}, approvals);
+        sortedResults.forEach(function(r) { if (r.isFlagged) delete u[r.inventoryId]; });
+        setApprovals(u);
+      }
+      return <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto", maxHeight: "calc(100vh - 300px)" })}>
+        {hasDoh && flaggedCount > 0 && <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", background: "rgba(220,38,38,0.04)", borderBottom: "1px solid rgba(220,38,38,0.15)", fontSize: 12, color: "#6B7280" }}>
+          <span style={{ color: "#DC2626", fontWeight: 600 }}>{"\u26A0"} {flaggedCount} flagged ({"|"}DoS{"|"} {">"} 7 days or unknown DRR)</span>
+          <span style={{ color: "#9CA3AF" }}>{"\u00B7"}</span>
+          <span>Check to approve for CC upload; leave unchecked to route to CC check.</span>
+          <div style={{ flex: 1 }} />
+          <button onClick={approveAll} style={{ background: "transparent", border: "1px solid #E5E7EB", padding: "3px 10px", borderRadius: 6, fontSize: 11, cursor: "pointer", color: "#374151" }}>Approve all</button>
+          <button onClick={approveNone} style={{ background: "transparent", border: "1px solid #E5E7EB", padding: "3px 10px", borderRadius: 6, fontSize: 11, cursor: "pointer", color: "#374151" }}>Clear approvals</button>
+        </div>}
+        <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
+          <thead><tr>
+            {hasDoh && <th style={Object.assign({}, S.th, { width: 60, textAlign: "center" })}>Approve</th>}
+            {["Inventory ID", "Warehouse", "Location", "Quantity", "UOM", "NDC", "Reported Qty", "Stock Qty"].map(function(h) { return <th key={h} style={S.th}>{h}</th>; })}
+            {hasDoh && <th style={S.th}>DRR</th>}
+            {hasDoh && <th style={S.th}>Days of Supply</th>}
+          </tr></thead>
+          <tbody>{sortedResults.map(function(r, i) {
+            var approved = !!approvals[r.inventoryId];
+            var rowBg;
+            if (r.isFlagged && !approved) rowBg = "rgba(220,38,38,0.06)";
+            else if (r.isFlagged && approved) rowBg = "rgba(5,150,105,0.05)";
+            else if (r.quantity < 0) rowBg = "rgba(220,38,38,0.04)";
+            else rowBg = "transparent";
+            // Add a subtle divider after the last flagged row
+            var isLastFlagged = hasDoh && r.isFlagged && (i + 1 < sortedResults.length) && !sortedResults[i + 1].isFlagged;
+            var borderBottom = isLastFlagged ? "2px solid rgba(220,38,38,0.2)" : undefined;
+            var dosDisplay = r.daysOfSupply == null ? "—" : (r.daysOfSupply > 0 ? "+" : "") + r.daysOfSupply.toFixed(1);
+            var dosColor = r.daysOfSupply == null ? "#DC2626" : (Math.abs(r.daysOfSupply) > 7 ? "#DC2626" : "#374151");
+            return <tr key={i} style={{ background: rowBg, borderBottom: borderBottom }}>
+              {hasDoh && <td style={Object.assign({}, S.td, { textAlign: "center" })}>{r.isFlagged ? <input type="checkbox" checked={approved} onChange={function() { toggleApproval(r.inventoryId); }} style={{ cursor: "pointer", width: 16, height: 16 }} /> : <span style={{ color: "#D1D5DB" }}>{"\u2014"}</span>}</td>}
+              <td style={Object.assign({}, S.td, { color: r.inventoryId.startsWith("GEN-") ? "#059669" : r.inventoryId.startsWith("UNV-") ? "#2563EB" : "#374151" })}>{r.inventoryId}</td>
+              <td style={S.td}>{r.warehouse}</td>
+              <td style={S.td}>{r.location}</td>
+              <td style={Object.assign({}, S.td, { color: r.quantity < 0 ? "#DC2626" : "#374151" })}>{r.quantity.toFixed(1)}</td>
+              <td style={S.td}>{r.uom}</td>
+              <td style={Object.assign({}, S.td, { color: "#6B7280" })}>{r.ndc}</td>
+              <td style={Object.assign({}, S.td, { color: "#6B7280" })}>{r.reportedQty.toFixed(1)}</td>
+              <td style={Object.assign({}, S.td, { color: "#6B7280" })}>{r.stockQty.toFixed(1)}</td>
+              {hasDoh && <td style={Object.assign({}, S.td, { color: "#6B7280", fontSize: 12 })}>{r.convertedDailyRunRate != null ? r.convertedDailyRunRate : "—"}</td>}
+              {hasDoh && <td style={Object.assign({}, S.td, { color: dosColor, fontWeight: r.isFlagged ? 600 : 400, fontSize: 12 })}>{dosDisplay}{r.flagReason === "no DRR" ? " (no DRR)" : ""}</td>}
+            </tr>;
+          })}</tbody>
+        </table>
+      </div>;
+    })()}
   </div>;
 }
 
