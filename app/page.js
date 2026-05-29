@@ -1622,10 +1622,14 @@ function CycleCountTool(props) {
       setStockLoading(false);
     });
   }
-  // Load TP-DOH from localStorage on mount, but only if saved date == today
+  // Load TP-DOH from localStorage on mount, but only if saved date == today.
+  // Cache key bumped to v2 in May 2026 when we switched from On Hand → Final FC units
+  // for the DRR calculation. Old v1 caches are cleared automatically.
   useEffect(function() {
     try {
-      var saved = localStorage.getItem("tpdoh-cache");
+      // Drop any legacy v1 cache once, no matter what
+      localStorage.removeItem("tpdoh-cache");
+      var saved = localStorage.getItem("tpdoh-cache-v2");
       if (saved) {
         var parsed = JSON.parse(saved);
         var today = new Date().toLocaleDateString();
@@ -1633,8 +1637,7 @@ function CycleCountTool(props) {
           setDohRows(parsed.rows);
           setDohMeta({ date: parsed.savedDate, count: parsed.rows.length, name: parsed.name || "TP-DOH" });
         } else {
-          // Stale — clear it
-          localStorage.removeItem("tpdoh-cache");
+          localStorage.removeItem("tpdoh-cache-v2");
         }
       }
     } catch (e) { /* localStorage unavailable, ignore */ }
@@ -1684,28 +1687,41 @@ function CycleCountTool(props) {
       return resp.json();
     }).then(function(json) {
       if (json.error) { toast("TP-DOH parse error: " + json.error, "error"); setDohLoading(false); setDohFile(null); return; }
-      // Keep only the columns we need — strip Meta data tab values if they leaked in
-      var trimmed = (json.rows || []).map(function(r) {
+      // Keep only the columns we need — strip Meta data tab values if they leaked in.
+      // "Final FC units" header includes the current month (e.g. "Final FC units May 2026"),
+      // so we match by prefix instead of exact name so the parser keeps working when the month rolls over.
+      var rawRows = json.rows || [];
+      var finalFcKey = null;
+      if (rawRows.length > 0) {
+        var keys = Object.keys(rawRows[0]);
+        for (var ki = 0; ki < keys.length; ki++) {
+          if (keys[ki].toLowerCase().indexOf("final fc units") === 0) { finalFcKey = keys[ki]; break; }
+        }
+      }
+      var trimmed = rawRows.map(function(r) {
         return {
           productCode: String(r["Product code"] || "").trim(),
           description: String(r["Product description"] || "").trim(),
           locationCode: String(r["Location code"] || "").trim(),
           mainUom: String(r["Main unit of measure"] || "").trim(),
-          onHand: parseFloat(r["On hand"]) || 0,
+          finalFcUnits: finalFcKey ? (parseFloat(r[finalFcKey]) || 0) : 0,
           daysOnHand: parseFloat(r["Days on hand"]) || 0,
         };
       }).filter(function(r) { return r.productCode; });
       if (trimmed.length === 0) {
-        toast("TP-DOH file has no valid rows — make sure 'Report data' is the first sheet", "error");
+        toast("TP-DOH file has no valid rows \u2014 make sure 'Report data' is the first sheet", "error");
         setDohLoading(false); setDohFile(null); return;
+      }
+      if (!finalFcKey) {
+        toast("TP-DOH parsed but no 'Final FC units' column found \u2014 Daily Run Rate will be 0", "error");
       }
       setDohRows(trimmed);
       var today = new Date().toLocaleDateString();
       var meta = { date: today, count: trimmed.length, name: file.name };
       setDohMeta(meta);
       try {
-        localStorage.setItem("tpdoh-cache", JSON.stringify({ rows: trimmed, savedDate: today, name: file.name }));
-        toast("TP-DOH loaded — " + trimmed.length + " items (today only)", "success");
+        localStorage.setItem("tpdoh-cache-v2", JSON.stringify({ rows: trimmed, savedDate: today, name: file.name }));
+        toast("TP-DOH loaded \u2014 " + trimmed.length + " items (today only)", "success");
       } catch (e) {
         toast("TP-DOH loaded but failed to cache locally", "error");
       }
@@ -1929,8 +1945,8 @@ function CycleCountTool(props) {
       });
 
       // If TP-DOH file is loaded, enrich each result with Daily Run Rate.
-      // Recipe:
-      //   1. drrInBase = TP-DOH On Hand ÷ Days on Hand (in TP-DOH's Main Unit of Measure)
+      // Recipe (changed May 2026: Final FC units replaces On Hand as the DRR numerator):
+      //   1. drrInBase = TP-DOH Final FC units ÷ Days on Hand (in TP-DOH's Main Unit of Measure)
       //   2. Get TP-DOH's Main UOM for the item (from the TP-DOH row)
       //   3. Get Sales Unit for the item (from Stock Items)
       //   4. In Stock Item UOM Conversions GI, find the row where
@@ -1949,12 +1965,12 @@ function CycleCountTool(props) {
           var dohRow = dohMap[row.inventoryId + "|" + wh];
           if (!dohRow) { row.dailyRunRate = null; row.convertedDailyRunRate = null; return; }
           row.dohDescription = dohRow.description;
-          row.dohOnHand = dohRow.onHand;
+          row.dohFinalFcUnits = dohRow.finalFcUnits;
           row.dohDaysOnHand = dohRow.daysOnHand;
           if (dohRow.daysOnHand <= 0) { row.dailyRunRate = null; row.convertedDailyRunRate = null; return; }
 
           // Step 1: DRR in TP-DOH's native unit
-          var drrInBase = dohRow.onHand / dohRow.daysOnHand;
+          var drrInBase = dohRow.finalFcUnits / dohRow.daysOnHand;
 
           // Step 2 & 3: get the FROM unit (TP-DOH Main UOM) and TO unit (Stock Items Sales Unit)
           var mainUom = (dohRow.mainUom || "").toUpperCase();
@@ -2089,11 +2105,11 @@ function CycleCountTool(props) {
           </div>}
 
           <div style={{ fontSize: 14, color: "#374151", fontWeight: 600, marginBottom: 8, marginTop: 20, display: "flex", alignItems: "center", gap: 6 }}>{isSftp ? "5" : "4"}. TP-DOH Netstock File <span style={{ fontSize: 11, fontWeight: 400, color: "#9CA3AF" }}>(optional, resets daily)</span></div>
-          <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 6 }}>Provides Daily Run Rate (On Hand ÷ Days on Hand) for a second export. Reupload each day.</div>
+          <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 6 }}>Provides Daily Run Rate (Final FC units ÷ Days on Hand) for a second export. Reupload each day.</div>
           {dohRows && dohMeta ? <div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(20,184,166,0.08)", border: "1px solid rgba(20,184,166,0.25)", borderRadius: 10 }}>
               <span style={{ color: TOOL_COLOR, fontSize: 13 }}>{"\u2713"} {dohMeta.name} — {dohMeta.count.toLocaleString()} items (loaded {dohMeta.date})</span>
-              <button onClick={function() { setDohRows(null); setDohMeta(null); try { localStorage.removeItem("tpdoh-cache"); } catch (e) {} }} style={{ background: "transparent", border: "none", color: "#9CA3AF", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 4px", marginLeft: "auto" }}>{"\u00D7"}</button>
+              <button onClick={function() { setDohRows(null); setDohMeta(null); try { localStorage.removeItem("tpdoh-cache-v2"); } catch (e) {} }} style={{ background: "transparent", border: "none", color: "#9CA3AF", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 4px", marginLeft: "auto" }}>{"\u00D7"}</button>
             </div>
             <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 6, paddingLeft: 4 }}>
               UOM conversions: {
@@ -2134,8 +2150,8 @@ function CycleCountTool(props) {
         <button onClick={processData} disabled={loading} style={Object.assign({}, S.btn(), { padding: "10px 20px", opacity: loading ? 0.5 : 1 })}>
           {loading ? "Processing..." : "Generate Cycle Count"}
         </button>
-        {results.length > 0 && <button onClick={downloadCSV} style={Object.assign({}, S.btn("ghost"), { padding: "10px 16px" })}><IconDL /> Download CSV</button>}
-        {results.length > 0 && dohRows && dohRows.length > 0 && <button onClick={downloadDrrCSV} style={Object.assign({}, S.btn("ghost"), { padding: "10px 16px" })}><IconDL /> Download Cycle Count Check CSV</button>}
+        {results.length > 0 && <button onClick={downloadCSV} style={Object.assign({}, S.btn("ghost"), { padding: "10px 16px" })}><IconDL /> CC upload</button>}
+        {results.length > 0 && dohRows && dohRows.length > 0 && <button onClick={downloadDrrCSV} style={Object.assign({}, S.btn("ghost"), { padding: "10px 16px" })}><IconDL /> CC check</button>}
         {results.length > 0 && <span style={{ fontSize: 12, color: "#6B7280" }}>{results.length} items</span>}
         {(ndcText.trim() || vendorFile || results.length > 0) && <button onClick={function() { setNdcText(""); setVendorFile(null); setVendorRows(null); setCsvWarehouses([]); setCsvWhSelected(""); setCsvWhCounts({}); setWarehouse(""); setResults([]); setErrors([]); setSftpFile(null); setSftpRows(null); }} style={Object.assign({}, S.btn("ghost"), { padding: "10px 16px", marginLeft: "auto" })}><IconTrash /> Clear</button>}
       </div>
