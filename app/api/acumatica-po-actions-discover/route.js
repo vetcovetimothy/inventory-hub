@@ -1,25 +1,8 @@
 /**
  * GET /api/acumatica-po-actions-discover?username=X&password=Y
  *
- * DISCOVERY — fetch the authoritative list of actions callable on the
- * PurchaseOrder entity, including workflow actions that aren't in the
- * default endpoint definition.
- *
- * Why this exists:
- *   We tried POSTing to /PurchaseOrder/DoNotEmail and got 404 "Can't find
- *   action DoNotEmail". The Acumatica UI shows the action exists, but its
- *   REST endpoint name may differ from the UI label.
- *
- * From AcumaticaERP_IntegrationDevelopmentGuide.pdf (Custom Fields and
- * Workflow Actions section): "For each top-level entity, the REST API
- * provides the schema of custom fields and workflow actions."
- *
- * The schema endpoint is documented as:
- *   GET /entity/Default/{version}/{Entity}/$adHocSchema
- *
- * We hit that and return whatever workflow actions are listed. The response
- * should include a `customActions` (or similar) section with the actual
- * REST-callable names.
+ * v2 — fetches the PurchaseOrder $adHocSchema and extracts ONLY the
+ * _workflowActions field, so the response stays small and doesn't get truncated.
  */
 
 const BASE = process.env.ACUMATICA_BASE_URL || "https://vetcove.acumatica.com";
@@ -51,35 +34,44 @@ export async function GET(req) {
     return json({ ok: false, stage: "login", error: String(err) });
   }
 
-  // Try a couple of schema endpoint shapes — Acumatica documentation refers
-  // to $adHocSchema, but the actual field/url name has varied across versions.
-  const candidates = [
-    `${BASE}/entity/Default/${API_VERSION}/PurchaseOrder/$adHocSchema`,
-    `${BASE}/entity/Default/${API_VERSION}/PurchaseOrder?$adHocSchema=true`,
-  ];
-
-  const results = [];
-  for (const candidateUrl of candidates) {
-    try {
-      const res = await fetch(candidateUrl, {
-        method: "GET",
-        headers: { "Accept": "application/json", "Cookie": cookies }
-      });
+  // Fetch schema
+  const schemaUrl = `${BASE}/entity/Default/${API_VERSION}/PurchaseOrder/$adHocSchema`;
+  let schema;
+  try {
+    const res = await fetch(schemaUrl, {
+      method: "GET",
+      headers: { "Accept": "application/json", "Cookie": cookies }
+    });
+    if (!res.ok) {
       const text = await res.text();
-      let parsed = null;
-      try { parsed = JSON.parse(text); } catch {}
-      results.push({
-        url: candidateUrl,
-        status: res.status,
-        bodyPreview: text.slice(0, 2000),
-        parsedKeys: parsed ? Object.keys(parsed) : null
-      });
-    } catch (err) {
-      results.push({ url: candidateUrl, error: String(err) });
+      return json({ ok: false, stage: "schema-fetch", status: res.status, body: text.slice(0, 1000) });
     }
+    schema = await res.json();
+  } catch (err) {
+    return json({ ok: false, stage: "schema-fetch", error: String(err) });
   }
 
-  return json({ ok: true, results });
+  const workflowActions = schema._workflowActions || null;
+
+  // Extract just the action names for easy scanning
+  let actionNames = null;
+  if (Array.isArray(workflowActions)) {
+    actionNames = workflowActions.map(entry => {
+      // Each entry is an object whose single key is the action name
+      const keys = Object.keys(entry).filter(k => k !== "parameters");
+      return keys[0] || "unknown";
+    });
+  } else if (workflowActions && typeof workflowActions === "object") {
+    actionNames = Object.keys(workflowActions);
+  }
+
+  return json({
+    ok: true,
+    actionCount: actionNames ? actionNames.length : 0,
+    actionNames: actionNames,
+    // Full workflow actions data with params — useful for action signatures
+    workflowActions: workflowActions
+  });
 }
 
 function json(obj) {
