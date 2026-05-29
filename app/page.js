@@ -2242,14 +2242,21 @@ function CycleCountTool(props) {
         if (u[invId]) { delete u[invId]; } else { u[invId] = true; }
         setApprovals(u);
       }
-      function approveAll() {
+      // Header checkbox: if currently all flagged rows are approved → unapprove all;
+      // otherwise (none or some approved) → approve all. Mirrors standard inbox UX.
+      var flaggedRows = sortedResults.filter(function(r) { return r.isFlagged; });
+      var approvedFlaggedCount = flaggedRows.filter(function(r) { return !!approvals[r.inventoryId]; }).length;
+      var allApproved = flaggedRows.length > 0 && approvedFlaggedCount === flaggedRows.length;
+      var someApproved = approvedFlaggedCount > 0 && !allApproved;
+      function toggleApproveAll() {
         var u = Object.assign({}, approvals);
-        sortedResults.forEach(function(r) { if (r.isFlagged) u[r.inventoryId] = true; });
-        setApprovals(u);
-      }
-      function approveNone() {
-        var u = Object.assign({}, approvals);
-        sortedResults.forEach(function(r) { if (r.isFlagged) delete u[r.inventoryId]; });
+        if (allApproved) {
+          // Currently checked → uncheck → clear all flagged approvals
+          flaggedRows.forEach(function(r) { delete u[r.inventoryId]; });
+        } else {
+          // Unchecked or mixed → check → approve all flagged
+          flaggedRows.forEach(function(r) { u[r.inventoryId] = true; });
+        }
         setApprovals(u);
       }
       return <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto", maxHeight: "calc(100vh - 300px)" })}>
@@ -2257,13 +2264,15 @@ function CycleCountTool(props) {
           <span style={{ color: "#DC2626", fontWeight: 600 }}>{"\u26A0"} {flaggedCount} flagged ({"|"}DoS{"|"} {">"} 7 days or unknown DRR)</span>
           <span style={{ color: "#9CA3AF" }}>{"\u00B7"}</span>
           <span>Check to approve for CC upload; leave unchecked to route to CC check.</span>
-          <div style={{ flex: 1 }} />
-          <button onClick={approveAll} style={{ background: "transparent", border: "1px solid #E5E7EB", padding: "3px 10px", borderRadius: 6, fontSize: 11, cursor: "pointer", color: "#374151" }}>Approve all</button>
-          <button onClick={approveNone} style={{ background: "transparent", border: "1px solid #E5E7EB", padding: "3px 10px", borderRadius: 6, fontSize: 11, cursor: "pointer", color: "#374151" }}>Clear approvals</button>
         </div>}
         <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
           <thead><tr>
-            {hasDoh && <th style={Object.assign({}, S.th, { width: 60, textAlign: "center" })}>Approve</th>}
+            {hasDoh && <th style={Object.assign({}, S.th, { width: 60, textAlign: "center" })}>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                <span>Approve</span>
+                {flaggedRows.length > 0 && <input type="checkbox" checked={allApproved} ref={function(el) { if (el) el.indeterminate = someApproved; }} onChange={toggleApproveAll} title={allApproved ? "Uncheck all" : "Approve all flagged"} style={{ cursor: "pointer", width: 14, height: 14 }} />}
+              </div>
+            </th>}
             {["Inventory ID", "Warehouse", "Location", "Quantity", "UOM", "NDC", "Reported Qty", "Stock Qty"].map(function(h) { return <th key={h} style={S.th}>{h}</th>; })}
             {hasDoh && <th style={S.th}>DRR</th>}
             {hasDoh && <th style={S.th}>Days of Supply</th>}
