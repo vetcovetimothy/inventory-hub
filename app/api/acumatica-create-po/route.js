@@ -93,64 +93,69 @@ export async function POST(req) {
   }
 
   // ── Process trucks ──────────────────────────────────────────────────────
+  // Wrapped in try/finally so logout always fires even on uncaught exceptions.
+  // Without this, an error mid-loop leaks the session against the user's
+  // concurrent login limit until Acumatica times it out.
   const succeeded = [];
   let failure = null;
 
-  for (let i = 0; i < trucks.length; i++) {
-    const truck = trucks[i];
-    const description = `${shortCode} ${truck.label}`;
+  try {
+    for (let i = 0; i < trucks.length; i++) {
+      const truck = trucks[i];
+      const description = `${shortCode} ${truck.label}`;
 
-    const createResult = await createOnePO(cookies, {
-      location, warehouse, description, lines: truck.lines
-    });
+      const createResult = await createOnePO(cookies, {
+        location, warehouse, description, lines: truck.lines
+      });
 
-    if (!createResult.ok) {
-      failure = {
+      if (!createResult.ok) {
+        failure = {
+          truckIndex: i,
+          truckLabel: truck.label,
+          stage: createResult.stage,
+          status: createResult.status,
+          errorDetails: createResult.errorDetails,
+          rawBody: createResult.rawBody,
+          payloadSent: createResult.payloadSent
+        };
+        break;
+      }
+
+      const refResult = await setVendorRef(cookies, {
+        id: createResult.id,
+        orderNbr: createResult.orderNbr
+      });
+
+      if (!refResult.ok) {
+        failure = {
+          truckIndex: i,
+          truckLabel: truck.label,
+          stage: "set-vendor-ref",
+          partialPO: {
+            orderNbr: createResult.orderNbr,
+            note: "PO was created but VendorRef was not set. Set it manually in Acumatica, or delete the PO and re-run."
+          },
+          status: refResult.status,
+          errorDetails: refResult.errorDetails,
+          rawBody: refResult.rawBody
+        };
+        break;
+      }
+
+      succeeded.push({
         truckIndex: i,
         truckLabel: truck.label,
-        stage: createResult.stage,
+        orderNbr: createResult.orderNbr,
+        vendorRefSet: refResult.vendorRef,
         status: createResult.status,
-        errorDetails: createResult.errorDetails,
-        rawBody: createResult.rawBody,
-        payloadSent: createResult.payloadSent
-      };
-      break;
+        hold: createResult.hold,
+        lineCount: createResult.lineCount,
+        orderTotal: createResult.orderTotal
+      });
     }
-
-    const refResult = await setVendorRef(cookies, {
-      id: createResult.id,
-      orderNbr: createResult.orderNbr
-    });
-
-    if (!refResult.ok) {
-      failure = {
-        truckIndex: i,
-        truckLabel: truck.label,
-        stage: "set-vendor-ref",
-        partialPO: {
-          orderNbr: createResult.orderNbr,
-          note: "PO was created but VendorRef was not set. Set it manually in Acumatica, or delete the PO and re-run."
-        },
-        status: refResult.status,
-        errorDetails: refResult.errorDetails,
-        rawBody: refResult.rawBody
-      };
-      break;
-    }
-
-    succeeded.push({
-      truckIndex: i,
-      truckLabel: truck.label,
-      orderNbr: createResult.orderNbr,
-      vendorRefSet: refResult.vendorRef,
-      status: createResult.status,
-      hold: createResult.hold,
-      lineCount: createResult.lineCount,
-      orderTotal: createResult.orderTotal
-    });
+  } finally {
+    await logout(cookies);
   }
-
-  await logout(cookies);
 
   return json({
     ok: failure === null,
