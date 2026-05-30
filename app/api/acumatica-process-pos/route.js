@@ -134,25 +134,26 @@ export async function POST(req) {
   // fetch the GI once, filter to just those POs' rows, and POST to Make webhook.
   // Notes about edi attached to each EDI result so the frontend can show outcome.
   const ediResults = results.filter(r => r.ok && r.pendingEdiSend);
+  let ediBatchDiagnostic = null;
   if (ediResults.length > 0) {
     const ediOrderNbrs = new Set(ediResults.map(r => r.orderNbr));
     const ediOutcome = await sendEdiBatch(cookies, ediOrderNbrs);
     // ediOutcome: { ok, stage, ediRowCount, matchedOrderNbrs: Set, unmatchedOrderNbrs: Array,
-    //               webhookStatus?, webhookBody?, error? }
+    //               webhookStatus?, webhookBody?, error?, diagnostic? }
+    ediBatchDiagnostic = ediOutcome;
     // Annotate per-PO results
     for (const r of ediResults) {
-      if (!ediOutcome.matchedOrderNbrs || !ediOutcome.matchedOrderNbrs.has(r.orderNbr)) {
-        // PO was supposed to be in the GI but wasn't returned
-        r.ediSent = false;
-        r.ediError = "PO released but EDI GI returned no rows for this PO";
-        continue;
-      }
-      if (ediOutcome.ok) {
+      if (ediOutcome.ok && ediOutcome.matchedOrderNbrs && ediOutcome.matchedOrderNbrs.has(r.orderNbr)) {
         r.ediSent = true;
         r.stage = "edi-sent";
-      } else {
+      } else if (!ediOutcome.ok) {
+        // Batch-level failure (fetch, parse, or no matches). Surface the actual reason.
         r.ediSent = false;
-        r.ediError = ediOutcome.error || ediOutcome.stage || "EDI webhook failed";
+        r.ediError = ediOutcome.error || `EDI batch failed at stage ${ediOutcome.stage}`;
+      } else {
+        // Batch succeeded but this PO wasn't in the matched set
+        r.ediSent = false;
+        r.ediError = "PO released but its row was not in the EDI GI matched set";
       }
     }
   }
@@ -428,6 +429,7 @@ async function sendEdiBatch(cookies, ediOrderNbrs) {
   }
 
   // Step 1: Pull the entire GI (already filtered server-side to today + EDINOTAX vendors)
+  // Acumatica's OData v3 endpoint defaults to XML responses unless we explicitly request JSON.
   let allRows;
   try {
     const res = await fetch(EDI_GI_URL, {
@@ -446,7 +448,7 @@ async function sendEdiBatch(cookies, ediOrderNbrs) {
     const data = await res.json();
     allRows = Array.isArray(data) ? data : (data.value || []);
   } catch (err) {
-    return { ok: false, stage: "fetch-gi", error: String(err), matchedOrderNbrs: new Set() };
+    return { ok: false, stage: "fetch-gi", error: `GI fetch/parse error: ${String(err)}`, matchedOrderNbrs: new Set() };
   }
 
   // Step 2: Identify the OrderNbr key in the GI rows.
@@ -487,12 +489,22 @@ async function sendEdiBatch(cookies, ediOrderNbrs) {
   const matchedOrderNbrs = new Set(matchedRows.map(r => extractValue(r[orderNbrKey])));
 
   if (matchedRows.length === 0) {
+    // Collect diagnostic info: what OrderNbrs DID the GI return? What did we ask for?
+    const giOrderNbrs = Array.from(new Set(allRows.map(r => extractValue(r[orderNbrKey])).filter(Boolean)));
+    const requestedOrderNbrs = Array.from(ediOrderNbrs);
     return {
       ok: false,
       stage: "filter-gi",
-      error: `GI returned ${allRows.length} rows but none matched the ${ediOrderNbrs.size} EDI PO(s) in this batch. Check that the EDI POs have OrderDate=today and TaxZoneID=EDINOTAX.`,
+      error: `GI returned ${allRows.length} rows across ${giOrderNbrs.length} PO(s), but none matched the ${ediOrderNbrs.size} EDI PO(s) in this batch. Requested: [${requestedOrderNbrs.join(", ")}]. GI contains: [${giOrderNbrs.slice(0, 10).join(", ")}${giOrderNbrs.length > 10 ? ", ..." : ""}]. Sample row keys: ${Object.keys(allRows[0]).slice(0, 8).join(", ")}.`,
       matchedOrderNbrs: new Set(),
-      ediRowCount: 0
+      ediRowCount: 0,
+      diagnostic: {
+        giRowCount: allRows.length,
+        giOrderNbrs,
+        requestedOrderNbrs,
+        orderNbrKey,
+        sampleRowKeys: Object.keys(allRows[0])
+      }
     };
   }
 
