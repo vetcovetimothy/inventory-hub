@@ -2385,6 +2385,10 @@ function POImportTool(props) {
   var _ndcLoading = useState(false), ndcLoading = _ndcLoading[0], setNdcLoading = _ndcLoading[1];
   var _activeFileTab = useState(null), activeFileTab = _activeFileTab[0], setActiveFileTab = _activeFileTab[1];
   var _flagThreshold = useState(40), flagThreshold = _flagThreshold[0], setFlagThreshold = _flagThreshold[1];
+  // Acumatica auto-create state
+  var _acuCreateLoading = useState(false), acuCreateLoading = _acuCreateLoading[0], setAcuCreateLoading = _acuCreateLoading[1];
+  var _acuCreateConfirm = useState(null), acuCreateConfirm = _acuCreateConfirm[0], setAcuCreateConfirm = _acuCreateConfirm[1];
+  var _acuCreateResult = useState(null), acuCreateResult = _acuCreateResult[0], setAcuCreateResult = _acuCreateResult[1];
   useEffect(function() {
     var mt = true;
     kvGet("po-translator-flag-threshold").then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
@@ -2870,6 +2874,185 @@ function POImportTool(props) {
     setPdfs([]); setMckPaste(""); setMckParsed(null); setMckFile(null); setMckPortalPrices({}); setScreenshotQtys({}); setEditedPrices({}); setResults([]); setMckWarnings([]); setError(null); setActiveFileTab(null); setStatedAmounts({});
   }
 
+  // ── Acumatica auto-create: group results into POs, then validate each ─────
+  // Returns { pos: [...], blocked: [...] } where pos is ready-to-create and blocked
+  // is per-file/group reasons we can't proceed (e.g. unmatched NDC, missing vendor ref).
+  function buildAcumaticaPOs() {
+    if (results.length === 0) return { pos: [], blocked: [] };
+    // Group by sourceFile: McKesson is always 1 PDF so this collapses to 1 group;
+    // other / GGM may have multiple PDFs => multiple POs.
+    var groupsByFile = {};
+    results.forEach(function(r) {
+      var key = r.sourceFile || "(unknown)";
+      if (!groupsByFile[key]) groupsByFile[key] = [];
+      groupsByFile[key].push(r);
+    });
+
+    // Section-driven config
+    var sectionConfig;
+    if (vendor === "mckesson") {
+      sectionConfig = { vendorId: "VID0041", descriptionMode: "fixed", description: "McKesson" };
+    } else if (vendor === "ggm-crossovers") {
+      sectionConfig = { vendorId: "VID0016", descriptionMode: "blank" };
+    } else {
+      // "other" — Keysource/Anda/Bloodworth. Description comes from each item's vendorSource.
+      sectionConfig = { vendorId: "VID0041", descriptionMode: "perFile" };
+    }
+
+    var pos = [];
+    var blocked = [];
+    Object.keys(groupsByFile).forEach(function(fileKey) {
+      var items = groupsByFile[fileKey];
+      // Pull metadata that should be consistent across items in one PDF:
+      // vendorRef (poNumber), warehouse, vendorSource.
+      var vendorRefs = {};
+      var warehouses = {};
+      var vendorSources = {};
+      items.forEach(function(r) {
+        if (r.poNumber) vendorRefs[r.poNumber] = 1;
+        if (r.warehouse) warehouses[r.warehouse] = 1;
+        if (r.vendorSource) vendorSources[r.vendorSource] = 1;
+      });
+      var vendorRefList = Object.keys(vendorRefs);
+      var warehouseList = Object.keys(warehouses);
+      var vendorSourceList = Object.keys(vendorSources);
+
+      // Validation: must have exactly one of each (PDF integrity check)
+      if (vendorRefList.length === 0) {
+        blocked.push({ file: fileKey, reason: "No vendor reference (poNumber) parsed from PDF" });
+        return;
+      }
+      if (vendorRefList.length > 1) {
+        blocked.push({ file: fileKey, reason: "Multiple vendor references in one PDF: " + vendorRefList.join(", ") });
+        return;
+      }
+      if (warehouseList.length === 0) {
+        blocked.push({ file: fileKey, reason: "No warehouse parsed from PDF" });
+        return;
+      }
+      if (warehouseList.length > 1) {
+        blocked.push({ file: fileKey, reason: "Multiple warehouses in one PDF: " + warehouseList.join(", ") });
+        return;
+      }
+
+      // Strict matching: refuse the PO if ANY item didn't find its inventory ID
+      var unmatched = items.filter(function(r) { return !r.ndcFound || !r.inventoryId; });
+      if (unmatched.length > 0) {
+        blocked.push({
+          file: fileKey,
+          reason: unmatched.length + " item(s) not matched in Acumatica: " + unmatched.slice(0, 3).map(function(r) { return r.ndc; }).join(", ") + (unmatched.length > 3 ? " +" + (unmatched.length - 3) + " more" : "")
+        });
+        return;
+      }
+
+      // Description per section
+      var description;
+      if (sectionConfig.descriptionMode === "fixed") {
+        description = sectionConfig.description;
+      } else if (sectionConfig.descriptionMode === "blank") {
+        description = "";
+      } else {
+        // perFile: use the (unique) vendorSource from the PDF; if absent or multi, error
+        if (vendorSourceList.length === 0) {
+          blocked.push({ file: fileKey, reason: "PDF parser did not detect sub-vendor (Keysource/Anda/Bloodworth)" });
+          return;
+        }
+        if (vendorSourceList.length > 1) {
+          blocked.push({ file: fileKey, reason: "Multiple sub-vendors detected in one PDF: " + vendorSourceList.join(", ") });
+          return;
+        }
+        description = vendorSourceList[0];
+      }
+
+      var warehouse = warehouseList[0];
+      // Build line items with edited prices / edited qtys taking precedence
+      var lines = items.map(function(r) {
+        var qty = screenshotQtys[r.ndc] != null ? parseInt(screenshotQtys[r.ndc]) : r.qty;
+        var price = editedPrices[r.ndc] != null ? parseFloat(editedPrices[r.ndc]) : r.unitPrice;
+        return {
+          inventoryId: r.inventoryId,
+          warehouse: warehouse,
+          orderQty: qty,
+          unitCost: price || 0,
+          uom: r.uom || ""
+        };
+      });
+      // Sanity: positive qty + non-empty uom for every line (the route will also enforce)
+      var badLine = lines.find(function(l) { return !(Number(l.orderQty) > 0) || !l.uom; });
+      if (badLine) {
+        blocked.push({ file: fileKey, reason: "Some line(s) have zero qty or missing UOM" });
+        return;
+      }
+
+      pos.push({
+        file: fileKey,
+        vendorId: sectionConfig.vendorId,
+        location: warehouse,           // Location matches warehouse (TP-OH, GGM-KY, etc.)
+        description: description,
+        vendorRef: vendorRefList[0],
+        lines: lines,
+        lineCount: lines.length,
+        orderTotal: lines.reduce(function(s, l) { return s + (Number(l.orderQty) * Number(l.unitCost)); }, 0)
+      });
+    });
+
+    return { pos: pos, blocked: blocked };
+  }
+
+  function onCreatePOsClick() {
+    if (!ok) { lp(); return; }
+    var built = buildAcumaticaPOs();
+    if (built.pos.length === 0) {
+      if (built.blocked.length > 0) {
+        toast("Cannot create any POs. " + built.blocked.length + " blocked \u2014 see below", "error");
+        setAcuCreateConfirm({ pos: [], blocked: built.blocked });
+      } else {
+        toast("Nothing to create \u2014 no parsed results", "error");
+      }
+      return;
+    }
+    setAcuCreateConfirm({ pos: built.pos, blocked: built.blocked });
+  }
+
+  async function executeCreatePOs(posToCreate) {
+    setAcuCreateConfirm(null);
+    setAcuCreateLoading(true);
+    try {
+      var resp = await fetch("/api/acumatica-po-import-create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: cred.username,
+          password: cred.password,
+          pos: posToCreate.map(function(p) {
+            return {
+              vendorId: p.vendorId,
+              location: p.location,
+              description: p.description,
+              vendorRef: p.vendorRef,
+              lines: p.lines
+            };
+          })
+        })
+      });
+      var data = await resp.json();
+      setAcuCreateResult({ data: data, requested: posToCreate });
+      if (data.ok) {
+        toast("Created " + (data.succeeded ? data.succeeded.length : 0) + " PO(s) in Acumatica", "success");
+      } else {
+        var succ = data.succeeded ? data.succeeded.length : 0;
+        var attempted = succ + 1; // we stop on first failure
+        toast(succ + "/" + posToCreate.length + " created \u2014 stopped on failure (see results)", "error");
+      }
+    } catch (err) {
+      setAcuCreateResult({ data: { ok: false, stage: "fetch-error", failure: { stage: "fetch", errorDetails: [{ message: String(err) }] }, succeeded: [] }, requested: posToCreate });
+      toast("Network error \u2014 see results", "error");
+    } finally {
+      setAcuCreateLoading(false);
+    }
+  }
+
+
   var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
   var fileList = useMemo(function() { if (vendor !== "other" || results.length === 0) return []; var f = {}; results.forEach(function(r) { if (r.sourceFile) f[r.sourceFile] = (f[r.sourceFile] || 0) + 1; }); return Object.keys(f).map(function(name) { return { name: name, count: f[name] }; }); }, [results, vendor]);
   var activeResults = useMemo(function() { if (vendor !== "other" || !activeFileTab || fileList.length <= 1) return results; return results.filter(function(r) { return r.sourceFile === activeFileTab; }); }, [results, vendor, activeFileTab, fileList]);
@@ -3001,6 +3184,7 @@ function POImportTool(props) {
               {vendor === "other" && fileList.length > 1 && <button onClick={function() { downloadCSV(activeResults); }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}><IconCSV /> Download Tab</button>}
               {vendor === "other" && fileList.length > 1 && <button onClick={function() { fileList.forEach(function(f, idx) { setTimeout(function() { downloadCSV(results.filter(function(r) { return r.sourceFile === f.name; })); }, idx * 300); }); }} style={Object.assign({}, S.btn(), { padding: "6px 14px", fontSize: 12 })}><IconCSV /> Download All ({fileList.length} files)</button>}
               {!(vendor === "other" && fileList.length > 1) && <button onClick={function() { downloadCSV(results); }} style={Object.assign({}, S.btn(), { padding: "6px 14px", fontSize: 12 })}><IconCSV /> Download CSV</button>}
+              <button onClick={onCreatePOsClick} disabled={acuCreateLoading || !ok} style={{ background: (acuCreateLoading || !ok) ? "#D1D5DB" : "#047857", color: "#FFFFFF", border: "none", padding: "6px 14px", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: (acuCreateLoading || !ok) ? "not-allowed" : "pointer", display: "inline-flex", alignItems: "center", gap: 6 }} title={!ok ? "Acumatica credentials required" : "Create the parsed POs in Acumatica"}>{acuCreateLoading ? <><Spinner /> Creating...</> : <>{"\u2192"} Create POs in Acumatica</>}</button>
             </div>
           </div>
           <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
@@ -3063,6 +3247,124 @@ function POImportTool(props) {
           </table>
         </div>
       </div>}
+
+      {/* ── Acumatica auto-create: confirmation modal ──────────────────── */}
+      {acuCreateConfirm && (function() {
+        var posList = acuCreateConfirm.pos || [];
+        var blockedList = acuCreateConfirm.blocked || [];
+        var grandTotal = posList.reduce(function(s, p) { return s + (p.orderTotal || 0); }, 0);
+        return <div onClick={function() { setAcuCreateConfirm(null); }} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div onClick={function(e) { e.stopPropagation(); }} style={{ background: "#FFFFFF", borderRadius: 8, padding: 24, width: "min(720px, 92vw)", maxHeight: "85vh", overflow: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.2)" }}>
+            <div style={{ fontSize: 18, fontWeight: 700, color: "#1F2937", marginBottom: 8 }}>Create {posList.length} PO{posList.length === 1 ? "" : "s"} in Acumatica?</div>
+            <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 16 }}>One PO per PDF will be created with Hold:false (Open) and the values shown below. Stops on first failure.</div>
+
+            {posList.length > 0 && <div style={{ border: "1px solid #E5E7EB", borderRadius: 6, overflow: "hidden", marginBottom: blockedList.length > 0 ? 12 : 16 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <thead><tr style={{ background: "#F9FAFB", borderBottom: "1px solid #E5E7EB" }}>
+                  <th style={{ padding: "8px 10px", textAlign: "left", fontWeight: 600, color: "#6B7280" }}>File</th>
+                  <th style={{ padding: "8px 10px", textAlign: "left", fontWeight: 600, color: "#6B7280" }}>Vendor</th>
+                  <th style={{ padding: "8px 10px", textAlign: "left", fontWeight: 600, color: "#6B7280" }}>Description</th>
+                  <th style={{ padding: "8px 10px", textAlign: "left", fontWeight: 600, color: "#6B7280" }}>Vendor Ref</th>
+                  <th style={{ padding: "8px 10px", textAlign: "left", fontWeight: 600, color: "#6B7280" }}>Warehouse</th>
+                  <th style={{ padding: "8px 10px", textAlign: "right", fontWeight: 600, color: "#6B7280" }}>Lines</th>
+                  <th style={{ padding: "8px 10px", textAlign: "right", fontWeight: 600, color: "#6B7280" }}>Total</th>
+                </tr></thead>
+                <tbody>{posList.map(function(p, i) {
+                  return <tr key={i} style={{ borderBottom: i < posList.length - 1 ? "1px solid #F3F4F6" : "none" }}>
+                    <td style={{ padding: "8px 10px", color: "#374151", fontSize: 11 }}>{(p.file || "").split("/").pop()}</td>
+                    <td style={{ padding: "8px 10px", color: "#374151" }}>{p.vendorId}</td>
+                    <td style={{ padding: "8px 10px", color: p.description ? "#374151" : "#9CA3AF", fontStyle: p.description ? "normal" : "italic" }}>{p.description || "(blank)"}</td>
+                    <td style={{ padding: "8px 10px", color: "#374151", fontFamily: "monospace" }}>{p.vendorRef}</td>
+                    <td style={{ padding: "8px 10px", color: "#374151" }}>{p.location}</td>
+                    <td style={{ padding: "8px 10px", color: "#374151", textAlign: "right" }}>{p.lineCount}</td>
+                    <td style={{ padding: "8px 10px", color: "#374151", textAlign: "right" }}>${(p.orderTotal || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                  </tr>;
+                })}</tbody>
+                <tfoot><tr style={{ background: "#F9FAFB", borderTop: "1px solid #E5E7EB" }}>
+                  <td colSpan={6} style={{ padding: "8px 10px", textAlign: "right", fontWeight: 600, color: "#6B7280" }}>Grand total:</td>
+                  <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "#1F2937" }}>${grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                </tr></tfoot>
+              </table>
+            </div>}
+
+            {blockedList.length > 0 && <div style={{ background: "rgba(220,38,38,0.04)", border: "1px solid rgba(220,38,38,0.15)", borderRadius: 6, padding: 12, marginBottom: 16 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: "#DC2626", marginBottom: 6 }}>{"\u26A0"} {blockedList.length} file{blockedList.length === 1 ? "" : "s"} blocked (will not be created):</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>{blockedList.map(function(b, i) {
+                return <div key={i} style={{ fontSize: 11, color: "#6B7280" }}><span style={{ fontFamily: "monospace", color: "#374151" }}>{(b.file || "").split("/").pop()}</span>: {b.reason}</div>;
+              })}</div>
+            </div>}
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button onClick={function() { setAcuCreateConfirm(null); }} style={Object.assign({}, S.btn("ghost"), { padding: "8px 16px" })}>Cancel</button>
+              {posList.length > 0 && <button onClick={function() { executeCreatePOs(posList); }} style={{ background: "#047857", color: "#FFFFFF", border: "none", padding: "8px 16px", borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Create {posList.length} PO{posList.length === 1 ? "" : "s"}</button>}
+            </div>
+          </div>
+        </div>;
+      })()}
+
+      {/* ── Acumatica auto-create: results modal ───────────────────────── */}
+      {acuCreateResult && (function() {
+        var data = acuCreateResult.data || {};
+        var requested = acuCreateResult.requested || [];
+        var succeeded = data.succeeded || [];
+        var failure = data.failure || null;
+        var allOk = data.ok === true && !failure;
+        var failureRequested = failure ? requested[failure.poIndex] : null;
+        var notAttempted = failure ? requested.slice(failure.poIndex + 1) : [];
+        return <div onClick={function() { setAcuCreateResult(null); }} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div onClick={function(e) { e.stopPropagation(); }} style={{ background: "#FFFFFF", borderRadius: 8, padding: 24, width: "min(720px, 92vw)", maxHeight: "85vh", overflow: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.2)" }}>
+            <div style={{ fontSize: 18, fontWeight: 700, color: allOk ? "#047857" : "#DC2626", marginBottom: 8 }}>{allOk ? "\u2713 All POs created" : "\u26A0 Stopped on failure"}</div>
+            <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 16 }}>{succeeded.length} created, {failure ? "1 failed" : "0 failed"}{notAttempted.length > 0 ? ", " + notAttempted.length + " not attempted" : ""}</div>
+
+            {succeeded.length > 0 && <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "#047857", marginBottom: 8 }}>Created in Acumatica:</div>
+              <div style={{ border: "1px solid #E5E7EB", borderRadius: 6, overflow: "hidden" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                  <thead><tr style={{ background: "#F9FAFB", borderBottom: "1px solid #E5E7EB" }}>
+                    <th style={{ padding: "6px 10px", textAlign: "left", fontWeight: 600, color: "#6B7280" }}>Order Nbr</th>
+                    <th style={{ padding: "6px 10px", textAlign: "left", fontWeight: 600, color: "#6B7280" }}>Vendor Ref</th>
+                    <th style={{ padding: "6px 10px", textAlign: "left", fontWeight: 600, color: "#6B7280" }}>Description</th>
+                    <th style={{ padding: "6px 10px", textAlign: "right", fontWeight: 600, color: "#6B7280" }}>Lines</th>
+                    <th style={{ padding: "6px 10px", textAlign: "right", fontWeight: 600, color: "#6B7280" }}>Total</th>
+                  </tr></thead>
+                  <tbody>{succeeded.map(function(s, i) {
+                    return <tr key={i} style={{ borderBottom: i < succeeded.length - 1 ? "1px solid #F3F4F6" : "none" }}>
+                      <td style={{ padding: "6px 10px", color: "#1F2937", fontWeight: 600, fontFamily: "monospace" }}>{s.orderNbr || "?"}</td>
+                      <td style={{ padding: "6px 10px", color: "#374151", fontFamily: "monospace" }}>{s.vendorRef}</td>
+                      <td style={{ padding: "6px 10px", color: s.description ? "#374151" : "#9CA3AF", fontStyle: s.description ? "normal" : "italic" }}>{s.description || "(blank)"}</td>
+                      <td style={{ padding: "6px 10px", color: "#374151", textAlign: "right" }}>{s.lineCount}</td>
+                      <td style={{ padding: "6px 10px", color: "#374151", textAlign: "right" }}>${(s.orderTotal || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                    </tr>;
+                  })}</tbody>
+                </table>
+              </div>
+            </div>}
+
+            {failure && <div style={{ background: "rgba(220,38,38,0.04)", border: "1px solid rgba(220,38,38,0.2)", borderRadius: 6, padding: 12, marginBottom: 16 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "#DC2626", marginBottom: 6 }}>Failed PO #{failure.poIndex + 1}:</div>
+              <div style={{ fontSize: 11, color: "#6B7280", marginBottom: 8 }}>
+                <div>Vendor Ref: <span style={{ fontFamily: "monospace", color: "#374151" }}>{failure.vendorRef}</span>{failureRequested ? <> {"\u00B7"} File: <span style={{ fontFamily: "monospace", color: "#374151" }}>{(failureRequested.file || "").split("/").pop()}</span></> : null}</div>
+                <div>Stage: <span style={{ color: "#374151" }}>{failure.stage}</span>{failure.status ? <> {"\u00B7"} HTTP {failure.status}</> : null}</div>
+              </div>
+              {failure.errorDetails && failure.errorDetails.length > 0 && <div style={{ background: "#FFFFFF", border: "1px solid #FECACA", borderRadius: 4, padding: 8, fontSize: 11, color: "#7F1D1D" }}>
+                {failure.errorDetails.map(function(e, i) {
+                  return <div key={i} style={{ marginBottom: i < failure.errorDetails.length - 1 ? 4 : 0 }}>{e.field ? <span style={{ fontFamily: "monospace", marginRight: 6 }}>{e.field}:</span> : null}{e.message}</div>;
+                })}
+              </div>}
+              {(!failure.errorDetails || failure.errorDetails.length === 0) && failure.rawBody && <pre style={{ background: "#FFFFFF", border: "1px solid #FECACA", borderRadius: 4, padding: 8, fontSize: 10, color: "#7F1D1D", maxHeight: 200, overflow: "auto", margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{failure.rawBody}</pre>}
+            </div>}
+
+            {notAttempted.length > 0 && <div style={{ background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 6, padding: 12, marginBottom: 16 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: "#6B7280", marginBottom: 6 }}>Not attempted ({notAttempted.length}):</div>
+              <div style={{ fontSize: 11, color: "#6B7280" }}>{notAttempted.map(function(p, i) { return <span key={i} style={{ fontFamily: "monospace", marginRight: 12 }}>{p.vendorRef}</span>; })}</div>
+            </div>}
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button onClick={function() { setAcuCreateResult(null); }} style={Object.assign({}, S.btn(), { padding: "8px 16px" })}>Close</button>
+            </div>
+          </div>
+        </div>;
+      })()}
     </div>
   );
 }
