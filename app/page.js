@@ -1022,12 +1022,16 @@ function WHT(props) {
         if (!r.ok) return;
         var p = processable[i];
         if (!p || !p.key) return;
-        // Only auto-checkmark Email channel POs (fully handled by the tool).
-        // TrueCommerce EDI / Website Ordering POs still need a manual follow-up
-        // (Truecommerce submission, website order), so leave them unchecked.
-        if (p.channel !== "Email") return;
-        updatedNotes[p.key] = Object.assign({}, updatedNotes[p.key] || {}, { done: true });
-        changed = true;
+        // Auto-checkmark Email channel POs (email sent) AND TrueCommerce EDI POs whose
+        // EDI send succeeded. Website Ordering POs still need a manual follow-up (vendor
+        // website submission), so leave them unchecked.
+        if (p.channel === "Email") {
+          updatedNotes[p.key] = Object.assign({}, updatedNotes[p.key] || {}, { done: true });
+          changed = true;
+        } else if (p.channel === "TrueCommerce EDI" && r.ediSent) {
+          updatedNotes[p.key] = Object.assign({}, updatedNotes[p.key] || {}, { done: true });
+          changed = true;
+        }
       });
       if (changed) {
         setShipNotes(updatedNotes);
@@ -1035,9 +1039,16 @@ function WHT(props) {
       }
       var s = resp.summary || {};
       if (resp.ok) {
-        toast("Processed " + s.successCount + " POs: " + s.emailedCount + " emailed, " + s.vendorRefOnlyCount + " vendor-ref only", "success");
+        var bits = [];
+        if (s.emailedCount) bits.push(s.emailedCount + " emailed");
+        if (s.ediSentCount) bits.push(s.ediSentCount + " sent to EDI");
+        if (s.vendorRefOnlyCount) bits.push(s.vendorRefOnlyCount + " vendor-ref only");
+        toast("Processed " + s.successCount + " POs: " + (bits.join(", ") || "all done"), "success");
       } else {
-        toast(s.successCount + " succeeded, " + s.failedCount + " failed \u2014 see results", "error");
+        var failBits = [];
+        if (s.failedCount) failBits.push(s.failedCount + " failed");
+        if (s.ediFailedCount) failBits.push(s.ediFailedCount + " EDI failed");
+        toast(s.successCount + " succeeded, " + failBits.join(", ") + " \u2014 see results", "error");
       }
     } catch (err) {
       toast("Network error: " + err.message, "error");
@@ -1220,8 +1231,10 @@ function WHT(props) {
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                 <thead><tr style={{ background: "#F9FAFB", position: "sticky", top: 0 }}><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>Vendor</th><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>PO #</th><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>Vendor Ref</th><th style={{ padding: "8px 12px", textAlign: "center", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>Channel</th><th style={{ padding: "8px 12px", textAlign: "center", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>Action</th></tr></thead>
                 <tbody>{p.map(function(row, i) {
-                  var actionText = row.channel === "Email" ? "Release + Email" : "Vendor Ref only";
-                  var actionColor = row.channel === "Email" ? "#059669" : "#C2410C";
+                  var actionText, actionColor;
+                  if (row.channel === "Email") { actionText = "Release + Email"; actionColor = "#059669"; }
+                  else if (row.channel === "TrueCommerce EDI") { actionText = "Release + Send to EDI"; actionColor = "#2563EB"; }
+                  else { actionText = "Vendor Ref only"; actionColor = "#C2410C"; }
                   return <tr key={i} style={{ borderBottom: "1px solid #F3F4F6" }}><td style={{ padding: "6px 12px", color: "#1F2937" }}>{row.vendorName}</td><td style={{ padding: "6px 12px", color: "#374151", fontFamily: "monospace" }}>{row.orderNbr}</td><td style={{ padding: "6px 12px", color: "#374151", fontFamily: "monospace" }}>{row.vendorRef}</td><td style={{ padding: "6px 12px", textAlign: "center", color: "#6B7280", fontSize: 11 }}>{row.channel}</td><td style={{ padding: "6px 12px", textAlign: "center", color: actionColor, fontWeight: 600 }}>{actionText}</td></tr>;
                 })}</tbody>
               </table>
@@ -1247,8 +1260,10 @@ function WHT(props) {
             </div>
             <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
               <div style={{ padding: "8px 14px", background: "#ECFDF5", color: "#059669", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>{s.successCount || 0} succeeded</div>
-              <div style={{ padding: "8px 14px", background: "#EFF6FF", color: "#2563EB", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>{s.emailedCount || 0} emailed</div>
-              <div style={{ padding: "8px 14px", background: "#FFF7ED", color: "#C2410C", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>{s.vendorRefOnlyCount || 0} vendor-ref only</div>
+              {s.emailedCount > 0 && <div style={{ padding: "8px 14px", background: "#EFF6FF", color: "#2563EB", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>{s.emailedCount} emailed</div>}
+              {s.ediSentCount > 0 && <div style={{ padding: "8px 14px", background: "#EFF6FF", color: "#2563EB", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>{s.ediSentCount} sent to EDI</div>}
+              {s.vendorRefOnlyCount > 0 && <div style={{ padding: "8px 14px", background: "#FFF7ED", color: "#C2410C", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>{s.vendorRefOnlyCount} vendor-ref only</div>}
+              {s.ediFailedCount > 0 && <div style={{ padding: "8px 14px", background: "#FEF2F2", color: "#DC2626", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>{s.ediFailedCount} EDI failed</div>}
               {s.failedCount > 0 && <div style={{ padding: "8px 14px", background: "#FEF2F2", color: "#DC2626", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>{s.failedCount} failed</div>}
             </div>
             <div style={{ border: "1px solid #E5E7EB", borderRadius: 8, overflow: "auto", maxHeight: "55vh" }}>
@@ -1257,7 +1272,9 @@ function WHT(props) {
                 <tbody>{rs.map(function(row, i) {
                   var resultText, resultColor;
                   if (row.ok && row.emailed) { resultText = "\u2713 Released + Emailed"; resultColor = "#059669"; }
-                  else if (row.ok && row.emailSkipped) { resultText = "\u2713 Vendor Ref written (still On Hold)"; resultColor = "#059669"; }
+                  else if (row.ok && row.ediSent) { resultText = "\u2713 Released + Sent to EDI"; resultColor = "#059669"; }
+                  else if (row.ok && row.pendingEdiSend && !row.ediSent) { resultText = "\u26A0 Released but EDI failed: " + (row.ediError || "unknown"); resultColor = "#DC2626"; }
+                  else if (row.ok && row.emailSkipped && row.channel === "Website Ordering") { resultText = "\u2713 Vendor Ref written (still On Hold)"; resultColor = "#059669"; }
                   else if (row.ok && row.emailError) { resultText = "\u26A0 Released but email failed"; resultColor = "#D97706"; }
                   else if (row.stage === "status-check") { resultText = "\u2717 Skipped: " + (row.currentStatus || "not on hold"); resultColor = "#DC2626"; }
                   else if (row.stage === "read-po") { resultText = "\u2717 PO not found"; resultColor = "#DC2626"; }
