@@ -87,14 +87,19 @@ export async function POST(req) {
   }
 
   // ── Process each PO independently (do NOT stop on first failure) ───────
+  // Wrapped in try/finally so that logout always fires even if an exception
+  // is thrown — without this, errors leak the session against your concurrent
+  // login limit until Acumatica times it out.
   const results = [];
-  for (let i = 0; i < removals.length; i++) {
-    const r = removals[i];
-    const result = await processOnePO(cookies, r.orderNbr, r.skus);
-    results.push(Object.assign({ orderNbr: r.orderNbr, requestedSkus: r.skus }, result));
+  try {
+    for (let i = 0; i < removals.length; i++) {
+      const r = removals[i];
+      const result = await processOnePO(cookies, r.orderNbr, r.skus);
+      results.push(Object.assign({ orderNbr: r.orderNbr, requestedSkus: r.skus }, result));
+    }
+  } finally {
+    await logout(cookies);
   }
-
-  await logout(cookies);
 
   const anyFailed = results.some(r => !r.ok);
   return json({
