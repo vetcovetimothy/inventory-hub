@@ -118,47 +118,50 @@ export async function POST(req) {
   }
 
   // ── Process each PO independently ───────────────────────────────────────
+  // Everything from here to the response is wrapped in try/finally so that
+  // `await logout(cookies)` always runs — even if an exception bubbles up
+  // from processOnePO, sendEdiBatch, or anywhere else. Without this, a thrown
+  // error leaks the Acumatica session and counts toward the user's concurrent
+  // login limit until Acumatica times it out (~20 min).
   const results = [];
-  for (let i = 0; i < pos.length; i++) {
-    const p = pos[i];
-    const result = await processOnePO(cookies, p.orderNbr, p.vendorRef.trim(), p.channel);
-    results.push(Object.assign({
-      orderNbr: p.orderNbr,
-      requestedVendorRef: p.vendorRef.trim(),
-      channel: p.channel
-    }, result));
-  }
+  try {
+    for (let i = 0; i < pos.length; i++) {
+      const p = pos[i];
+      const result = await processOnePO(cookies, p.orderNbr, p.vendorRef.trim(), p.channel);
+      results.push(Object.assign({
+        orderNbr: p.orderNbr,
+        requestedVendorRef: p.vendorRef.trim(),
+        channel: p.channel
+      }, result));
+    }
 
-  // ── EDI batch step ───────────────────────────────────────────────────────
-  // After per-PO loop: if any TrueCommerce EDI POs were successfully released,
-  // fetch the GI once, filter to just those POs' rows, and POST to Make webhook.
-  // Notes about edi attached to each EDI result so the frontend can show outcome.
-  const ediResults = results.filter(r => r.ok && r.pendingEdiSend);
-  let ediBatchDiagnostic = null;
-  if (ediResults.length > 0) {
-    const ediOrderNbrs = new Set(ediResults.map(r => r.orderNbr));
-    const ediOutcome = await sendEdiBatch(cookies, username, password, ediOrderNbrs);
-    // ediOutcome: { ok, stage, ediRowCount, matchedOrderNbrs: Set, unmatchedOrderNbrs: Array,
-    //               webhookStatus?, webhookBody?, error?, diagnostic? }
-    ediBatchDiagnostic = ediOutcome;
-    // Annotate per-PO results
-    for (const r of ediResults) {
-      if (ediOutcome.ok && ediOutcome.matchedOrderNbrs && ediOutcome.matchedOrderNbrs.has(r.orderNbr)) {
-        r.ediSent = true;
-        r.stage = "edi-sent";
-      } else if (!ediOutcome.ok) {
-        // Batch-level failure (fetch, parse, or no matches). Surface the actual reason.
-        r.ediSent = false;
-        r.ediError = ediOutcome.error || `EDI batch failed at stage ${ediOutcome.stage}`;
-      } else {
-        // Batch succeeded but this PO wasn't in the matched set
-        r.ediSent = false;
-        r.ediError = "PO released but its row was not in the EDI GI matched set";
+    // ── EDI batch step ───────────────────────────────────────────────────────
+    // After per-PO loop: if any TrueCommerce EDI POs were successfully released,
+    // fetch the GI once, filter to just those POs' rows, and POST to Make webhook.
+    // Notes about edi attached to each EDI result so the frontend can show outcome.
+    const ediResults = results.filter(r => r.ok && r.pendingEdiSend);
+    if (ediResults.length > 0) {
+      const ediOrderNbrs = new Set(ediResults.map(r => r.orderNbr));
+      const ediOutcome = await sendEdiBatch(cookies, username, password, ediOrderNbrs);
+      // Annotate per-PO results
+      for (const r of ediResults) {
+        if (ediOutcome.ok && ediOutcome.matchedOrderNbrs && ediOutcome.matchedOrderNbrs.has(r.orderNbr)) {
+          r.ediSent = true;
+          r.stage = "edi-sent";
+        } else if (!ediOutcome.ok) {
+          // Batch-level failure (fetch, parse, or no matches). Surface the actual reason.
+          r.ediSent = false;
+          r.ediError = ediOutcome.error || `EDI batch failed at stage ${ediOutcome.stage}`;
+        } else {
+          // Batch succeeded but this PO wasn't in the matched set
+          r.ediSent = false;
+          r.ediError = "PO released but its row was not in the EDI GI matched set";
+        }
       }
     }
+  } finally {
+    await logout(cookies);
   }
-
-  await logout(cookies);
 
   // Summary
   const successCount = results.filter(r => r.ok).length;
