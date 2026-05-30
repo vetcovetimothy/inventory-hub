@@ -855,6 +855,7 @@ function WHT(props) {
   // ─── Acumatica: Process All POs ───
   var _acuProc = useState(false), acuProcLoading = _acuProc[0], setAcuProcLoading = _acuProc[1];
   var _acuProcConfirm = useState(false), acuProcConfirm = _acuProcConfirm[0], setAcuProcConfirm = _acuProcConfirm[1];
+  var _acuSkipConfirm = useState(null), acuSkipConfirm = _acuSkipConfirm[0], setAcuSkipConfirm = _acuSkipConfirm[1];
   var _acuProcResult = useState(null), acuProcResult = _acuProcResult[0], setAcuProcResult = _acuProcResult[1];
   // For categorize modal: { unlabeledVendors: [...], pendingChannels: { vendor: "Email"|... } }
   var _acuCat = useState(null), acuCategorize = _acuCat[0], setAcuCategorize = _acuCat[1];
@@ -933,11 +934,16 @@ function WHT(props) {
       setAcuCategorize({ vendors: built.unlabeledVendors, pending: pending });
       return;
     }
-    // (3) Missing Vendor Ref on some rows
+    // (3) Missing Vendor Ref on some rows — confirm-and-skip instead of blocking the whole batch
     if (built.missingRef.length > 0) {
-      var miss2 = built.missingRef.slice(0, 3).map(function(m) { return m.vendorName + " (" + m.orderNbr + ")"; }).join(", ");
-      var more2 = built.missingRef.length > 3 ? " +" + (built.missingRef.length - 3) + " more" : "";
-      toast("Missing Vendor Ref for: " + miss2 + more2, "error");
+      if (built.processable.length === 0) {
+        // No rows ready at all — there's nothing to confirm. Just toast.
+        toast("Enter at least one Vendor Ref before processing", "error");
+        return;
+      }
+      // Some rows ready, some missing VR. Ask the user to confirm we should process the ready ones
+      // and skip the missing-VR rows (so they can fill them in later and re-run).
+      setAcuSkipConfirm({ processable: built.processable, missingRef: built.missingRef });
       return;
     }
     if (built.processable.length === 0) {
@@ -1214,6 +1220,37 @@ function WHT(props) {
           </div>
         </div>
       </div>}
+
+      {/* Process All POs — Skip Missing-VR Confirmation Modal */}
+      {acuSkipConfirm && (function() {
+        var ready = acuSkipConfirm.processable || [];
+        var missing = acuSkipConfirm.missingRef || [];
+        var missPreview = missing.slice(0, 5).map(function(m) { return m.vendorName + " (" + m.orderNbr + ")"; });
+        var missMore = missing.length > 5 ? missing.length - 5 : 0;
+        return <div onClick={function() { setAcuSkipConfirm(null); }} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div onClick={function(e) { e.stopPropagation(); }} style={{ background: "#FFFFFF", borderRadius: 12, padding: 24, maxWidth: 520, width: "94%", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ fontSize: 18, fontWeight: 700, color: "#1F2937", marginBottom: 12 }}>Process {ready.length} of {ready.length + missing.length} POs?</div>
+            <div style={{ fontSize: 13, color: "#374151", marginBottom: 16, lineHeight: 1.55 }}>
+              <strong style={{ color: "#047857" }}>{ready.length}</strong> {ready.length === 1 ? "PO has" : "POs have"} a Vendor Ref and will be processed now.
+              <br /><strong style={{ color: "#6B7280" }}>{missing.length}</strong> {missing.length === 1 ? "PO is" : "POs are"} missing a Vendor Ref and will be skipped \u2014 you can fill them in and re-run later.
+            </div>
+            <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 16, padding: "8px 12px", background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 6 }}>
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>Skipping:</div>
+              {missPreview.map(function(s, i) { return <div key={i} style={{ fontFamily: "monospace" }}>{"\u00B7 " + s}</div>; })}
+              {missMore > 0 && <div style={{ marginTop: 4, fontStyle: "italic" }}>+ {missMore} more</div>}
+            </div>
+            <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
+              <button onClick={function() { setAcuSkipConfirm(null); }} style={S.btn("ghost")}>Cancel</button>
+              <button onClick={function() {
+                var p = ready;
+                setAcuSkipConfirm(null);
+                if (p.length >= 5) setAcuProcConfirm(true);
+                else processAllPOs(p);
+              }} style={Object.assign({}, S.btn(), { background: "#047857", borderColor: "#047857" })}>Process {ready.length} {ready.length === 1 ? "PO" : "POs"}</button>
+            </div>
+          </div>
+        </div>;
+      })()}
 
       {/* Process All POs — Confirmation Modal (only shown for 5+ POs) */}
       {acuProcConfirm && (function() {
