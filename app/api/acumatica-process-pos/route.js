@@ -137,7 +137,7 @@ export async function POST(req) {
   let ediBatchDiagnostic = null;
   if (ediResults.length > 0) {
     const ediOrderNbrs = new Set(ediResults.map(r => r.orderNbr));
-    const ediOutcome = await sendEdiBatch(cookies, ediOrderNbrs);
+    const ediOutcome = await sendEdiBatch(cookies, username, password, ediOrderNbrs);
     // ediOutcome: { ok, stage, ediRowCount, matchedOrderNbrs: Set, unmatchedOrderNbrs: Array,
     //               webhookStatus?, webhookBody?, error?, diagnostic? }
     ediBatchDiagnostic = ediOutcome;
@@ -418,7 +418,7 @@ async function logout(cookies) {
 // Returns:
 //   { ok, stage, ediRowCount, matchedOrderNbrs: Set, unmatchedOrderNbrs: Array,
 //     webhookStatus?, webhookBody?, error? }
-async function sendEdiBatch(cookies, ediOrderNbrs) {
+async function sendEdiBatch(cookies, username, password, ediOrderNbrs) {
   if (!EDI_WEBHOOK_URL) {
     return {
       ok: false,
@@ -428,13 +428,16 @@ async function sendEdiBatch(cookies, ediOrderNbrs) {
     };
   }
 
-  // Step 1: Pull the entire GI (already filtered server-side to today + EDINOTAX vendors)
-  // Acumatica's OData v3 endpoint defaults to XML responses unless we explicitly request JSON.
+  // Step 1: Pull the entire GI (already filtered server-side to today + EDINOTAX vendors).
+  // IMPORTANT: Acumatica's OData endpoint uses HTTP Basic Authentication, NOT the cookie
+  // session from /entity/auth/login. This is the same pattern the legacy Google Sheet
+  // App Script uses (Authorization: Basic <base64>).
+  const basicAuth = "Basic " + Buffer.from(`${username}:${password}`).toString("base64");
   let allRows;
   try {
     const res = await fetch(EDI_GI_URL, {
       method: "GET",
-      headers: { "Accept": "application/json", "Cookie": cookies }
+      headers: { "Accept": "application/json", "Authorization": basicAuth }
     });
     if (!res.ok) {
       const text = await res.text();
