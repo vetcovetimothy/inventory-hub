@@ -223,6 +223,17 @@ async function processOnePO(cookies, orderNbr, vendorRef, channel) {
   if (shouldRelease) {
     putPayload.Hold = { value: false };
   }
+  // For Email channel: set DoNotPrint = true so the print step is satisfied
+  // and EmailPurchaseOrder will actually send the email. Without this,
+  // Acumatica appears to suppress the email until either Print runs OR
+  // DoNotPrint is flagged. Tim's manual workflow today: click Do Not Print
+  // first, then click Email Purchase Order. This automates the first click.
+  // PO008672 (which auto-emailed successfully) confirms this pattern — it
+  // had Do Not Print checked and Emailed checked. EDI POs leave this alone
+  // (TrueCommerce handles their send via SFTP).
+  if (isEmailChannel) {
+    putPayload.DoNotPrint = { value: true };
+  }
 
   let putStatusAfter = null;
   try {
