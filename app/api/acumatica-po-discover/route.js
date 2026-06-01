@@ -65,43 +65,31 @@ export async function GET(req) {
       });
       const sText = await sRes.text();
       let parsed = null;
-      try {
-        parsed = JSON.parse(sText);
-      } catch {}
-      // Extract just field names + action names if parseable — much more useful than raw blob.
+      try { parsed = JSON.parse(sText); } catch {}
+
       if (parsed && typeof parsed === "object") {
-        const fieldNames = [];
-        const actionNames = [];
-        // Schema structure: top-level keys are field names; "Actions" key (or
-        // separate actions list) holds invokable actions. Walk shallow.
-        Object.keys(parsed).forEach(k => {
-          const v = parsed[k];
-          // Heuristic: actions are usually marked by "type": "Action" or
-          // appear under an "Actions" sub-object. Capture both shapes.
-          if (v && typeof v === "object" && v.type === "Action") {
-            actionNames.push(k);
-          } else {
-            fieldNames.push(k);
-          }
-        });
-        // If there's a nested Actions object, surface those too
-        if (parsed.Actions && typeof parsed.Actions === "object") {
-          Object.keys(parsed.Actions).forEach(a => {
-            if (!actionNames.includes(a)) actionNames.push(a);
-          });
-        }
+        // Top-level keys are fields and a few meta keys like _workflowActions.
+        const fieldNames = Object.keys(parsed).filter(k => !k.startsWith("_"));
+        // Workflow actions are listed under _workflowActions
+        const wf = parsed._workflowActions || {};
+        const workflowActionNames = (wf && typeof wf === "object") ? Object.keys(wf) : [];
+
         out.schemaSummary = {
           fieldCount: fieldNames.length,
-          actionCount: actionNames.length,
-          // Filter to anything that smells like Print/Email so we don't drown in noise
+          workflowActionCount: workflowActionNames.length,
           printRelatedFields: fieldNames.filter(n => /print/i.test(n)),
           emailRelatedFields: fieldNames.filter(n => /email|mail/i.test(n)),
-          printRelatedActions: actionNames.filter(n => /print/i.test(n)),
-          emailRelatedActions: actionNames.filter(n => /email|mail/i.test(n)),
-          allActions: actionNames,
-          // Full field list, just in case — but capped to avoid huge response
-          allFields: fieldNames.slice(0, 300)
+          printRelatedWorkflowActions: workflowActionNames.filter(n => /print/i.test(n)),
+          emailRelatedWorkflowActions: workflowActionNames.filter(n => /email|mail/i.test(n)),
+          holdRelatedWorkflowActions: workflowActionNames.filter(n => /hold/i.test(n)),
+          allWorkflowActions: workflowActionNames,
+          allFields: fieldNames
         };
+        // If there are very few workflow actions, also surface the raw object
+        // so we can see their full shape
+        if (workflowActionNames.length > 0 && workflowActionNames.length <= 20) {
+          out.workflowActionsRaw = wf;
+        }
       } else {
         out.schemaRaw = sText.slice(0, 8000);
       }
@@ -111,12 +99,12 @@ export async function GET(req) {
     }
 
     // ─── Step 2: live PO sample (if orderNbr provided) ──────────────────────
-    // We GET the PO with $expand=* to surface every nested entity. Then we
-    // walk the JSON for any key that looks Print- or Email-related.
+    // Top-level fields only — no $expand to avoid the ExpandBinder error we
+    // hit last time. We just want to see what real field values look like
+    // for one PO that we know is "stuck" in Pending Printing.
     if (orderNbr) {
       try {
-        // Acumatica REST: filter by OrderNbr + OrderType, expand everything
-        const filterUrl = `${BASE}/entity/Default/${API_VERSION}/PurchaseOrder?$filter=OrderNbr eq '${encodeURIComponent(orderNbr)}'&$expand=Details,TaxDetails,Shipping`;
+        const filterUrl = `${BASE}/entity/Default/${API_VERSION}/PurchaseOrder?$filter=OrderNbr eq '${encodeURIComponent(orderNbr)}'`;
         const poRes = await fetch(filterUrl, {
           method: "GET",
           headers: { "Accept": "application/json", "Cookie": cookies }
@@ -128,27 +116,31 @@ export async function GET(req) {
             const arr = JSON.parse(poText);
             const po = Array.isArray(arr) ? arr[0] : arr;
             if (po) {
-              // Walk every key on the top-level PO object; report any that
-              // are Print/Email related, along with their values.
-              const printEmailKeys = {};
+              const printEmailHoldKeys = {};
               Object.keys(po).forEach(k => {
-                if (/print|email|mail/i.test(k)) {
-                  printEmailKeys[k] = po[k];
+                if (/print|email|mail|hold/i.test(k)) {
+                  printEmailHoldKeys[k] = po[k];
                 }
               });
-              out.poSampleRelevantFields = printEmailKeys;
-              // Also list all top-level field names so we can spot anything
-              // unexpected
+              out.poSampleRelevantFields = printEmailHoldKeys;
               out.poSampleAllTopLevelKeys = Object.keys(po);
-              // Surface a few core fields so we know which PO we got
               out.poSampleIdentity = {
                 OrderNbr: po?.OrderNbr?.value,
                 OrderType: po?.OrderType?.value,
+                Type: po?.Type?.value,
                 Status: po?.Status?.value,
                 Hold: po?.Hold?.value,
                 VendorID: po?.VendorID?.value,
                 VendorRef: po?.VendorRef?.value
               };
+              // Also surface the available workflow actions on THIS specific PO
+              // (not all entity-level actions are available in every PO state)
+              if (po._workflowActions) {
+                out.poAvailableWorkflowActions = po._workflowActions;
+              }
+              if (po._links) {
+                out.poLinks = po._links;
+              }
             } else {
               out.poSampleNotFound = `No PO matching OrderNbr=${orderNbr}`;
             }
