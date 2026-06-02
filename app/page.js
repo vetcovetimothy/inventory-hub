@@ -760,22 +760,18 @@ function WHT(props) {
 
         var now = new Date().toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
         var who = cred && cred.username ? cred.username : "You";
-        // Carry over existing shipNotes to new data — match by vendor name
+        // Carry over existing shipNotes to new data — EXACT MATCH ONLY.
+        // We used to fall back to vendor-name matching when the PO number had
+        // changed, but that caused yesterday's vendor refs to get carried onto
+        // today's brand-new POs. A vendor ref is PO-specific — never inherit
+        // one across PO numbers. If the user re-enters a vendor ref tomorrow,
+        // that's a feature, not a bug.
         var prevNotes = Object.assign({}, sGet("ship-notes-" + whKey) || {}, shipNotes);
         var newGroups = {};
         rows.forEach(function(r) { var k = r.VendorName + " || " + (r.OrderNbr || ""); newGroups[k] = 1; });
         var carried = {};
         Object.keys(newGroups).forEach(function(newKey) {
-          // Exact match first
-          if (prevNotes[newKey]) { carried[newKey] = prevNotes[newKey]; return; }
-          // Try matching by vendor name only (PO# may have changed)
-          var newVendor = newKey.split(" || ")[0];
-          Object.keys(prevNotes).forEach(function(oldKey) {
-            var oldVendor = oldKey.split(" || ")[0];
-            if (oldVendor === newVendor && prevNotes[oldKey] && (prevNotes[oldKey].po || prevNotes[oldKey].notes) && !carried[newKey]) {
-              carried[newKey] = prevNotes[oldKey];
-            }
-          });
+          if (prevNotes[newKey]) { carried[newKey] = prevNotes[newKey]; }
         });
         setData(rows); setRunBy(who); setRunTime(now); setLoading(false); setSubPage("data"); setShipNotes(carried); setDismissed({}); persist(rows, false, who, now, carried); toast(cfg.label + ": Fetched " + rows.length + " lines");
       } catch (err) {
