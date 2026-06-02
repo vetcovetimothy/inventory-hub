@@ -6121,8 +6121,8 @@ function VendorSettingsPage(props) {
 
             <td style={Object.assign({}, S.td, { textAlign: "center" })}>{isEditing ? <div style={{ display: "flex", gap: 4, justifyContent: "center", alignItems: "center" }}>
               <button onClick={function() { saveEdit(vendor); }} style={Object.assign({}, S.btn(), { padding: "4px 10px", fontSize: 11 })}>Save</button>
-              <button onClick={function() { setEditing(null); }} style={Object.assign({}, S.btn("ghost"), { padding: "4px 10px", fontSize: 11 })}>Cancel</button>
-              <button onClick={function() { removeVendor(vendor); }} style={{ background: "none", border: "none", cursor: "pointer", color: "#DC2626", fontSize: 14, padding: 4, marginLeft: 4 }} title="Delete vendor">{"\u2715"}</button>
+              <button onClick={function() { removeVendor(vendor); }} style={{ background: "#DC2626", color: "#FFFFFF", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Delete</button>
+              <button onClick={function() { setEditing(null); }} style={{ background: "none", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 14, padding: 4, marginLeft: 4 }} title="Exit edit mode">{"\u2715"}</button>
             </div> : <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
               <button onClick={function() { setEditing(vendor); setEditEmail(email); setEditChannel(ch); setEditRule(rule); }} style={{ background: "none", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 14, padding: 4 }} title="Edit">{"\u270E"}</button>
             </div>}</td>
