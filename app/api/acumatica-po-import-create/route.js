@@ -132,10 +132,9 @@ export async function POST(req) {
         hold: result.hold,
         lineCount: result.lineCount,
         orderTotal: result.orderTotal,
-        lineResults: result.lineResults,
-        altUpdatesAttempted: result.altUpdatesAttempted,
-        altSkipped: result.altSkipped,
-        altUpdateError: result.altUpdateError
+        method: result.method,
+        altAttemptError: result.altAttemptError,
+        lineResults: result.lineResults
       });
     }
   } finally {
@@ -152,136 +151,108 @@ export async function POST(req) {
 
 // ─────────────────────────────────────────────────────────────────────────
 // Per-PO flow:
-//   Step 1. Create the PO from InventoryID (clean, guaranteed-valid lines).
-//           Acumatica stamps each line's AlternateID with the item's DEFAULT
-//           cross-reference NDC at this point.
-//   Step 2. For each created line whose AlternateID is not already the NDC we
-//           ordered against (line.alternateId), set it via an update-by-id PUT
-//           — the same pattern the line-removal route uses. This mirrors a user
-//           changing the Alternate ID dropdown on the line by hand.
-//   Step 3. Read the lines back and report what actually landed, so we can see
-//           whether the NDC stuck or Acumatica reverted it to the default.
+//   Put AlternateID (the vendor NDC) in the SAME create payload as every other
+//   line field — keyed so it resolves the item, with NO InventoryID, because the
+//   grid-import test showed that when both are present InventoryID wins and the
+//   line falls back to the item's default cross-reference. If a line can't be
+//   resolved from its NDC, fall back to creating that PO by InventoryID (the old
+//   behavior) so a usable PO is always produced. The response reports which
+//   method was used and the resulting NDC per line.
 async function createOnePO(cookies, p) {
   const url = `${BASE}/entity/Default/${API_VERSION}/PurchaseOrder?$expand=Details`;
 
-  const payload = {
+  const header = {
     VendorID:    { value: String(p.vendorId) },
     Location:    { value: String(p.location) },
     Branch:      { value: BRANCH },
     Hold:        { value: false },                  // Open immediately
     VendorRef:   { value: String(p.vendorRef) },
-    Description: { value: String(p.description || "") },
-    Details: p.lines.map(line => ({
-      BranchID:    { value: BRANCH },
-      InventoryID: { value: String(line.inventoryId) },
-      WarehouseID: { value: String(line.warehouse) },
-      OrderQty:    { value: Number(line.orderQty) },
-      UOM:         { value: String(line.uom) },
-      UnitCost:    { value: Number(line.unitCost) || 0 }
-    }))
+    Description: { value: String(p.description || "") }
   };
 
-  let res, text;
-  try {
-    res = await fetch(url, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "Cookie": cookies
-      },
-      body: JSON.stringify(payload)
-    });
-    text = await res.text();
-  } catch (err) {
-    return { ok: false, stage: "create-po", error: String(err), payloadSent: payload };
-  }
+  // Lines keyed by the vendor NDC (AlternateID resolves the item, no InventoryID)
+  const detailsByAlternate = () => p.lines.map(line => ({
+    BranchID:    { value: BRANCH },
+    AlternateID: { value: String(line.alternateId) },
+    WarehouseID: { value: String(line.warehouse) },
+    OrderQty:    { value: Number(line.orderQty) },
+    UOM:         { value: String(line.uom) },
+    UnitCost:    { value: Number(line.unitCost) || 0 }
+  }));
 
-  if (!res.ok) {
-    let errorDetails = null;
+  // Fallback: lines keyed by InventoryID (original behavior; NDC will be default)
+  const detailsByInventory = () => p.lines.map(line => ({
+    BranchID:    { value: BRANCH },
+    InventoryID: { value: String(line.inventoryId) },
+    WarehouseID: { value: String(line.warehouse) },
+    OrderQty:    { value: Number(line.orderQty) },
+    UOM:         { value: String(line.uom) },
+    UnitCost:    { value: Number(line.unitCost) || 0 }
+  }));
+
+  async function putCreate(details) {
+    const payload = Object.assign({}, header, { Details: details });
+    let res, text;
     try {
-      const parsed = JSON.parse(text);
-      errorDetails = extractAllErrors(parsed);
-    } catch {}
-    return {
-      ok: false,
-      stage: "create-po",
-      status: res.status,
-      errorDetails,
-      rawBody: text.slice(0, 2500),
-      payloadSent: payload
-    };
-  }
-
-  let created;
-  try {
-    created = JSON.parse(text);
-  } catch {
-    return { ok: false, stage: "parse-create-response", status: 200, rawBody: text.slice(0, 1000), payloadSent: payload };
-  }
-
-  const orderNbr  = created?.OrderNbr?.value;
-  const orderType = created?.Type?.value || "Normal";
-  const createdDetails = Array.isArray(created?.Details) ? created.Details : [];
-
-  // ── Step 2: set the line AlternateID (NDC) where it isn't already correct ──
-  const norm = v => String(v == null ? "" : v).trim();
-  const altUpdates = [];
-  const altSkipped = [];
-  createdDetails.forEach((d, i) => {
-    const inLine = p.lines[i];
-    if (!inLine) return;
-    const wantNdc = norm(inLine.alternateId);
-    if (!wantNdc) return;                                  // no NDC to set for this line
-    const lineInv = norm(d?.InventoryID?.value);
-    const wantInv = norm(inLine.inventoryId);
-    // Safety: only touch a line whose resolved item matches what we sent
-    if (wantInv && lineInv && wantInv.toUpperCase() !== lineInv.toUpperCase()) {
-      altSkipped.push({ index: i, reason: "inventory-mismatch", expected: wantInv, got: lineInv });
-      return;
-    }
-    if (norm(d?.AlternateID?.value) === wantNdc) return;   // already correct (NDC is the default)
-    if (!d?.id) { altSkipped.push({ index: i, reason: "no-line-id" }); return; }
-    altUpdates.push({ id: d.id, AlternateID: { value: wantNdc } });
-  });
-
-  let altUpdateError = null;
-  let finalDetails = createdDetails;
-  if (altUpdates.length > 0) {
-    const updatePayload = {
-      id: created?.id,
-      OrderType: { value: orderType },
-      OrderNbr:  { value: orderNbr },
-      Details: altUpdates
-    };
-    try {
-      const ures = await fetch(url, {
+      res = await fetch(url, {
         method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "application/json",
-          "Cookie": cookies
-        },
-        body: JSON.stringify(updatePayload)
+        headers: { "Content-Type": "application/json", "Accept": "application/json", "Cookie": cookies },
+        body: JSON.stringify(payload)
       });
-      const utext = await ures.text();
-      if (!ures.ok) {
-        let ed = null;
-        try { ed = extractAllErrors(JSON.parse(utext)); } catch {}
-        altUpdateError = { status: ures.status, errorDetails: ed, rawBody: utext.slice(0, 1500) };
-      } else {
-        try {
-          const u = JSON.parse(utext);
-          if (Array.isArray(u?.Details)) finalDetails = u.Details;
-        } catch {}
-      }
+      text = await res.text();
     } catch (err) {
-      altUpdateError = { error: String(err) };
+      return { ok: false, networkError: String(err), payloadSent: payload };
     }
+    if (!res.ok) {
+      let errorDetails = null;
+      try { errorDetails = extractAllErrors(JSON.parse(text)); } catch {}
+      return { ok: false, status: res.status, errorDetails, rawBody: text.slice(0, 2500), payloadSent: payload };
+    }
+    let parsed;
+    try { parsed = JSON.parse(text); }
+    catch { return { ok: false, parseError: true, status: 200, rawBody: text.slice(0, 1000), payloadSent: payload }; }
+    return { ok: true, parsed };
   }
 
-  // ── Step 3: self-diagnosing readback — what each line actually ended up with
-  const lineResults = finalDetails.map(d => ({
+  const norm = v => String(v == null ? "" : v).trim();
+  const allHaveAlt = p.lines.every(l => norm(l.alternateId));
+
+  // 1) Try AlternateID-keyed create. Treat it as failed if the PUT errors OR if
+  //    any line came back without a resolved InventoryID (NDC didn't resolve).
+  let attempt = null, method = null, altAttemptError = null;
+  if (allHaveAlt) {
+    const a = await putCreate(detailsByAlternate());
+    if (a.ok) {
+      const det = Array.isArray(a.parsed?.Details) ? a.parsed.Details : [];
+      const allResolved = det.length === p.lines.length && det.every(d => norm(d?.InventoryID?.value));
+      if (allResolved) { attempt = a; method = "alternate"; }
+      else { altAttemptError = { reason: "lines-did-not-resolve-from-ndc", lineCount: det.length }; }
+    } else {
+      altAttemptError = { status: a.status, errorDetails: a.errorDetails, rawBody: a.rawBody, networkError: a.networkError };
+    }
+  } else {
+    altAttemptError = { reason: "not-all-lines-have-an-ndc" };
+  }
+
+  // 2) Fall back to InventoryID-keyed create if needed.
+  if (!attempt) {
+    const b = await putCreate(detailsByInventory());
+    if (!b.ok) {
+      return {
+        ok: false, stage: "create-po",
+        status: b.status, errorDetails: b.errorDetails, rawBody: b.rawBody, error: b.networkError,
+        altAttemptError: altAttemptError || undefined,
+        payloadSent: b.payloadSent
+      };
+    }
+    attempt = b; method = "inventory";
+  }
+
+  const created = attempt.parsed;
+  const details = Array.isArray(created?.Details) ? created.Details : [];
+
+  // Self-diagnosing readback: what each line actually ended up with.
+  const lineResults = details.map(d => ({
     inventoryID: d?.InventoryID?.value,
     alternateID: d?.AlternateID?.value,
     orderQty:    d?.OrderQty?.value,
@@ -291,15 +262,14 @@ async function createOnePO(cookies, p) {
   return {
     ok: true,
     id: created?.id,
-    orderNbr,
+    orderNbr: created?.OrderNbr?.value,
     status: created?.Status?.value,
     hold: created?.Hold?.value,
-    lineCount: finalDetails.length,
+    lineCount: details.length,
     orderTotal: created?.OrderTotal?.value,
-    lineResults,
-    altUpdatesAttempted: altUpdates.length,
-    altSkipped: altSkipped.length ? altSkipped : undefined,
-    altUpdateError: altUpdateError || undefined
+    method,
+    altAttemptError: (method === "inventory" && altAttemptError) ? altAttemptError : undefined,
+    lineResults
   };
 }
 
