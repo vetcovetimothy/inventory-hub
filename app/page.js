@@ -2979,7 +2979,8 @@ function POImportTool(props) {
           warehouse: warehouse,
           orderQty: qty,
           unitCost: price || 0,
-          uom: r.uom || ""
+          uom: r.uom || "",
+          alternateId: r.ndc || ""
         };
       });
       // Sanity: positive qty + non-empty uom for every line (the route will also enforce)
