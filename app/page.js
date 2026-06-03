@@ -3353,9 +3353,14 @@ function POImportTool(props) {
                 return <div key={si} style={{ marginBottom: 10, border: "1px solid #E5E7EB", borderRadius: 6, overflow: "hidden" }}>
                   <div style={{ background: "#F9FAFB", borderBottom: "1px solid #E5E7EB", padding: "6px 10px", fontSize: 11, color: "#6B7280" }}>
                     <span style={{ fontFamily: "monospace", color: "#1F2937", fontWeight: 600 }}>{s.orderNbr}</span>
-                    {" \u00B7 keyed by "}<span style={{ color: s.method === "alternate" ? "#047857" : "#B45309", fontWeight: 600 }}>{s.method === "alternate" ? "NDC" : "Inventory ID"}</span>
-                    {s.altAttemptError ? <span style={{ color: "#B45309" }}>{" \u00B7 NDC path failed, used Inventory ID"}</span> : null}
+                    {" \u00B7 keyed by "}<span style={{ color: s.method === "both" ? "#047857" : "#B45309", fontWeight: 600 }}>{s.method === "both" ? "Inventory ID + NDC" : "Inventory ID"}</span>
+                    {s.createAltError ? <span style={{ color: "#B45309" }}>{" \u00B7 NDC-in-create rejected, used Inventory ID only"}</span> : null}
                   </div>
+                  {s.createAltError && (s.createAltError.errorDetails || s.createAltError.rawBody || s.createAltError.reason) && <div style={{ background: "#FFF7ED", borderBottom: "1px solid #FED7AA", padding: "6px 10px", fontSize: 10, color: "#9A3412", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                    {s.createAltError.errorDetails && s.createAltError.errorDetails.length > 0
+                      ? s.createAltError.errorDetails.map(function(e, ei) { return <div key={ei}>{e.field ? <span style={{ fontFamily: "monospace", marginRight: 6 }}>{e.field}:</span> : null}{e.message}</div>; })
+                      : (s.createAltError.rawBody || s.createAltError.reason || "")}
+                  </div>}
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                     <thead><tr style={{ background: "#FFFFFF", borderBottom: "1px solid #F3F4F6" }}>
                       <th style={{ padding: "4px 10px", textAlign: "left", fontWeight: 600, color: "#6B7280" }}>Inventory ID</th>
