@@ -19,7 +19,10 @@
  *         description: string,         // e.g. "Keysource", "McKesson", "" for GGM
  *         vendorRef:   string,         // vendor's own PO number, parsed from PDF
  *         lines: [
- *           { inventoryId: string, warehouse: string, orderQty: number, unitCost: number, uom: string }
+ *           { inventoryId: string, warehouse: string, orderQty: number, unitCost: number, uom: string, alternateId?: string }
+ *           // alternateId is the vendor's NDC the line was matched on; when present,
+ *           // the route sets it on the created line so the PO shows that NDC instead
+ *           // of the stock item's default cross-reference.
  *         ]
  *       },
  *       ...
@@ -128,7 +131,11 @@ export async function POST(req) {
         status: result.status,
         hold: result.hold,
         lineCount: result.lineCount,
-        orderTotal: result.orderTotal
+        orderTotal: result.orderTotal,
+        lineResults: result.lineResults,
+        altUpdatesAttempted: result.altUpdatesAttempted,
+        altSkipped: result.altSkipped,
+        altUpdateError: result.altUpdateError
       });
     }
   } finally {
@@ -144,6 +151,16 @@ export async function POST(req) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// Per-PO flow:
+//   Step 1. Create the PO from InventoryID (clean, guaranteed-valid lines).
+//           Acumatica stamps each line's AlternateID with the item's DEFAULT
+//           cross-reference NDC at this point.
+//   Step 2. For each created line whose AlternateID is not already the NDC we
+//           ordered against (line.alternateId), set it via an update-by-id PUT
+//           — the same pattern the line-removal route uses. This mirrors a user
+//           changing the Alternate ID dropdown on the line by hand.
+//   Step 3. Read the lines back and report what actually landed, so we can see
+//           whether the NDC stuck or Acumatica reverted it to the default.
 async function createOnePO(cookies, p) {
   const url = `${BASE}/entity/Default/${API_VERSION}/PurchaseOrder?$expand=Details`;
 
@@ -196,21 +213,93 @@ async function createOnePO(cookies, p) {
     };
   }
 
-  let parsed;
+  let created;
   try {
-    parsed = JSON.parse(text);
+    created = JSON.parse(text);
   } catch {
     return { ok: false, stage: "parse-create-response", status: 200, rawBody: text.slice(0, 1000), payloadSent: payload };
   }
 
+  const orderNbr  = created?.OrderNbr?.value;
+  const orderType = created?.Type?.value || "Normal";
+  const createdDetails = Array.isArray(created?.Details) ? created.Details : [];
+
+  // ── Step 2: set the line AlternateID (NDC) where it isn't already correct ──
+  const norm = v => String(v == null ? "" : v).trim();
+  const altUpdates = [];
+  const altSkipped = [];
+  createdDetails.forEach((d, i) => {
+    const inLine = p.lines[i];
+    if (!inLine) return;
+    const wantNdc = norm(inLine.alternateId);
+    if (!wantNdc) return;                                  // no NDC to set for this line
+    const lineInv = norm(d?.InventoryID?.value);
+    const wantInv = norm(inLine.inventoryId);
+    // Safety: only touch a line whose resolved item matches what we sent
+    if (wantInv && lineInv && wantInv.toUpperCase() !== lineInv.toUpperCase()) {
+      altSkipped.push({ index: i, reason: "inventory-mismatch", expected: wantInv, got: lineInv });
+      return;
+    }
+    if (norm(d?.AlternateID?.value) === wantNdc) return;   // already correct (NDC is the default)
+    if (!d?.id) { altSkipped.push({ index: i, reason: "no-line-id" }); return; }
+    altUpdates.push({ id: d.id, AlternateID: { value: wantNdc } });
+  });
+
+  let altUpdateError = null;
+  let finalDetails = createdDetails;
+  if (altUpdates.length > 0) {
+    const updatePayload = {
+      id: created?.id,
+      OrderType: { value: orderType },
+      OrderNbr:  { value: orderNbr },
+      Details: altUpdates
+    };
+    try {
+      const ures = await fetch(url, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "Cookie": cookies
+        },
+        body: JSON.stringify(updatePayload)
+      });
+      const utext = await ures.text();
+      if (!ures.ok) {
+        let ed = null;
+        try { ed = extractAllErrors(JSON.parse(utext)); } catch {}
+        altUpdateError = { status: ures.status, errorDetails: ed, rawBody: utext.slice(0, 1500) };
+      } else {
+        try {
+          const u = JSON.parse(utext);
+          if (Array.isArray(u?.Details)) finalDetails = u.Details;
+        } catch {}
+      }
+    } catch (err) {
+      altUpdateError = { error: String(err) };
+    }
+  }
+
+  // ── Step 3: self-diagnosing readback — what each line actually ended up with
+  const lineResults = finalDetails.map(d => ({
+    inventoryID: d?.InventoryID?.value,
+    alternateID: d?.AlternateID?.value,
+    orderQty:    d?.OrderQty?.value,
+    uom:         d?.UOM?.value
+  }));
+
   return {
     ok: true,
-    id: parsed?.id,
-    orderNbr: parsed?.OrderNbr?.value,
-    status: parsed?.Status?.value,
-    hold: parsed?.Hold?.value,
-    lineCount: Array.isArray(parsed?.Details) ? parsed.Details.length : 0,
-    orderTotal: parsed?.OrderTotal?.value
+    id: created?.id,
+    orderNbr,
+    status: created?.Status?.value,
+    hold: created?.Hold?.value,
+    lineCount: finalDetails.length,
+    orderTotal: created?.OrderTotal?.value,
+    lineResults,
+    altUpdatesAttempted: altUpdates.length,
+    altSkipped: altSkipped.length ? altSkipped : undefined,
+    altUpdateError: altUpdateError || undefined
   };
 }
 
