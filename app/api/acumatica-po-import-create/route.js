@@ -133,7 +133,7 @@ export async function POST(req) {
         lineCount: result.lineCount,
         orderTotal: result.orderTotal,
         method: result.method,
-        altAttemptError: result.altAttemptError,
+        createAltError: result.createAltError,
         lineResults: result.lineResults
       });
     }
@@ -170,9 +170,10 @@ async function createOnePO(cookies, p) {
     Description: { value: String(p.description || "") }
   };
 
-  // Lines keyed by the vendor NDC (AlternateID resolves the item, no InventoryID)
-  const detailsByAlternate = () => p.lines.map(line => ({
+  // Lines with BOTH InventoryID and AlternateID (the vendor NDC) in one create.
+  const detailsByBoth = () => p.lines.map(line => ({
     BranchID:    { value: BRANCH },
+    InventoryID: { value: String(line.inventoryId) },
     AlternateID: { value: String(line.alternateId) },
     WarehouseID: { value: String(line.warehouse) },
     OrderQty:    { value: Number(line.orderQty) },
@@ -180,7 +181,7 @@ async function createOnePO(cookies, p) {
     UnitCost:    { value: Number(line.unitCost) || 0 }
   }));
 
-  // Fallback: lines keyed by InventoryID (original behavior; NDC will be default)
+  // Fallback: lines keyed by InventoryID only (NDC will be the item default)
   const detailsByInventory = () => p.lines.map(line => ({
     BranchID:    { value: BRANCH },
     InventoryID: { value: String(line.inventoryId) },
@@ -217,31 +218,24 @@ async function createOnePO(cookies, p) {
   const norm = v => String(v == null ? "" : v).trim();
   const allHaveAlt = p.lines.every(l => norm(l.alternateId));
 
-  // 1) Try AlternateID-keyed create. Treat it as failed if the PUT errors OR if
-  //    any line came back without a resolved InventoryID (NDC didn't resolve).
-  let attempt = null, method = null, altAttemptError = null;
+  // 1) Try creating with InventoryID + AlternateID together in one payload.
+  let attempt = null, method = null, createAltError = null;
   if (allHaveAlt) {
-    const a = await putCreate(detailsByAlternate());
-    if (a.ok) {
-      const det = Array.isArray(a.parsed?.Details) ? a.parsed.Details : [];
-      const allResolved = det.length === p.lines.length && det.every(d => norm(d?.InventoryID?.value));
-      if (allResolved) { attempt = a; method = "alternate"; }
-      else { altAttemptError = { reason: "lines-did-not-resolve-from-ndc", lineCount: det.length }; }
-    } else {
-      altAttemptError = { status: a.status, errorDetails: a.errorDetails, rawBody: a.rawBody, networkError: a.networkError };
-    }
+    const a = await putCreate(detailsByBoth());
+    if (a.ok) { attempt = a; method = "both"; }
+    else { createAltError = { status: a.status, errorDetails: a.errorDetails, rawBody: a.rawBody, networkError: a.networkError }; }
   } else {
-    altAttemptError = { reason: "not-all-lines-have-an-ndc" };
+    createAltError = { reason: "not-all-lines-have-an-ndc" };
   }
 
-  // 2) Fall back to InventoryID-keyed create if needed.
+  // 2) Fall back to InventoryID-only create if the combined create was rejected.
   if (!attempt) {
     const b = await putCreate(detailsByInventory());
     if (!b.ok) {
       return {
         ok: false, stage: "create-po",
         status: b.status, errorDetails: b.errorDetails, rawBody: b.rawBody, error: b.networkError,
-        altAttemptError: altAttemptError || undefined,
+        createAltError: createAltError || undefined,
         payloadSent: b.payloadSent
       };
     }
@@ -268,7 +262,7 @@ async function createOnePO(cookies, p) {
     lineCount: details.length,
     orderTotal: created?.OrderTotal?.value,
     method,
-    altAttemptError: (method === "inventory" && altAttemptError) ? altAttemptError : undefined,
+    createAltError: (method === "inventory" && createAltError) ? createAltError : undefined,
     lineResults
   };
 }
