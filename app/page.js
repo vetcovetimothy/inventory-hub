@@ -3346,6 +3346,34 @@ function POImportTool(props) {
               </div>
             </div>}
 
+            {succeeded.length > 0 && <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 8 }}>Line NDCs (Alternate ID) as created:</div>
+              {succeeded.map(function(s, si) {
+                var lr = s.lineResults || [];
+                return <div key={si} style={{ marginBottom: 10, border: "1px solid #E5E7EB", borderRadius: 6, overflow: "hidden" }}>
+                  <div style={{ background: "#F9FAFB", borderBottom: "1px solid #E5E7EB", padding: "6px 10px", fontSize: 11, color: "#6B7280" }}>
+                    <span style={{ fontFamily: "monospace", color: "#1F2937", fontWeight: 600 }}>{s.orderNbr}</span>
+                    {" \u00B7 keyed by "}<span style={{ color: s.method === "alternate" ? "#047857" : "#B45309", fontWeight: 600 }}>{s.method === "alternate" ? "NDC" : "Inventory ID"}</span>
+                    {s.altAttemptError ? <span style={{ color: "#B45309" }}>{" \u00B7 NDC path failed, used Inventory ID"}</span> : null}
+                  </div>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                    <thead><tr style={{ background: "#FFFFFF", borderBottom: "1px solid #F3F4F6" }}>
+                      <th style={{ padding: "4px 10px", textAlign: "left", fontWeight: 600, color: "#6B7280" }}>Inventory ID</th>
+                      <th style={{ padding: "4px 10px", textAlign: "left", fontWeight: 600, color: "#6B7280" }}>Alternate ID (NDC)</th>
+                      <th style={{ padding: "4px 10px", textAlign: "right", fontWeight: 600, color: "#6B7280" }}>Qty</th>
+                    </tr></thead>
+                    <tbody>{lr.map(function(l, li) {
+                      return <tr key={li} style={{ borderBottom: li < lr.length - 1 ? "1px solid #F9FAFB" : "none" }}>
+                        <td style={{ padding: "4px 10px", color: "#374151", fontFamily: "monospace" }}>{l.inventoryID || "\u2014"}</td>
+                        <td style={{ padding: "4px 10px", color: "#374151", fontFamily: "monospace" }}>{l.alternateID || "\u2014"}</td>
+                        <td style={{ padding: "4px 10px", color: "#374151", textAlign: "right" }}>{l.orderQty}</td>
+                      </tr>;
+                    })}</tbody>
+                  </table>
+                </div>;
+              })}
+            </div>}
+
             {failure && <div style={{ background: "rgba(220,38,38,0.04)", border: "1px solid rgba(220,38,38,0.2)", borderRadius: 6, padding: 12, marginBottom: 16 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: "#DC2626", marginBottom: 6 }}>Failed PO #{failure.poIndex + 1}:</div>
               <div style={{ fontSize: 11, color: "#6B7280", marginBottom: 8 }}>
