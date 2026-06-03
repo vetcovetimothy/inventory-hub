@@ -2778,6 +2778,7 @@ function POImportTool(props) {
 
       // Step 4: McKesson portal cross-reference (using NDCs from pasted table)
       var warnings = [];
+      var qtyOverrides = {};
       if (vendor === "mckesson" && mckParsed && mckParsed.length > 0) {
         var portalNdcs = mckParsed.map(function(item) { return item.ndc; }); // already normalized (no dashes)
         var mckItems = matched.filter(function(r) { return r.vendorSource === "McKesson"; });
@@ -2801,12 +2802,17 @@ function POImportTool(props) {
           warnings.push({ type: "screenshot-only", msg: "NDC " + pi.ndc + desc + " is on the McKesson portal but NOT in the PDF", item: null });
         });
 
-        // Quantity mismatches
+        // Quantity mismatches — push warning AND auto-fill the portal qty
+        // into screenshotQtys so the result row shows the portal value with
+        // an orange highlight (the "edited" visual treatment). Portal always
+        // wins per Tim's spec — we trust the McKesson portal over the PDF.
+        // The warning banner still surfaces so the discrepancy is visible.
         mckItems.forEach(function(pdfItem) {
           var ndcNorm = normalizeNdcForCompare(pdfItem.ndc);
           var portalMatch = mckParsed.find(function(pi) { return pi.ndc === ndcNorm; });
           if (portalMatch && portalMatch.qty && pdfItem.qty && portalMatch.qty !== pdfItem.qty) {
             warnings.push({ type: "qty-mismatch", msg: pdfItem.drugName + " (NDC " + pdfItem.ndc + "): PDF says qty " + pdfItem.qty + " but portal shows " + portalMatch.qty, item: pdfItem });
+            qtyOverrides[pdfItem.ndc] = String(portalMatch.qty);
           }
         });
 
@@ -2831,6 +2837,12 @@ function POImportTool(props) {
         if (fileList.length > 0) setActiveFileTab(fileList[0]);
       }
       setMckWarnings(warnings);
+      // McKesson only: apply portal qty overrides (computed in the qty-mismatch
+      // loop above). Replaces any prior screenshotQtys since we're doing a
+      // fresh parse. Other modes leave screenshotQtys alone.
+      if (vendor === "mckesson") {
+        setScreenshotQtys(qtyOverrides);
+      }
       var foundCount = matched.filter(function(r) { return r.ndcFound; }).length;
       toast("Validated " + matched.length + " items: " + foundCount + " matched in OData, " + (matched.length - foundCount) + " not found");
     } catch (err) {
