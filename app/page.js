@@ -3193,22 +3193,22 @@ function POImportTool(props) {
               <button onClick={onCreatePOsClick} disabled={acuCreateLoading || !ok} style={{ background: (acuCreateLoading || !ok) ? "#D1D5DB" : "#047857", color: "#FFFFFF", border: "none", padding: "6px 14px", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: (acuCreateLoading || !ok) ? "not-allowed" : "pointer", display: "inline-flex", alignItems: "center", gap: 6 }} title={!ok ? "Acumatica credentials required" : "Create the parsed POs in Acumatica"}>{acuCreateLoading ? <><Spinner /> Creating...</> : <>{"\u2192"} Create POs in Acumatica</>}</button>
             </div>
           </div>
-          <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
+          <table style={{ width: "100%", minWidth: 1200, borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
             <thead><tr>
-              <th style={S.th}>OData Status</th>
-              <th style={S.th}>NDC</th>
-              <th style={S.th}>GEN- Inventory ID</th>
-              <th style={S.th}>Description (Acumatica)</th>
-              <th style={S.th}>UOM</th>
-              <th style={S.th}>Drug Name (PO)</th>
-              <th style={S.th}>Vendor</th>
+              <th style={Object.assign({}, S.th, { whiteSpace: "nowrap" })}>OData Status</th>
+              <th style={Object.assign({}, S.th, { minWidth: 120, whiteSpace: "nowrap" })}>NDC</th>
+              <th style={Object.assign({}, S.th, { minWidth: 120, whiteSpace: "nowrap" })}>GEN- Inventory ID</th>
+              <th style={Object.assign({}, S.th, { minWidth: 200 })}>Description (Acumatica)</th>
+              <th style={Object.assign({}, S.th, { whiteSpace: "nowrap" })}>UOM</th>
+              <th style={Object.assign({}, S.th, { minWidth: 200 })}>Drug Name (PO)</th>
+              <th style={Object.assign({}, S.th, { whiteSpace: "nowrap" })}>Vendor</th>
               <th style={Object.assign({}, S.th, { textAlign: "center" })}>Qty</th>
-              <th style={Object.assign({}, S.th, { textAlign: "right" })}>Unit Cost</th>
-              <th style={Object.assign({}, S.th, { textAlign: "right" })}>Ext. Cost</th>
-              <th style={Object.assign({}, S.th, { textAlign: "right" })}>Avg Unit Cost</th>
-              <th onClick={function() { setDeltaSort(deltaSort === "desc" ? "asc" : deltaSort === "asc" ? null : "desc"); }} style={Object.assign({}, S.th, { textAlign: "right", cursor: "pointer", userSelect: "none" })}>{"\u0394% Unit Cost"}{deltaSort === "desc" ? " \u25BE" : deltaSort === "asc" ? " \u25B4" : ""}</th>
-              {vendor === "mckesson" && <th style={S.th}>MCK Item #</th>}
-              <th style={S.th}>Source</th>
+              <th style={Object.assign({}, S.th, { textAlign: "right", whiteSpace: "nowrap" })}>Unit Cost</th>
+              <th style={Object.assign({}, S.th, { textAlign: "right", whiteSpace: "nowrap" })}>Ext. Cost</th>
+              <th style={Object.assign({}, S.th, { textAlign: "right", whiteSpace: "nowrap" })}>Avg Unit Cost</th>
+              <th onClick={function() { setDeltaSort(deltaSort === "desc" ? "asc" : deltaSort === "asc" ? null : "desc"); }} style={Object.assign({}, S.th, { textAlign: "right", cursor: "pointer", userSelect: "none", whiteSpace: "nowrap", minWidth: 95 })}>{"\u0394% Unit Cost"}{deltaSort === "desc" ? " \u25BE" : deltaSort === "asc" ? " \u25B4" : ""}</th>
+              {vendor === "mckesson" && <th style={Object.assign({}, S.th, { whiteSpace: "nowrap" })}>MCK Item #</th>}
+              <th style={Object.assign({}, S.th, { minWidth: 130, whiteSpace: "nowrap" })}>Source</th>
             </tr></thead>
             <tbody>{sortedActiveResults.map(function(r, i) {
               var editedQty = screenshotQtys[r.ndc] != null ? parseInt(screenshotQtys[r.ndc]) : r.qty;
@@ -3218,12 +3218,12 @@ function POImportTool(props) {
               var extCost = (editedQty && editedPrice) ? Math.round(editedQty * editedPrice * 100) / 100 : r.totalPrice;
               return <tr key={i} style={{ background: (qtyChanged || priceChanged) ? "rgba(245,158,11,0.06)" : (r.ndcFound ? "transparent" : "rgba(239,68,68,0.04)") }}>
                 <td style={S.td}><span style={S.badge(r.ndcFound ? "success" : "danger")}>{r.ndcFound ? <><IconCheck /> Match</> : <><IconAlert /> Missing</>}</span></td>
-                <td style={S.td}>{r.ndc}</td>
-                <td style={Object.assign({}, S.td, { color: r.inventoryId ? "#059669" : "#9CA3AF" })}>{r.inventoryId || "\u2014"}</td>
-                <td style={Object.assign({}, S.td, { maxWidth: 220, wordBreak: "break-word" })}>{r.acumaticaDesc || "\u2014"}</td>
-                <td style={Object.assign({}, S.td, { color: r.uom ? "#06B6D4" : "#9CA3AF" })}>{r.uom || "\u2014"}</td>
-                <td style={Object.assign({}, S.td, { color: "#6B7280", maxWidth: 200, wordBreak: "break-word" })}>{r.drugName || "\u2014"}</td>
-                <td style={S.td}>{r.vendorSource || "\u2014"}</td>
+                <td style={Object.assign({}, S.td, { whiteSpace: "nowrap", fontFamily: "monospace", fontSize: 12 })}>{r.ndc}</td>
+                <td style={Object.assign({}, S.td, { whiteSpace: "nowrap", fontFamily: "monospace", fontSize: 12, color: r.inventoryId ? "#059669" : "#9CA3AF" })}>{r.inventoryId || "\u2014"}</td>
+                <td style={Object.assign({}, S.td, { minWidth: 200, maxWidth: 320, wordBreak: "normal", overflowWrap: "break-word" })}>{r.acumaticaDesc || "\u2014"}</td>
+                <td style={Object.assign({}, S.td, { whiteSpace: "nowrap", color: r.uom ? "#06B6D4" : "#9CA3AF" })}>{r.uom || "\u2014"}</td>
+                <td style={Object.assign({}, S.td, { color: "#6B7280", minWidth: 200, maxWidth: 320, wordBreak: "normal", overflowWrap: "break-word" })}>{r.drugName || "\u2014"}</td>
+                <td style={Object.assign({}, S.td, { whiteSpace: "nowrap" })}>{r.vendorSource || "\u2014"}</td>
                 <td style={Object.assign({}, S.td, { textAlign: "center" })}><input style={Object.assign({}, S.inp, { width: 70, padding: "6px 8px", textAlign: "center", color: qtyChanged ? "#D97706" : "#374151", background: qtyChanged ? "rgba(245,158,11,0.1)" : "#F8F9FB" })} type="number" value={screenshotQtys[r.ndc] != null ? screenshotQtys[r.ndc] : (r.qty || "")} onChange={function(e) { var updated = Object.assign({}, screenshotQtys); updated[r.ndc] = e.target.value; setScreenshotQtys(updated); }} /></td>
                 <td style={Object.assign({}, S.td, { textAlign: "right" })}><input style={Object.assign({}, S.inp, { width: 90, padding: "6px 8px", textAlign: "right", color: priceChanged ? "#D97706" : "#059669", background: priceChanged ? "rgba(245,158,11,0.1)" : "#F8F9FB" })} type="number" step="0.01" value={editedPrices[r.ndc] != null ? editedPrices[r.ndc] : (r.unitPrice || "")} onChange={function(e) { var updated = Object.assign({}, editedPrices); updated[r.ndc] = e.target.value; setEditedPrices(updated); }} /></td>
                 <td style={Object.assign({}, S.td, { textAlign: "right" })}>{extCost ? "$" + extCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "\u2014"}</td>
@@ -3247,7 +3247,7 @@ function POImportTool(props) {
                   </>;
                 })()}
                 {vendor === "mckesson" && <td style={S.td}>{r.vendorItemNum || "\u2014"}</td>}
-                <td style={Object.assign({}, S.td, { color: "#9CA3AF" })}>{(r.sourceFile || "").split("/").pop()}</td>
+                <td style={Object.assign({}, S.td, { whiteSpace: "nowrap", color: "#9CA3AF" })}>{(r.sourceFile || "").split("/").pop()}</td>
               </tr>;
             })}</tbody>
           </table>
