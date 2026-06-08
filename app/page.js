@@ -3203,10 +3203,9 @@ function POImportTool(props) {
               <th style={Object.assign({}, S.th, { padding: "9px 10px", minWidth: 150 })}>Drug Name (PO)</th>
               <th style={Object.assign({}, S.th, { padding: "9px 10px", textAlign: "center" })}>Qty</th>
               <th style={Object.assign({}, S.th, { padding: "9px 10px", textAlign: "right", whiteSpace: "nowrap" })}>Unit Cost</th>
-              <th style={Object.assign({}, S.th, { padding: "9px 10px", textAlign: "right", whiteSpace: "nowrap" })}>Ext. Cost</th>
+              <th style={Object.assign({}, S.th, { padding: "9px 10px", textAlign: "right", whiteSpace: "nowrap" })}>Line Total</th>
               <th style={Object.assign({}, S.th, { padding: "9px 10px", textAlign: "right", whiteSpace: "nowrap" })}>Avg Unit Cost</th>
               <th onClick={function() { setDeltaSort(deltaSort === "desc" ? "asc" : deltaSort === "asc" ? null : "desc"); }} style={Object.assign({}, S.th, { padding: "9px 10px", textAlign: "right", cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" })}>{"\u0394% Unit Cost"}{deltaSort === "desc" ? " \u25BE" : deltaSort === "asc" ? " \u25B4" : ""}</th>
-              {vendor === "mckesson" && <th style={Object.assign({}, S.th, { padding: "9px 10px", whiteSpace: "nowrap" })}>MCK Item #</th>}
             </tr></thead>
             <tbody>{sortedActiveResults.map(function(r, i) {
               var editedQty = screenshotQtys[r.ndc] != null ? parseInt(screenshotQtys[r.ndc]) : r.qty;
@@ -3243,7 +3242,6 @@ function POImportTool(props) {
                     </td>
                   </>;
                 })()}
-                {vendor === "mckesson" && <td style={Object.assign({}, S.td, { padding: "11px 10px", whiteSpace: "nowrap" })}>{r.vendorItemNum || "\u2014"}</td>}
               </tr>;
             })}</tbody>
           </table>
