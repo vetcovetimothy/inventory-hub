@@ -235,7 +235,9 @@ export async function POST(request) {
     // Only cache types listed in CACHE_TTL, and only when no warehouse filter is applied
     // (per-warehouse PO fetches and warehouse-filtered queries shouldn't share a cache key)
     const cacheable = ttl && !warehouse;
-    const cacheKey = cacheable ? `acu-cache:${type}` : null;
+    // Bump the suffix to invalidate a stale cached copy after a query change
+    // (uom-conversions:v2 abandons the old truncated entry from before the $top fix).
+    const cacheKey = cacheable ? `acu-cache:${type}${type === "uom-conversions" ? ":v2" : ""}` : null;
     if (cacheable && !skipCache) {
       const cached = await getCached(cacheKey);
       if (cached && cached.data) {
@@ -281,6 +283,13 @@ export async function POST(request) {
     // For cross reference, get all records
     if (type === "item-xref") {
       url += `?$top=10000`;
+    }
+
+    // For UOM conversions, fetch all (no warehouse filter; many rows per item, so
+    // without an explicit cap the GI gets truncated and some items lose their
+    // conversion factor — which breaks per-UOM avg-cost scaling downstream).
+    if (type === "uom-conversions") {
+      url += `?$top=100000`;
     }
 
     // Call Acumatica
