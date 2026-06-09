@@ -24,7 +24,9 @@
  *   3. For each requested SKU, find ALL matching lines by AlternateID (NDC)
  *      first, then by InventoryID as fallback. If a SKU matches multiple
  *      lines on the same PO, delete all of them.
- *   4. PUT the PO with the matched lines marked { "delete": true }.
+ *   4. If EVERY line on the PO matched (removing them would empty the PO),
+ *      DELETE the whole PO instead. Otherwise PUT the PO with the matched lines
+ *      marked { "delete": true }.
  *
  * Behavior, across POs:
  *   - Process each PO independently. One PO failing does NOT stop the others.
@@ -213,6 +215,37 @@ async function processOnePO(cookies, orderNbr, skus) {
       poDetailsCount: details.length,
       error: `None of the requested SKUs matched any line on PO ${orderNbr}. The line(s) may have already been removed, or the SKU values don't match.`
     };
+  }
+
+  // Step 3.5: If EVERY line on the PO is being removed, deleting the lines would
+  // leave an empty PO. Delete the whole PO instead. (On Hold was verified above.)
+  const removesAllLines = details.length > 0 && matchedLineIds.length === details.length;
+  if (removesAllLines) {
+    const delUrl = `${BASE}/entity/Default/${API_VERSION}/PurchaseOrder/${encodeURIComponent(po.id)}`;
+    try {
+      const dres = await fetch(delUrl, { method: "DELETE", headers: { "Accept": "application/json", "Cookie": cookies } });
+      if (dres.status === 204 || dres.status === 200) {
+        return { ok: true, stage: "deleted-po", deletedEntirePO: true, removedLines: matchedReport, unmatchedSkus };
+      }
+      const dtext = await dres.text();
+      let derr = null;
+      try { derr = extractAllErrors(JSON.parse(dtext)); } catch {}
+      let dhint = "";
+      if (dres.status === 403) dhint = "The login lacks delete rights on the Purchase Orders form.";
+      else if (dres.status === 500) dhint = "Acumatica refused the delete — usually a receipt/bill or workflow rule blocking it.";
+      return {
+        ok: false,
+        stage: "delete-po",
+        status: dres.status,
+        hint: dhint,
+        errorDetails: derr,
+        rawBody: dtext.slice(0, 2000),
+        attemptedDeletes: matchedReport,
+        error: `All ${details.length} line(s) on PO ${orderNbr} matched, so it would be emptied — but Acumatica rejected deleting the whole PO.`
+      };
+    } catch (err) {
+      return { ok: false, stage: "delete-po", error: String(err), attemptedDeletes: matchedReport };
+    }
   }
 
   // Step 4: PUT the PO with matched lines marked for deletion
