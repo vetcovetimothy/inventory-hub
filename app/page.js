@@ -2004,8 +2004,9 @@ function CycleCountTool(props) {
       });
 
       // If TP-DOH file is loaded, enrich each result with Daily Run Rate.
-      // Recipe (changed May 2026: Final FC units replaces On Hand as the DRR numerator):
-      //   1. drrInBase = TP-DOH Final FC units ÷ Days on Hand (in TP-DOH's Main Unit of Measure)
+      // Recipe (changed June 2026: divisor is now days in the current month, not Days on Hand):
+      //   1. drrInBase = TP-DOH Final FC units ÷ days in the CURRENT calendar month
+      //      (dynamic: 28/29/30/31), expressed in TP-DOH's Main Unit of Measure
       //   2. Get TP-DOH's Main UOM for the item (from the TP-DOH row)
       //   3. Get Sales Unit for the item (from Stock Items)
       //   4. In Stock Item UOM Conversions GI, find the row where
@@ -2020,16 +2021,23 @@ function CycleCountTool(props) {
             dohMap[r.productCode + "|" + r.locationCode] = r;
           }
         });
+        // Days in the CURRENT calendar month (dynamic): 30 for June, 31 for July,
+        // 28/29 for February. The 0th day of next month = last day of this month.
+        var _now = new Date();
+        var daysInCurrentMonth = new Date(_now.getFullYear(), _now.getMonth() + 1, 0).getDate();
         output.forEach(function(row) {
           var dohRow = dohMap[row.inventoryId + "|" + wh];
           if (!dohRow) { row.dailyRunRate = null; row.convertedDailyRunRate = null; return; }
           row.dohDescription = dohRow.description;
           row.dohFinalFcUnits = dohRow.finalFcUnits;
           row.dohDaysOnHand = dohRow.daysOnHand;
-          if (dohRow.daysOnHand <= 0) { row.dailyRunRate = null; row.convertedDailyRunRate = null; return; }
+          // Divide Final FC units by the number of days in the current month
+          // (dynamic), rather than Days on Hand.
+          var finalFc = dohRow.finalFcUnits;
+          if (finalFc == null || isNaN(finalFc) || daysInCurrentMonth <= 0) { row.dailyRunRate = null; row.convertedDailyRunRate = null; return; }
 
-          // Step 1: DRR in TP-DOH's native unit
-          var drrInBase = dohRow.finalFcUnits / dohRow.daysOnHand;
+          // Step 1: DRR in TP-DOH's native unit = Final FC units ÷ days in current month
+          var drrInBase = finalFc / daysInCurrentMonth;
 
           // Step 2 & 3: get the FROM unit (TP-DOH Main UOM) and TO unit (Stock Items Sales Unit)
           var mainUom = (dohRow.mainUom || "").toUpperCase();
@@ -2216,7 +2224,7 @@ function CycleCountTool(props) {
           </div>}
 
           <div style={{ fontSize: 14, color: "#374151", fontWeight: 600, marginBottom: 8, marginTop: 20, display: "flex", alignItems: "center", gap: 6 }}>{isSftp ? "5" : "4"}. TP-DOH Netstock File <span style={{ fontSize: 11, fontWeight: 400, color: "#9CA3AF" }}>(optional, resets daily)</span></div>
-          <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 6 }}>Provides Daily Run Rate (Final FC units ÷ Days on Hand) for a second export. Reupload each day.</div>
+          <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 6 }}>Provides Daily Run Rate (Final FC units ÷ days in current month) for a second export. Reupload each day.</div>
           {dohRows && dohMeta ? <div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(20,184,166,0.08)", border: "1px solid rgba(20,184,166,0.25)", borderRadius: 10 }}>
               <span style={{ color: TOOL_COLOR, fontSize: 13 }}>{"\u2713"} {dohMeta.name} — {dohMeta.count.toLocaleString()} items (loaded {dohMeta.date})</span>
