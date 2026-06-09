@@ -808,10 +808,13 @@ function WHT(props) {
       var resp = await res.json();
       if (!resp || !Array.isArray(resp.results)) { toast("Unexpected response from Acumatica", "error"); return; }
       var removedKeys = new Set();
+      var deletedPOs = new Set();
       var removedCount = 0;
       var failedSummaries = [];
       resp.results.forEach(function(r) {
-        if (r.ok && Array.isArray(r.removedLines)) {
+        if (r.ok && r.deletedEntirePO) {
+          deletedPOs.add(r.orderNbr);
+        } else if (r.ok && Array.isArray(r.removedLines)) {
           r.removedLines.forEach(function(rl) {
             removedCount++;
             if (rl.inventoryID) removedKeys.add(r.orderNbr + "::" + String(rl.inventoryID).trim().toUpperCase());
@@ -821,8 +824,9 @@ function WHT(props) {
           failedSummaries.push(why);
         }
       });
-      if (removedKeys.size > 0) {
+      if (removedKeys.size > 0 || deletedPOs.size > 0) {
         var nextData = data.filter(function(row) {
+          if (deletedPOs.has(row.OrderNbr || "")) return false;
           var inv = String(row.InventoryID || "").trim().toUpperCase();
           if (!inv) return true;
           var k = (row.OrderNbr || "") + "::" + inv;
@@ -831,12 +835,15 @@ function WHT(props) {
         setData(nextData);
         try { persist(nextData, emailSent, runBy, runTime, shipNotes); } catch (e) {}
       }
-      if (removedCount > 0 && failedSummaries.length === 0) {
-        toast("Removed " + removedCount + " line" + (removedCount > 1 ? "s" : "") + " from Acumatica", "success");
-      } else if (removedCount > 0 && failedSummaries.length > 0) {
-        toast("Removed " + removedCount + ". Skipped: " + failedSummaries.join("; "), "error");
+      var okParts = [];
+      if (removedCount > 0) okParts.push("Removed " + removedCount + " line" + (removedCount > 1 ? "s" : ""));
+      if (deletedPOs.size > 0) okParts.push("deleted " + deletedPOs.size + " empty PO" + (deletedPOs.size > 1 ? "s" : "") + " (" + Array.from(deletedPOs).join(", ") + ")");
+      if (okParts.length > 0 && failedSummaries.length === 0) {
+        toast(okParts.join(", "), "success");
+      } else if (okParts.length > 0 && failedSummaries.length > 0) {
+        toast(okParts.join(", ") + ". Skipped: " + failedSummaries.join("; "), "error");
       } else if (failedSummaries.length > 0) {
-        toast("No lines removed. " + failedSummaries.join("; "), "error");
+        toast("No changes. " + failedSummaries.join("; "), "error");
       } else {
         toast("No matching lines found to remove", "error");
       }
