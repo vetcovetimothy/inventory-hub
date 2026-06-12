@@ -5736,21 +5736,20 @@ function OOSTracker(props) {
     kvPost(OOS_DATA_KEY, { fuze: fuze, fuzeName: fuzeFn, ggm: ggm, ggmName: ggmFn, cgp: cgp, cgpName: cgpFn, _savedAt: Date.now() }).catch(function() {});
   }
 
-  function applyUploadToMissCount(rows, vendorTab) {
-    // For every note key in this vendor tab:
-    //   - If item is in this upload: reset miss count to 0
-    //   - If item is NOT in this upload: miss count += 1
-    //   - If miss count >= NOTE_EXPIRY_MISSES: clear the note
+  // Pure: given current miss/notes maps, compute the updated maps for one vendor's
+  // upload. No state writes, so it can be chained across vendors (e.g. a single
+  // Snowflake fetch that loads all tabs at once) before one combined state update.
+  function computeMissUpdate(rows, vendorTab, missIn, notesIn) {
     var prefix = vendorTab + ":";
     var seenKeys = {};
     (rows || []).forEach(function(r) {
       seenKeys[vendorTab + ":" + r.MANUFACTURER_NO + ":" + (r.WAREHOUSE_SLUG || "")] = true;
     });
-    var newMiss = Object.assign({}, missCount);
-    var newNotes = Object.assign({}, permNotes);
+    var newMiss = Object.assign({}, missIn);
+    var newNotes = Object.assign({}, notesIn);
     var notesChanged = false;
     Object.keys(newNotes).forEach(function(k) {
-      if (k.indexOf(prefix) !== 0) return; // only touch keys for the vendor we just uploaded
+      if (k.indexOf(prefix) !== 0) return; // only touch keys for this vendor
       if (seenKeys[k]) {
         newMiss[k] = 0;
       } else {
@@ -5764,14 +5763,19 @@ function OOSTracker(props) {
         }
       }
     });
-    // Also initialize missCount = 0 for new keys in this upload (items with no note yet)
+    // Initialize missCount = 0 for new keys in this upload (items with no note yet)
     Object.keys(seenKeys).forEach(function(k) { if (newMiss[k] === undefined) newMiss[k] = 0; });
-    setMissCount(newMiss);
+    return { miss: newMiss, notes: newNotes, notesChanged: notesChanged };
+  }
+
+  function applyUploadToMissCount(rows, vendorTab) {
+    var u = computeMissUpdate(rows, vendorTab, missCount, permNotes);
+    setMissCount(u.miss);
     var now = Date.now();
-    kvPost(OOS_NOTES_MISS_KEY, Object.assign({}, newMiss, { _savedAt: now })).catch(function() {});
-    if (notesChanged) {
-      setPermNotes(newNotes);
-      kvPost(OOS_NOTES_PERM_KEY, Object.assign({}, newNotes, { _savedAt: now })).catch(function() {});
+    kvPost(OOS_NOTES_MISS_KEY, Object.assign({}, u.miss, { _savedAt: now })).catch(function() {});
+    if (u.notesChanged) {
+      setPermNotes(u.notes);
+      kvPost(OOS_NOTES_PERM_KEY, Object.assign({}, u.notes, { _savedAt: now })).catch(function() {});
     }
   }
 
@@ -5790,6 +5794,42 @@ function OOSTracker(props) {
     reader.readAsText(file);
   }
 
+  function loadFromSnowflake() {
+    setSfLoading(true);
+    fetch("/api/oos-vendor-report", { cache: "no-store" }).then(function(r) { return r.json(); }).then(function(d) {
+      if (!d || !d.ok) { setSfLoading(false); toast("Snowflake fetch failed: " + ((d && (d.message || d.hint || d.error)) || "unknown error"), "error"); return; }
+      var all = d.rows || [];
+      var fuze = [], ggm = [], cgp = [], dropped = 0;
+      all.forEach(function(r) {
+        r._wh = mapWH(r.WAREHOUSE_SLUG || "");
+        var v = (r.VENDOR_NAME || "").trim();
+        if (v === "FuzeRx") fuze.push(r);
+        else if (v === "GoGoMeds") ggm.push(r);
+        else if (v === "Central Garden & Pet") cgp.push(r);
+        else dropped++; // other vendors are intentionally not tracked here
+      });
+      var nm = "Snowflake \u00B7 " + new Date().toLocaleString();
+      setFuzeData(fuze); setFuzeName(nm);
+      setGgmData(ggm); setGgmName(nm);
+      setCgpData(cgp); setCgpName(nm);
+      saveDataToKV(fuze, nm, ggm, nm, cgp, nm);
+      // Chain miss-count updates across all three vendors into ONE state write.
+      var now = Date.now();
+      var u1 = computeMissUpdate(fuze, "fuzerx", missCount, permNotes);
+      var u2 = computeMissUpdate(ggm, "gogomeds", u1.miss, u1.notes);
+      var u3 = computeMissUpdate(cgp, "cgp", u2.miss, u2.notes);
+      setMissCount(u3.miss);
+      kvPost(OOS_NOTES_MISS_KEY, Object.assign({}, u3.miss, { _savedAt: now })).catch(function() {});
+      if (u1.notesChanged || u2.notesChanged || u3.notesChanged) {
+        setPermNotes(u3.notes);
+        kvPost(OOS_NOTES_PERM_KEY, Object.assign({}, u3.notes, { _savedAt: now })).catch(function() {});
+      }
+      setWhFilter("all"); setSearch("");
+      setSfLoading(false);
+      toast("Loaded " + (fuze.length + ggm.length + cgp.length) + " OOS items from Snowflake" + (dropped > 0 ? " (" + dropped + " other-vendor rows skipped)" : ""));
+    }).catch(function(e) { setSfLoading(false); toast("Snowflake fetch error: " + (e && e.message || e), "error"); });
+  }
+
   function uploadZone(vendor) {
     var label = vendor === "fuzerx" ? "FuzeRx" : vendor === "cgp" ? "Central Garden & Pet" : "GoGoMeds";
     return <div style={Object.assign({}, S.card, { textAlign: "center", padding: 40 })}>
@@ -5804,6 +5844,7 @@ function OOSTracker(props) {
   var data = tab === "fuzerx" ? fuzeData : tab === "cgp" ? cgpData : ggmData;
   var currentName = tab === "fuzerx" ? fuzeName : tab === "cgp" ? cgpName : ggmName;
   var _sdIds = useState({}), sdIds = _sdIds[0], setSdIds = _sdIds[1];
+  var _sfLoading = useState(false), sfLoading = _sfLoading[0], setSfLoading = _sfLoading[1];
   useEffect(function() {
     // Try localStorage first
     var cached = sGet("tracker-short-dating");
@@ -5938,6 +5979,8 @@ function OOSTracker(props) {
       <button onClick={function() { setTab("fuzerx"); setWhFilter("all"); setSearch(""); }} style={S.pill(tab === "fuzerx", "#3B82F6")}>FuzeRx{fuzeData.length > 0 && <span style={{ fontSize: 10, background: tab === "fuzerx" ? "rgba(255,255,255,0.2)" : "rgba(100,116,139,0.2)", padding: "1px 6px", borderRadius: 4, marginLeft: 6 }}>{fuzeData.length}</span>}</button>
       <button onClick={function() { setTab("gogomeds"); setWhFilter("all"); setSearch(""); }} style={S.pill(tab === "gogomeds", "#8B5CF6")}>GoGoMeds{ggmData.length > 0 && <span style={{ fontSize: 10, background: tab === "gogomeds" ? "rgba(255,255,255,0.2)" : "rgba(100,116,139,0.2)", padding: "1px 6px", borderRadius: 4, marginLeft: 6 }}>{ggmData.length}</span>}</button>
       <button onClick={function() { setTab("cgp"); setWhFilter("all"); setSearch(""); }} style={S.pill(tab === "cgp", "#10B981")}>Central Garden &amp; Pet{cgpData.length > 0 && <span style={{ fontSize: 10, background: tab === "cgp" ? "rgba(255,255,255,0.2)" : "rgba(100,116,139,0.2)", padding: "1px 6px", borderRadius: 4, marginLeft: 6 }}>{cgpData.length}</span>}</button>
+      <div style={{ flex: 1 }} />
+      <button onClick={loadFromSnowflake} disabled={sfLoading} style={Object.assign({}, S.btn("ghost"), { background: "#EF4444", color: "#fff", border: "none", padding: "8px 14px", fontSize: 12, opacity: sfLoading ? 0.6 : 1, cursor: sfLoading ? "default" : "pointer" })}>{sfLoading ? "Fetching\u2026" : "\u2601 Fetch from Snowflake"}</button>
     </div>
     {data.length === 0 ? uploadZone(tab) : dataTable()}
   </div>;
