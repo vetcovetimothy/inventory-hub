@@ -1611,7 +1611,7 @@ function CycleCountTool(props) {
   var cred = props.cred;
   var TOOL_COLOR = props.toolColor || "#14B8A6";
   var isSftp = props.sftp || false;
-  var _ndcText = useState(""), ndcText = _ndcText[0], setNdcText = _ndcText[1];
+  var _ndcText = useState(function() { return sGet("cc-ndc-text") || ""; }), ndcText = _ndcText[0], setNdcText = _ndcText[1];
   var _vendorFile = useState(null), vendorFile = _vendorFile[0], setVendorFile = _vendorFile[1];
   var _vendorRows = useState(null), vendorRows = _vendorRows[0], setVendorRows = _vendorRows[1];
   var _csvWarehouses = useState([]), csvWarehouses = _csvWarehouses[0], setCsvWarehouses = _csvWarehouses[1];
@@ -1629,7 +1629,7 @@ function CycleCountTool(props) {
   var _dohLoading = useState(false), dohLoading = _dohLoading[0], setDohLoading = _dohLoading[1];
   var _uomMap = useState(null), uomMap = _uomMap[0], setUomMap = _uomMap[1];
   var _uomMapStatus = useState("idle"), uomMapStatus = _uomMapStatus[0], setUomMapStatus = _uomMapStatus[1];
-  var _warehouse = useState(""), warehouse = _warehouse[0], setWarehouse = _warehouse[1];
+  var _warehouse = useState(function() { return sGet("cc-warehouse") || ""; }), warehouse = _warehouse[0], setWarehouse = _warehouse[1];
   var _results = useState([]), results = _results[0], setResults = _results[1];
   var _errors = useState([]), errors = _errors[0], setErrors = _errors[1];
   var _loading = useState(false), loading = _loading[0], setLoading = _loading[1];
@@ -2076,7 +2076,7 @@ function CycleCountTool(props) {
         // Compute Days of Supply change + flag status for each row.
         // Rules:
         //   - DoS = Adjustment / Converted DRR (positive = supply added, negative = supply removed)
-        //   - Flag when |DoS| > 7 days
+        //   - Flag when |DoS| > 14 days
         //   - Also flag when Adjustment is non-zero but DRR is missing/zero (impact unknown — needs approval)
         //   - Adjustment of 0 is never flagged (no supply change either way)
         output.forEach(function(row) {
@@ -2092,9 +2092,9 @@ function CycleCountTool(props) {
             row.flagReason = "no DRR";
           } else {
             row.daysOfSupply = Math.round((adj / crr) * 10) / 10;
-            if (Math.abs(row.daysOfSupply) > 7) {
+            if (Math.abs(row.daysOfSupply) > 14) {
               row.isFlagged = true;
-              row.flagReason = "|DoS| > 7";
+              row.flagReason = "|DoS| > 14";
             } else {
               row.isFlagged = false;
               row.flagReason = "";
@@ -2186,13 +2186,13 @@ function CycleCountTool(props) {
         <div>
           <div style={{ fontSize: 14, color: "#374151", fontWeight: 600, marginBottom: 8 }}>1. Paste NDC List</div>
           <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 6 }}>Copy the NDC column from your Google Sheet and paste below</div>
-          <textarea value={ndcText} onChange={function(e) { setNdcText(e.target.value); }} placeholder={"68462-0128-01\n68462-0129-01\n43547-0336-10\n..."} rows={8} style={Object.assign({}, S.inp, { resize: "vertical", fontFamily: "monospace", fontSize: 12 })} />
+          <textarea value={ndcText} onChange={function(e) { setNdcText(e.target.value); sSet("cc-ndc-text", e.target.value); }} placeholder={"68462-0128-01\n68462-0129-01\n43547-0336-10\n..."} rows={8} style={Object.assign({}, S.inp, { resize: "vertical", fontFamily: "monospace", fontSize: 12 })} />
           {ndcText.trim() && (function() { var lines = ndcText.trim().split("\n").filter(function(l) { return l.trim(); }); var u = {}; lines.forEach(function(l) { u[l.trim()] = 1; }); var total = lines.length, unique = Object.keys(u).length; return <p style={{ color: "#059669", fontSize: 12, marginTop: 6 }}>{"\u2713"} {unique} NDCs pasted{total > unique ? " (" + (total - unique) + " duplicate" + (total - unique > 1 ? "s" : "") + " removed)" : ""}</p>; })()}
         </div>
         <div>
           <div style={{ fontSize: 14, color: "#374151", fontWeight: 600, marginBottom: 8 }}>2. Warehouse Code</div>
           <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 6 }}>Type the warehouse code for the output (e.g. TP-NY, TP-OH)</div>
-          <input value={warehouse} onChange={function(e) { setWarehouse(e.target.value); }} placeholder="TP-NY" style={Object.assign({}, S.inp, { maxWidth: 200 })} />
+          <input value={warehouse} onChange={function(e) { setWarehouse(e.target.value); sSet("cc-warehouse", e.target.value); }} placeholder="TP-NY" style={Object.assign({}, S.inp, { maxWidth: 200 })} />
 
           <div style={{ fontSize: 14, color: "#374151", fontWeight: 600, marginBottom: 8, marginTop: 20 }}>3. Vendor Inventory CSV</div>
           <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 6 }}>Export from Pharm Admin (contains SKU, Manufacturer Number, Reported Qty, Stock Qty)</div>
@@ -2272,7 +2272,7 @@ function CycleCountTool(props) {
         {results.length > 0 && <button onClick={downloadCSV} style={Object.assign({}, S.btn("ghost"), { padding: "10px 16px" })}><IconDL /> CC upload{dohRows && dohRows.length > 0 ? " (" + getUploadRows().length + ")" : ""}</button>}
         {results.length > 0 && dohRows && dohRows.length > 0 && getCheckRows().length > 0 && <button onClick={downloadDrrCSV} style={Object.assign({}, S.btn("ghost"), { padding: "10px 16px" })}><IconDL /> CC check ({getCheckRows().length})</button>}
         {results.length > 0 && <span style={{ fontSize: 12, color: "#6B7280" }}>{results.length} items</span>}
-        {(ndcText.trim() || vendorFile || results.length > 0) && <button onClick={function() { setNdcText(""); setVendorFile(null); setVendorRows(null); setCsvWarehouses([]); setCsvWhSelected(""); setCsvWhCounts({}); setWarehouse(""); setResults([]); setErrors([]); setSftpFile(null); setSftpRows(null); setApprovals({}); }} style={Object.assign({}, S.btn("ghost"), { padding: "10px 16px", marginLeft: "auto" })}><IconTrash /> Clear</button>}
+        {(ndcText.trim() || vendorFile || results.length > 0) && <button onClick={function() { setNdcText(""); setVendorFile(null); setVendorRows(null); setCsvWarehouses([]); setCsvWhSelected(""); setCsvWhCounts({}); setWarehouse(""); setResults([]); setErrors([]); setSftpFile(null); setSftpRows(null); setApprovals({}); sDel("cc-ndc-text"); sDel("cc-warehouse"); }} style={Object.assign({}, S.btn("ghost"), { padding: "10px 16px", marginLeft: "auto" })}><IconTrash /> Clear</button>}
       </div>
     </div>
 
@@ -2284,21 +2284,20 @@ function CycleCountTool(props) {
 
     {results.length > 0 && (function() {
       var hasDoh = dohRows && dohRows.length > 0;
-      // Sort: flagged first (descending by |DoS|, with no-DRR flagged rows at the very top),
-      // then unflagged in original order.
+      // Order: rows still "to be checked" (flagged AND not yet approved) float to the top.
+      // Everything else — unflagged rows AND flagged rows already checked off — drops below
+      // in the SAME order as the pasted NDC list / export, so a row you check off moves out
+      // of the top section and slots back into export order (where it stays highlighted).
       var sortedResults = results.slice();
       if (hasDoh) {
-        sortedResults.sort(function(a, b) {
-          if (a.isFlagged !== b.isFlagged) return a.isFlagged ? -1 : 1;
-          if (a.isFlagged) {
-            // No-DRR flagged rows first (most uncertain)
-            var aNoDrr = a.daysOfSupply == null;
-            var bNoDrr = b.daysOfSupply == null;
-            if (aNoDrr !== bNoDrr) return aNoDrr ? -1 : 1;
-            return Math.abs(b.daysOfSupply || 0) - Math.abs(a.daysOfSupply || 0);
-          }
-          return 0;
+        var withIdx = sortedResults.map(function(r, idx) { return { r: r, idx: idx }; });
+        withIdx.sort(function(a, b) {
+          var aNeeds = a.r.isFlagged && !approvals[a.r.inventoryId];
+          var bNeeds = b.r.isFlagged && !approvals[b.r.inventoryId];
+          if (aNeeds !== bNeeds) return aNeeds ? -1 : 1;
+          return a.idx - b.idx;
         });
+        sortedResults = withIdx.map(function(x) { return x.r; });
       }
       var flaggedCount = sortedResults.filter(function(r) { return r.isFlagged; }).length;
       function toggleApproval(invId) {
@@ -2325,7 +2324,7 @@ function CycleCountTool(props) {
       }
       return <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto", maxHeight: "calc(100vh - 300px)" })}>
         {hasDoh && flaggedCount > 0 && <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", background: "rgba(220,38,38,0.04)", borderBottom: "1px solid rgba(220,38,38,0.15)", fontSize: 12, color: "#6B7280" }}>
-          <span style={{ color: "#DC2626", fontWeight: 600 }}>{"\u26A0"} {flaggedCount} flagged ({"|"}DoS{"|"} {">"} 7 days or unknown DRR)</span>
+          <span style={{ color: "#DC2626", fontWeight: 600 }}>{"\u26A0"} {flaggedCount} flagged ({"|"}DoS{"|"} {">"} 14 days or unknown DRR)</span>
           <span style={{ color: "#9CA3AF" }}>{"\u00B7"}</span>
           <span>Check to approve for CC upload; leave unchecked to route to CC check.</span>
         </div>}
@@ -2343,17 +2342,20 @@ function CycleCountTool(props) {
           </tr></thead>
           <tbody>{sortedResults.map(function(r, i) {
             var approved = !!approvals[r.inventoryId];
-            var rowBg;
-            if (r.isFlagged && !approved) rowBg = "rgba(220,38,38,0.06)";
-            else if (r.isFlagged && approved) rowBg = "rgba(5,150,105,0.05)";
-            else if (r.quantity < 0) rowBg = "rgba(220,38,38,0.04)";
-            else rowBg = "transparent";
-            // Add a subtle divider after the last flagged row
-            var isLastFlagged = hasDoh && r.isFlagged && (i + 1 < sortedResults.length) && !sortedResults[i + 1].isFlagged;
-            var borderBottom = isLastFlagged ? "2px solid rgba(220,38,38,0.2)" : undefined;
+            var needsCheck = r.isFlagged && !approved;
+            var rowBg, borderLeft;
+            if (needsCheck) { rowBg = "rgba(220,38,38,0.06)"; borderLeft = "3px solid #DC2626"; }
+            else if (r.isFlagged && approved) { rowBg = "rgba(5,150,105,0.10)"; borderLeft = "3px solid #059669"; }
+            else if (r.quantity < 0) { rowBg = "rgba(220,38,38,0.04)"; borderLeft = "3px solid transparent"; }
+            else { rowBg = "transparent"; borderLeft = "3px solid transparent"; }
+            // Divider after the last "to be checked" (unapproved flagged) row, separating
+            // the to-check section from the rest (which is in pasted-NDC / export order).
+            var nextNeedsCheck = (i + 1 < sortedResults.length) && sortedResults[i + 1].isFlagged && !approvals[sortedResults[i + 1].inventoryId];
+            var isLastNeedsCheck = hasDoh && needsCheck && (i + 1 < sortedResults.length) && !nextNeedsCheck;
+            var borderBottom = isLastNeedsCheck ? "2px solid rgba(220,38,38,0.2)" : undefined;
             var dosDisplay = r.daysOfSupply == null ? "—" : (r.daysOfSupply > 0 ? "+" : "") + r.daysOfSupply.toFixed(1);
-            var dosColor = r.daysOfSupply == null ? "#DC2626" : (Math.abs(r.daysOfSupply) > 7 ? "#DC2626" : "#374151");
-            return <tr key={i} style={{ background: rowBg, borderBottom: borderBottom }}>
+            var dosColor = r.daysOfSupply == null ? "#DC2626" : (Math.abs(r.daysOfSupply) > 14 ? "#DC2626" : "#374151");
+            return <tr key={i} style={{ background: rowBg, borderBottom: borderBottom, borderLeft: borderLeft }}>
               {hasDoh && <td style={Object.assign({}, S.td, { textAlign: "center" })}>{r.isFlagged ? <input type="checkbox" checked={approved} onChange={function() { toggleApproval(r.inventoryId); }} style={{ cursor: "pointer", width: 16, height: 16 }} /> : <span style={{ color: "#D1D5DB" }}>{"\u2014"}</span>}</td>}
               <td style={Object.assign({}, S.td, { color: r.inventoryId.startsWith("GEN-") ? "#059669" : r.inventoryId.startsWith("UNV-") ? "#2563EB" : "#374151" })}>{r.inventoryId}</td>
               <td style={S.td}>{r.warehouse}</td>
