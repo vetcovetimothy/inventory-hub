@@ -15,6 +15,49 @@ function sDel(k) {
   try { localStorage.removeItem("vh-" + k); } catch {}
 }
 
+/* ═══════ INDEXEDDB (large per-browser values that exceed the localStorage quota,
+   e.g. a parsed Vendor Inventory CSV). Same per-browser scope as localStorage. ═══════ */
+function idbOpen() {
+  return new Promise(function(resolve, reject) {
+    try {
+      var req = indexedDB.open("vh-store", 1);
+      req.onupgradeneeded = function() { req.result.createObjectStore("kv"); };
+      req.onsuccess = function() { resolve(req.result); };
+      req.onerror = function() { reject(req.error); };
+    } catch (e) { reject(e); }
+  });
+}
+function idbSet(key, value) {
+  return idbOpen().then(function(db) {
+    return new Promise(function(resolve, reject) {
+      var tx = db.transaction("kv", "readwrite");
+      tx.objectStore("kv").put(value, key);
+      tx.oncomplete = function() { resolve(true); };
+      tx.onerror = function() { reject(tx.error); };
+    });
+  }).catch(function() { return false; });
+}
+function idbGet(key) {
+  return idbOpen().then(function(db) {
+    return new Promise(function(resolve, reject) {
+      var tx = db.transaction("kv", "readonly");
+      var r = tx.objectStore("kv").get(key);
+      r.onsuccess = function() { resolve(r.result != null ? r.result : null); };
+      r.onerror = function() { reject(r.error); };
+    });
+  }).catch(function() { return null; });
+}
+function idbDel(key) {
+  return idbOpen().then(function(db) {
+    return new Promise(function(resolve) {
+      var tx = db.transaction("kv", "readwrite");
+      tx.objectStore("kv").delete(key);
+      tx.oncomplete = function() { resolve(true); };
+      tx.onerror = function() { resolve(false); };
+    });
+  }).catch(function() { return false; });
+}
+
 /* ═══════ KV HELPERS ═══════ */
 var KV_SECRET = typeof process !== "undefined" && process.env && process.env.NEXT_PUBLIC_KV_SECRET || "";
 function kvHeaders(extra) {
@@ -1614,9 +1657,10 @@ function CycleCountTool(props) {
   var _ndcText = useState(function() { return sGet("cc-ndc-text") || ""; }), ndcText = _ndcText[0], setNdcText = _ndcText[1];
   var _vendorFile = useState(null), vendorFile = _vendorFile[0], setVendorFile = _vendorFile[1];
   var _vendorRows = useState(null), vendorRows = _vendorRows[0], setVendorRows = _vendorRows[1];
-  var _csvWarehouses = useState([]), csvWarehouses = _csvWarehouses[0], setCsvWarehouses = _csvWarehouses[1];
-  var _csvWhSelected = useState(""), csvWhSelected = _csvWhSelected[0], setCsvWhSelected = _csvWhSelected[1];
-  var _csvWhCounts = useState({}), csvWhCounts = _csvWhCounts[0], setCsvWhCounts = _csvWhCounts[1];
+  var _csvWarehouses = useState(function() { return sGet("cc-vendor-warehouses") || []; }), csvWarehouses = _csvWarehouses[0], setCsvWarehouses = _csvWarehouses[1];
+  var _csvWhSelected = useState(function() { return sGet("cc-vendor-wh-selected") || ""; }), csvWhSelected = _csvWhSelected[0], setCsvWhSelected = _csvWhSelected[1];
+  var _csvWhCounts = useState(function() { return sGet("cc-vendor-wh-counts") || {}; }), csvWhCounts = _csvWhCounts[0], setCsvWhCounts = _csvWhCounts[1];
+  var _vendorName = useState(function() { return sGet("cc-vendor-name") || ""; }), vendorName = _vendorName[0], setVendorName = _vendorName[1];
   var _stockFile = useState(null), stockFile = _stockFile[0], setStockFile = _stockFile[1];
   var _sftpFile = useState(null), sftpFile = _sftpFile[0], setSftpFile = _sftpFile[1];
   var _sftpRows = useState(null), sftpRows = _sftpRows[0], setSftpRows = _sftpRows[1];
@@ -1630,12 +1674,25 @@ function CycleCountTool(props) {
   var _uomMap = useState(null), uomMap = _uomMap[0], setUomMap = _uomMap[1];
   var _uomMapStatus = useState("idle"), uomMapStatus = _uomMapStatus[0], setUomMapStatus = _uomMapStatus[1];
   var _warehouse = useState(function() { return sGet("cc-warehouse") || ""; }), warehouse = _warehouse[0], setWarehouse = _warehouse[1];
-  var _results = useState([]), results = _results[0], setResults = _results[1];
-  var _errors = useState([]), errors = _errors[0], setErrors = _errors[1];
+  var _results = useState(function() { return sGet("cc-results") || []; }), results = _results[0], setResults = _results[1];
+  var _errors = useState(function() { return sGet("cc-errors") || []; }), errors = _errors[0], setErrors = _errors[1];
   var _loading = useState(false), loading = _loading[0], setLoading = _loading[1];
   // approvals: { inventoryId: true } — flagged rows the user has approved for CC upload.
-  // Reset every time results are regenerated.
-  var _approvals = useState({}), approvals = _approvals[0], setApprovals = _approvals[1];
+  // Persisted so checked-off rows survive navigation; reset on regenerate / Clear.
+  var _approvals = useState(function() { return sGet("cc-approvals") || {}; }), approvals = _approvals[0], setApprovals = _approvals[1];
+  useEffect(function() { sSet("cc-approvals", approvals); }, [approvals]);
+  // Vendor Inventory rows are large, so they live in IndexedDB (localStorage's ~5MB cap
+  // is shared with the results, and an oversized vendor file was silently pushing the
+  // results save out). Load them on mount, and purge any legacy localStorage copy that
+  // an earlier build wrote, so it stops eating the quota.
+  useEffect(function() {
+    var mt = true;
+    sDel("cc-vendor-rows");
+    idbGet("cc-vendor-rows").then(function(rows) {
+      if (mt && Array.isArray(rows) && rows.length > 0) setVendorRows(rows);
+    });
+    return function() { mt = false; };
+  }, []);
 
   // Load cached stock items from localStorage on mount
   useEffect(function() {
@@ -1846,18 +1903,23 @@ function CycleCountTool(props) {
   function handleVendorUpload(file) {
     if (!file) return;
     setVendorFile(file);
+    setVendorName(file.name);
+    sSet("cc-vendor-name", file.name);
     readFileAsText(file).then(function(text) {
       var rows = parseCSV(text);
       setVendorRows(rows);
+      idbSet("cc-vendor-rows", rows);
       // Detect unique warehouse names and count rows per warehouse
       var whCounts = {};
       rows.forEach(function(r) { var w = (r.Warehouse || "").trim(); if (w) { whCounts[w] = (whCounts[w] || 0) + 1; } });
       var whList = Object.keys(whCounts).sort();
       setCsvWarehouses(whList);
       setCsvWhCounts(whCounts);
+      sSet("cc-vendor-warehouses", whList);
+      sSet("cc-vendor-wh-counts", whCounts);
       // Auto-select if only one warehouse
-      if (whList.length === 1) setCsvWhSelected(whList[0]);
-      else setCsvWhSelected("");
+      if (whList.length === 1) { setCsvWhSelected(whList[0]); sSet("cc-vendor-wh-selected", whList[0]); }
+      else { setCsvWhSelected(""); sSet("cc-vendor-wh-selected", ""); }
     }).catch(function() { toast("Failed to read CSV", "error"); });
   }
 
@@ -2112,6 +2174,8 @@ function CycleCountTool(props) {
 
       setResults(output);
       setErrors(errs);
+      sSet("cc-results", output);
+      sSet("cc-errors", errs);
       toast("Processed " + output.length + " items" + (errs.length > 0 ? ", " + errs.length + " warnings" : ""));
     } catch (err) {
       toast("Error: " + err.message, "error");
@@ -2196,15 +2260,15 @@ function CycleCountTool(props) {
 
           <div style={{ fontSize: 14, color: "#374151", fontWeight: 600, marginBottom: 8, marginTop: 20 }}>3. Vendor Inventory CSV</div>
           <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 6 }}>Export from Pharm Admin (contains SKU, Manufacturer Number, Reported Qty, Stock Qty)</div>
-          {vendorFile ? <div>
+          {(vendorFile || vendorRows) ? <div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(5,150,105,0.06)", border: "1px solid rgba(5,150,105,0.2)", borderRadius: 10 }}>
-              <span style={{ color: "#059669", fontSize: 13 }}>{"\u2713"} {vendorFile.name} — {vendorRows ? vendorRows.length.toLocaleString() + " rows" : "parsing..."}</span>
-              <button onClick={function() { setVendorFile(null); setVendorRows(null); setCsvWarehouses([]); setCsvWhSelected(""); setCsvWhCounts({}); }} style={{ background: "transparent", border: "none", color: "#9CA3AF", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 4px" }}>{"\u00D7"}</button>
+              <span style={{ color: "#059669", fontSize: 13 }}>{"\u2713"} {vendorFile ? vendorFile.name : (vendorName || "Vendor Inventory")} — {vendorRows ? vendorRows.length.toLocaleString() + " rows" : "parsing..."}</span>
+              <button onClick={function() { setVendorFile(null); setVendorRows(null); setCsvWarehouses([]); setCsvWhSelected(""); setCsvWhCounts({}); setVendorName(""); idbDel("cc-vendor-rows"); sDel("cc-vendor-warehouses"); sDel("cc-vendor-wh-selected"); sDel("cc-vendor-wh-counts"); sDel("cc-vendor-name"); }} style={{ background: "transparent", border: "none", color: "#9CA3AF", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 4px" }}>{"\u00D7"}</button>
             </div>
           </div> : <DropZone accept=".csv" label="Vendor Inventory CSV" sublabel="Drop CSV or click to browse" icon="spreadsheet" color={TOOL_COLOR} onFiles={function(files) { handleVendorUpload(files[0]); }} />}
           {csvWarehouses.length > 1 && <div style={{ marginTop: 10 }}>
             <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 4 }}>Select warehouse from CSV:</div>
-            <select value={csvWhSelected} onChange={function(e) { setCsvWhSelected(e.target.value); }} style={Object.assign({}, S.inp, { maxWidth: 280, cursor: "pointer" })}>
+            <select value={csvWhSelected} onChange={function(e) { setCsvWhSelected(e.target.value); sSet("cc-vendor-wh-selected", e.target.value); }} style={Object.assign({}, S.inp, { maxWidth: 280, cursor: "pointer" })}>
               <option value="">— Select —</option>
               {csvWarehouses.map(function(w) { return <option key={w} value={w}>{w} ({(csvWhCounts[w] || 0).toLocaleString()} rows)</option>; })}
             </select>
@@ -2272,7 +2336,7 @@ function CycleCountTool(props) {
         {results.length > 0 && <button onClick={downloadCSV} style={Object.assign({}, S.btn("ghost"), { padding: "10px 16px" })}><IconDL /> CC upload{dohRows && dohRows.length > 0 ? " (" + getUploadRows().length + ")" : ""}</button>}
         {results.length > 0 && dohRows && dohRows.length > 0 && getCheckRows().length > 0 && <button onClick={downloadDrrCSV} style={Object.assign({}, S.btn("ghost"), { padding: "10px 16px" })}><IconDL /> CC check ({getCheckRows().length})</button>}
         {results.length > 0 && <span style={{ fontSize: 12, color: "#6B7280" }}>{results.length} items</span>}
-        {(ndcText.trim() || vendorFile || results.length > 0) && <button onClick={function() { setNdcText(""); setVendorFile(null); setVendorRows(null); setCsvWarehouses([]); setCsvWhSelected(""); setCsvWhCounts({}); setWarehouse(""); setResults([]); setErrors([]); setSftpFile(null); setSftpRows(null); setApprovals({}); sDel("cc-ndc-text"); sDel("cc-warehouse"); }} style={Object.assign({}, S.btn("ghost"), { padding: "10px 16px", marginLeft: "auto" })}><IconTrash /> Clear</button>}
+        {(ndcText.trim() || vendorFile || results.length > 0) && <button onClick={function() { setNdcText(""); setVendorFile(null); setVendorRows(null); setCsvWarehouses([]); setCsvWhSelected(""); setCsvWhCounts({}); setWarehouse(""); setResults([]); setErrors([]); setSftpFile(null); setSftpRows(null); setApprovals({}); setVendorName(""); sDel("cc-ndc-text"); sDel("cc-warehouse"); sDel("cc-results"); sDel("cc-errors"); sDel("cc-approvals"); idbDel("cc-vendor-rows"); sDel("cc-vendor-warehouses"); sDel("cc-vendor-wh-selected"); sDel("cc-vendor-wh-counts"); sDel("cc-vendor-name"); }} style={Object.assign({}, S.btn("ghost"), { padding: "10px 16px", marginLeft: "auto" })}><IconTrash /> Clear</button>}
       </div>
     </div>
 
@@ -2346,7 +2410,6 @@ function CycleCountTool(props) {
             var rowBg, borderLeft;
             if (needsCheck) { rowBg = "rgba(220,38,38,0.06)"; borderLeft = "3px solid #DC2626"; }
             else if (r.isFlagged && approved) { rowBg = "rgba(5,150,105,0.10)"; borderLeft = "3px solid #059669"; }
-            else if (r.quantity < 0) { rowBg = "rgba(220,38,38,0.04)"; borderLeft = "3px solid transparent"; }
             else { rowBg = "transparent"; borderLeft = "3px solid transparent"; }
             // Divider after the last "to be checked" (unapproved flagged) row, separating
             // the to-check section from the rest (which is in pasted-NDC / export order).
