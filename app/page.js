@@ -5585,6 +5585,7 @@ function OOSTracker(props) {
   var OOS_DATA_KEY = "oos-data-shared";
   var OOS_NOTES_PERM_KEY = "oos-notes-permanent";
   var OOS_NOTES_MISS_KEY = "oos-notes-misscount";
+  var OOS_SD_EXC_KEY = "oos-sd-exceptions"; // persistent, vendor-wide short-dating exceptions (no daily reset)
   var NOTE_EXPIRY_MISSES = 7; // Note clears when item has been missing from this many uploads in a row
   // Legacy keys (read-only, for one-time migration of surviving notes)
   var OOS_PNOTES_KEY = "oos-persistent-notes";
@@ -5593,6 +5594,7 @@ function OOSTracker(props) {
   var _permNotes = useState({}), permNotes = _permNotes[0], setPermNotes = _permNotes[1];
   var _missCount = useState({}), missCount = _missCount[0], setMissCount = _missCount[1];
   var _prevItems = useState({}), prevItems = _prevItems[0], setPrevItems = _prevItems[1];
+  var _sdExc = useState({}), sdExc = _sdExc[0], setSdExc = _sdExc[1];
 
   function getDailyReset() {
     var now = new Date();
@@ -5682,6 +5684,12 @@ function OOSTracker(props) {
       }
       setMissCount(missRaw);
     }).catch(function() {});
+    // Load short-dating exceptions (persistent, vendor-wide, no daily reset)
+    kvGet(OOS_SD_EXC_KEY).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+      if (!m || !d || !d.data) return;
+      var parsed = typeof d.data === "string" ? JSON.parse(d.data) : d.data;
+      delete parsed._savedAt; setSdExc(parsed);
+    }).catch(function() {});
     return function() { m = false; };
   }, []);
 
@@ -5699,12 +5707,29 @@ function OOSTracker(props) {
           delete parsed._savedAt; setPermNotes(parsed);
         }
       }).catch(function() {});
+      kvGet(OOS_SD_EXC_KEY).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+        if (d && d.data) {
+          var parsed = typeof d.data === "string" ? JSON.parse(d.data) : d.data;
+          delete parsed._savedAt; setSdExc(parsed);
+        }
+      }).catch(function() {});
     }, 8000);
     return function() { clearInterval(iv); };
   }, []);
 
   var WH_MAP = { "TRUEPILL_BROOKLYN": "Brooklyn", "TRUEPILL_OHIO": "Ohio", "TRUEPILL_HAYWARD": "Hayward", "GOGOMEDS_KY": "Kentucky", "GOGOMEDS_AZ": "Arizona", "GOGOMEDS_KENTUCKY": "Kentucky", "GOGOMEDS_ARIZONA": "Arizona", "HILLS_CGP_WAREHOUSE_CA": "Hills CA", "HILLS_CGP_WAREHOUSE_NJ": "Hills NJ", "HILLS_CGP_WAREHOUSE_FL": "Hills FL", "HILLS_CGP_WAREHOUSE_TX": "Hills TX" };
   function mapWH(slug) { return WH_MAP[slug] || slug || "\u2014"; }
+
+  // Vendor-wide short-dating exception, keyed by current vendor tab + Mfr No.
+  // Persistent (own KV key, no daily reset). When set, the item is treated as
+  // NOT short-dated for this vendor across all its warehouses.
+  function toggleException(mfrNo) {
+    var key = tab + ":" + mfrNo;
+    var u = Object.assign({}, sdExc);
+    if (u[key]) delete u[key]; else u[key] = true;
+    setSdExc(u);
+    kvPost(OOS_SD_EXC_KEY, Object.assign({}, u, { _savedAt: Date.now() })).catch(function() {});
+  }
 
   function updateNote(key, field, value) {
     if (field === "note") {
@@ -5866,9 +5891,9 @@ function OOSTracker(props) {
     if (whFilter !== "all") d = d.filter(function(r) { return r._wh === whFilter; });
     if (search) { var s = search.toLowerCase(); d = d.filter(function(r) { return (r.PRODUCT_LINE_NAME || "").toLowerCase().indexOf(s) >= 0 || (r.MANUFACTURER_NAME || "").toLowerCase().indexOf(s) >= 0 || (r.MANUFACTURER_NO || "").toLowerCase().indexOf(s) >= 0; }); }
     var col = sortState.col; var dir = sortState.dir;
-    d.sort(function(a, b) { var va, vb; var nkA = tab + ":" + a.MANUFACTURER_NO + ":" + (a.WAREHOUSE_SLUG || ""); var nkB = tab + ":" + b.MANUFACTURER_NO + ":" + (b.WAREHOUSE_SLUG || ""); var nA = notes[nkA] || {}; var nB = notes[nkB] || {}; if (col === "warehouse") { va = a._wh; vb = b._wh; } else if (col === "manufacturer") { va = a.MANUFACTURER_NAME; vb = b.MANUFACTURER_NAME; } else if (col === "product") { va = a.PRODUCT_LINE_NAME; vb = b.PRODUCT_LINE_NAME; } else if (col === "status") { va = a.SUPPLY_STATUS; vb = b.SUPPLY_STATUS; } else if (col === "sd") { va = (nA.sd !== undefined ? nA.sd : sdIds[String(a.MANUFACTURER_NO)]) ? 1 : 0; vb = (nB.sd !== undefined ? nB.sd : sdIds[String(b.MANUFACTURER_NO)]) ? 1 : 0; return dir === "desc" ? vb - va : va - vb; } else if (col === "bo") { va = nA.bo ? 1 : 0; vb = nB.bo ? 1 : 0; return dir === "desc" ? vb - va : va - vb; } else if (col === "oos") { va = prevItems[tab + ":" + a.MANUFACTURER_NO] ? 1 : 0; vb = prevItems[tab + ":" + b.MANUFACTURER_NO] ? 1 : 0; return dir === "desc" ? vb - va : va - vb; } else { va = a.MANUFACTURER_NO; vb = b.MANUFACTURER_NO; } return dir === "desc" ? -(va || "").localeCompare(vb || "") : (va || "").localeCompare(vb || ""); });
+    d.sort(function(a, b) { var va, vb; var nkA = tab + ":" + a.MANUFACTURER_NO + ":" + (a.WAREHOUSE_SLUG || ""); var nkB = tab + ":" + b.MANUFACTURER_NO + ":" + (b.WAREHOUSE_SLUG || ""); var nA = notes[nkA] || {}; var nB = notes[nkB] || {}; if (col === "warehouse") { va = a._wh; vb = b._wh; } else if (col === "manufacturer") { va = a.MANUFACTURER_NAME; vb = b.MANUFACTURER_NAME; } else if (col === "product") { va = a.PRODUCT_LINE_NAME; vb = b.PRODUCT_LINE_NAME; } else if (col === "status") { va = a.SUPPLY_STATUS; vb = b.SUPPLY_STATUS; } else if (col === "sd") { va = ((sdExc[tab + ":" + a.MANUFACTURER_NO]) ? false : (nA.sd !== undefined ? nA.sd : sdIds[String(a.MANUFACTURER_NO)])) ? 1 : 0; vb = ((sdExc[tab + ":" + b.MANUFACTURER_NO]) ? false : (nB.sd !== undefined ? nB.sd : sdIds[String(b.MANUFACTURER_NO)])) ? 1 : 0; return dir === "desc" ? vb - va : va - vb; } else if (col === "bo") { va = nA.bo ? 1 : 0; vb = nB.bo ? 1 : 0; return dir === "desc" ? vb - va : va - vb; } else if (col === "oos") { va = prevItems[tab + ":" + a.MANUFACTURER_NO] ? 1 : 0; vb = prevItems[tab + ":" + b.MANUFACTURER_NO] ? 1 : 0; return dir === "desc" ? vb - va : va - vb; } else { va = a.MANUFACTURER_NO; vb = b.MANUFACTURER_NO; } return dir === "desc" ? -(va || "").localeCompare(vb || "") : (va || "").localeCompare(vb || ""); });
     return d;
-  }, [data, whFilter, search, sortState, notes, sdIds, prevItems]);
+  }, [data, whFilter, search, sortState, notes, sdIds, prevItems, sdExc]);
 
   function sortHeader(col, label) {
     var isSorted = sortState.col === col;
@@ -5894,6 +5919,7 @@ function OOSTracker(props) {
           <thead><tr>
             <th style={Object.assign({}, S.th, { minWidth: 360 })}>Notes</th>
             {sortHeader("sd", "SD")}
+            <th style={Object.assign({}, S.th, { textAlign: "center" })}>Exc</th>
             {sortHeader("bo", "BO")}
             {sortHeader("oos", "OOS")}
             {sortHeader("id", "Mfr No.")}
@@ -5906,13 +5932,15 @@ function OOSTracker(props) {
             var noteKey = tab + ":" + r.MANUFACTURER_NO + ":" + (r.WAREHOUSE_SLUG || "");
             var n = notes[noteKey] || {};
             var autoSD = sdIds[String(r.MANUFACTURER_NO)] || false;
-            var isSD = n.sd !== undefined ? n.sd : autoSD;
+            var isExc = sdExc[tab + ":" + r.MANUFACTURER_NO] || false;
+            var isSD = isExc ? false : (n.sd !== undefined ? n.sd : autoSD);
             var isOld = prevItems[tab + ":" + r.MANUFACTURER_NO];
             var whBg = r._wh === "Brooklyn" ? "#EFF6FF" : r._wh === "Ohio" ? "#ECFDF5" : r._wh === "Hayward" ? "#FFF7ED" : r._wh === "Kentucky" ? "#F5F3FF" : r._wh === "Arizona" ? "#FDF2F8" : r._wh === "Hills CA" ? "#FEF9C3" : r._wh === "Hills NJ" ? "#E0F2FE" : r._wh === "Hills FL" ? "#FFE4E6" : r._wh === "Hills TX" ? "#CCFBF1" : "#F3F4F6";
             var whColor = r._wh === "Brooklyn" ? "#2563EB" : r._wh === "Ohio" ? "#059669" : r._wh === "Hayward" ? "#D97706" : r._wh === "Kentucky" ? "#7C3AED" : r._wh === "Arizona" ? "#DB2777" : r._wh === "Hills CA" ? "#A16207" : r._wh === "Hills NJ" ? "#0369A1" : r._wh === "Hills FL" ? "#BE123C" : r._wh === "Hills TX" ? "#0F766E" : "#6B7280";
             return <tr key={i}>
               <td style={S.td}><textarea value={permNotes[noteKey] !== undefined ? permNotes[noteKey] : ""} onChange={function(e) { updateNote(noteKey, "note", e.target.value); e.target.style.height = "auto"; e.target.style.height = e.target.scrollHeight + "px"; }} placeholder="Add notes..." rows={1} style={Object.assign({}, S.inp, { padding: "5px 10px", fontSize: 12, resize: "none", overflow: "hidden", minHeight: 32, lineHeight: "1.4", display: "block", width: "100%" })} ref={function(el) { if (el) { el.style.height = "auto"; el.style.height = el.scrollHeight + "px"; } }} /></td>
-              <td style={Object.assign({}, S.td, { textAlign: "center" })}><button onClick={function() { updateNote(noteKey, "sd", !isSD); }} style={{ width: 20, height: 20, borderRadius: 4, border: isSD ? "2px solid #E879F9" : "2px solid #D1D5DB", background: isSD ? "#E879F9" : "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", transition: "all 0.15s" }}>{isSD && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}</button></td>
+              <td style={Object.assign({}, S.td, { textAlign: "center" })}><button onClick={function() { if (isExc) return; updateNote(noteKey, "sd", !isSD); }} title={isExc ? "Exempted from short-dating — clear the exception to use SD" : ""} style={{ width: 20, height: 20, borderRadius: 4, border: isSD ? "2px solid #E879F9" : "2px solid #D1D5DB", background: isSD ? "#E879F9" : "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", cursor: isExc ? "not-allowed" : "pointer", opacity: isExc ? 0.4 : 1, transition: "all 0.15s" }}>{isSD && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}</button></td>
+              <td style={Object.assign({}, S.td, { textAlign: "center" })}><button onClick={function() { toggleException(r.MANUFACTURER_NO); }} title={"Exempt " + r.MANUFACTURER_NO + " from short-dating for " + (tab === "fuzerx" ? "FuzeRx" : tab === "gogomeds" ? "GoGoMeds" : "Central Garden & Pet") + " (all warehouses)"} style={{ fontSize: 10, fontWeight: 600, padding: "3px 9px", borderRadius: 6, cursor: "pointer", whiteSpace: "nowrap", border: isExc ? "1px solid #6366F1" : "1px solid #D1D5DB", background: isExc ? "#6366F1" : "#FFFFFF", color: isExc ? "#FFFFFF" : "#9CA3AF" }}>{isExc ? "Exempt \u2713" : "Exempt"}</button></td>
               <td style={Object.assign({}, S.td, { textAlign: "center" })}><button onClick={function() { updateNote(noteKey, "bo", !n.bo); }} style={{ width: 20, height: 20, borderRadius: 4, border: n.bo ? "2px solid #F97316" : "2px solid #D1D5DB", background: n.bo ? "#F97316" : "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", transition: "all 0.15s" }}>{n.bo && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}</button></td>
               <td style={Object.assign({}, S.td, { textAlign: "center" })}><span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 6, fontWeight: 600, background: isOld ? "#FFF7ED" : "#ECFDF5", color: isOld ? "#D97706" : "#059669" }}>{isOld ? "Old" : "New"}</span></td>
               <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, fontWeight: 600, color: "#374151" })}>{r.MANUFACTURER_NO}</td>
