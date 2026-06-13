@@ -6798,7 +6798,7 @@ function ForecastingTool(props) {
 
       {headers.length > 0 && <div style={S.card}>
         <div style={{ display: "flex", alignItems: "flex-end", gap: 20, flexWrap: "wrap" }}>
-          <div>
+          <div style={{ position: "relative" }}>
             <label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 6 }}>Warehouse</label>
             <select value={warehouse} onChange={function (e) { changeWarehouse(e.target.value); }} style={Object.assign({}, S.sel, { minWidth: 160 })}>
               {warehouse === "" && <option value="">Select...</option>}
@@ -6808,7 +6808,7 @@ function ForecastingTool(props) {
                 return list.map(function (w) { return <option key={w} value={w}>{w}</option>; });
               })()}
             </select>
-            {detectedWh ? <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 4 }}>Detected from filename: {detectedWh}</div> : null}
+            {detectedWh ? <div style={{ fontSize: 11, color: "#9CA3AF", position: "absolute", top: "100%", left: 0, marginTop: 4, whiteSpace: "nowrap" }}>Detected from filename: {detectedWh}</div> : null}
           </div>
           <div>
             <label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 6 }}>Mode</label>
@@ -6835,7 +6835,7 @@ function ForecastingTool(props) {
       </div>}
 
       {formatted && formatted.length > 0 && <div style={S.card}>
-        <div style={{ display: "flex", alignItems: "flex-end", gap: 20, flexWrap: "wrap", marginBottom: 14 }}>
+        <div style={{ display: "flex", alignItems: "flex-end", gap: 20, flexWrap: "wrap", marginBottom: 26 }}>
           <div>
             <label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 6 }}>Method (all rows)</label>
             <select value={globalMethod} onChange={function (e) { setGlobalMethod(e.target.value); }} style={Object.assign({}, S.sel, { minWidth: 280 })}>
@@ -6843,10 +6843,10 @@ function ForecastingTool(props) {
               {FC_METHODS.map(function (m) { return <option key={m.id} value={m.id}>{m.label}</option>; })}
             </select>
           </div>
-          <div>
+          <div style={{ position: "relative" }}>
             <label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 6 }}>Growth (multiplier)</label>
             <input value={growth} onChange={function (e) { setGrowth(e.target.value); }} style={Object.assign({}, S.inp, { width: 90 })} />
-            <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 4 }}>1.10 = +10% (methods B, D)</div>
+            <div style={{ fontSize: 11, color: "#9CA3AF", position: "absolute", top: "100%", left: 0, marginTop: 4, whiteSpace: "nowrap" }}>1.10 = +10% (methods B, D)</div>
           </div>
           <div style={{ flex: 1 }} />
           <div style={{ display: "flex", gap: 10 }}>
