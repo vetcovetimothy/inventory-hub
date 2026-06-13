@@ -6396,7 +6396,7 @@ function ForecastingTool(props) {
   var _fn = useState(""), fileName = _fn[0], setFileName = _fn[1];
   var _dw = useState(""), detectedWh = _dw[0], setDetectedWh = _dw[1];
   var _wh = useState(""), warehouse = _wh[0], setWarehouse = _wh[1];
-  var _md = useState("gen"), mode = _md[0], setMode = _md[1];
+  var _md = useState("non"), mode = _md[0], setMode = _md[1];
   var _fmt = useState(null), formatted = _fmt[0], setFormatted = _fmt[1];
   var _st = useState(null), stats = _st[0], setStats = _st[1];
   var _busy = useState(false), busy = _busy[0], setBusy = _busy[1];
