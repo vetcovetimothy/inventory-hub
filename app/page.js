@@ -6342,7 +6342,7 @@ function VendorSettingsPage(props) {
 
 
 /* ═══════ MAIN HUB ═══════ */
-/* ═══════ FORECASTING TOOL (Phase 1: ingest + auto-format + export) ═══════ */
+/* ═══════ FORECASTING TOOL (Phase 1: ingest + auto-format + export; Phase 2: methods) ═══════ */
 var FC_KNOWN_WAREHOUSES = ["TP-NY", "TP-OH", "TP-CA", "GGM-KY", "GGM-AZ"];
 
 // Full-text, quote-aware CSV parser (handles commas/newlines inside quoted
@@ -6386,6 +6386,33 @@ function fcIdxContains(headers, sub) {
   for (var i = 0; i < headers.length; i++) if (String(headers[i]).toLowerCase().indexOf(t) !== -1) return i;
   return -1;
 }
+// Detect the columns the methods key off, by header name (resilient to month shifts).
+function fcAnchors(headers) {
+  var mtd = fcIdxExact(headers, "Hist: MTD");
+  var hist = [];
+  for (var i = 0; i < headers.length; i++) { var h = String(headers[i]); if (/^hist:/i.test(h) && !/mtd/i.test(h)) hist.push(i); }
+  var lastHist = hist.length ? hist[hist.length - 1] : -1;
+  var trail3 = hist.slice(-3);
+  var final1 = fcIdxContains(headers, "final:1:");
+  var comp1 = -1; for (var j = 0; j < headers.length; j++) { if (/^computer:/i.test(String(headers[j]))) { comp1 = j; break; } }
+  var uploads = [];
+  for (var k = 0; k < headers.length; k++) { var hh = String(headers[k]); if (/^upload:\s*\d+:/i.test(hh)) uploads.push({ idx: k, label: hh.replace(/^upload:\s*\d+:\s*/i, "") }); }
+  return { mtd: mtd, lastHist: lastHist, trail3: trail3, final1: final1, comp1: comp1, uploads: uploads };
+}
+function fcNum(row, idx) {
+  if (idx == null || idx < 0) return null;
+  var raw = String(row[idx] == null ? "" : row[idx]).replace(/[^0-9.\-]/g, "");
+  if (raw === "" || raw === "-" || raw === ".") return null;
+  var v = parseFloat(raw); return isNaN(v) ? null : v;
+}
+var FC_METHODS = [
+  { id: "A", label: "A - MTD run-rate (today excluded)" },
+  { id: "B", label: "B - Last month x growth" },
+  { id: "C", label: "C - Netstock Final" },
+  { id: "D", label: "D - Max(A, B, C)" },
+  { id: "E", label: "E - Trailing 3-month average" },
+  { id: "F", label: "F - Netstock Computer baseline" },
+];
 
 function ForecastingTool(props) {
   var toast = props.toast, cred = props.cred, ok = props.ok, lp = props.lp;
@@ -6401,18 +6428,53 @@ function ForecastingTool(props) {
   var _st = useState(null), stats = _st[0], setStats = _st[1];
   var _busy = useState(false), busy = _busy[0], setBusy = _busy[1];
   var _tab = useState("forecast"), tab = _tab[0], setTab = _tab[1];
+  // Phase 2 state
+  var _gm = useState("none"), globalMethod = _gm[0], setGlobalMethod = _gm[1];
+  var _gr = useState("1.10"), growth = _gr[0], setGrowth = _gr[1];
+  var _tc = useState([]), targetCols = _tc[0], setTargetCols = _tc[1];
+  var _rm = useState({}), rowMethod = _rm[0], setRowMethod = _rm[1];
+  var _me = useState({}), manualEdits = _me[0], setManualEdits = _me[1];
   var fileRef = useRef(null);
 
+  var anchors = useMemo(function () { return fcAnchors(headers); }, [headers]);
+  var productCol = useMemo(function () { return fcIdxExact(headers, "Product code"); }, [headers]);
+
+  // Date facts for Method A (today excluded; ~5am pull means today is incomplete).
+  var now = new Date();
+  var dom = now.getDate();
+  var denom = dom - 1; if (denom < 1) denom = 1;
+  var daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+
+  function defaultTargetCols(an) {
+    if (!an || !an.uploads.length) return [];
+    var monShort = now.toLocaleString("en-US", { month: "short" });
+    var yr = String(now.getFullYear());
+    var hit = -1;
+    for (var i = 0; i < an.uploads.length; i++) { var l = an.uploads[i].label; if (l.indexOf(monShort) !== -1 && l.indexOf(yr) !== -1) { hit = i; break; } }
+    if (hit < 0) hit = 0;
+    return [an.uploads[hit].idx];
+  }
+
+  // restore on mount
   useEffect(function () {
     (async function () {
       try { var inp = await idbGet("fc-input"); if (inp && inp.headers) { setHeaders(inp.headers); setRows(inp.rows || []); setFileName(inp.fileName || ""); setDetectedWh(inp.detectedWh || ""); } } catch (e) {}
       try { var res = await idbGet("fc-result"); if (res) { if (res.formattedRows) setFormatted(res.formattedRows); if (res.stats) setStats(res.stats); } } catch (e) {}
+      try { var fc = await idbGet("fc-forecast"); if (fc) { if (fc.globalMethod) setGlobalMethod(fc.globalMethod); if (fc.growth) setGrowth(fc.growth); if (fc.targetCols) setTargetCols(fc.targetCols); if (fc.rowMethod) setRowMethod(fc.rowMethod); if (fc.manualEdits) setManualEdits(fc.manualEdits); } } catch (e) {}
       var m = sGet("fc-mode"); if (m) setMode(m);
       var w = sGet("fc-wh"); if (w) setWarehouse(w);
     })();
   }, []);
 
   useEffect(function () { if (!warehouse && detectedWh) setWarehouse(detectedWh); }, [detectedWh]);
+  // seed default fill-month once headers are known and nothing selected yet
+  useEffect(function () { if (headers.length && anchors.uploads.length && targetCols.length === 0) setTargetCols(defaultTargetCols(anchors)); }, [headers]);
+
+  // persist Phase-2 working state
+  useEffect(function () {
+    if (!headers.length) return;
+    idbSet("fc-forecast", { globalMethod: globalMethod, growth: growth, targetCols: targetCols, rowMethod: rowMethod, manualEdits: manualEdits }).catch(function () {});
+  }, [globalMethod, growth, targetCols, rowMethod, manualEdits]);
 
   function chooseFile() { if (fileRef.current) fileRef.current.click(); }
 
@@ -6433,8 +6495,10 @@ function ForecastingTool(props) {
         setHeaders(hdr); setRows(dataRows); setFileName(file.name); setDetectedWh(dw);
         if (dw) { setWarehouse(dw); sSet("fc-wh", dw); }
         setFormatted(null); setStats(null);
+        // new file: clear per-row forecasting overrides, reset fill-month default
+        setRowMethod({}); setManualEdits({}); setTargetCols(defaultTargetCols(fcAnchors(hdr)));
         idbSet("fc-input", { headers: hdr, rows: dataRows, fileName: file.name, detectedWh: dw }).catch(function () {});
-        idbDel("fc-result").catch(function () {});
+        idbDel("fc-result").catch(function () {}); idbDel("fc-forecast").catch(function () {});
         toast("Loaded " + dataRows.length + " forecast rows" + (dw ? " (" + dw + ")" : ""));
       } catch (err) { toast("Error parsing CSV: " + err.message, "error"); }
     };
@@ -6449,9 +6513,8 @@ function ForecastingTool(props) {
     if (!headers.length || !rows.length) { toast("Upload a forecast CSV first", "error"); return; }
     if (!warehouse) { toast("Pick a warehouse first", "error"); return; }
     if (!ok) { lp(); return; }
-    var productCol = fcIdxExact(headers, "Product code");
-    var classCol = fcIdxExact(headers, "Classification");
     if (productCol < 0) { toast("Could not find a 'Product code' column", "error"); return; }
+    var classCol = fcIdxExact(headers, "Classification");
     if (classCol < 0) { toast("Could not find a 'Classification' column", "error"); return; }
     setBusy(true);
     try {
@@ -6478,6 +6541,8 @@ function ForecastingTool(props) {
       });
       var st = { input: rows.length, allowed: allowedCount, kept: kept.length, dropped: rows.length - kept.length, warehouse: warehouse, mode: mode, at: Date.now() };
       setFormatted(kept); setStats(st);
+      // rows changed: clear stale per-row overrides
+      setRowMethod({}); setManualEdits({});
       idbSet("fc-result", { formattedRows: kept, stats: st }).catch(function () {});
       toast("Kept " + kept.length + " of " + rows.length + " rows for " + warehouse);
     } catch (err) {
@@ -6487,26 +6552,62 @@ function ForecastingTool(props) {
 
   function exportFormatted() {
     if (!formatted || !formatted.length) { toast("Run Auto-format first", "error"); return; }
-    var csv = fcToCSV(headers, formatted);
+    fcDownload(fcToCSV(headers, formatted), "forecast_" + (warehouse || "all") + "_" + (mode === "gen" ? "generics" : "nongenerics") + "_formatted.csv");
+  }
+
+  function fcDownload(csv, name) {
     var blob = new Blob([csv], { type: "text/csv" });
     var url = URL.createObjectURL(blob);
-    var a = document.createElement("a");
-    a.href = url;
-    a.download = "forecast_" + (warehouse || "all") + "_" + (mode === "gen" ? "generics" : "nongenerics") + "_formatted.csv";
-    a.click();
+    var a = document.createElement("a"); a.href = url; a.download = name; a.click();
     setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
   }
 
-  var dispCols = [];
-  if (headers.length) {
-    [["Product code", "Product code"], ["Description", "Description"], ["Supplier Description", "Supplier"], ["Item Class", "Class"], ["Classification", "ABC"], ["Velocity", "Velocity"], ["Item Status", "Status"]].forEach(function (pair) {
-      var idx = fcIdxExact(headers, pair[0]); if (idx >= 0) dispCols.push({ idx: idx, label: pair[1] });
-    });
-    var mtd = fcIdxExact(headers, "Hist: MTD"); if (mtd >= 0) dispCols.push({ idx: mtd, label: "MTD", num: true });
-    var lastHist = -1; for (var k = 0; k < headers.length; k++) { var h = String(headers[k]); if (/^hist:/i.test(h) && !/mtd/i.test(h)) lastHist = k; }
-    if (lastHist >= 0) dispCols.push({ idx: lastHist, label: String(headers[lastHist]).replace(/^hist:\s*/i, ""), num: true });
-    var fin1 = fcIdxContains(headers, "final:1:"); if (fin1 >= 0) dispCols.push({ idx: fin1, label: "Final 1", num: true });
+  // ── method engine ──
+  var growthMult = (function () { var g = parseFloat(growth); return isNaN(g) ? 1 : g; })();
+  function methodValue(row, m) {
+    if (m === "A") { var mtd = fcNum(row, anchors.mtd); if (mtd == null) return null; return (mtd / denom) * daysInMonth; }
+    if (m === "B") { var lm = fcNum(row, anchors.lastHist); if (lm == null) return null; return lm * growthMult; }
+    if (m === "C") { return fcNum(row, anchors.final1); }
+    if (m === "F") { return fcNum(row, anchors.comp1); }
+    if (m === "E") { var vals = anchors.trail3.map(function (i) { return fcNum(row, i); }).filter(function (v) { return v != null; }); if (!vals.length) return null; return vals.reduce(function (a, b) { return a + b; }, 0) / vals.length; }
+    if (m === "D") { var arr = ["A", "B", "C"].map(function (x) { return methodValue(row, x); }).filter(function (v) { return v != null; }); if (!arr.length) return null; return Math.max.apply(null, arr); }
+    return null;
   }
+  function rowKey(row) { return String(row[productCol] == null ? "" : row[productCol]); }
+  function computedFor(row) {
+    var m = rowMethod[rowKey(row)] || globalMethod;
+    if (!m || m === "none") return null;
+    var v = methodValue(row, m); return v == null ? null : Math.round(v);
+  }
+  function effectiveFor(row) {
+    var k = rowKey(row);
+    var man = manualEdits[k];
+    if (man != null && String(man).trim() !== "") { var mv = parseFloat(man); return isNaN(mv) ? null : mv; }
+    return computedFor(row);
+  }
+  function setManual(k, v) { var u = Object.assign({}, manualEdits); if (v == null || String(v).trim() === "") delete u[k]; else u[k] = v; setManualEdits(u); }
+  function setRowM(k, v) { var u = Object.assign({}, rowMethod); if (!v) delete u[k]; else u[k] = v; setRowMethod(u); }
+  function toggleTarget(idx) { var has = targetCols.indexOf(idx) !== -1; setTargetCols(has ? targetCols.filter(function (x) { return x !== idx; }) : targetCols.concat([idx]).sort(function (a, b) { return a - b; })); }
+  function clearOverrides() { setRowMethod({}); setManualEdits({}); toast("Cleared per-row methods and manual edits"); }
+
+  function exportForecast() {
+    if (!formatted || !formatted.length) { toast("Run Auto-format first", "error"); return; }
+    if (!targetCols.length) { toast("Pick at least one month to fill", "error"); return; }
+    var out = formatted.map(function (row) {
+      var r = row.slice();
+      var v = effectiveFor(row);
+      if (v != null) { targetCols.forEach(function (c) { r[c] = String(v); }); }
+      return r;
+    });
+    fcDownload(fcToCSV(headers, out), "forecast_" + (warehouse || "all") + "_" + (mode === "gen" ? "generics" : "nongenerics") + "_upload.csv");
+  }
+
+  var filledCount = useMemo(function () {
+    if (!formatted) return 0;
+    return formatted.reduce(function (n, row) { return effectiveFor(row) != null ? n + 1 : n; }, 0);
+  }, [formatted, globalMethod, growth, rowMethod, manualEdits]);
+
+  var lastMonthLabel = anchors.lastHist >= 0 ? String(headers[anchors.lastHist]).replace(/^hist:\s*/i, "") : "Last mo";
 
   return <div>
     <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
@@ -6554,31 +6655,92 @@ function ForecastingTool(props) {
           <div style={{ flex: 1 }} />
           <div style={{ display: "flex", gap: 10 }}>
             <button onClick={autoFormat} disabled={busy} style={Object.assign({}, S.btn(), busy ? { opacity: 0.7, cursor: "wait" } : {})}>{busy ? <><Spinner color="#fff" size={14} /> Formatting...</> : <><IconFilter /> Auto-format</>}</button>
-            {formatted && formatted.length > 0 ? <button onClick={exportFormatted} style={S.btn("ghost")}><IconDL /> Export CSV</button> : null}
+            {formatted && formatted.length > 0 ? <button onClick={exportFormatted} style={S.btn("ghost")}><IconDL /> Formatted CSV</button> : null}
           </div>
         </div>
         {!ok && <div style={{ marginTop: 12, fontSize: 12, color: "#DC2626", display: "flex", alignItems: "center", gap: 6 }}><IconLock /> Log in to Acumatica to fetch warehouse data for auto-format.</div>}
       </div>}
 
       {stats && <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
-        <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0, minWidth: 120 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Input rows</div><div style={{ fontSize: 24, fontWeight: 700, color: "#1F2937", marginTop: 4 }}>{stats.input}</div></div>
-        <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0, minWidth: 120 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Kept</div><div style={{ fontSize: 24, fontWeight: 700, color: "#0EA5E9", marginTop: 4 }}>{stats.kept}</div></div>
-        <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0, minWidth: 120 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Dropped</div><div style={{ fontSize: 24, fontWeight: 700, color: "#9CA3AF", marginTop: 4 }}>{stats.dropped}</div></div>
-        <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0, minWidth: 120 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Stocked in {stats.warehouse}</div><div style={{ fontSize: 24, fontWeight: 700, color: "#1F2937", marginTop: 4 }}>{stats.allowed}</div></div>
+        <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0, minWidth: 110 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Input rows</div><div style={{ fontSize: 24, fontWeight: 700, color: "#1F2937", marginTop: 4 }}>{stats.input}</div></div>
+        <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0, minWidth: 110 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Kept</div><div style={{ fontSize: 24, fontWeight: 700, color: "#0EA5E9", marginTop: 4 }}>{stats.kept}</div></div>
+        <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0, minWidth: 110 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Dropped</div><div style={{ fontSize: 24, fontWeight: 700, color: "#9CA3AF", marginTop: 4 }}>{stats.dropped}</div></div>
+        <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0, minWidth: 110 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Forecasted</div><div style={{ fontSize: 24, fontWeight: 700, color: "#059669", marginTop: 4 }}>{filledCount}</div></div>
+      </div>}
+
+      {formatted && formatted.length > 0 && <div style={S.card}>
+        <div style={{ display: "flex", alignItems: "flex-end", gap: 20, flexWrap: "wrap", marginBottom: 14 }}>
+          <div>
+            <label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 6 }}>Method (all rows)</label>
+            <select value={globalMethod} onChange={function (e) { setGlobalMethod(e.target.value); }} style={Object.assign({}, S.sel, { minWidth: 280 })}>
+              <option value="none">None - leave Upload blank</option>
+              {FC_METHODS.map(function (m) { return <option key={m.id} value={m.id}>{m.label}</option>; })}
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 6 }}>Growth (multiplier)</label>
+            <input value={growth} onChange={function (e) { setGrowth(e.target.value); }} style={Object.assign({}, S.inp, { width: 90 })} />
+            <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 4 }}>1.10 = +10% (methods B, D)</div>
+          </div>
+          <div style={{ flex: 1 }} />
+          <div style={{ display: "flex", gap: 10 }}>
+            <button onClick={clearOverrides} style={S.btn("ghost")}>Clear overrides</button>
+            <button onClick={exportForecast} style={S.btn()}><IconDL /> Forecast CSV</button>
+          </div>
+        </div>
+
+        <div style={{ marginBottom: 6, fontSize: 12, color: "#6B7280", fontWeight: 500 }}>Fill these Upload month(s):</div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+          {anchors.uploads.map(function (u) {
+            var on = targetCols.indexOf(u.idx) !== -1;
+            return <button key={u.idx} onClick={function () { toggleTarget(u.idx); }} style={{ padding: "5px 10px", borderRadius: 8, border: "1px solid " + (on ? "#0EA5E9" : "#E5E7EB"), background: on ? "#0EA5E9" : "#fff", color: on ? "#fff" : "#6B7280", fontSize: 12, fontWeight: 500, cursor: "pointer" }}>{u.label}</button>;
+          })}
+        </div>
+        <div style={{ fontSize: 11, color: "#9CA3AF", marginBottom: 4 }}>Each row's monthly value (computed or hand-typed) is written into every selected month. Per-row method overrides the global method; a typed Upload value overrides both.</div>
       </div>}
 
       {formatted && formatted.length > 0 && <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden" })}>
-        <div style={{ maxHeight: 520, overflow: "auto" }}>
+        <div style={{ maxHeight: 560, overflow: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead><tr>{dispCols.map(function (c, ci) { return <th key={ci} style={Object.assign({}, S.th, c.num ? { textAlign: "right" } : {})}>{c.label}</th>; })}</tr></thead>
+            <thead><tr>
+              <th style={S.th}>Product code</th>
+              <th style={S.th}>Description</th>
+              <th style={Object.assign({}, S.th, { textAlign: "right" })}>MTD</th>
+              <th style={Object.assign({}, S.th, { textAlign: "right" })}>{lastMonthLabel}</th>
+              <th style={Object.assign({}, S.th, { textAlign: "right" })}>Final 1</th>
+              <th style={Object.assign({}, S.th, { textAlign: "right" })}>Computer</th>
+              <th style={S.th}>Method</th>
+              <th style={Object.assign({}, S.th, { textAlign: "right" })}>Upload</th>
+            </tr></thead>
             <tbody>
-              {formatted.slice(0, 500).map(function (row, ri) {
-                return <tr key={ri}>{dispCols.map(function (c, ci) { return <td key={ci} style={Object.assign({}, S.td, c.num ? { textAlign: "right", fontVariantNumeric: "tabular-nums" } : {})}>{row[c.idx]}</td>; })}</tr>;
+              {formatted.map(function (row, ri) {
+                var k = rowKey(row);
+                var comp = computedFor(row);
+                var man = manualEdits[k];
+                var isManual = man != null && String(man).trim() !== "";
+                var cellVal = isManual ? man : (comp == null ? "" : comp);
+                return <tr key={ri}>
+                  <td style={Object.assign({}, S.td, { fontWeight: 500, whiteSpace: "nowrap" })}>{row[productCol]}</td>
+                  <td style={Object.assign({}, S.td, { maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })}>{anchors && fcIdxExact(headers, "Description") >= 0 ? row[fcIdxExact(headers, "Description")] : ""}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums" })}>{row[anchors.mtd]}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums" })}>{anchors.lastHist >= 0 ? row[anchors.lastHist] : ""}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums" })}>{anchors.final1 >= 0 ? row[anchors.final1] : ""}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums" })}>{anchors.comp1 >= 0 ? row[anchors.comp1] : ""}</td>
+                  <td style={Object.assign({}, S.td, { padding: "6px 10px" })}>
+                    <select value={rowMethod[k] || ""} onChange={function (e) { setRowM(k, e.target.value); }} style={Object.assign({}, S.sel, { padding: "5px 8px", fontSize: 12 })}>
+                      <option value="">Global</option>
+                      {FC_METHODS.map(function (m) { return <option key={m.id} value={m.id}>{m.id}</option>; })}
+                    </select>
+                  </td>
+                  <td style={Object.assign({}, S.td, { textAlign: "right", padding: "6px 10px" })}>
+                    <input value={cellVal} onChange={function (e) { setManual(k, e.target.value); }} placeholder={comp == null ? "-" : ""} style={{ width: 84, textAlign: "right", padding: "6px 8px", borderRadius: 8, fontSize: 13, fontVariantNumeric: "tabular-nums", border: "1px solid " + (isManual ? "#0EA5E9" : "#E5E7EB"), background: isManual ? "#F0F9FF" : "#F9FAFB", color: "#1F2937", outline: "none" }} />
+                  </td>
+                </tr>;
               })}
             </tbody>
           </table>
         </div>
-        {formatted.length > 500 && <div style={{ padding: "10px 16px", fontSize: 12, color: "#9CA3AF", borderTop: "1px solid #F3F4F6" }}>Showing first 500 of {formatted.length} rows. The export includes all of them.</div>}
+        <div style={{ padding: "10px 16px", fontSize: 12, color: "#9CA3AF", borderTop: "1px solid #F3F4F6" }}>{formatted.length} items - {filledCount} will export with an Upload value into {targetCols.length} month{targetCols.length === 1 ? "" : "s"}. Blue cells are manual overrides.</div>
       </div>}
 
       {headers.length > 0 && (!formatted || !formatted.length) && stats === null && <div style={{ fontSize: 13, color: "#9CA3AF", padding: "8px 4px" }}>Pick a warehouse and mode, then Auto-format to filter the list down to the items worth forecasting.</div>}
