@@ -6434,7 +6434,16 @@ function ForecastingTool(props) {
   var _tc = useState([]), targetCols = _tc[0], setTargetCols = _tc[1];
   var _rm = useState({}), rowMethod = _rm[0], setRowMethod = _rm[1];
   var _me = useState({}), manualEdits = _me[0], setManualEdits = _me[1];
+  // Phase 3 (TP Forecast) state
+  var _tph = useState([]), tpHeaders = _tph[0], setTpHeaders = _tph[1];
+  var _tpr = useState([]), tpRows = _tpr[0], setTpRows = _tpr[1];
+  var _tpf = useState(""), tpFileName = _tpf[0], setTpFileName = _tpf[1];
+  var _tpfc = useState(-1), tpFinalCol = _tpfc[0], setTpFinalCol = _tpfc[1];
+  var _tpfmt = useState(null), tpFormatted = _tpfmt[0], setTpFormatted = _tpfmt[1];
+  var _tpst = useState(null), tpStats = _tpst[0], setTpStats = _tpst[1];
+  var _tpbusy = useState(false), tpBusy = _tpbusy[0], setTpBusy = _tpbusy[1];
   var fileRef = useRef(null);
+  var tpFileRef = useRef(null);
 
   var anchors = useMemo(function () { return fcAnchors(headers); }, [headers]);
   var productCol = useMemo(function () { return fcIdxExact(headers, "Product code"); }, [headers]);
@@ -6461,6 +6470,8 @@ function ForecastingTool(props) {
       try { var inp = await idbGet("fc-input"); if (inp && inp.headers) { setHeaders(inp.headers); setRows(inp.rows || []); setFileName(inp.fileName || ""); setDetectedWh(inp.detectedWh || ""); } } catch (e) {}
       try { var res = await idbGet("fc-result"); if (res) { if (res.formattedRows) setFormatted(res.formattedRows); if (res.stats) setStats(res.stats); } } catch (e) {}
       try { var fc = await idbGet("fc-forecast"); if (fc) { if (fc.globalMethod) setGlobalMethod(fc.globalMethod); if (fc.growth) setGrowth(fc.growth); if (fc.targetCols) setTargetCols(fc.targetCols); if (fc.rowMethod) setRowMethod(fc.rowMethod); if (fc.manualEdits) setManualEdits(fc.manualEdits); } } catch (e) {}
+      try { var tpi = await idbGet("fc-tp-input"); if (tpi && tpi.headers) { setTpHeaders(tpi.headers); setTpRows(tpi.rows || []); setTpFileName(tpi.fileName || ""); if (tpi.finalCol != null) setTpFinalCol(tpi.finalCol); } } catch (e) {}
+      try { var tpr = await idbGet("fc-tp-result"); if (tpr) { if (tpr.formatted) setTpFormatted(tpr.formatted); if (tpr.stats) setTpStats(tpr.stats); } } catch (e) {}
       var m = sGet("fc-mode"); if (m) setMode(m);
       var w = sGet("fc-wh"); if (w) setWarehouse(w);
     })();
@@ -6562,6 +6573,100 @@ function ForecastingTool(props) {
     setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
   }
 
+  // ── TP Forecast (generics) ──
+  var TP_KEEP = ["Product code", "Location code", "Product description", "Supplier description", "Class", "Velocity", "Main unit of measure"];
+  function tpFinalCols() {
+    var out = [];
+    for (var i = 0; i < tpHeaders.length; i++) { if (/^final fc units/i.test(String(tpHeaders[i]))) out.push({ idx: i, label: String(tpHeaders[i]).replace(/^final fc units\s*/i, "") }); }
+    return out;
+  }
+  function chooseTpFile() { if (tpFileRef.current) tpFileRef.current.click(); }
+  function onTpFile(e) {
+    var file = e.target.files && e.target.files[0]; if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function (ev) {
+      try {
+        var XLSX = require("xlsx");
+        var wb = XLSX.read(ev.target.result, { type: "array" });
+        // pick the sheet that has a "Product code" + "Location code" header (Report data)
+        var hdr = null, rws = null;
+        wb.SheetNames.forEach(function (nm) {
+          if (hdr) return;
+          var aoa = XLSX.utils.sheet_to_json(wb.Sheets[nm], { header: 1, defval: "", raw: true });
+          if (!aoa.length) return;
+          var h = aoa[0].map(function (x) { return String(x).trim(); });
+          var hasP = h.some(function (x) { return x.toLowerCase() === "product code"; });
+          var hasL = h.some(function (x) { return x.toLowerCase() === "location code"; });
+          if (hasP && hasL) { hdr = h; rws = aoa.slice(1).filter(function (r) { return r.some(function (c) { return String(c).trim() !== ""; }); }); }
+        });
+        if (!hdr) { toast("No 'Report data' sheet with Product/Location code found", "error"); return; }
+        var finals = []; for (var i = 0; i < hdr.length; i++) { if (/^final fc units/i.test(hdr[i])) finals.push(i); }
+        var defFinal = finals.length ? finals[finals.length - 1] : -1;
+        setTpHeaders(hdr); setTpRows(rws); setTpFileName(file.name); setTpFinalCol(defFinal); setTpFormatted(null); setTpStats(null);
+        idbSet("fc-tp-input", { headers: hdr, rows: rws, fileName: file.name, finalCol: defFinal }).catch(function () {});
+        idbDel("fc-tp-result").catch(function () {});
+        toast("Loaded TP Forecast report: " + rws.length + " rows");
+      } catch (err) { toast("Error reading report: " + err.message, "error"); }
+    };
+    reader.readAsArrayBuffer(file);
+    e.target.value = "";
+  }
+  function changeTpFinal(idx) { setTpFinalCol(idx); idbSet("fc-tp-input", { headers: tpHeaders, rows: tpRows, fileName: tpFileName, finalCol: idx }).catch(function () {}); }
+  function tpKeepIdx() {
+    var idxs = TP_KEEP.map(function (n) { return fcIdxExact(tpHeaders, n); }).filter(function (i) { return i >= 0; });
+    if (tpFinalCol >= 0) idxs.push(tpFinalCol);
+    return idxs;
+  }
+  async function prepareTp() {
+    if (!tpHeaders.length || !tpRows.length) { toast("Upload the TP Forecast report first", "error"); return; }
+    if (!warehouse) { toast("Pick a warehouse first", "error"); return; }
+    if (!ok) { lp(); return; }
+    var pCol = fcIdxExact(tpHeaders, "Product code");
+    var lCol = fcIdxExact(tpHeaders, "Location code");
+    var cCol = fcIdxExact(tpHeaders, "Class");
+    if (pCol < 0 || lCol < 0 || cCol < 0) { toast("Report is missing Product code / Location code / Class", "error"); return; }
+    setTpBusy(true);
+    try {
+      var whseRows = await fetchAcumatica("whse-replenish", null, cred.username, cred.password);
+      var allowed = {};
+      (whseRows || []).forEach(function (r) {
+        if (String(r.Warehouse || "").trim() !== warehouse) return;
+        var cl = String(r.ReplenishmentClass || "").trim().toUpperCase();
+        if (cl !== "A" && cl !== "B" && cl !== "C") return;
+        if (String(r.ItemStatus || "").trim().toLowerCase() === "no purchases") return;
+        var id = String(r.InventoryID || "").trim();
+        if (!id || id.toUpperCase().indexOf("GEN-") === -1) return;
+        allowed[id] = true;
+      });
+      var keep = tpKeepIdx();
+      var kept = tpRows.filter(function (row) {
+        if (String(row[lCol] || "").trim() !== warehouse) return false;
+        if (!allowed[String(row[pCol] || "").trim()]) return false;
+        var cl = String(row[cCol] || "").trim().toUpperCase();
+        return cl === "A" || cl === "B" || cl === "C";
+      }).map(function (row) { return keep.map(function (i) { return row[i]; }); });
+      var st = { input: tpRows.length, allowed: Object.keys(allowed).length, kept: kept.length, dropped: tpRows.length - kept.length, warehouse: warehouse, at: Date.now() };
+      setTpFormatted(kept); setTpStats(st);
+      idbSet("fc-tp-result", { formatted: kept, stats: st }).catch(function () {});
+      toast("Prepared " + kept.length + " of " + tpRows.length + " rows for " + warehouse);
+    } catch (err) {
+      toast("Prepare failed: " + (err && err.message ? err.message : err), "error");
+    } finally { setTpBusy(false); }
+  }
+  function exportTp() {
+    if (!tpFormatted || !tpFormatted.length) { toast("Run Prepare first", "error"); return; }
+    try {
+      var XLSX = require("xlsx");
+      var keep = tpKeepIdx();
+      var keptHeaders = keep.map(function (i) { return tpHeaders[i]; });
+      var ws = XLSX.utils.aoa_to_sheet([keptHeaders].concat(tpFormatted));
+      var wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Report data");
+      var d = new Date().toISOString().slice(0, 10);
+      XLSX.writeFile(wb, "TPForecast_" + (warehouse || "all") + "_" + d + ".xlsx");
+    } catch (err) { toast("Export failed: " + err.message, "error"); }
+  }
+
   // ── method engine ──
   var growthMult = (function () { var g = parseFloat(growth); return isNaN(g) ? 1 : g; })();
   function methodValue(row, m) {
@@ -6615,7 +6720,67 @@ function ForecastingTool(props) {
       {mode === "gen" && <button onClick={function () { setTab("tp"); }} style={S.pill(tab === "tp", "#0EA5E9")}>TP Forecast</button>}
     </div>
 
-    {tab === "tp" && <div style={S.card}><div style={{ color: "#6B7280", fontSize: 13 }}>The generics TP Forecast export is the next build step (Phase 3). For now, use the Forecast tab.</div></div>}
+    {tab === "tp" && <div>
+      <div style={S.card}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 600, color: "#1F2937", marginBottom: 4 }}>TP Forecast report (generics)</div>
+            <div style={{ fontSize: 13, color: "#6B7280" }}>{tpFileName ? (tpFileName + "  -  " + tpRows.length + " rows") : "Upload the Netstock TP Forecast report (.xlsx, 'Report data' sheet)."}</div>
+          </div>
+          <div>
+            <input ref={tpFileRef} type="file" accept=".xlsx,.xls" onChange={onTpFile} style={{ display: "none" }} />
+            <button onClick={chooseTpFile} style={S.btn()}><IconUpload /> {tpFileName ? "Replace file" : "Upload report"}</button>
+          </div>
+        </div>
+      </div>
+
+      {tpHeaders.length > 0 && <div style={S.card}>
+        <div style={{ display: "flex", alignItems: "flex-end", gap: 20, flexWrap: "wrap" }}>
+          <div>
+            <label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 6 }}>Warehouse</label>
+            <select value={warehouse} onChange={function (e) { changeWarehouse(e.target.value); }} style={Object.assign({}, S.sel, { minWidth: 160 })}>
+              {warehouse === "" && <option value="">Select...</option>}
+              {(function () { var list = FC_KNOWN_WAREHOUSES.slice(); if (warehouse && list.indexOf(warehouse) === -1) list.unshift(warehouse); return list.map(function (w) { return <option key={w} value={w}>{w}</option>; }); })()}
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 6 }}>Final FC units month</label>
+            <select value={tpFinalCol} onChange={function (e) { changeTpFinal(parseInt(e.target.value)); }} style={Object.assign({}, S.sel, { minWidth: 160 })}>
+              {tpFinalCols().map(function (f) { return <option key={f.idx} value={f.idx}>{f.label}</option>; })}
+            </select>
+          </div>
+          <div style={{ flex: 1 }} />
+          <div style={{ display: "flex", gap: 10 }}>
+            <button onClick={prepareTp} disabled={tpBusy} style={Object.assign({}, S.btn(), tpBusy ? { opacity: 0.7, cursor: "wait" } : {})}>{tpBusy ? <><Spinner color="#fff" size={14} /> Preparing...</> : <><IconFilter /> Prepare</>}</button>
+            {tpFormatted && tpFormatted.length > 0 ? <button onClick={exportTp} style={S.btn("ghost")}><IconDL /> Export xlsx</button> : null}
+          </div>
+        </div>
+        {!ok && <div style={{ marginTop: 12, fontSize: 12, color: "#DC2626", display: "flex", alignItems: "center", gap: 6 }}><IconLock /> Log in to Acumatica to fetch warehouse data for Prepare.</div>}
+      </div>}
+
+      {tpStats && <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
+        <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0, minWidth: 120 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Report rows</div><div style={{ fontSize: 24, fontWeight: 700, color: "#1F2937", marginTop: 4 }}>{tpStats.input}</div></div>
+        <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0, minWidth: 120 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Kept</div><div style={{ fontSize: 24, fontWeight: 700, color: "#0EA5E9", marginTop: 4 }}>{tpStats.kept}</div></div>
+        <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0, minWidth: 120 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Dropped</div><div style={{ fontSize: 24, fontWeight: 700, color: "#9CA3AF", marginTop: 4 }}>{tpStats.dropped}</div></div>
+        <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0, minWidth: 120 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Generics in {tpStats.warehouse}</div><div style={{ fontSize: 24, fontWeight: 700, color: "#1F2937", marginTop: 4 }}>{tpStats.allowed}</div></div>
+      </div>}
+
+      {tpFormatted && tpFormatted.length > 0 && <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden" })}>
+        <div style={{ maxHeight: 520, overflow: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead><tr>{tpKeepIdx().map(function (i, ci) { return <th key={ci} style={Object.assign({}, S.th, ci >= 4 ? { textAlign: "right" } : {})}>{tpHeaders[i]}</th>; })}</tr></thead>
+            <tbody>
+              {tpFormatted.slice(0, 500).map(function (row, ri) {
+                return <tr key={ri}>{row.map(function (cell, ci) { return <td key={ci} style={Object.assign({}, S.td, ci >= 4 ? { textAlign: "right", fontVariantNumeric: "tabular-nums" } : {}, ci === 0 ? { fontWeight: 500, whiteSpace: "nowrap" } : {})}>{String(cell == null ? "" : cell)}</td>; })}</tr>;
+              })}
+            </tbody>
+          </table>
+        </div>
+        {tpFormatted.length > 500 && <div style={{ padding: "10px 16px", fontSize: 12, color: "#9CA3AF", borderTop: "1px solid #F3F4F6" }}>Showing first 500 of {tpFormatted.length} rows. The export includes all of them.</div>}
+      </div>}
+
+      {tpHeaders.length > 0 && tpStats === null && <div style={{ fontSize: 13, color: "#9CA3AF", padding: "8px 4px" }}>Pick a warehouse, then Prepare to keep only generics stocked in that warehouse (Acumatica Class A/B/C) and the report's A/B/C rows for that location.</div>}
+    </div>}
 
     {tab === "forecast" && <div>
       <div style={S.card}>
