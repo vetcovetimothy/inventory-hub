@@ -6518,7 +6518,7 @@ function ForecastingTool(props) {
   }
 
   function changeWarehouse(v) { setWarehouse(v); sSet("fc-wh", v); }
-  function changeMode(v) { setMode(v); sSet("fc-mode", v); if (v !== "gen" && tab === "tp") setTab("forecast"); }
+  function changeMode(v) { setMode(v); sSet("fc-mode", v); if (v === "non" && tab === "tp") setTab("forecast"); }
 
   async function autoFormat() {
     if (!headers.length || !rows.length) { toast("Upload a forecast CSV first", "error"); return; }
@@ -6530,7 +6530,6 @@ function ForecastingTool(props) {
     setBusy(true);
     try {
       var whseRows = await fetchAcumatica("whse-replenish", null, cred.username, cred.password);
-      var wantGen = mode === "gen";
       var allowed = {};
       (whseRows || []).forEach(function (r) {
         if (String(r.Warehouse || "").trim() !== warehouse) return;
@@ -6540,7 +6539,8 @@ function ForecastingTool(props) {
         var id = String(r.InventoryID || "").trim();
         if (!id) return;
         var isGen = id.toUpperCase().indexOf("GEN-") !== -1;
-        if (wantGen !== isGen) return;
+        if (mode === "gen" && !isGen) return;
+        if (mode === "non" && isGen) return;
         allowed[id] = true;
       });
       var allowedCount = Object.keys(allowed).length;
@@ -6563,7 +6563,7 @@ function ForecastingTool(props) {
 
   function exportFormatted() {
     if (!formatted || !formatted.length) { toast("Run Auto-format first", "error"); return; }
-    fcDownload(fcToCSV(headers, formatted), "forecast_" + (warehouse || "all") + "_" + (mode === "gen" ? "generics" : "nongenerics") + "_formatted.csv");
+    fcDownload(fcToCSV(headers, formatted), "forecast_" + (warehouse || "all") + "_" + (mode === "gen" ? "generics" : mode === "all" ? "all" : "nongenerics") + "_formatted.csv");
   }
 
   function fcDownload(csv, name) {
@@ -6704,7 +6704,7 @@ function ForecastingTool(props) {
       if (v != null) { targetCols.forEach(function (c) { r[c] = String(v); }); }
       return r;
     });
-    fcDownload(fcToCSV(headers, out), "forecast_" + (warehouse || "all") + "_" + (mode === "gen" ? "generics" : "nongenerics") + "_upload.csv");
+    fcDownload(fcToCSV(headers, out), "forecast_" + (warehouse || "all") + "_" + (mode === "gen" ? "generics" : mode === "all" ? "all" : "nongenerics") + "_upload.csv");
   }
 
   var filledCount = useMemo(function () {
@@ -6717,7 +6717,7 @@ function ForecastingTool(props) {
   return <div>
     <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
       <button onClick={function () { setTab("forecast"); }} style={S.pill(tab === "forecast", "#0EA5E9")}>Forecast</button>
-      {mode === "gen" && <button onClick={function () { setTab("tp"); }} style={S.pill(tab === "tp", "#0EA5E9")}>TP Forecast</button>}
+      {mode !== "non" && <button onClick={function () { setTab("tp"); }} style={S.pill(tab === "tp", "#0EA5E9")}>TP Forecast</button>}
     </div>
 
     {tab === "tp" && <div>
@@ -6813,8 +6813,9 @@ function ForecastingTool(props) {
           <div>
             <label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 6 }}>Mode</label>
             <div style={{ display: "flex", gap: 6, background: "#F3F4F6", padding: 4, borderRadius: 10 }}>
-              <button onClick={function () { changeMode("gen"); }} style={S.pill(mode === "gen", "#0EA5E9")}>Generics</button>
               <button onClick={function () { changeMode("non"); }} style={S.pill(mode === "non", "#0EA5E9")}>Non-generics</button>
+              <button onClick={function () { changeMode("gen"); }} style={S.pill(mode === "gen", "#0EA5E9")}>Generics</button>
+              <button onClick={function () { changeMode("all"); }} style={S.pill(mode === "all", "#0EA5E9")}>All</button>
             </div>
           </div>
           <div style={{ flex: 1 }} />
