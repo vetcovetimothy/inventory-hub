@@ -6342,6 +6342,251 @@ function VendorSettingsPage(props) {
 
 
 /* ═══════ MAIN HUB ═══════ */
+/* ═══════ FORECASTING TOOL (Phase 1: ingest + auto-format + export) ═══════ */
+var FC_KNOWN_WAREHOUSES = ["TP-NY", "TP-OH", "TP-CA", "GGM-KY", "GGM-AZ"];
+
+// Full-text, quote-aware CSV parser (handles commas/newlines inside quoted
+// fields and "" escapes). Returns an array of row-arrays; row 0 = headers.
+function fcParseCSV(text) {
+  text = String(text || "").replace(/^\uFEFF/, "");
+  var rows = [], cur = [], field = "", inQ = false, i = 0, n = text.length;
+  while (i < n) {
+    var ch = text[i];
+    if (inQ) {
+      if (ch === '"') { if (text[i + 1] === '"') { field += '"'; i += 2; continue; } inQ = false; i++; continue; }
+      field += ch; i++; continue;
+    }
+    if (ch === '"') { inQ = true; i++; continue; }
+    if (ch === ',') { cur.push(field); field = ""; i++; continue; }
+    if (ch === '\r') { if (text[i + 1] === '\n') i++; cur.push(field); rows.push(cur); cur = []; field = ""; i++; continue; }
+    if (ch === '\n') { cur.push(field); rows.push(cur); cur = []; field = ""; i++; continue; }
+    field += ch; i++;
+  }
+  if (field !== "" || cur.length) { cur.push(field); rows.push(cur); }
+  return rows.filter(function (r) { return r.some(function (c) { return String(c).trim() !== ""; }); });
+}
+
+function fcCsvCell(v) { v = (v == null ? "" : String(v)); return /[",\r\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+function fcToCSV(headers, rowArrs) {
+  var out = [headers.map(fcCsvCell).join(",")];
+  rowArrs.forEach(function (r) { out.push(r.map(fcCsvCell).join(",")); });
+  return out.join("\r\n");
+}
+function fcDetectWarehouse(fname) {
+  var m = String(fname || "").match(/([A-Za-z]{2,4}-[A-Za-z]{2,4})/);
+  return m ? m[1].toUpperCase() : "";
+}
+function fcIdxExact(headers, name) {
+  var t = name.toLowerCase().trim();
+  for (var i = 0; i < headers.length; i++) if (String(headers[i]).toLowerCase().trim() === t) return i;
+  return -1;
+}
+function fcIdxContains(headers, sub) {
+  var t = sub.toLowerCase();
+  for (var i = 0; i < headers.length; i++) if (String(headers[i]).toLowerCase().indexOf(t) !== -1) return i;
+  return -1;
+}
+
+function ForecastingTool(props) {
+  var toast = props.toast, cred = props.cred, ok = props.ok, lp = props.lp;
+  var S = makeStyles("#0EA5E9");
+
+  var _hd = useState([]), headers = _hd[0], setHeaders = _hd[1];
+  var _rw = useState([]), rows = _rw[0], setRows = _rw[1];
+  var _fn = useState(""), fileName = _fn[0], setFileName = _fn[1];
+  var _dw = useState(""), detectedWh = _dw[0], setDetectedWh = _dw[1];
+  var _wh = useState(""), warehouse = _wh[0], setWarehouse = _wh[1];
+  var _md = useState("gen"), mode = _md[0], setMode = _md[1];
+  var _fmt = useState(null), formatted = _fmt[0], setFormatted = _fmt[1];
+  var _st = useState(null), stats = _st[0], setStats = _st[1];
+  var _busy = useState(false), busy = _busy[0], setBusy = _busy[1];
+  var _tab = useState("forecast"), tab = _tab[0], setTab = _tab[1];
+  var fileRef = useRef(null);
+
+  useEffect(function () {
+    (async function () {
+      try { var inp = await idbGet("fc-input"); if (inp && inp.headers) { setHeaders(inp.headers); setRows(inp.rows || []); setFileName(inp.fileName || ""); setDetectedWh(inp.detectedWh || ""); } } catch (e) {}
+      try { var res = await idbGet("fc-result"); if (res) { if (res.formattedRows) setFormatted(res.formattedRows); if (res.stats) setStats(res.stats); } } catch (e) {}
+      var m = sGet("fc-mode"); if (m) setMode(m);
+      var w = sGet("fc-wh"); if (w) setWarehouse(w);
+    })();
+  }, []);
+
+  useEffect(function () { if (!warehouse && detectedWh) setWarehouse(detectedWh); }, [detectedWh]);
+
+  function chooseFile() { if (fileRef.current) fileRef.current.click(); }
+
+  function onFile(e) {
+    var file = e.target.files && e.target.files[0]; if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      try {
+        var parsed = fcParseCSV(reader.result);
+        if (parsed.length < 2) { toast("That file has no data rows", "error"); return; }
+        var hdr = parsed[0].map(function (h) { return String(h).trim(); });
+        var dataRows = parsed.slice(1).map(function (r) {
+          var row = r.slice(0, hdr.length);
+          while (row.length < hdr.length) row.push("");
+          return row;
+        });
+        var dw = fcDetectWarehouse(file.name);
+        setHeaders(hdr); setRows(dataRows); setFileName(file.name); setDetectedWh(dw);
+        if (dw) { setWarehouse(dw); sSet("fc-wh", dw); }
+        setFormatted(null); setStats(null);
+        idbSet("fc-input", { headers: hdr, rows: dataRows, fileName: file.name, detectedWh: dw }).catch(function () {});
+        idbDel("fc-result").catch(function () {});
+        toast("Loaded " + dataRows.length + " forecast rows" + (dw ? " (" + dw + ")" : ""));
+      } catch (err) { toast("Error parsing CSV: " + err.message, "error"); }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  }
+
+  function changeWarehouse(v) { setWarehouse(v); sSet("fc-wh", v); }
+  function changeMode(v) { setMode(v); sSet("fc-mode", v); if (v !== "gen" && tab === "tp") setTab("forecast"); }
+
+  async function autoFormat() {
+    if (!headers.length || !rows.length) { toast("Upload a forecast CSV first", "error"); return; }
+    if (!warehouse) { toast("Pick a warehouse first", "error"); return; }
+    if (!ok) { lp(); return; }
+    var productCol = fcIdxExact(headers, "Product code");
+    var classCol = fcIdxExact(headers, "Classification");
+    if (productCol < 0) { toast("Could not find a 'Product code' column", "error"); return; }
+    if (classCol < 0) { toast("Could not find a 'Classification' column", "error"); return; }
+    setBusy(true);
+    try {
+      var whseRows = await fetchAcumatica("whse-replenish", null, cred.username, cred.password);
+      var wantGen = mode === "gen";
+      var allowed = {};
+      (whseRows || []).forEach(function (r) {
+        if (String(r.Warehouse || "").trim() !== warehouse) return;
+        var cls = String(r.ReplenishmentClass || "").trim().toUpperCase();
+        if (cls !== "A" && cls !== "B" && cls !== "C") return;
+        if (String(r.ItemStatus || "").trim().toLowerCase() === "no purchases") return;
+        var id = String(r.InventoryID || "").trim();
+        if (!id) return;
+        var isGen = id.toUpperCase().indexOf("GEN-") !== -1;
+        if (wantGen !== isGen) return;
+        allowed[id] = true;
+      });
+      var allowedCount = Object.keys(allowed).length;
+      var kept = rows.filter(function (row) {
+        var pc = String(row[productCol] || "").trim();
+        if (!allowed[pc]) return false;
+        var cl = String(row[classCol] || "").trim().toUpperCase();
+        return cl === "A" || cl === "B" || cl === "C";
+      });
+      var st = { input: rows.length, allowed: allowedCount, kept: kept.length, dropped: rows.length - kept.length, warehouse: warehouse, mode: mode, at: Date.now() };
+      setFormatted(kept); setStats(st);
+      idbSet("fc-result", { formattedRows: kept, stats: st }).catch(function () {});
+      toast("Kept " + kept.length + " of " + rows.length + " rows for " + warehouse);
+    } catch (err) {
+      toast("Auto-format failed: " + (err && err.message ? err.message : err), "error");
+    } finally { setBusy(false); }
+  }
+
+  function exportFormatted() {
+    if (!formatted || !formatted.length) { toast("Run Auto-format first", "error"); return; }
+    var csv = fcToCSV(headers, formatted);
+    var blob = new Blob([csv], { type: "text/csv" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "forecast_" + (warehouse || "all") + "_" + (mode === "gen" ? "generics" : "nongenerics") + "_formatted.csv";
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  }
+
+  var dispCols = [];
+  if (headers.length) {
+    [["Product code", "Product code"], ["Description", "Description"], ["Supplier Description", "Supplier"], ["Item Class", "Class"], ["Classification", "ABC"], ["Velocity", "Velocity"], ["Item Status", "Status"]].forEach(function (pair) {
+      var idx = fcIdxExact(headers, pair[0]); if (idx >= 0) dispCols.push({ idx: idx, label: pair[1] });
+    });
+    var mtd = fcIdxExact(headers, "Hist: MTD"); if (mtd >= 0) dispCols.push({ idx: mtd, label: "MTD", num: true });
+    var lastHist = -1; for (var k = 0; k < headers.length; k++) { var h = String(headers[k]); if (/^hist:/i.test(h) && !/mtd/i.test(h)) lastHist = k; }
+    if (lastHist >= 0) dispCols.push({ idx: lastHist, label: String(headers[lastHist]).replace(/^hist:\s*/i, ""), num: true });
+    var fin1 = fcIdxContains(headers, "final:1:"); if (fin1 >= 0) dispCols.push({ idx: fin1, label: "Final 1", num: true });
+  }
+
+  return <div>
+    <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+      <button onClick={function () { setTab("forecast"); }} style={S.pill(tab === "forecast", "#0EA5E9")}>Forecast</button>
+      {mode === "gen" && <button onClick={function () { setTab("tp"); }} style={S.pill(tab === "tp", "#0EA5E9")}>TP Forecast</button>}
+    </div>
+
+    {tab === "tp" && <div style={S.card}><div style={{ color: "#6B7280", fontSize: 13 }}>The generics TP Forecast export is the next build step (Phase 3). For now, use the Forecast tab.</div></div>}
+
+    {tab === "forecast" && <div>
+      <div style={S.card}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 600, color: "#1F2937", marginBottom: 4 }}>Netstock forecast file</div>
+            <div style={{ fontSize: 13, color: "#6B7280" }}>{fileName ? (fileName + "  -  " + rows.length + " rows") : "Upload the multi-forecast CSV exported from Netstock."}</div>
+          </div>
+          <div>
+            <input ref={fileRef} type="file" accept=".csv,text/csv" onChange={onFile} style={{ display: "none" }} />
+            <button onClick={chooseFile} style={S.btn()}><IconUpload /> {fileName ? "Replace file" : "Upload CSV"}</button>
+          </div>
+        </div>
+      </div>
+
+      {headers.length > 0 && <div style={S.card}>
+        <div style={{ display: "flex", alignItems: "flex-end", gap: 20, flexWrap: "wrap" }}>
+          <div>
+            <label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 6 }}>Warehouse</label>
+            <select value={warehouse} onChange={function (e) { changeWarehouse(e.target.value); }} style={Object.assign({}, S.sel, { minWidth: 160 })}>
+              {warehouse === "" && <option value="">Select...</option>}
+              {(function () {
+                var list = FC_KNOWN_WAREHOUSES.slice();
+                if (warehouse && list.indexOf(warehouse) === -1) list.unshift(warehouse);
+                return list.map(function (w) { return <option key={w} value={w}>{w}</option>; });
+              })()}
+            </select>
+            {detectedWh ? <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 4 }}>Detected from filename: {detectedWh}</div> : null}
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 6 }}>Mode</label>
+            <div style={{ display: "flex", gap: 6, background: "#F3F4F6", padding: 4, borderRadius: 10 }}>
+              <button onClick={function () { changeMode("gen"); }} style={S.pill(mode === "gen", "#0EA5E9")}>Generics</button>
+              <button onClick={function () { changeMode("non"); }} style={S.pill(mode === "non", "#0EA5E9")}>Non-generics</button>
+            </div>
+          </div>
+          <div style={{ flex: 1 }} />
+          <div style={{ display: "flex", gap: 10 }}>
+            <button onClick={autoFormat} disabled={busy} style={Object.assign({}, S.btn(), busy ? { opacity: 0.7, cursor: "wait" } : {})}>{busy ? <><Spinner color="#fff" size={14} /> Formatting...</> : <><IconFilter /> Auto-format</>}</button>
+            {formatted && formatted.length > 0 ? <button onClick={exportFormatted} style={S.btn("ghost")}><IconDL /> Export CSV</button> : null}
+          </div>
+        </div>
+        {!ok && <div style={{ marginTop: 12, fontSize: 12, color: "#DC2626", display: "flex", alignItems: "center", gap: 6 }}><IconLock /> Log in to Acumatica to fetch warehouse data for auto-format.</div>}
+      </div>}
+
+      {stats && <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
+        <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0, minWidth: 120 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Input rows</div><div style={{ fontSize: 24, fontWeight: 700, color: "#1F2937", marginTop: 4 }}>{stats.input}</div></div>
+        <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0, minWidth: 120 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Kept</div><div style={{ fontSize: 24, fontWeight: 700, color: "#0EA5E9", marginTop: 4 }}>{stats.kept}</div></div>
+        <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0, minWidth: 120 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Dropped</div><div style={{ fontSize: 24, fontWeight: 700, color: "#9CA3AF", marginTop: 4 }}>{stats.dropped}</div></div>
+        <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0, minWidth: 120 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Stocked in {stats.warehouse}</div><div style={{ fontSize: 24, fontWeight: 700, color: "#1F2937", marginTop: 4 }}>{stats.allowed}</div></div>
+      </div>}
+
+      {formatted && formatted.length > 0 && <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden" })}>
+        <div style={{ maxHeight: 520, overflow: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead><tr>{dispCols.map(function (c, ci) { return <th key={ci} style={Object.assign({}, S.th, c.num ? { textAlign: "right" } : {})}>{c.label}</th>; })}</tr></thead>
+            <tbody>
+              {formatted.slice(0, 500).map(function (row, ri) {
+                return <tr key={ri}>{dispCols.map(function (c, ci) { return <td key={ci} style={Object.assign({}, S.td, c.num ? { textAlign: "right", fontVariantNumeric: "tabular-nums" } : {})}>{row[c.idx]}</td>; })}</tr>;
+              })}
+            </tbody>
+          </table>
+        </div>
+        {formatted.length > 500 && <div style={{ padding: "10px 16px", fontSize: 12, color: "#9CA3AF", borderTop: "1px solid #F3F4F6" }}>Showing first 500 of {formatted.length} rows. The export includes all of them.</div>}
+      </div>}
+
+      {headers.length > 0 && (!formatted || !formatted.length) && stats === null && <div style={{ fontSize: 13, color: "#9CA3AF", padding: "8px 4px" }}>Pick a warehouse and mode, then Auto-format to filter the list down to the items worth forecasting.</div>}
+    </div>}
+  </div>;
+}
+
+
 export default function Hub() {
   var _p = useState(function() {
     if (typeof window !== "undefined") {
@@ -6525,8 +6770,8 @@ export default function Hub() {
   );
 
   var isWH = page in WH;
-  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "backorder-resolver" ? "#14B8A6" : page === "po-import" ? "#06B6D4" : page === "cycle-count" ? "#14B8A6" : page === "fuze-tracker" ? "#F59E0B" : page === "ggm-tracker" ? "#8B5CF6" : page === "hills-pawtree" ? "#10B981" : page === "truckloader" ? "#D97706" : page === "oos-tracker" ? "#EF4444" : page === "vendor-settings" ? "#6366F1" : page === "how-to" ? "#6B7280" : "#3B82F6";
-  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "backorder-resolver" ? "Backorder Resolver" : page === "po-import" ? "Generic PO Translator" : page === "cycle-count" ? "Cycle Counting" : page === "fuze-tracker" ? "Fuze Tracker" : page === "ggm-tracker" ? "GGM Tracker" : page === "hills-pawtree" ? "Hills & Pawtree Tracker" : page === "truckloader" ? "Truckloader" : page === "oos-tracker" ? "OOS Tracker" : page === "vendor-settings" ? "Vendor Settings" : page === "how-to" ? "How-To Guide" : showLogin ? "Login" : "Vendor Settings";
+  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "backorder-resolver" ? "#14B8A6" : page === "po-import" ? "#06B6D4" : page === "cycle-count" ? "#14B8A6" : page === "fuze-tracker" ? "#F59E0B" : page === "ggm-tracker" ? "#8B5CF6" : page === "hills-pawtree" ? "#10B981" : page === "truckloader" ? "#D97706" : page === "oos-tracker" ? "#EF4444" : page === "vendor-settings" ? "#6366F1" : page === "forecasting" ? "#0EA5E9" : page === "how-to" ? "#6B7280" : "#3B82F6";
+  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "backorder-resolver" ? "Backorder Resolver" : page === "po-import" ? "Generic PO Translator" : page === "cycle-count" ? "Cycle Counting" : page === "fuze-tracker" ? "Fuze Tracker" : page === "ggm-tracker" ? "GGM Tracker" : page === "hills-pawtree" ? "Hills & Pawtree Tracker" : page === "truckloader" ? "Truckloader" : page === "oos-tracker" ? "OOS Tracker" : page === "vendor-settings" ? "Vendor Settings" : page === "forecasting" ? "Forecasting" : page === "how-to" ? "How-To Guide" : showLogin ? "Login" : "Vendor Settings";
 
   function SideLink(p) {
     var active = page === p.id && !showLogin;
@@ -6553,6 +6798,7 @@ export default function Hub() {
             { key: "oos", label: "OOS", items: [{ id: "oos-tracker", label: "OOS Tracker", color: "#EF4444" }] },
             { key: "tracking", label: "Tracking", items: [{ id: "fuze-tracker", label: "Fuze Tracker", color: "#F59E0B" }, { id: "ggm-tracker", label: "GGM Tracker", color: "#8B5CF6" }] },
             { key: "inventory", label: "Inventory Tools", items: [{ id: "short-dating", label: "Short-Dating", color: "#E879F9" }, { id: "backorder", label: "Backorders", color: "#F97316" }, { id: "backorder-resolver", label: "Backorder Resolver", color: "#14B8A6" }] },
+            { key: "forecasting", label: "Forecasting", items: [{ id: "forecasting", label: "Forecasting", color: "#0EA5E9" }] },
           ];
           return sections.map(function(sec, si) {
             var hasActive = sec.items.some(function(item) { return page === item.id && !showLogin; });
@@ -6613,6 +6859,7 @@ export default function Hub() {
           {!showLogin && page === "truckloader" && <TruckloaderTool toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} />}
           {!showLogin && page === "oos-tracker" && <OOSTracker toast={showToast} cred={cred} />}
           {!showLogin && page === "backorder-resolver" && <BackorderResolver toast={showToast} cred={cred} />}
+          {!showLogin && page === "forecasting" && <ForecastingTool toast={showToast} cred={cred} ok={ok} lp={promptLogin} />}
           {!showLogin && (page === "vendor-settings" || page === "vendor-contacts" || page === "rules") && <VendorSettingsPage contacts={vendorContacts} updateContacts={updateVendorContacts} channels={vendorChannels} updateChannels={updateVendorChannels} shipRules={shipRules} updateShipRules={updateShipRules} toast={showToast} />}
           {!showLogin && page === "how-to" && <HowToGuide toast={showToast} />}
         </div>
