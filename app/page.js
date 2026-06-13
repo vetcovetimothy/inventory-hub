@@ -1131,20 +1131,31 @@ function WHT(props) {
   var sdExemptEntries = Object.keys(sdExempt).map(function(id) { var v = sdExempt[id]; var desc = (v && typeof v === "object" && v.desc) ? v.desc : (sdExemptDescByInv[id] || ""); return { invId: id, desc: desc, onPO: !!sdExemptDescByInv[id] }; }).sort(function(a, b) { return a.invId.localeCompare(b.invId); });
   var emailBlocked = !isGGM && (flags.s.length > 0 || flags.so.length > 0);
   var getFlag = function(r) { var mc = (r.MovementClass || "").toLowerCase().trim(); if (mc === "short-dating") return sdExempt[String(r.InventoryID || "").trim()] ? null : "short"; if (mc === "sell-off item") return "selloff"; return null; };
-  // Auto-reset: if an exempted item comes back in the data no longer short-dating,
-  // drop its exemption (it's been reset). Only acts on items actually present in
-  // this warehouse's data, never on ones merely absent.
+  // Auto-reset exempt items that are no longer short-dated, and backfill missing
+  // descriptions for exempt items once we can see them on a PO (so off-PO views
+  // in the same group can display them too).
   useEffect(function() {
-    if (!props.onClearExempt) return;
-    var present = {}, shortSet = {};
+    var present = {}, shortSet = {}, descByInv = {};
     data.forEach(function(r) {
       var invId = String(r.InventoryID || "").trim();
       if (!invId) return;
       present[invId] = true;
+      if (r.Description && !descByInv[invId]) descByInv[invId] = r.Description;
       if ((r.MovementClass || "").toLowerCase().trim() === "short-dating") shortSet[invId] = true;
     });
-    var toClear = Object.keys(sdExempt).filter(function(invId) { return present[invId] && !shortSet[invId]; });
-    if (toClear.length > 0) props.onClearExempt(sdExemptGroup, toClear);
+    if (props.onClearExempt) {
+      var toClear = Object.keys(sdExempt).filter(function(invId) { return present[invId] && !shortSet[invId]; });
+      if (toClear.length > 0) props.onClearExempt(sdExemptGroup, toClear);
+    }
+    if (props.onBackfillExempt) {
+      var metaByInv = {};
+      Object.keys(sdExempt).forEach(function(invId) {
+        var v = sdExempt[invId];
+        var hasDesc = v && typeof v === "object" && v.desc;
+        if (!hasDesc && shortSet[invId] && descByInv[invId]) metaByInv[invId] = { desc: descByInv[invId] };
+      });
+      if (Object.keys(metaByInv).length > 0) props.onBackfillExempt(sdExemptGroup, metaByInv);
+    }
   }, [data, sdExempt]);
   var filtered = useMemo(function() { var d = data.slice(); if (search) { var s = search.toLowerCase(); d = d.filter(function(r) { return r.SKUNDC.toLowerCase().indexOf(s) >= 0 || (r.InventoryID || "").toLowerCase().indexOf(s) >= 0 || r.Description.toLowerCase().indexOf(s) >= 0 || r.VendorName.toLowerCase().indexOf(s) >= 0; }); } if (vendorFilter !== "all") d = d.filter(function(r) { return r.VendorName === vendorFilter; }); if (flagsOnly) { var fi = new Set(flags.s.concat(flags.so)); d = d.filter(function(r) { return fi.has(data.indexOf(r)); }); } if (poSort.col) { var col = poSort.col; var dir = poSort.dir; d.sort(function(a, b) { var va, vb; if (col === "Qty") { va = parseFloat(a.OrderQty) || 0; vb = parseFloat(b.OrderQty) || 0; } else if (col === "Vendor") { va = a.VendorName || ""; vb = b.VendorName || ""; return dir === "desc" ? vb.localeCompare(va) : va.localeCompare(vb); } else if (col === "PO #") { va = a.OrderNbr || ""; vb = b.OrderNbr || ""; return dir === "desc" ? vb.localeCompare(va) : va.localeCompare(vb); } else if (col === "SKU") { va = a.SKUNDC || ""; vb = b.SKUNDC || ""; return dir === "desc" ? vb.localeCompare(va) : va.localeCompare(vb); } else if (col === "InventoryID") { va = a.InventoryID || ""; vb = b.InventoryID || ""; return dir === "desc" ? vb.localeCompare(va) : va.localeCompare(vb); } else if (col === "Description") { va = a.Description || ""; vb = b.Description || ""; return dir === "desc" ? vb.localeCompare(va) : va.localeCompare(vb); } else if (col === "Reorder") { va = parseFloat(a.ReorderPoint) || 0; vb = parseFloat(b.ReorderPoint) || 0; } else if (col === "Max") { va = parseFloat(a.MaxQty) || 0; vb = parseFloat(b.MaxQty) || 0; } else if (col === "Lead") { va = parseFloat(a.LeadTime) || 0; vb = parseFloat(b.LeadTime) || 0; } else if (col === "Min") { va = parseFloat(a.MinOrderQty) || 0; vb = parseFloat(b.MinOrderQty) || 0; } else if (col === "Avail") { va = parseFloat(a.QtyAvailable) || 0; vb = parseFloat(b.QtyAvailable) || 0; } else if (col === "Price") { va = a.Price || 0; vb = b.Price || 0; } else if (col === "Total") { va = a.TotalPrice || 0; vb = b.TotalPrice || 0; } else if (col === "Flag") { va = getFlag(a) ? 0 : 1; vb = getFlag(b) ? 0 : 1; } else { return 0; } return dir === "desc" ? vb - va : va - vb; }); } else { d.sort(function(a, b) { var fa = getFlag(a) ? 0 : 1; var fb = getFlag(b) ? 0 : 1; return fa - fb; }); } return d; }, [data, search, vendorFilter, flagsOnly, flags, poSort]);
   var todayStr = new Date().toLocaleDateString("en-US", { month: "numeric", day: "numeric" });
@@ -6375,6 +6386,21 @@ export default function Hub() {
       var next = Object.assign({}, prev); next[group] = groupMap; return next;
     });
   }
+  function backfillSdExemptMeta(group, metaByInv) {
+    setSdExempt(function(prev) {
+      var groupMap = Object.assign({}, prev[group] || {});
+      var changed = false;
+      Object.keys(metaByInv || {}).forEach(function(id) {
+        if (groupMap[id] === undefined) return; // only fill records that exist
+        var cur = groupMap[id];
+        var hasDesc = cur && typeof cur === "object" && cur.desc;
+        if (!hasDesc && metaByInv[id] && metaByInv[id].desc) { groupMap[id] = metaByInv[id]; changed = true; }
+      });
+      if (!changed) return prev;
+      kvPost("po-sd-exempt:" + group, Object.assign({}, groupMap, { _savedAt: Date.now() })).catch(function() {});
+      var next = Object.assign({}, prev); next[group] = groupMap; return next;
+    });
+  }
 
   var showToast = useCallback(function(m, t) { setToast({ m: m, t: t || "success" }); setTimeout(function() { setToast(null); }, 3500); }, []);
   useEffect(function() { var mt = true; (async function() { var s = sGet("user-credentials"); if (mt && s && s.username && s.password) { setCred(s); setOk(true); } var g = getGmailToken(); if (mt && g && g.token) { setGmail(g); } if (mt) setCredLoading(false); kvGet("vendor-contacts").then(function(r) { return r.ok ? r.json() : null; }).then(function(d) { if (mt && d && d.data && typeof d.data === "object" && Object.keys(d.data).length > 0) { setVendorContacts(d.data); } }).catch(function() {}); kvGet("vendor-channels").then(function(r) { return r.ok ? r.json() : null; }).then(function(d) { if (mt && d && d.data && typeof d.data === "object" && Object.keys(d.data).length > 0) { setVendorChannels(d.data); } }).catch(function() {}); kvGet("shipping-rules-v2").then(function(r) { return r.ok ? r.json() : null; }).then(function(d) { if (mt && d && d.data && typeof d.data === "object" && Object.keys(d.data).length > 0) { setShipRules(d.data); } }).catch(function() {}); })(); return function() { mt = false; }; }, []);
@@ -6576,7 +6602,7 @@ export default function Hub() {
         <div style={{ padding: 32, flex: 1 }}>
           {showLogin && <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 400 }}><div style={{ background: "#FFFFFF", border: "1px solid #E5E7EB", borderRadius: 12, padding: 32, width: 400, textAlign: "center" }}><div style={{ width: 56, height: 56, borderRadius: 14, background: "rgba(59,130,246,0.15)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}><IconKey /></div><h2 style={{ fontSize: 20, fontWeight: 700, color: "#1F2937", margin: "0 0 4px" }}>Acumatica Login</h2><p style={{ color: "#9CA3AF", fontSize: 11, margin: "0 0 24px" }}>Shared across all tools</p><div style={{ textAlign: "left", display: "flex", flexDirection: "column", gap: 12 }}><div><label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 4 }}>Username</label><input style={{ background: "#F8F9FB", border: "1px solid #E5E7EB", borderRadius: 8, padding: "8px 12px", color: "#374151", fontSize: 13, outline: "none", width: "100%" }} value={cred.username} onChange={function(e) { setCred({ username: e.target.value, password: cred.password }); }} placeholder="your.username" /></div><div><label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 4 }}>Password</label><input style={{ background: "#F8F9FB", border: "1px solid #E5E7EB", borderRadius: 8, padding: "8px 12px", color: "#374151", fontSize: 13, outline: "none", width: "100%" }} type="password" value={cred.password} onChange={function(e) { setCred({ username: cred.username, password: e.target.value }); }} placeholder="\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" /></div><button onClick={login} disabled={loginLoading} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, width: "100%", background: "#3B82F6", color: "#fff", border: "none", borderRadius: 8, padding: "10px 16px", fontSize: 13, fontWeight: 600, cursor: loginLoading ? "wait" : "pointer", marginTop: 8, opacity: loginLoading ? 0.7 : 1 }}>{loginLoading ? <><Spinner color="#fff" size={14} /> Verifying...</> : "Connect"}</button></div></div></div>}
 
-          {!showLogin && Object.entries(WH).map(function(e) { return <div key={e[0]} style={{ display: page === e[0] ? "block" : "none" }}><WHT whKey={e[0]} cfg={e[1]} toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} shipRules={shipRules} vendorChannels={vendorChannels} updateVendorChannels={updateVendorChannels} vendorContacts={vendorContacts} sdExempt={e[0].indexOf("GGM") === 0 ? sdExempt.ggm : sdExempt.fuze} onToggleExempt={toggleSdExempt} onClearExempt={clearSdExempt} /></div>; })}
+          {!showLogin && Object.entries(WH).map(function(e) { return <div key={e[0]} style={{ display: page === e[0] ? "block" : "none" }}><WHT whKey={e[0]} cfg={e[1]} toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} shipRules={shipRules} vendorChannels={vendorChannels} updateVendorChannels={updateVendorChannels} vendorContacts={vendorContacts} sdExempt={e[0].indexOf("GGM") === 0 ? sdExempt.ggm : sdExempt.fuze} onToggleExempt={toggleSdExempt} onClearExempt={clearSdExempt} onBackfillExempt={backfillSdExemptMeta} /></div>; })}
           {!showLogin && page === "short-dating" && <TrackerTool toolKey="short-dating" toolLabel="Short-Dating Tracker" toolColor="#E879F9" demoData={SD_DEMO} columns={sdColumns} emailConfig={sdEmail} toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} contacts={vendorContacts} />}
           {!showLogin && page === "backorder" && <TrackerTool toolKey="backorder" toolLabel="Backorder Tracker" toolColor="#F97316" demoData={BKO_DEMO} columns={bkoColumns} emailConfig={bkoEmail} skipVendors={BKO_SKIP} toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} contacts={vendorContacts} />}
           {!showLogin && page === "po-import" && <POImportTool toast={showToast} cred={cred} ok={ok} lp={promptLogin} />}
