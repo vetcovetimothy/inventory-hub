@@ -6936,6 +6936,7 @@ function ReceivingTool(props) {
   var _qty = useState({}), qty = _qty[0], setQty = _qty[1];           // receive qty (string)
   var _loc = useState({}), loc = _loc[0], setLoc = _loc[1];           // location (string)
   var _final = useState({}), finalFlag = _final[0], setFinalFlag = _final[1]; // close-line toggle
+  var _dbg = useState(""), dbg = _dbg[0], setDbg = _dbg[1];
 
   function dispOf(k) { return disp[k] || "receive"; }
 
@@ -6943,11 +6944,23 @@ function ReceivingTool(props) {
     var po = poInput.trim();
     if (!po) { toast("Enter a PO number", "error"); return; }
     if (!ok) { lp(); return; }
-    setBusy(true);
+    setBusy(true); setDbg("");
     try {
-      var all = await fetchAcumatica("open-po-lines", null, cred.username, cred.password);
-      var rows = (all || []).filter(function (r) { return String(r.OrderNbr || "").trim() === po; });
-      if (!rows.length) { toast("No open lines found for PO " + po, "error"); setBusy(false); return; }
+      var resp = await fetch("/api/acumatica?refresh=1", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "open-po-lines", username: cred.username, password: cred.password }) });
+      var json = await resp.json();
+      if (!resp.ok) throw new Error(json.error || "request failed");
+      var all = json.data || [];
+      var rows = all.filter(function (r) { return String(r.OrderNbr || "").trim() === po; });
+      if (!rows.length) {
+        var distinct = {}; all.forEach(function (r) { var o = String(r.OrderNbr || "").trim(); if (o) distinct[o] = 1; });
+        var dl = Object.keys(distinct);
+        var sub = dl.filter(function (o) { return o.indexOf(po) >= 0; });
+        var keys = all.length ? Object.keys(all[0]).join(", ") : "(none)";
+        setDbg("Fetched " + all.length + " open lines across " + dl.length + " POs; no exact match for \"" + po + "\". "
+          + (sub.length ? ("Contains-match: " + sub.slice(0, 8).join(", ") + ". ") : "")
+          + "First-row fields: [" + keys + "]. Sample POs: " + dl.slice(0, 12).join(", "));
+        setBusy(false); return;
+      }
       var d = {}, q = {}, l = {}, f = {};
       rows.forEach(function (r, i) {
         var open = Math.max(0, rcNum(r.OrderQty) - rcNum(r.QtyOnReceipts));
@@ -6990,6 +7003,7 @@ function ReceivingTool(props) {
         {loadedPo ? <div style={{ fontSize: 13, color: "#6B7280", paddingBottom: 8 }}>PO <strong style={{ color: "#1F2937" }}>{loadedPo}</strong>{vendor ? " \u00B7 " + vendor : ""} \u00B7 {lines.length} open line{lines.length === 1 ? "" : "s"}</div> : null}
       </div>
       {!ok && <div style={{ marginTop: 12, fontSize: 12, color: "#DC2626", display: "flex", alignItems: "center", gap: 6 }}><IconLock /> Log in to Acumatica to load a PO.</div>}
+      {dbg && <div style={{ marginTop: 12, fontSize: 12, color: "#92400E", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 8, padding: "10px 12px", lineHeight: 1.5 }}>{dbg}</div>}
     </div>
 
     {lines.length > 0 && <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
