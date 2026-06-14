@@ -6395,9 +6395,11 @@ function fcAnchors(headers) {
   var trail3 = hist.slice(-3);
   var final1 = fcIdxContains(headers, "final:1:");
   var comp1 = -1; for (var j = 0; j < headers.length; j++) { if (/^computer:/i.test(String(headers[j]))) { comp1 = j; break; } }
+  var finals = {};
+  for (var f = 0; f < headers.length; f++) { var fm = String(headers[f]).match(/^final:\s*(\d+):/i); if (fm) finals[parseInt(fm[1], 10)] = f; }
   var uploads = [];
-  for (var k = 0; k < headers.length; k++) { var hh = String(headers[k]); if (/^upload:\s*\d+:/i.test(hh)) uploads.push({ idx: k, label: hh.replace(/^upload:\s*\d+:\s*/i, "") }); }
-  return { mtd: mtd, lastHist: lastHist, trail3: trail3, final1: final1, comp1: comp1, uploads: uploads };
+  for (var k = 0; k < headers.length; k++) { var hh = String(headers[k]); var um = hh.match(/^upload:\s*(\d+):/i); if (um) uploads.push({ idx: k, num: parseInt(um[1], 10), label: hh.replace(/^upload:\s*\d+:\s*/i, "") }); }
+  return { mtd: mtd, lastHist: lastHist, trail3: trail3, final1: final1, comp1: comp1, finals: finals, uploads: uploads };
 }
 function fcNum(row, idx) {
   if (idx == null || idx < 0) return null;
@@ -6406,12 +6408,10 @@ function fcNum(row, idx) {
   var v = parseFloat(raw); return isNaN(v) ? null : v;
 }
 var FC_METHODS = [
-  { id: "A", label: "A - MTD run-rate (today excluded)" },
-  { id: "B", label: "B - Last month x growth" },
-  { id: "C", label: "C - Netstock Final" },
-  { id: "D", label: "D - Max(A, B, C)" },
-  { id: "E", label: "E - Trailing 3-month average" },
-  { id: "F", label: "F - Netstock Computer baseline" },
+  { id: "A", label: "A - MTD run-rate (current month only)" },
+  { id: "B", label: "B - Last month x growth (compounds each month)" },
+  { id: "C", label: "C - Netstock Final (per month)" },
+  { id: "E", label: "E - Trailing 3-month average (flat)" },
 ];
 
 function ForecastingTool(props) {
@@ -6669,30 +6669,38 @@ function ForecastingTool(props) {
 
   // ── method engine ──
   var growthMult = (function () { var g = parseFloat(growth); return isNaN(g) ? 1 : g; })();
-  function methodValue(row, m) {
-    if (m === "A") { var mtd = fcNum(row, anchors.mtd); if (mtd == null) return null; return (mtd / denom) * daysInMonth; }
-    if (m === "B") { var lm = fcNum(row, anchors.lastHist); if (lm == null) return null; return lm * growthMult; }
-    if (m === "C") { return fcNum(row, anchors.final1); }
-    if (m === "F") { return fcNum(row, anchors.comp1); }
+  function methodValueForMonth(row, m, num) {
+    if (m === "A") { if (num !== 1) return null; var mtd = fcNum(row, anchors.mtd); if (mtd == null) return null; return (mtd / denom) * daysInMonth; }
+    if (m === "B") { var lm = fcNum(row, anchors.lastHist); if (lm == null) return null; return lm * Math.pow(growthMult, num); }
+    if (m === "C") { var fi = anchors.finals[num]; return fi == null ? null : fcNum(row, fi); }
     if (m === "E") { var vals = anchors.trail3.map(function (i) { return fcNum(row, i); }).filter(function (v) { return v != null; }); if (!vals.length) return null; return vals.reduce(function (a, b) { return a + b; }, 0) / vals.length; }
-    if (m === "D") { var arr = ["A", "B", "C"].map(function (x) { return methodValue(row, x); }).filter(function (v) { return v != null; }); if (!arr.length) return null; return Math.max.apply(null, arr); }
     return null;
   }
   function rowKey(row) { return String(row[productCol] == null ? "" : row[productCol]); }
-  function computedFor(row) {
+  function computedForMonth(row, num) {
     var m = rowMethod[rowKey(row)] || globalMethod;
     if (!m || m === "none") return null;
-    var v = methodValue(row, m); return v == null ? null : Math.round(v);
+    var v = methodValueForMonth(row, m, num); return v == null ? null : Math.round(v);
   }
-  function effectiveFor(row) {
+  function effectiveForMonth(row, num) {
     var k = rowKey(row);
     var man = manualEdits[k];
     if (man != null && String(man).trim() !== "") { var mv = parseFloat(man); return isNaN(mv) ? null : mv; }
-    return computedFor(row);
+    return computedForMonth(row, num);
   }
+  function uploadNum(colIdx) { for (var i = 0; i < anchors.uploads.length; i++) { if (anchors.uploads[i].idx === colIdx) return anchors.uploads[i].num; } return null; }
   function setManual(k, v) { var u = Object.assign({}, manualEdits); if (v == null || String(v).trim() === "") delete u[k]; else u[k] = v; setManualEdits(u); }
   function setRowM(k, v) { var u = Object.assign({}, rowMethod); if (!v) delete u[k]; else u[k] = v; setRowMethod(u); }
-  function toggleTarget(idx) { var has = targetCols.indexOf(idx) !== -1; setTargetCols(has ? targetCols.filter(function (x) { return x !== idx; }) : targetCols.concat([idx]).sort(function (a, b) { return a - b; })); }
+  function toggleTarget(idx) {
+    if (globalMethod === "A") { var fa = anchors.uploads.length ? anchors.uploads[0].idx : null; setTargetCols(fa != null ? [fa] : []); return; }
+    var has = targetCols.indexOf(idx) !== -1; setTargetCols(has ? targetCols.filter(function (x) { return x !== idx; }) : targetCols.concat([idx]).sort(function (a, b) { return a - b; }));
+  }
+  var firstTargetNum = (function () { var nums = targetCols.map(uploadNum).filter(function (n) { return n != null; }); return nums.length ? Math.min.apply(null, nums) : 1; })();
+  var firstTargetLabel = (function () { for (var i = 0; i < anchors.uploads.length; i++) { if (anchors.uploads[i].num === firstTargetNum) return anchors.uploads[i].label; } return ""; })();
+  function changeGlobalMethod(v) {
+    setGlobalMethod(v);
+    if (v === "A") { var first = anchors.uploads.length ? anchors.uploads[0].idx : null; setTargetCols(first != null ? [first] : []); }
+  }
   function clearOverrides() { setRowMethod({}); setManualEdits({}); toast("Cleared per-row methods and manual edits"); }
 
   function resetAll() {
@@ -6713,8 +6721,11 @@ function ForecastingTool(props) {
     if (!targetCols.length) { toast("Pick at least one month to fill", "error"); return; }
     var out = formatted.map(function (row) {
       var r = row.slice();
-      var v = effectiveFor(row);
-      if (v != null) { targetCols.forEach(function (c) { r[c] = String(v); }); }
+      targetCols.forEach(function (c) {
+        var num = uploadNum(c); if (num == null) return;
+        var v = effectiveForMonth(row, num);
+        if (v != null) r[c] = String(v);
+      });
       return r;
     });
     fcDownload(fcToCSV(headers, out), "forecast_" + (warehouse || "all") + "_" + (mode === "gen" ? "generics" : mode === "all" ? "all" : "nongenerics") + "_upload.csv");
@@ -6722,8 +6733,8 @@ function ForecastingTool(props) {
 
   var filledCount = useMemo(function () {
     if (!formatted) return 0;
-    return formatted.reduce(function (n, row) { return effectiveFor(row) != null ? n + 1 : n; }, 0);
-  }, [formatted, globalMethod, growth, rowMethod, manualEdits]);
+    return formatted.reduce(function (n, row) { return effectiveForMonth(row, firstTargetNum) != null ? n + 1 : n; }, 0);
+  }, [formatted, globalMethod, growth, rowMethod, manualEdits, firstTargetNum]);
 
   var lastMonthLabel = anchors.lastHist >= 0 ? String(headers[anchors.lastHist]).replace(/^hist:\s*/i, "") : "Last mo";
 
@@ -6852,7 +6863,7 @@ function ForecastingTool(props) {
         <div style={{ display: "flex", alignItems: "flex-end", gap: 20, flexWrap: "wrap", marginBottom: 26 }}>
           <div>
             <label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 6 }}>Method (all rows)</label>
-            <select value={globalMethod} onChange={function (e) { setGlobalMethod(e.target.value); }} style={Object.assign({}, S.sel, { minWidth: 280 })}>
+            <select value={globalMethod} onChange={function (e) { changeGlobalMethod(e.target.value); }} style={Object.assign({}, S.sel, { minWidth: 280 })}>
               <option value="none">None - leave Upload blank</option>
               {FC_METHODS.map(function (m) { return <option key={m.id} value={m.id}>{m.label}</option>; })}
             </select>
@@ -6860,7 +6871,7 @@ function ForecastingTool(props) {
           <div style={{ position: "relative" }}>
             <label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 6 }}>Growth (multiplier)</label>
             <input value={growth} onChange={function (e) { setGrowth(e.target.value); }} style={Object.assign({}, S.inp, { width: 90 })} />
-            <div style={{ fontSize: 11, color: "#9CA3AF", position: "absolute", top: "100%", left: 0, marginTop: 4, whiteSpace: "nowrap" }}>1.10 = +10% (methods B, D)</div>
+            <div style={{ fontSize: 11, color: "#9CA3AF", position: "absolute", top: "100%", left: 0, marginTop: 4, whiteSpace: "nowrap" }}>1.10 = +10% (method B)</div>
           </div>
           <div style={{ flex: 1 }} />
           <div style={{ display: "flex", gap: 10 }}>
@@ -6871,12 +6882,13 @@ function ForecastingTool(props) {
 
         <div style={{ marginBottom: 6, fontSize: 12, color: "#6B7280", fontWeight: 500 }}>Fill these Upload month(s):</div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
-          {anchors.uploads.map(function (u) {
+          {anchors.uploads.map(function (u, ui) {
             var on = targetCols.indexOf(u.idx) !== -1;
-            return <button key={u.idx} onClick={function () { toggleTarget(u.idx); }} style={{ padding: "5px 10px", borderRadius: 8, border: "1px solid " + (on ? "#0EA5E9" : "#E5E7EB"), background: on ? "#0EA5E9" : "#fff", color: on ? "#fff" : "#6B7280", fontSize: 12, fontWeight: 500, cursor: "pointer" }}>{u.label}</button>;
+            var disabled = globalMethod === "A" && ui !== 0;
+            return <button key={u.idx} disabled={disabled} onClick={function () { toggleTarget(u.idx); }} style={{ padding: "5px 10px", borderRadius: 8, border: "1px solid " + (on ? "#0EA5E9" : "#E5E7EB"), background: on ? "#0EA5E9" : "#fff", color: on ? "#fff" : (disabled ? "#D1D5DB" : "#6B7280"), fontSize: 12, fontWeight: 500, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1 }}>{u.label}</button>;
           })}
         </div>
-        <div style={{ fontSize: 11, color: "#9CA3AF", marginBottom: 4 }}>Each row's monthly value (computed or hand-typed) is written into every selected month. Per-row method overrides the global method; a typed Upload value overrides both.</div>
+        <div style={{ fontSize: 11, color: "#9CA3AF", marginBottom: 4 }}>Each selected month gets its own value &mdash; B compounds the growth, C pulls that month&rsquo;s Netstock Final, A fills only the current month. A typed value overrides all selected months; a per-row method overrides the global one.</div>
       </div>}
 
       {formatted && formatted.length > 0 && <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden" })}>
@@ -6890,12 +6902,12 @@ function ForecastingTool(props) {
               <th style={Object.assign({}, S.th, { textAlign: "right" })}>Final 1</th>
               <th style={Object.assign({}, S.th, { textAlign: "right" })}>Computer</th>
               <th style={S.th}>Method</th>
-              <th style={Object.assign({}, S.th, { textAlign: "right" })}>Upload</th>
+              <th style={Object.assign({}, S.th, { textAlign: "right" })}>{firstTargetLabel ? "Upload (" + firstTargetLabel + ")" : "Upload"}</th>
             </tr></thead>
             <tbody>
               {formatted.map(function (row, ri) {
                 var k = rowKey(row);
-                var comp = computedFor(row);
+                var comp = computedForMonth(row, firstTargetNum);
                 var man = manualEdits[k];
                 var isManual = man != null && String(man).trim() !== "";
                 var cellVal = isManual ? man : (comp == null ? "" : comp);
@@ -6920,7 +6932,7 @@ function ForecastingTool(props) {
             </tbody>
           </table>
         </div>
-        <div style={{ padding: "10px 16px", fontSize: 12, color: "#9CA3AF", borderTop: "1px solid #F3F4F6" }}>{formatted.length} items - {filledCount} will export with an Upload value into {targetCols.length} month{targetCols.length === 1 ? "" : "s"}. Blue cells are manual overrides.</div>
+        <div style={{ padding: "10px 16px", fontSize: 12, color: "#9CA3AF", borderTop: "1px solid #F3F4F6" }}>{formatted.length} items - preview shows {firstTargetLabel || "the first month"}; export writes each of the {targetCols.length} selected month{targetCols.length === 1 ? "" : "s"} its own value. Blue cells are manual overrides.</div>
       </div>}
 
       {headers.length > 0 && (!formatted || !formatted.length) && stats === null && <div style={{ fontSize: 13, color: "#9CA3AF", padding: "8px 4px" }}>Pick a warehouse and mode, then Auto-format to filter the list down to the items worth forecasting.</div>}
