@@ -7016,6 +7016,8 @@ function ReceivingTool(props) {
         if (r.note) { out.push(ent + ": " + r.note); return; }
         out.push(ent + " — header: [" + (r.headerKeys || []).join(", ") + "]");
         out.push(ent + " — lines: [" + (r.lineKeys || []).join(", ") + "]");
+        if (r.headerSample) out.push(ent + " — header sample: " + JSON.stringify(r.headerSample));
+        if (r.lineSample) out.push(ent + " — line sample: " + JSON.stringify(r.lineSample));
       });
       setDbg(out.join("\n"));
     } catch (err) { setDbg("Probe failed: " + (err && err.message ? err.message : err)); } finally { setBusy(false); }
