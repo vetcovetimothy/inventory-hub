@@ -50,7 +50,9 @@ export async function POST(req) {
       // receiving location when Location is not supplied.
     });
     const payload = { Type: { value: "Receipt" }, Hold: { value: true }, Details: details };
-    if (vendorID) payload.VendorID = { value: String(vendorID) };
+    // VendorID intentionally NOT set: when lines are added by PO reference,
+    // Acumatica populates the vendor from the PO. Setting it here makes the
+    // PO selector resolve before the vendor context is established ("OrderNbr ... cannot be found").
 
     const r = await fetch(`${BASE}/entity/Default/${API_VERSION}/PurchaseReceipt`, {
       method: "PUT",
