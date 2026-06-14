@@ -64,13 +64,25 @@ export async function POST(req) {
       let detail = "";
       try {
         const ej = JSON.parse(text);
-        detail = ej.exceptionMessage || ej.message || "";
+        detail = ej.exceptionMessage || ej.message || ej.error || "";
         let inner = ej.innerException || ej.InnerException;
         let depth = 0;
         while (inner && depth < 6) { const m = inner.exceptionMessage || inner.message; if (m) detail += " | inner: " + m; inner = inner.innerException || inner.InnerException; depth++; }
         if (ej.modelState) detail += " | fields: " + JSON.stringify(ej.modelState).slice(0, 600);
+        // Contract-API validation (422) responses return the entity with per-field error props.
+        const fieldErrs = [];
+        const walk = (o, path) => {
+          if (!o || typeof o !== "object") return;
+          if (Array.isArray(o)) { o.forEach((v, i) => walk(v, path + "[" + i + "]")); return; }
+          for (const k of Object.keys(o)) {
+            if (k === "error" && typeof o[k] === "string" && o[k] && path) fieldErrs.push(path + ": " + o[k]);
+            else if (o[k] && typeof o[k] === "object") walk(o[k], path ? path + "." + k : k);
+          }
+        };
+        walk(ej, "");
+        if (fieldErrs.length) detail += " | FIELD ERRORS: " + fieldErrs.slice(0, 10).join("  ;  ");
       } catch {}
-      return json({ ok: false, stage: "create", status: r.status, error: String(detail).slice(0, 1000), body: text.slice(0, 1500), payloadSent: payload });
+      return json({ ok: false, stage: "create", status: r.status, error: String(detail).slice(0, 1400), body: text.slice(0, 1500), payloadSent: payload });
     }
     let obj; try { obj = JSON.parse(text); } catch { obj = null; }
     const receiptNbr = obj && obj.ReceiptNbr ? obj.ReceiptNbr.value : null;
