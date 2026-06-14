@@ -42,7 +42,7 @@ export async function POST(req) {
   try {
     for (let i = 0; i < entities.length; i++) {
       const ent = String(entities[i]).replace(/[^A-Za-z]/g, "");
-      const url = `${BASE}/entity/Default/${API_VERSION}/${ent}?$top=1&$expand=Details`;
+      const url = `${BASE}/entity/Default/${API_VERSION}/${ent}?$top=5&$expand=Details`;
       try {
         const r = await fetch(url, { method: "GET", headers: { "Cookie": cookies, "Accept": "application/json" } });
         const text = await r.text();
@@ -50,10 +50,24 @@ export async function POST(req) {
         let arr; try { arr = JSON.parse(text); } catch { results[ent] = { error: "parse", body: text.slice(0, 300) }; continue; }
         if (!Array.isArray(arr)) arr = arr ? [arr] : [];
         if (!arr.length) { results[ent] = { note: "no records to sample" }; continue; }
-        const h = flatten(arr[0]);
-        const headerKeys = Object.keys(h).filter((k) => k !== "Details");
-        const lineKeys = (Array.isArray(arr[0].Details) && arr[0].Details.length) ? Object.keys(flatten(arr[0].Details[0])) : [];
-        results[ent] = { headerKeys: headerKeys, lineKeys: lineKeys };
+        const pick = (obj, fields) => { const o = {}; fields.forEach((f) => { if (obj && obj[f] != null && obj[f] !== "") o[f] = obj[f]; }); return o; };
+        const headerSampleFields = ent === "PurchaseReceipt" ? ["Type", "Status", "Hold", "VendorID", "Branch", "Warehouse", "Location"] : ["Type", "Status", "VendorID", "Branch"];
+        const lineSampleFields = ent === "PurchaseReceipt" ? ["POOrderNbr", "POOrderType", "POLineNbr", "ReceiptQty", "Location", "LotSerialNbr", "InventoryID", "Warehouse", "UOM"] : ["OrderType", "OrderNbr", "LineNbr", "AlternateID", "InventoryID"];
+        // For receipts, prefer a record whose lines reference a PO.
+        let rec = arr[0];
+        if (ent === "PurchaseReceipt") {
+          const withPO = arr.find((x) => Array.isArray(x.Details) && x.Details.some((d) => { const fd = flatten(d); return fd.POOrderNbr != null && fd.POOrderNbr !== ""; }));
+          if (withPO) rec = withPO;
+        }
+        const flatH = flatten(rec);
+        const headerKeys = Object.keys(flatH).filter((k) => k !== "Details");
+        let lineObj = {};
+        if (Array.isArray(rec.Details) && rec.Details.length) {
+          const flatLines = rec.Details.map(flatten);
+          lineObj = (ent === "PurchaseReceipt" ? (flatLines.find((d) => d.POOrderNbr != null && d.POOrderNbr !== "") || flatLines[0]) : flatLines[0]);
+        }
+        const lineKeys = Object.keys(lineObj);
+        results[ent] = { headerKeys: headerKeys, lineKeys: lineKeys, headerSample: pick(flatH, headerSampleFields), lineSample: pick(lineObj, lineSampleFields) };
       } catch (e) {
         results[ent] = { error: String(e) };
       }
