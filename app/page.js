@@ -6960,6 +6960,7 @@ function ReceivingTool(props) {
       var rows = [];
       orders.forEach(function (o) {
         var on = g(o, ["OrderNbr"], "");
+        var otype = g(o, ["Type"], "Normal");
         (o.Details || []).forEach(function (ln) {
           var ordered = rcNum(g(ln, ["OrderQty", "Quantity"], 0));
           var received = rcNum(g(ln, ["QtyOnReceipts", "ReceivedQty", "ReceiptedQty", "QtyReceived"], 0));
@@ -6972,7 +6973,7 @@ function ReceivingTool(props) {
           if (open <= 0 || isCancelled || isCompleted) return; // open, actionable lines only
           rows.push({
             orderNbr: on,
-            orderType: g(ln, ["OrderType"], "Normal"),
+            orderType: otype,
             lineNbr: g(ln, ["LineNbr", "POLineNbr", "LineNumber"], ""),
             inventoryID: g(ln, ["InventoryID"], ""),
             ndc: g(ln, ["AlternateID", "AlternateId"], ""),
@@ -7046,7 +7047,7 @@ function ReceivingTool(props) {
         var resp = await fetch("/api/acumatica-receipt-create", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: cred.username, password: cred.password, vendorID: vendor, orderNbr: on, orderType: groups[on].orderType, lines: groups[on].lines }) });
         var j = await resp.json();
         if (j.ok) msgs.push("PO " + on + ": created receipt " + (j.receiptNbr || "(on hold)") + " \u2014 " + j.lineCount + " line(s), status " + (j.status || "?") + (j.hold ? ", on hold" : ""));
-        else msgs.push("PO " + on + ": FAILED at " + (j.stage || "?") + (j.status ? (" HTTP " + j.status) : "") + " \u2014 " + (j.error || (j.body ? String(j.body).slice(0, 500) : "")));
+        else msgs.push("PO " + on + ": FAILED (sent POOrderType=\"" + groups[on].orderType + "\") at " + (j.stage || "?") + (j.status ? (" HTTP " + j.status) : "") + " \u2014 " + (j.error || (j.body ? String(j.body).slice(0, 500) : "")));
       }
       setDbg(msgs.join("\n"));
       var anyOk = msgs.some(function (m) { return m.indexOf(": created receipt") !== -1; });
