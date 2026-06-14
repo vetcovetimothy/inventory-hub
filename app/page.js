@@ -6947,30 +6947,49 @@ function ReceivingTool(props) {
     if (!ok) { lp(); return; }
     setBusy(true); setDbg("");
     try {
-      var resp = await fetch("/api/acumatica?refresh=1", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "open-po-lines", username: cred.username, password: cred.password }) });
-      var json = await resp.json();
-      if (!resp.ok) throw new Error(json.error || "request failed");
-      var all = json.data || [];
-      // The working PO number is stored in the vendor reference, not the Acumatica
-      // auto-generated Order Nbr. Match either; prefer vendor ref.
-      var rows = all.filter(function (r) { return String(r.VendorRef || "").trim() === po || String(r.OrderNbr || "").trim() === po; });
-      if (!rows.length) {
-        var dVR = {}, dON = {}; all.forEach(function (r) { var v = String(r.VendorRef || "").trim(); if (v) dVR[v] = 1; var o = String(r.OrderNbr || "").trim(); if (o) dON[o] = 1; });
-        var vrl = Object.keys(dVR), onl = Object.keys(dON);
-        var sub = vrl.concat(onl).filter(function (x) { return x.indexOf(po) >= 0; });
-        var keys = all.length ? Object.keys(all[0]).join(", ") : "(none)";
-        setDbg("Fetched " + all.length + " open lines (" + vrl.length + " vendor refs, " + onl.length + " Acumatica POs); no match for \"" + po + "\". "
-          + (sub.length ? ("Contains-match: " + sub.slice(0, 8).join(", ") + ". ") : "")
-          + "First-row fields: [" + keys + "]. Sample vendor refs: " + vrl.slice(0, 12).join(", "));
+      var resp = await fetch("/api/acumatica-po-fetch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: cred.username, password: cred.password, query: po }) });
+      var j = await resp.json();
+      if (!j.ok) {
+        setDbg("Lookup failed" + (j.stage ? (" at " + j.stage) : "") + (j.status ? (" (HTTP " + j.status + ")") : "") + ": " + (j.error || (j.body ? String(j.body).slice(0, 300) : "unknown")));
         setBusy(false); return;
       }
-      var orderNbrs = {}; rows.forEach(function (r) { var o = String(r.OrderNbr || "").trim(); if (o) orderNbrs[o] = 1; });
+      var orders = j.orders || [];
+      if (!orders.length) { setDbg("No purchase order found for \"" + po + "\" (searched vendor ref and order nbr)."); setBusy(false); return; }
+      function g(o, keys, dflt) { for (var i = 0; i < keys.length; i++) { if (o[keys[i]] != null && o[keys[i]] !== "") return o[keys[i]]; } return dflt; }
+      var rows = [];
+      orders.forEach(function (o) {
+        var on = g(o, ["OrderNbr"], "");
+        (o.Details || []).forEach(function (ln) {
+          var ordered = rcNum(g(ln, ["OrderQty", "Quantity"], 0));
+          var received = rcNum(g(ln, ["QtyOnReceipts", "ReceivedQty", "ReceiptedQty", "QtyReceived"], 0));
+          var openField = g(ln, ["OpenQty"], null);
+          var open = openField != null ? rcNum(openField) : Math.max(0, ordered - received);
+          var cancelled = g(ln, ["Cancelled"], false);
+          var completed = g(ln, ["Completed"], false);
+          var isCancelled = cancelled === true || String(cancelled).toLowerCase() === "true";
+          var isCompleted = completed === true || String(completed).toLowerCase() === "true";
+          if (open <= 0 || isCancelled || isCompleted) return; // open, actionable lines only
+          rows.push({
+            orderNbr: on,
+            lineNbr: g(ln, ["LineNbr", "POLineNbr", "LineNumber"], ""),
+            inventoryID: g(ln, ["InventoryID"], ""),
+            ndc: g(ln, ["AlternateID", "AlternateId"], ""),
+            description: g(ln, ["LineDescription", "TranDesc", "Description"], ""),
+            uom: g(ln, ["UOM", "OrderQtyUOM"], ""),
+            warehouse: g(ln, ["WarehouseID", "Warehouse"], ""),
+            ordered: ordered, received: received, open: open
+          });
+        });
+      });
+      if (!rows.length) { setDbg("PO found but no open lines (all received / closed / cancelled). Line fields seen: [" + (j.lineKeys || []).join(", ") + "]"); setBusy(false); return; }
       var d = {}, q = {}, l = {}, f = {};
       rows.forEach(function (r, i) {
-        var open = Math.max(0, rcNum(r.OrderQty) - rcNum(r.QtyOnReceipts));
-        d[i] = "receive"; q[i] = String(open); l[i] = ""; f[i] = false;
+        d[i] = "receive"; q[i] = String(r.open); f[i] = false;
+        var isGen = String(r.inventoryID).toUpperCase().indexOf("GEN-") !== -1;
+        l[i] = (isGen && r.ndc) ? String(r.ndc).replace(/-/g, "") : "";
       });
-      setLines(rows); setLoadedPo(po); setAcuPo(Object.keys(orderNbrs).join(", ")); setVendor(String(rows[0].VendorName || ""));
+      var orderNbrs = {}; rows.forEach(function (r) { if (r.orderNbr) orderNbrs[r.orderNbr] = 1; });
+      setLines(rows); setLoadedPo(po); setAcuPo(Object.keys(orderNbrs).join(", ")); setVendor(String(g(orders[0], ["VendorID", "Vendor"], "")));
       setDisp(d); setQty(q); setLoc(l); setFinalFlag(f);
       toast("Loaded " + rows.length + " open line" + (rows.length === 1 ? "" : "s") + " for PO " + po);
     } catch (err) {
@@ -6989,7 +7008,7 @@ function ReceivingTool(props) {
       var dd = disp[i] || "receive";
       if (dd === "receive") c.receive++;
       else if (dd === "skip") c.skip++;
-      else if (dd === "end") { (rcNum(r.QtyOnReceipts) > 0 ? c.close++ : c.cancel++); }
+      else if (dd === "end") { (r.received > 0 ? c.close++ : c.cancel++); }
     });
     return c;
   }, [lines, disp]);
@@ -7035,8 +7054,7 @@ function ReceivingTool(props) {
           <tbody>
             {lines.map(function (r, i) {
               var k = i;
-              var ordered = rcNum(r.OrderQty), received = rcNum(r.QtyOnReceipts);
-              var open = Math.max(0, ordered - received);
+              var ordered = r.ordered, received = r.received, open = r.open;
               var dd = dispOf(k);
               var endLabel = received > 0 ? "Close" : "Cancel";
               var endColor = received > 0 ? "#0EA5E9" : "#DC2626";
@@ -7045,9 +7063,9 @@ function ReceivingTool(props) {
               var locStyle = { width: 130, padding: "6px 8px", borderRadius: 8, fontSize: 13, border: "1px solid #E5E7EB", background: greyed ? "#F3F4F6" : "#F9FAFB", color: greyed ? "#9CA3AF" : "#1F2937", outline: "none" };
               var rowBg = dd === "skip" ? "#FafafA" : (dd === "end" ? (received > 0 ? "#F0F9FF" : "#FEF2F2") : "transparent");
               return <tr key={k} style={{ background: rowBg }}>
-                <td style={Object.assign({}, S.td, { fontWeight: 500, whiteSpace: "nowrap", textDecoration: dd === "skip" ? "line-through" : "none", color: dd === "skip" ? "#9CA3AF" : undefined })}>{r.InventoryID}</td>
-                <td style={Object.assign({}, S.td, { maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })}>{r.Description}</td>
-                <td style={S.td}>{r.Warehouse}</td>
+                <td style={Object.assign({}, S.td, { fontWeight: 500, whiteSpace: "nowrap", textDecoration: dd === "skip" ? "line-through" : "none", color: dd === "skip" ? "#9CA3AF" : undefined })}>{r.inventoryID}</td>
+                <td style={Object.assign({}, S.td, { maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })}>{r.description}</td>
+                <td style={S.td}>{r.warehouse}</td>
                 <td style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums" })}>{ordered}</td>
                 <td style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums" })}>{received}</td>
                 <td style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums", fontWeight: 600 })}>{open}</td>
