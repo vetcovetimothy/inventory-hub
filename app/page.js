@@ -6998,6 +6998,25 @@ function ReceivingTool(props) {
   }
 
   function setRow(stateObj, setter, k, v) { var u = Object.assign({}, stateObj); u[k] = v; setter(u); }
+
+  async function probeSchema() {
+    if (!ok) { lp(); return; }
+    setBusy(true); setDbg("Probing field names...");
+    try {
+      var resp = await fetch("/api/acumatica-schema-probe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: cred.username, password: cred.password, entities: ["PurchaseReceipt", "PurchaseOrder"] }) });
+      var j = await resp.json();
+      if (!j.ok) { setDbg("Probe failed" + (j.stage ? (" at " + j.stage) : "") + ": " + (j.error || (j.body ? String(j.body).slice(0, 300) : "unknown"))); setBusy(false); return; }
+      var out = [];
+      Object.keys(j.results || {}).forEach(function (ent) {
+        var r = j.results[ent];
+        if (r.error) { out.push(ent + ": ERROR " + r.error + (r.body ? (" — " + r.body) : "")); return; }
+        if (r.note) { out.push(ent + ": " + r.note); return; }
+        out.push(ent + " — header: [" + (r.headerKeys || []).join(", ") + "]");
+        out.push(ent + " — lines: [" + (r.lineKeys || []).join(", ") + "]");
+      });
+      setDbg(out.join("\n"));
+    } catch (err) { setDbg("Probe failed: " + (err && err.message ? err.message : err)); } finally { setBusy(false); }
+  }
   function toggleSkip(k) { setRow(disp, setDisp, k, dispOf(k) === "skip" ? "receive" : "skip"); }
   function toggleEnd(k) { setRow(disp, setDisp, k, dispOf(k) === "end" ? "receive" : "end"); }
 
@@ -7023,10 +7042,11 @@ function ReceivingTool(props) {
           <input value={poInput} onChange={function (e) { setPoInput(e.target.value); }} onKeyDown={function (e) { if (e.key === "Enter") loadPo(); }} placeholder="e.g. 16854209" style={Object.assign({}, S.inp, { width: 200 })} />
         </div>
         <button onClick={loadPo} disabled={busy} style={Object.assign({}, S.btn(), busy ? { opacity: 0.7, cursor: "wait" } : {})}>{busy ? <><Spinner color="#fff" size={14} /> Loading...</> : "Load PO"}</button>
+        <button onClick={probeSchema} disabled={busy} title="Dev: read PurchaseReceipt/PurchaseOrder field names from the instance" style={Object.assign({}, S.btn("ghost"), { fontSize: 12 })}>Probe fields</button>
         {loadedPo ? <div style={{ fontSize: 13, color: "#6B7280", paddingBottom: 8 }}>Vendor ref <strong style={{ color: "#1F2937" }}>{loadedPo}</strong>{acuPo ? <>{" \u00B7 Acumatica PO "}<strong style={{ color: "#1F2937" }}>{acuPo}</strong></> : null}{vendor ? " \u00B7 " + vendor : ""}{" \u00B7 " + lines.length + " open line" + (lines.length === 1 ? "" : "s")}</div> : null}
       </div>
       {!ok && <div style={{ marginTop: 12, fontSize: 12, color: "#DC2626", display: "flex", alignItems: "center", gap: 6 }}><IconLock /> Log in to Acumatica to load a PO.</div>}
-      {dbg && <div style={{ marginTop: 12, fontSize: 12, color: "#92400E", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 8, padding: "10px 12px", lineHeight: 1.5 }}>{dbg}</div>}
+      {dbg && <div style={{ marginTop: 12, fontSize: 12, color: "#92400E", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 8, padding: "10px 12px", lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{dbg}</div>}
     </div>
 
     {lines.length > 0 && <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
