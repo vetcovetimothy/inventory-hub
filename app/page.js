@@ -7046,7 +7046,7 @@ function ReceivingTool(props) {
         var resp = await fetch("/api/acumatica-receipt-create", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: cred.username, password: cred.password, vendorID: vendor, orderNbr: on, orderType: groups[on].orderType, lines: groups[on].lines }) });
         var j = await resp.json();
         if (j.ok) msgs.push("PO " + on + ": created receipt " + (j.receiptNbr || "(on hold)") + " \u2014 " + j.lineCount + " line(s), status " + (j.status || "?") + (j.hold ? ", on hold" : ""));
-        else msgs.push("PO " + on + ": FAILED at " + (j.stage || "?") + (j.status ? (" HTTP " + j.status) : "") + " \u2014 " + (j.body ? String(j.body).slice(0, 400) : (j.error || "")));
+        else msgs.push("PO " + on + ": FAILED at " + (j.stage || "?") + (j.status ? (" HTTP " + j.status) : "") + " \u2014 " + (j.error || (j.body ? String(j.body).slice(0, 500) : "")));
       }
       setDbg(msgs.join("\n"));
       var anyOk = msgs.some(function (m) { return m.indexOf(": created receipt") !== -1; });
@@ -7090,7 +7090,7 @@ function ReceivingTool(props) {
     </div>}
 
     {lines.length > 0 && <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
-      <button onClick={submitReceipt} disabled={submitting || counts.receive === 0} style={Object.assign({}, S.btn(), (submitting || counts.receive === 0) ? { opacity: 0.55, cursor: "not-allowed" } : {})}>{submitting ? <><Spinner color="#fff" size={14} /> Creating...</> : <>Create Receipt (on hold) \u00B7 {counts.receive}</>}</button>
+      <button onClick={submitReceipt} disabled={submitting || counts.receive === 0} style={Object.assign({}, S.btn(), (submitting || counts.receive === 0) ? { opacity: 0.55, cursor: "not-allowed" } : {})}>{submitting ? <><Spinner color="#fff" size={14} /> Creating...</> : ("Create Receipt (on hold) \u00B7 " + counts.receive)}</button>
       <span style={{ fontSize: 12, color: "#6B7280" }}>Creates an unreleased receipt for the {counts.receive} Receive line{counts.receive === 1 ? "" : "s"}; you review and release in Acumatica.</span>
       {(counts.close + counts.cancel) > 0 && <span style={{ fontSize: 12, color: "#92400E", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 6, padding: "4px 8px" }}>{counts.close + counts.cancel} close/cancel line{(counts.close + counts.cancel) === 1 ? "" : "s"} are not submitted yet \u2014 that write is the next step. Handle those in Acumatica for now.</span>}
     </div>}
