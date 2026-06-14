@@ -6930,6 +6930,7 @@ function ReceivingTool(props) {
   var _loaded = useState(""), loadedPo = _loaded[0], setLoadedPo = _loaded[1];
   var _acu = useState(""), acuPo = _acu[0], setAcuPo = _acu[1];
   var _vendor = useState(""), vendor = _vendor[0], setVendor = _vendor[1];
+  var _pst = useState(""), poStatus = _pst[0], setPoStatus = _pst[1];
   var _lines = useState([]), lines = _lines[0], setLines = _lines[1];
   var _busy = useState(false), busy = _busy[0], setBusy = _busy[1];
   // per-row state. key = row index as string.
@@ -6992,7 +6993,7 @@ function ReceivingTool(props) {
         l[i] = (isGen && r.ndc) ? String(r.ndc).replace(/-/g, "") : "";
       });
       var orderNbrs = {}; rows.forEach(function (r) { if (r.orderNbr) orderNbrs[r.orderNbr] = 1; });
-      setLines(rows); setLoadedPo(po); setAcuPo(Object.keys(orderNbrs).join(", ")); setVendor(String(g(orders[0], ["VendorID", "Vendor"], "")));
+      setLines(rows); setLoadedPo(po); setAcuPo(Object.keys(orderNbrs).join(", ")); setVendor(String(g(orders[0], ["VendorID", "Vendor"], ""))); setPoStatus(String(g(orders[0], ["Status"], "")));
       setDisp(d); setQty(q); setLoc(l); setFinalFlag(f);
       toast("Loaded " + rows.length + " open line" + (rows.length === 1 ? "" : "s") + " for PO " + po);
     } catch (err) {
@@ -7080,7 +7081,7 @@ function ReceivingTool(props) {
         </div>
         <button onClick={loadPo} disabled={busy} style={Object.assign({}, S.btn(), busy ? { opacity: 0.7, cursor: "wait" } : {})}>{busy ? <><Spinner color="#fff" size={14} /> Loading...</> : "Load PO"}</button>
         <button onClick={probeSchema} disabled={busy} title="Dev: read PurchaseReceipt/PurchaseOrder field names from the instance" style={Object.assign({}, S.btn("ghost"), { fontSize: 12 })}>Probe fields</button>
-        {loadedPo ? <div style={{ fontSize: 13, color: "#6B7280", paddingBottom: 8 }}>Vendor ref <strong style={{ color: "#1F2937" }}>{loadedPo}</strong>{acuPo ? <>{" \u00B7 Acumatica PO "}<strong style={{ color: "#1F2937" }}>{acuPo}</strong></> : null}{vendor ? " \u00B7 " + vendor : ""}{" \u00B7 " + lines.length + " open line" + (lines.length === 1 ? "" : "s")}</div> : null}
+        {loadedPo ? <div style={{ fontSize: 13, color: "#6B7280", paddingBottom: 8 }}>Vendor ref <strong style={{ color: "#1F2937" }}>{loadedPo}</strong>{acuPo ? <>{" \u00B7 Acumatica PO "}<strong style={{ color: "#1F2937" }}>{acuPo}</strong></> : null}{poStatus ? (" \u00B7 " + poStatus) : ""}{vendor ? " \u00B7 " + vendor : ""}{" \u00B7 " + lines.length + " open line" + (lines.length === 1 ? "" : "s")}</div> : null}
       </div>
       {!ok && <div style={{ marginTop: 12, fontSize: 12, color: "#DC2626", display: "flex", alignItems: "center", gap: 6 }}><IconLock /> Log in to Acumatica to load a PO.</div>}
       {dbg && <div style={{ marginTop: 12, fontSize: 12, color: "#92400E", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 8, padding: "10px 12px", lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{dbg}</div>}
