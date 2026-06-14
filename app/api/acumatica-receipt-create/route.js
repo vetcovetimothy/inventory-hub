@@ -36,7 +36,7 @@ function parseErr(txt) {
 export async function POST(req) {
   let body;
   try { body = await req.json(); } catch { return json({ ok: false, stage: "parse-body", error: "Invalid JSON body" }); }
-  const { username, password, vendorID, vendorRef, orderNbr, orderType, lines, location } = body || {};
+  const { username, password, vendorID, vendorRef, orderNbr, orderType, lines, location, warehouse } = body || {};
   if (!username || !password) return json({ ok: false, stage: "validate-input", error: "username and password required" });
   if (!orderNbr) return json({ ok: false, stage: "validate-input", error: "orderNbr required" });
   if (!Array.isArray(lines) || !lines.length) return json({ ok: false, stage: "validate-input", error: "lines must be a non-empty array" });
@@ -77,9 +77,10 @@ export async function POST(req) {
       Type: { value: "Receipt" },
       Hold: { value: true },
       Branch: { value: BRANCH },
-      Location: { value: String(location || "MAIN") },
       Details: details
     };
+    if (warehouse) payload.Warehouse = { value: String(warehouse) };
+    if (location) payload.Location = { value: String(location) };
     if (vendorID) payload.VendorID = { value: String(vendorID) };
     if (vendorRef) payload.VendorRef = { value: String(vendorRef) };
 
