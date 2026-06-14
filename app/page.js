@@ -6915,255 +6915,6 @@ function ForecastingTool(props) {
 }
 
 
-/* ═══════ RECEIVING TOOL (Phase 1: read-only PO worksheet) ═══════ */
-function rcNum(v) {
-  var raw = String(v == null ? "" : v).replace(/[^0-9.\-]/g, "");
-  if (raw === "" || raw === "-" || raw === ".") return 0;
-  var n = parseFloat(raw); return isNaN(n) ? 0 : n;
-}
-
-function ReceivingTool(props) {
-  var toast = props.toast, cred = props.cred, ok = props.ok, lp = props.lp;
-  var S = makeStyles("#7C3AED");
-
-  var _po = useState(""), poInput = _po[0], setPoInput = _po[1];
-  var _loaded = useState(""), loadedPo = _loaded[0], setLoadedPo = _loaded[1];
-  var _acu = useState(""), acuPo = _acu[0], setAcuPo = _acu[1];
-  var _vendor = useState(""), vendor = _vendor[0], setVendor = _vendor[1];
-  var _pst = useState(""), poStatus = _pst[0], setPoStatus = _pst[1];
-  var _lines = useState([]), lines = _lines[0], setLines = _lines[1];
-  var _busy = useState(false), busy = _busy[0], setBusy = _busy[1];
-  // per-row state. key = row index as string.
-  var _disp = useState({}), disp = _disp[0], setDisp = _disp[1];      // "receive" | "skip" | "end"
-  var _qty = useState({}), qty = _qty[0], setQty = _qty[1];           // receive qty (string)
-  var _loc = useState({}), loc = _loc[0], setLoc = _loc[1];           // location (string)
-  var _final = useState({}), finalFlag = _final[0], setFinalFlag = _final[1]; // close-line toggle
-  var _dbg = useState(""), dbg = _dbg[0], setDbg = _dbg[1];
-  var _sub = useState(false), submitting = _sub[0], setSubmitting = _sub[1];
-
-  function dispOf(k) { return disp[k] || "receive"; }
-
-  async function loadPo() {
-    var po = poInput.trim();
-    if (!po) { toast("Enter a PO number", "error"); return; }
-    if (!ok) { lp(); return; }
-    setBusy(true); setDbg("");
-    try {
-      var resp = await fetch("/api/acumatica-po-fetch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: cred.username, password: cred.password, query: po }) });
-      var j = await resp.json();
-      if (!j.ok) {
-        setDbg("Lookup failed" + (j.stage ? (" at " + j.stage) : "") + (j.status ? (" (HTTP " + j.status + ")") : "") + ": " + (j.error || (j.body ? String(j.body).slice(0, 300) : "unknown")));
-        setBusy(false); return;
-      }
-      var orders = j.orders || [];
-      if (!orders.length) { setDbg("No purchase order found for \"" + po + "\" (searched vendor ref and order nbr)."); setBusy(false); return; }
-      function g(o, keys, dflt) { for (var i = 0; i < keys.length; i++) { if (o[keys[i]] != null && o[keys[i]] !== "") return o[keys[i]]; } return dflt; }
-      var rows = [];
-      orders.forEach(function (o) {
-        var on = g(o, ["OrderNbr"], "");
-        var otype = g(o, ["Type"], "Normal");
-        (o.Details || []).forEach(function (ln) {
-          // The receipt's PO selector matches on the order-type CODE (e.g. "RO"/"DP"),
-          // which the PO LINE's OrderType carries — not the header Type display value.
-          var lineOrderType = g(ln, ["OrderType"], otype);
-          var ordered = rcNum(g(ln, ["OrderQty", "Quantity"], 0));
-          var received = rcNum(g(ln, ["QtyOnReceipts", "ReceivedQty", "ReceiptedQty", "QtyReceived"], 0));
-          var openField = g(ln, ["OpenQty"], null);
-          var open = openField != null ? rcNum(openField) : Math.max(0, ordered - received);
-          var cancelled = g(ln, ["Cancelled"], false);
-          var completed = g(ln, ["Completed"], false);
-          var isCancelled = cancelled === true || String(cancelled).toLowerCase() === "true";
-          var isCompleted = completed === true || String(completed).toLowerCase() === "true";
-          if (open <= 0 || isCancelled || isCompleted) return; // open, actionable lines only
-          rows.push({
-            orderNbr: on,
-            orderType: lineOrderType,
-            lineNbr: g(ln, ["LineNbr", "POLineNbr", "LineNumber"], ""),
-            inventoryID: g(ln, ["InventoryID"], ""),
-            ndc: g(ln, ["AlternateID", "AlternateId"], ""),
-            description: g(ln, ["LineDescription", "TranDesc", "Description"], ""),
-            uom: g(ln, ["UOM", "OrderQtyUOM"], ""),
-            warehouse: g(ln, ["WarehouseID", "Warehouse"], ""),
-            ordered: ordered, received: received, open: open
-          });
-        });
-      });
-      if (!rows.length) { setDbg("PO found but no open lines (all received / closed / cancelled). Line fields seen: [" + (j.lineKeys || []).join(", ") + "]"); setBusy(false); return; }
-      var d = {}, q = {}, l = {}, f = {};
-      rows.forEach(function (r, i) {
-        d[i] = "receive"; q[i] = String(r.open); f[i] = false;
-        var isGen = String(r.inventoryID).toUpperCase().indexOf("GEN-") !== -1;
-        l[i] = (isGen && r.ndc) ? String(r.ndc).replace(/-/g, "") : "";
-      });
-      var orderNbrs = {}; rows.forEach(function (r) { if (r.orderNbr) orderNbrs[r.orderNbr] = 1; });
-      setLines(rows); setLoadedPo(po); setAcuPo(Object.keys(orderNbrs).join(", ")); setVendor(String(g(orders[0], ["VendorID", "Vendor"], ""))); setPoStatus(String(g(orders[0], ["Status"], "")));
-      setDisp(d); setQty(q); setLoc(l); setFinalFlag(f);
-      toast("Loaded " + rows.length + " open line" + (rows.length === 1 ? "" : "s") + " for PO " + po);
-    } catch (err) {
-      toast("Load failed: " + (err && err.message ? err.message : err), "error");
-    } finally { setBusy(false); }
-  }
-
-  function setRow(stateObj, setter, k, v) { var u = Object.assign({}, stateObj); u[k] = v; setter(u); }
-
-  async function probeSchema() {
-    if (!ok) { lp(); return; }
-    setBusy(true); setDbg("Probing field names...");
-    try {
-      var resp = await fetch("/api/acumatica-schema-probe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: cred.username, password: cred.password, entities: ["PurchaseReceipt", "PurchaseOrder"] }) });
-      var j = await resp.json();
-      if (!j.ok) { setDbg("Probe failed" + (j.stage ? (" at " + j.stage) : "") + ": " + (j.error || (j.body ? String(j.body).slice(0, 300) : "unknown"))); setBusy(false); return; }
-      var out = [];
-      Object.keys(j.results || {}).forEach(function (ent) {
-        var r = j.results[ent];
-        if (r.error) { out.push(ent + ": ERROR " + r.error + (r.body ? (" — " + r.body) : "")); return; }
-        if (r.note) { out.push(ent + ": " + r.note); return; }
-        out.push(ent + " — header: [" + (r.headerKeys || []).join(", ") + "]");
-        out.push(ent + " — lines: [" + (r.lineKeys || []).join(", ") + "]");
-        if (r.headerSample) out.push(ent + " — header sample: " + JSON.stringify(r.headerSample));
-        if (r.lineSample) out.push(ent + " — line sample: " + JSON.stringify(r.lineSample));
-      });
-      setDbg(out.join("\n"));
-    } catch (err) { setDbg("Probe failed: " + (err && err.message ? err.message : err)); } finally { setBusy(false); }
-  }
-  function toggleSkip(k) { setRow(disp, setDisp, k, dispOf(k) === "skip" ? "receive" : "skip"); }
-  function toggleEnd(k) { setRow(disp, setDisp, k, dispOf(k) === "end" ? "receive" : "end"); }
-
-  async function submitReceipt() {
-    if (!ok) { lp(); return; }
-    var recvIdx = lines.map(function (_, i) { return i; }).filter(function (i) { return dispOf(i) === "receive"; });
-    if (!recvIdx.length) { toast("No lines set to Receive", "error"); return; }
-    var groups = {};
-    recvIdx.forEach(function (i) {
-      var r = lines[i]; var qv = parseFloat(qty[i]);
-      if (isNaN(qv) || qv <= 0) return;
-      var on = r.orderNbr || loadedPo;
-      if (!groups[on]) groups[on] = { orderType: r.orderType || "Normal", warehouse: r.warehouse || "", lines: [] };
-      groups[on].lines.push({ poLineNbr: r.lineNbr, receiptQty: qv, location: (loc[i] || "").trim() });
-    });
-    var pos = Object.keys(groups).filter(function (on) { return groups[on].lines.length; });
-    if (!pos.length) { toast("Receive lines need a positive quantity", "error"); return; }
-    var totalLines = pos.reduce(function (n, on) { return n + groups[on].lines.length; }, 0);
-    if (!window.confirm("Create " + pos.length + " receipt" + (pos.length === 1 ? "" : "s") + " on hold for " + totalLines + " line" + (totalLines === 1 ? "" : "s") + "?\n\nNothing is released — you review and release in Acumatica.")) return;
-    setSubmitting(true); setDbg("");
-    try {
-      var msgs = [];
-      for (var gi = 0; gi < pos.length; gi++) {
-        var on = pos[gi];
-        var resp = await fetch("/api/acumatica-receipt-create", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: cred.username, password: cred.password, vendorID: vendor, vendorRef: loadedPo, orderNbr: on, orderType: groups[on].orderType, warehouse: groups[on].warehouse, lines: groups[on].lines }) });
-        var j = await resp.json();
-        if (j.ok) msgs.push("PO " + on + ": created receipt " + (j.receiptNbr || "(on hold)") + " \u2014 " + j.lineCount + " line(s), status " + (j.status || "?") + (j.hold ? ", on hold" : ""));
-        else msgs.push("PO " + on + ": FAILED (sent POOrderType=\"" + groups[on].orderType + "\") at " + (j.stage || "?") + (j.status ? (" HTTP " + j.status) : "") + " \u2014 " + (j.error || (j.body ? String(j.body).slice(0, 500) : "")));
-      }
-      setDbg(msgs.join("\n"));
-      var anyOk = msgs.some(function (m) { return m.indexOf(": created receipt") !== -1; });
-      toast(anyOk ? "Receipt(s) created on hold \u2014 review and release in Acumatica" : "Create failed \u2014 see details", anyOk ? "success" : "error");
-    } catch (err) { setDbg("Submit error: " + (err && err.message ? err.message : err)); } finally { setSubmitting(false); }
-  }
-
-  // summary counts
-  var counts = useMemo(function () {
-    var c = { receive: 0, skip: 0, close: 0, cancel: 0 };
-    lines.forEach(function (r, i) {
-      var dd = disp[i] || "receive";
-      if (dd === "receive") c.receive++;
-      else if (dd === "skip") c.skip++;
-      else if (dd === "end") { (r.received > 0 ? c.close++ : c.cancel++); }
-    });
-    return c;
-  }, [lines, disp]);
-
-  var thNum = Object.assign({}, S.th, { textAlign: "right" });
-
-  return <div>
-    <div style={S.card}>
-      <div style={{ display: "flex", alignItems: "flex-end", gap: 14, flexWrap: "wrap" }}>
-        <div>
-          <label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 6 }}>Purchase Order #</label>
-          <input value={poInput} onChange={function (e) { setPoInput(e.target.value); }} onKeyDown={function (e) { if (e.key === "Enter") loadPo(); }} placeholder="e.g. 16854209" style={Object.assign({}, S.inp, { width: 200 })} />
-        </div>
-        <button onClick={loadPo} disabled={busy} style={Object.assign({}, S.btn(), busy ? { opacity: 0.7, cursor: "wait" } : {})}>{busy ? <><Spinner color="#fff" size={14} /> Loading...</> : "Load PO"}</button>
-        <button onClick={probeSchema} disabled={busy} title="Dev: read PurchaseReceipt/PurchaseOrder field names from the instance" style={Object.assign({}, S.btn("ghost"), { fontSize: 12 })}>Probe fields</button>
-        {loadedPo ? <div style={{ fontSize: 13, color: "#6B7280", paddingBottom: 8 }}>Vendor ref <strong style={{ color: "#1F2937" }}>{loadedPo}</strong>{acuPo ? <>{" \u00B7 Acumatica PO "}<strong style={{ color: "#1F2937" }}>{acuPo}</strong></> : null}{poStatus ? (" \u00B7 " + poStatus) : ""}{vendor ? " \u00B7 " + vendor : ""}{" \u00B7 " + lines.length + " open line" + (lines.length === 1 ? "" : "s")}</div> : null}
-      </div>
-      {!ok && <div style={{ marginTop: 12, fontSize: 12, color: "#DC2626", display: "flex", alignItems: "center", gap: 6 }}><IconLock /> Log in to Acumatica to load a PO.</div>}
-      {dbg && <div style={{ marginTop: 12, fontSize: 12, color: "#92400E", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 8, padding: "10px 12px", lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{dbg}</div>}
-    </div>
-
-    {lines.length > 0 && <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
-      {[["Receive", counts.receive, "#7C3AED"], ["Skip", counts.skip, "#9CA3AF"], ["Close", counts.close, "#0EA5E9"], ["Cancel", counts.cancel, "#DC2626"]].map(function (s, i) {
-        return <div key={i} style={Object.assign({}, S.card, { flex: 1, padding: "14px 18px", marginBottom: 0, minWidth: 100 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>{s[0]}</div><div style={{ fontSize: 22, fontWeight: 700, color: s[2], marginTop: 4 }}>{s[1]}</div></div>;
-      })}
-    </div>}
-
-    {lines.length > 0 && <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
-      <button onClick={submitReceipt} disabled={submitting || counts.receive === 0} style={Object.assign({}, S.btn(), (submitting || counts.receive === 0) ? { opacity: 0.55, cursor: "not-allowed" } : {})}>{submitting ? <><Spinner color="#fff" size={14} /> Creating...</> : ("Create Receipt (on hold) \u00B7 " + counts.receive)}</button>
-      <span style={{ fontSize: 12, color: "#6B7280" }}>Creates an unreleased receipt for the {counts.receive} Receive line{counts.receive === 1 ? "" : "s"}; you review and release in Acumatica.</span>
-      {(counts.close + counts.cancel) > 0 && <span style={{ fontSize: 12, color: "#92400E", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 6, padding: "4px 8px" }}>{counts.close + counts.cancel} close/cancel line{(counts.close + counts.cancel) === 1 ? "" : "s"} are not submitted yet \u2014 that write is the next step. Handle those in Acumatica for now.</span>}
-    </div>}
-
-    {lines.length > 0 && <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden" })}>
-      <div style={{ overflow: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead><tr>
-            <th style={S.th}>Inventory ID</th>
-            <th style={S.th}>Description</th>
-            <th style={S.th}>Whse</th>
-            <th style={thNum}>Ordered</th>
-            <th style={thNum}>Received</th>
-            <th style={thNum}>Open</th>
-            <th style={thNum}>Receive Qty</th>
-            <th style={S.th}>Location</th>
-            <th style={Object.assign({}, S.th, { textAlign: "center" })}>Final</th>
-            <th style={Object.assign({}, S.th, { textAlign: "center" })}>Skip</th>
-            <th style={Object.assign({}, S.th, { textAlign: "center" })}>End line</th>
-          </tr></thead>
-          <tbody>
-            {lines.map(function (r, i) {
-              var k = i;
-              var ordered = r.ordered, received = r.received, open = r.open;
-              var dd = dispOf(k);
-              var endLabel = received > 0 ? "Close" : "Cancel";
-              var endColor = received > 0 ? "#0EA5E9" : "#DC2626";
-              var greyed = dd !== "receive";
-              var inpStyle = { width: 78, textAlign: "right", padding: "6px 8px", borderRadius: 8, fontSize: 13, fontVariantNumeric: "tabular-nums", border: "1px solid #E5E7EB", background: greyed ? "#F3F4F6" : "#F9FAFB", color: greyed ? "#9CA3AF" : "#1F2937", outline: "none" };
-              var locStyle = { width: 130, padding: "6px 8px", borderRadius: 8, fontSize: 13, border: "1px solid #E5E7EB", background: greyed ? "#F3F4F6" : "#F9FAFB", color: greyed ? "#9CA3AF" : "#1F2937", outline: "none" };
-              var rowBg = dd === "skip" ? "#FafafA" : (dd === "end" ? (received > 0 ? "#F0F9FF" : "#FEF2F2") : "transparent");
-              return <tr key={k} style={{ background: rowBg }}>
-                <td style={Object.assign({}, S.td, { fontWeight: 500, whiteSpace: "nowrap", textDecoration: dd === "skip" ? "line-through" : "none", color: dd === "skip" ? "#9CA3AF" : undefined })}>{r.inventoryID}</td>
-                <td style={Object.assign({}, S.td, { maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })}>{r.description}</td>
-                <td style={S.td}>{r.warehouse}</td>
-                <td style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums" })}>{ordered}</td>
-                <td style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums" })}>{received}</td>
-                <td style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums", fontWeight: 600 })}>{open}</td>
-                <td style={Object.assign({}, S.td, { textAlign: "right", padding: "6px 10px" })}>
-                  <input value={qty[k] != null ? qty[k] : ""} disabled={greyed} onChange={function (e) { setRow(qty, setQty, k, e.target.value); }} style={inpStyle} />
-                </td>
-                <td style={Object.assign({}, S.td, { padding: "6px 10px" })}>
-                  <input value={loc[k] != null ? loc[k] : ""} disabled={greyed} placeholder={greyed ? "" : "location"} onChange={function (e) { setRow(loc, setLoc, k, e.target.value); }} style={locStyle} />
-                </td>
-                <td style={Object.assign({}, S.td, { textAlign: "center" })}>
-                  <input type="checkbox" checked={!!finalFlag[k] && dd === "receive"} disabled={dd !== "receive"} onChange={function (e) { setRow(finalFlag, setFinalFlag, k, e.target.checked); }} style={{ cursor: dd === "receive" ? "pointer" : "default" }} />
-                </td>
-                <td style={Object.assign({}, S.td, { textAlign: "center" })}>
-                  <button onClick={function () { toggleSkip(k); }} title="Skip this line (leave open)" style={{ width: 28, height: 28, borderRadius: 8, border: "1px solid " + (dd === "skip" ? "#9CA3AF" : "#E5E7EB"), background: dd === "skip" ? "#9CA3AF" : "#fff", color: dd === "skip" ? "#fff" : "#9CA3AF", fontSize: 15, fontWeight: 700, cursor: "pointer", lineHeight: 1 }}>{"\u00D7"}</button>
-                </td>
-                <td style={Object.assign({}, S.td, { textAlign: "center", whiteSpace: "nowrap" })}>
-                  <button onClick={function () { toggleEnd(k); }} title={endLabel + " this line"} style={{ padding: "5px 12px", borderRadius: 8, border: "1px solid " + (dd === "end" ? endColor : "#E5E7EB"), background: dd === "end" ? endColor : "#fff", color: dd === "end" ? "#fff" : endColor, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>{dd === "end" ? "\u2713 " : ""}{endLabel}</button>
-                </td>
-              </tr>;
-            })}
-          </tbody>
-        </table>
-      </div>
-      <div style={{ padding: "12px 16px", fontSize: 12, color: "#9CA3AF", borderTop: "1px solid #F3F4F6" }}>Receive lines create an unreleased receipt you review and release in Acumatica. Closing/cancelling lines is the next step. The "End line" button reads <span style={{ color: "#0EA5E9", fontWeight: 600 }}>Close</span> when the line has been received before and <span style={{ color: "#DC2626", fontWeight: 600 }}>Cancel</span> when it never has.</div>
-    </div>}
-
-    {!lines.length && loadedPo === "" && ok && <div style={{ fontSize: 13, color: "#9CA3AF", padding: "8px 4px" }}>Enter a PO number and Load it to see its open lines.</div>}
-  </div>;
-}
-
-
 export default function Hub() {
   var _p = useState(function() {
     if (typeof window !== "undefined") {
@@ -7347,8 +7098,8 @@ export default function Hub() {
   );
 
   var isWH = page in WH;
-  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "backorder-resolver" ? "#14B8A6" : page === "po-import" ? "#06B6D4" : page === "cycle-count" ? "#14B8A6" : page === "fuze-tracker" ? "#F59E0B" : page === "ggm-tracker" ? "#8B5CF6" : page === "hills-pawtree" ? "#10B981" : page === "truckloader" ? "#D97706" : page === "oos-tracker" ? "#EF4444" : page === "vendor-settings" ? "#6366F1" : page === "forecasting" ? "#0EA5E9" : page === "receiving" ? "#7C3AED" : page === "how-to" ? "#6B7280" : "#3B82F6";
-  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "backorder-resolver" ? "Backorder Resolver" : page === "po-import" ? "Generic PO Translator" : page === "cycle-count" ? "Cycle Counting" : page === "fuze-tracker" ? "Fuze Tracker" : page === "ggm-tracker" ? "GGM Tracker" : page === "hills-pawtree" ? "Hills & Pawtree Tracker" : page === "truckloader" ? "Truckloader" : page === "oos-tracker" ? "OOS Tracker" : page === "vendor-settings" ? "Vendor Settings" : page === "forecasting" ? "Forecasting" : page === "receiving" ? "Receiving" : page === "how-to" ? "How-To Guide" : showLogin ? "Login" : "Vendor Settings";
+  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "backorder-resolver" ? "#14B8A6" : page === "po-import" ? "#06B6D4" : page === "cycle-count" ? "#14B8A6" : page === "fuze-tracker" ? "#F59E0B" : page === "ggm-tracker" ? "#8B5CF6" : page === "hills-pawtree" ? "#10B981" : page === "truckloader" ? "#D97706" : page === "oos-tracker" ? "#EF4444" : page === "vendor-settings" ? "#6366F1" : page === "forecasting" ? "#0EA5E9" : page === "how-to" ? "#6B7280" : "#3B82F6";
+  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "backorder-resolver" ? "Backorder Resolver" : page === "po-import" ? "Generic PO Translator" : page === "cycle-count" ? "Cycle Counting" : page === "fuze-tracker" ? "Fuze Tracker" : page === "ggm-tracker" ? "GGM Tracker" : page === "hills-pawtree" ? "Hills & Pawtree Tracker" : page === "truckloader" ? "Truckloader" : page === "oos-tracker" ? "OOS Tracker" : page === "vendor-settings" ? "Vendor Settings" : page === "forecasting" ? "Forecasting" : page === "how-to" ? "How-To Guide" : showLogin ? "Login" : "Vendor Settings";
 
   function SideLink(p) {
     var active = page === p.id && !showLogin;
@@ -7374,7 +7125,7 @@ export default function Hub() {
             { key: "hills", label: "Hills Tools", items: [{ id: "hills-pawtree", label: "Hills & Pawtree", color: "#10B981" }, { id: "truckloader", label: "Truckloader", color: "#D97706" }] },
             { key: "oos", label: "OOS", items: [{ id: "oos-tracker", label: "OOS Tracker", color: "#EF4444" }] },
             { key: "tracking", label: "Tracking", items: [{ id: "fuze-tracker", label: "Fuze Tracker", color: "#F59E0B" }, { id: "ggm-tracker", label: "GGM Tracker", color: "#8B5CF6" }] },
-            { key: "inventory", label: "Inventory Tools", items: [{ id: "short-dating", label: "Short-Dating", color: "#E879F9" }, { id: "backorder", label: "Backorders", color: "#F97316" }, { id: "backorder-resolver", label: "Backorder Resolver", color: "#14B8A6" }, { id: "receiving", label: "Receiving", color: "#7C3AED" }] },
+            { key: "inventory", label: "Inventory Tools", items: [{ id: "short-dating", label: "Short-Dating", color: "#E879F9" }, { id: "backorder", label: "Backorders", color: "#F97316" }, { id: "backorder-resolver", label: "Backorder Resolver", color: "#14B8A6" }] },
             { key: "forecasting", label: "Forecasting", items: [{ id: "forecasting", label: "Forecasting", color: "#0EA5E9" }] },
           ];
           return sections.map(function(sec, si) {
@@ -7437,7 +7188,6 @@ export default function Hub() {
           {!showLogin && page === "oos-tracker" && <OOSTracker toast={showToast} cred={cred} />}
           {!showLogin && page === "backorder-resolver" && <BackorderResolver toast={showToast} cred={cred} />}
           {!showLogin && page === "forecasting" && <ForecastingTool toast={showToast} cred={cred} ok={ok} lp={promptLogin} />}
-          {!showLogin && page === "receiving" && <ReceivingTool toast={showToast} cred={cred} ok={ok} lp={promptLogin} />}
           {!showLogin && (page === "vendor-settings" || page === "vendor-contacts" || page === "rules") && <VendorSettingsPage contacts={vendorContacts} updateContacts={updateVendorContacts} channels={vendorChannels} updateChannels={updateVendorChannels} shipRules={shipRules} updateShipRules={updateShipRules} toast={showToast} />}
           {!showLogin && page === "how-to" && <HowToGuide toast={showToast} />}
         </div>
