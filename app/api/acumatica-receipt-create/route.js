@@ -4,6 +4,7 @@
 // the tool never releases; the user reviews and releases in Acumatica.
 const BASE = process.env.ACUMATICA_BASE_URL || "https://vetcove.acumatica.com";
 const API_VERSION = "25.200.001";
+const BRANCH = "VETCOVE";
 
 function json(o) {
   return new Response(JSON.stringify(o), { status: 200, headers: { "Content-Type": "application/json" } });
@@ -75,6 +76,7 @@ export async function POST(req) {
     const payload = {
       Type: { value: "Receipt" },
       Hold: { value: true },
+      Branch: { value: BRANCH },
       Location: { value: String(location || "MAIN") },
       Details: details
     };
