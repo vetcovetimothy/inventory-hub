@@ -39,14 +39,15 @@ export async function POST(req) {
   // ── Create receipt (try/finally so we always log out) ──
   try {
     const details = lines.map((l) => {
-      const d = {
+      return {
         POOrderNbr: { value: String(orderNbr) },
         POOrderType: { value: String(orderType || "Normal") },
         POLineNbr: { value: Number(l.poLineNbr) },
         ReceiptQty: { value: Number(l.receiptQty) }
       };
-      if (l.location && String(l.location).trim()) d.Location = { value: String(l.location).trim() };
-      return d;
+      // Location intentionally omitted for now: we're confirming where the generic NDC
+      // belongs (warehouse Location bin vs LotSerialNbr). Acumatica defaults the
+      // receiving location when Location is not supplied.
     });
     const payload = { Type: { value: "Receipt" }, Hold: { value: true }, Details: details };
     if (vendorID) payload.VendorID = { value: String(vendorID) };
@@ -57,7 +58,18 @@ export async function POST(req) {
       body: JSON.stringify(payload)
     });
     const text = await r.text();
-    if (!r.ok) return json({ ok: false, stage: "create", status: r.status, body: text.slice(0, 1500), payloadSent: payload });
+    if (!r.ok) {
+      let detail = "";
+      try {
+        const ej = JSON.parse(text);
+        detail = ej.exceptionMessage || ej.message || "";
+        let inner = ej.innerException || ej.InnerException;
+        let depth = 0;
+        while (inner && depth < 6) { const m = inner.exceptionMessage || inner.message; if (m) detail += " | inner: " + m; inner = inner.innerException || inner.InnerException; depth++; }
+        if (ej.modelState) detail += " | fields: " + JSON.stringify(ej.modelState).slice(0, 600);
+      } catch {}
+      return json({ ok: false, stage: "create", status: r.status, error: String(detail).slice(0, 1000), body: text.slice(0, 1500), payloadSent: payload });
+    }
     let obj; try { obj = JSON.parse(text); } catch { obj = null; }
     const receiptNbr = obj && obj.ReceiptNbr ? obj.ReceiptNbr.value : null;
     const status = obj && obj.Status ? obj.Status.value : null;
