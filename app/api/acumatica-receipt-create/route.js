@@ -63,12 +63,14 @@ export async function POST(req) {
 
   // ── Create (try/finally so we always log out) ──
   try {
-    const details = lines.map((l) => ({
+    // Documented "Create a Purchase Receipt from a Purchase Order": reference the PO
+    // with only OrderNbr + Type, which pulls all of its open lines at full qty.
+    // (Per-line POLineNbr/ReceiptQty selectivity is rejected by the order selector;
+    // selective qty/skip will be layered on as a follow-up adjustment step.)
+    const details = [{
       POOrderNbr: { value: String(orderNbr) },
-      POOrderType: { value: String(orderType || "Normal") },
-      POLineNbr: { value: Number(l.poLineNbr) },
-      ReceiptQty: { value: Number(l.receiptQty) }
-    }));
+      POOrderType: { value: String(orderType || "Normal") }
+    }];
 
     const payload = {
       Type: { value: "Receipt" },
