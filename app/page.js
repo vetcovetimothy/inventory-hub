@@ -6343,7 +6343,7 @@ function VendorSettingsPage(props) {
 
 /* ═══════ MAIN HUB ═══════ */
 /* ═══════ FORECASTING TOOL (Phase 1: ingest + auto-format + export; Phase 2: methods) ═══════ */
-var FC_KNOWN_WAREHOUSES = ["TP-NY", "TP-OH", "TP-CA", "GGM-KY", "GGM-AZ"];
+var FC_KNOWN_WAREHOUSES = ["TP-NY", "TP-OH", "TP-CA", "GGM-KY", "GGM-AZ", "HILL-CP-CA", "HILL-CP-NJ", "HILL-CP-FL", "HILL-CP-TX"];
 
 // Full-text, quote-aware CSV parser (handles commas/newlines inside quoted
 // fields and "" escapes). Returns an array of row-arrays; row 0 = headers.
@@ -6373,7 +6373,7 @@ function fcToCSV(headers, rowArrs) {
   return out.join("\r\n");
 }
 function fcDetectWarehouse(fname) {
-  var m = String(fname || "").match(/([A-Za-z]{2,4}-[A-Za-z]{2,4})/);
+  var m = String(fname || "").match(/([A-Za-z]{2,4}-[A-Za-z]{2,4}(?:-[A-Za-z]{2,4})?)/);
   return m ? m[1].toUpperCase() : "";
 }
 function fcIdxExact(headers, name) {
@@ -6695,6 +6695,19 @@ function ForecastingTool(props) {
   function toggleTarget(idx) { var has = targetCols.indexOf(idx) !== -1; setTargetCols(has ? targetCols.filter(function (x) { return x !== idx; }) : targetCols.concat([idx]).sort(function (a, b) { return a - b; })); }
   function clearOverrides() { setRowMethod({}); setManualEdits({}); toast("Cleared per-row methods and manual edits"); }
 
+  function resetAll() {
+    var hasData = headers.length || rows.length || tpRows.length || formatted || tpFormatted || fileName || tpFileName;
+    if (hasData && !window.confirm("Reset the Forecasting tool? This clears the loaded file(s), results, and selections on both tabs.")) return;
+    setHeaders([]); setRows([]); setFileName(""); setDetectedWh(""); setWarehouse("");
+    setMode("non"); setFormatted(null); setStats(null); setBusy(false); setTab("forecast");
+    setGlobalMethod("none"); setGrowth("1.10"); setTargetCols([]); setRowMethod({}); setManualEdits({});
+    setTpHeaders([]); setTpRows([]); setTpFileName(""); setTpFinalCol(-1); setTpFormatted(null); setTpStats(null); setTpBusy(false);
+    idbDel("fc-input").catch(function () {}); idbDel("fc-result").catch(function () {}); idbDel("fc-forecast").catch(function () {});
+    idbDel("fc-tp-input").catch(function () {}); idbDel("fc-tp-result").catch(function () {});
+    sDel("fc-mode"); sDel("fc-wh");
+    toast("Forecasting reset");
+  }
+
   function exportForecast() {
     if (!formatted || !formatted.length) { toast("Run Auto-format first", "error"); return; }
     if (!targetCols.length) { toast("Pick at least one month to fill", "error"); return; }
@@ -6715,9 +6728,10 @@ function ForecastingTool(props) {
   var lastMonthLabel = anchors.lastHist >= 0 ? String(headers[anchors.lastHist]).replace(/^hist:\s*/i, "") : "Last mo";
 
   return <div>
-    <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 20 }}>
       <button onClick={function () { setTab("forecast"); }} style={S.pill(tab === "forecast", "#0EA5E9")}>Forecast</button>
       {mode !== "non" && <button onClick={function () { setTab("tp"); }} style={S.pill(tab === "tp", "#0EA5E9")}>TP Forecast</button>}
+      <button onClick={resetAll} title="Clear loaded files, results, and selections on both tabs" style={Object.assign({}, S.btn("ghost"), { marginLeft: "auto", fontSize: 12, color: "#DC2626", borderColor: "#FCA5A5" })}>Reset</button>
     </div>
 
     {tab === "tp" && <div>
@@ -7125,8 +7139,7 @@ export default function Hub() {
             { key: "hills", label: "Hills Tools", items: [{ id: "hills-pawtree", label: "Hills & Pawtree", color: "#10B981" }, { id: "truckloader", label: "Truckloader", color: "#D97706" }] },
             { key: "oos", label: "OOS", items: [{ id: "oos-tracker", label: "OOS Tracker", color: "#EF4444" }] },
             { key: "tracking", label: "Tracking", items: [{ id: "fuze-tracker", label: "Fuze Tracker", color: "#F59E0B" }, { id: "ggm-tracker", label: "GGM Tracker", color: "#8B5CF6" }] },
-            { key: "inventory", label: "Inventory Tools", items: [{ id: "short-dating", label: "Short-Dating", color: "#E879F9" }, { id: "backorder", label: "Backorders", color: "#F97316" }, { id: "backorder-resolver", label: "Backorder Resolver", color: "#14B8A6" }] },
-            { key: "forecasting", label: "Forecasting", items: [{ id: "forecasting", label: "Forecasting", color: "#0EA5E9" }] },
+            { key: "inventory", label: "Inventory Tools", items: [{ id: "forecasting", label: "Forecasting", color: "#0EA5E9" }, { id: "short-dating", label: "Short-Dating", color: "#E879F9" }, { id: "backorder", label: "Backorders", color: "#F97316" }, { id: "backorder-resolver", label: "Backorder Resolver", color: "#14B8A6" }] },
           ];
           return sections.map(function(sec, si) {
             var hasActive = sec.items.some(function(item) { return page === item.id && !showLogin; });
