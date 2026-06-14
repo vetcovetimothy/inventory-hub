@@ -6928,6 +6928,7 @@ function ReceivingTool(props) {
 
   var _po = useState(""), poInput = _po[0], setPoInput = _po[1];
   var _loaded = useState(""), loadedPo = _loaded[0], setLoadedPo = _loaded[1];
+  var _acu = useState(""), acuPo = _acu[0], setAcuPo = _acu[1];
   var _vendor = useState(""), vendor = _vendor[0], setVendor = _vendor[1];
   var _lines = useState([]), lines = _lines[0], setLines = _lines[1];
   var _busy = useState(false), busy = _busy[0], setBusy = _busy[1];
@@ -6950,23 +6951,26 @@ function ReceivingTool(props) {
       var json = await resp.json();
       if (!resp.ok) throw new Error(json.error || "request failed");
       var all = json.data || [];
-      var rows = all.filter(function (r) { return String(r.OrderNbr || "").trim() === po; });
+      // The working PO number is stored in the vendor reference, not the Acumatica
+      // auto-generated Order Nbr. Match either; prefer vendor ref.
+      var rows = all.filter(function (r) { return String(r.VendorRef || "").trim() === po || String(r.OrderNbr || "").trim() === po; });
       if (!rows.length) {
-        var distinct = {}; all.forEach(function (r) { var o = String(r.OrderNbr || "").trim(); if (o) distinct[o] = 1; });
-        var dl = Object.keys(distinct);
-        var sub = dl.filter(function (o) { return o.indexOf(po) >= 0; });
+        var dVR = {}, dON = {}; all.forEach(function (r) { var v = String(r.VendorRef || "").trim(); if (v) dVR[v] = 1; var o = String(r.OrderNbr || "").trim(); if (o) dON[o] = 1; });
+        var vrl = Object.keys(dVR), onl = Object.keys(dON);
+        var sub = vrl.concat(onl).filter(function (x) { return x.indexOf(po) >= 0; });
         var keys = all.length ? Object.keys(all[0]).join(", ") : "(none)";
-        setDbg("Fetched " + all.length + " open lines across " + dl.length + " POs; no exact match for \"" + po + "\". "
+        setDbg("Fetched " + all.length + " open lines (" + vrl.length + " vendor refs, " + onl.length + " Acumatica POs); no match for \"" + po + "\". "
           + (sub.length ? ("Contains-match: " + sub.slice(0, 8).join(", ") + ". ") : "")
-          + "First-row fields: [" + keys + "]. Sample POs: " + dl.slice(0, 12).join(", "));
+          + "First-row fields: [" + keys + "]. Sample vendor refs: " + vrl.slice(0, 12).join(", "));
         setBusy(false); return;
       }
+      var orderNbrs = {}; rows.forEach(function (r) { var o = String(r.OrderNbr || "").trim(); if (o) orderNbrs[o] = 1; });
       var d = {}, q = {}, l = {}, f = {};
       rows.forEach(function (r, i) {
         var open = Math.max(0, rcNum(r.OrderQty) - rcNum(r.QtyOnReceipts));
         d[i] = "receive"; q[i] = String(open); l[i] = ""; f[i] = false;
       });
-      setLines(rows); setLoadedPo(po); setVendor(String(rows[0].VendorName || ""));
+      setLines(rows); setLoadedPo(po); setAcuPo(Object.keys(orderNbrs).join(", ")); setVendor(String(rows[0].VendorName || ""));
       setDisp(d); setQty(q); setLoc(l); setFinalFlag(f);
       toast("Loaded " + rows.length + " open line" + (rows.length === 1 ? "" : "s") + " for PO " + po);
     } catch (err) {
@@ -7000,7 +7004,7 @@ function ReceivingTool(props) {
           <input value={poInput} onChange={function (e) { setPoInput(e.target.value); }} onKeyDown={function (e) { if (e.key === "Enter") loadPo(); }} placeholder="e.g. 16854209" style={Object.assign({}, S.inp, { width: 200 })} />
         </div>
         <button onClick={loadPo} disabled={busy} style={Object.assign({}, S.btn(), busy ? { opacity: 0.7, cursor: "wait" } : {})}>{busy ? <><Spinner color="#fff" size={14} /> Loading...</> : "Load PO"}</button>
-        {loadedPo ? <div style={{ fontSize: 13, color: "#6B7280", paddingBottom: 8 }}>PO <strong style={{ color: "#1F2937" }}>{loadedPo}</strong>{vendor ? " \u00B7 " + vendor : ""} \u00B7 {lines.length} open line{lines.length === 1 ? "" : "s"}</div> : null}
+        {loadedPo ? <div style={{ fontSize: 13, color: "#6B7280", paddingBottom: 8 }}>Vendor ref <strong style={{ color: "#1F2937" }}>{loadedPo}</strong>{acuPo ? <> \u00B7 Acumatica PO <strong style={{ color: "#1F2937" }}>{acuPo}</strong></> : null}{vendor ? " \u00B7 " + vendor : ""} \u00B7 {lines.length} open line{lines.length === 1 ? "" : "s"}</div> : null}
       </div>
       {!ok && <div style={{ marginTop: 12, fontSize: 12, color: "#DC2626", display: "flex", alignItems: "center", gap: 6 }}><IconLock /> Log in to Acumatica to load a PO.</div>}
       {dbg && <div style={{ marginTop: 12, fontSize: 12, color: "#92400E", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 8, padding: "10px 12px", lineHeight: 1.5 }}>{dbg}</div>}
