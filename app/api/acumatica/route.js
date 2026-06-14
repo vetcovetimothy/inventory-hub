@@ -292,6 +292,12 @@ export async function POST(request) {
       url += `?$top=100000`;
     }
 
+    // For open PO lines, fetch all (a specific PO's lines can be anywhere in the
+    // set; without a cap the GI truncates and recent/scattered POs go missing).
+    if (type === "open-po-lines") {
+      url += `?$top=100000`;
+    }
+
     // Call Acumatica
     const authHeader = "Basic " + Buffer.from(authUser + ":" + authPass).toString("base64");
     const resp = await fetch(url, {
