@@ -6963,6 +6963,9 @@ function ReceivingTool(props) {
         var on = g(o, ["OrderNbr"], "");
         var otype = g(o, ["Type"], "Normal");
         (o.Details || []).forEach(function (ln) {
+          // The receipt's PO selector matches on the order-type CODE (e.g. "RO"/"DP"),
+          // which the PO LINE's OrderType carries — not the header Type display value.
+          var lineOrderType = g(ln, ["OrderType"], otype);
           var ordered = rcNum(g(ln, ["OrderQty", "Quantity"], 0));
           var received = rcNum(g(ln, ["QtyOnReceipts", "ReceivedQty", "ReceiptedQty", "QtyReceived"], 0));
           var openField = g(ln, ["OpenQty"], null);
@@ -6974,7 +6977,7 @@ function ReceivingTool(props) {
           if (open <= 0 || isCancelled || isCompleted) return; // open, actionable lines only
           rows.push({
             orderNbr: on,
-            orderType: otype,
+            orderType: lineOrderType,
             lineNbr: g(ln, ["LineNbr", "POLineNbr", "LineNumber"], ""),
             inventoryID: g(ln, ["InventoryID"], ""),
             ndc: g(ln, ["AlternateID", "AlternateId"], ""),
