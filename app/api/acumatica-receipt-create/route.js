@@ -92,14 +92,16 @@ export async function POST(req) {
     if (!r.ok) {
       let verify = "";
       try {
-        const vr = await fetch(`${BASE}/entity/Default/${API_VERSION}/PurchaseOrder?$filter=OrderNbr eq '${String(orderNbr).replace(/'/g, "''")}'&$top=1`, { headers: { "Cookie": cookies, "Accept": "application/json" } });
+        const vr = await fetch(`${BASE}/entity/Default/${API_VERSION}/PurchaseOrder?$filter=OrderNbr eq '${String(orderNbr).replace(/'/g, "''")}'&$expand=Details&$top=1`, { headers: { "Cookie": cookies, "Accept": "application/json" } });
         const vt = await vr.text();
         if (vr.ok) {
           const va = JSON.parse(vt);
           const po = Array.isArray(va) && va.length ? va[0] : null;
           if (po) {
             const gv = (f) => (po[f] && typeof po[f] === "object" && "value" in po[f]) ? po[f].value : (po[f] != null ? po[f] : "");
-            verify = ` || PO CHECK (create session sees it): Type="${gv("Type")}" Status="${gv("Status")}" Hold=${gv("Hold")} VendorID="${gv("VendorID")}" Branch="${gv("Branch")}"`;
+            const d0 = Array.isArray(po.Details) && po.Details.length ? po.Details[0] : null;
+            const gvd = (f) => (d0 && d0[f] && typeof d0[f] === "object" && "value" in d0[f]) ? d0[f].value : (d0 && d0[f] != null ? d0[f] : "");
+            verify = ` || PO CHECK: header Type="${gv("Type")}" Status="${gv("Status")}" Hold=${gv("Hold")} VendorID="${gv("VendorID")}" Branch="${gv("Branch")}" | line OrderType="${gvd("OrderType")}" WarehouseID="${gvd("WarehouseID")}" LineNbr=${gvd("LineNbr")}`;
           } else {
             verify = ` || PO CHECK: create session does NOT see OrderNbr ${orderNbr} (company/tenant mismatch?)`;
           }
