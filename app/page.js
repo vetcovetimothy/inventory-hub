@@ -7038,7 +7038,7 @@ function ReceivingTool(props) {
       var r = lines[i]; var qv = parseFloat(qty[i]);
       if (isNaN(qv) || qv <= 0) return;
       var on = r.orderNbr || loadedPo;
-      if (!groups[on]) groups[on] = { orderType: r.orderType || "Normal", lines: [] };
+      if (!groups[on]) groups[on] = { orderType: r.orderType || "Normal", warehouse: r.warehouse || "", lines: [] };
       groups[on].lines.push({ poLineNbr: r.lineNbr, receiptQty: qv, location: (loc[i] || "").trim() });
     });
     var pos = Object.keys(groups).filter(function (on) { return groups[on].lines.length; });
@@ -7050,7 +7050,7 @@ function ReceivingTool(props) {
       var msgs = [];
       for (var gi = 0; gi < pos.length; gi++) {
         var on = pos[gi];
-        var resp = await fetch("/api/acumatica-receipt-create", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: cred.username, password: cred.password, vendorID: vendor, vendorRef: loadedPo, orderNbr: on, orderType: groups[on].orderType, lines: groups[on].lines }) });
+        var resp = await fetch("/api/acumatica-receipt-create", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: cred.username, password: cred.password, vendorID: vendor, vendorRef: loadedPo, orderNbr: on, orderType: groups[on].orderType, warehouse: groups[on].warehouse, lines: groups[on].lines }) });
         var j = await resp.json();
         if (j.ok) msgs.push("PO " + on + ": created receipt " + (j.receiptNbr || "(on hold)") + " \u2014 " + j.lineCount + " line(s), status " + (j.status || "?") + (j.hold ? ", on hold" : ""));
         else msgs.push("PO " + on + ": FAILED (sent POOrderType=\"" + groups[on].orderType + "\") at " + (j.stage || "?") + (j.status ? (" HTTP " + j.status) : "") + " \u2014 " + (j.error || (j.body ? String(j.body).slice(0, 500) : "")));
