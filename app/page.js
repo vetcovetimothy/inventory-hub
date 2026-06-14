@@ -6938,6 +6938,7 @@ function ReceivingTool(props) {
   var _loc = useState({}), loc = _loc[0], setLoc = _loc[1];           // location (string)
   var _final = useState({}), finalFlag = _final[0], setFinalFlag = _final[1]; // close-line toggle
   var _dbg = useState(""), dbg = _dbg[0], setDbg = _dbg[1];
+  var _sub = useState(false), submitting = _sub[0], setSubmitting = _sub[1];
 
   function dispOf(k) { return disp[k] || "receive"; }
 
@@ -6971,6 +6972,7 @@ function ReceivingTool(props) {
           if (open <= 0 || isCancelled || isCompleted) return; // open, actionable lines only
           rows.push({
             orderNbr: on,
+            orderType: g(ln, ["OrderType"], "Normal"),
             lineNbr: g(ln, ["LineNbr", "POLineNbr", "LineNumber"], ""),
             inventoryID: g(ln, ["InventoryID"], ""),
             ndc: g(ln, ["AlternateID", "AlternateId"], ""),
@@ -7020,6 +7022,38 @@ function ReceivingTool(props) {
   function toggleSkip(k) { setRow(disp, setDisp, k, dispOf(k) === "skip" ? "receive" : "skip"); }
   function toggleEnd(k) { setRow(disp, setDisp, k, dispOf(k) === "end" ? "receive" : "end"); }
 
+  async function submitReceipt() {
+    if (!ok) { lp(); return; }
+    var recvIdx = lines.map(function (_, i) { return i; }).filter(function (i) { return dispOf(i) === "receive"; });
+    if (!recvIdx.length) { toast("No lines set to Receive", "error"); return; }
+    var groups = {};
+    recvIdx.forEach(function (i) {
+      var r = lines[i]; var qv = parseFloat(qty[i]);
+      if (isNaN(qv) || qv <= 0) return;
+      var on = r.orderNbr || loadedPo;
+      if (!groups[on]) groups[on] = { orderType: r.orderType || "Normal", lines: [] };
+      groups[on].lines.push({ poLineNbr: r.lineNbr, receiptQty: qv, location: (loc[i] || "").trim() });
+    });
+    var pos = Object.keys(groups).filter(function (on) { return groups[on].lines.length; });
+    if (!pos.length) { toast("Receive lines need a positive quantity", "error"); return; }
+    var totalLines = pos.reduce(function (n, on) { return n + groups[on].lines.length; }, 0);
+    if (!window.confirm("Create " + pos.length + " receipt" + (pos.length === 1 ? "" : "s") + " on hold for " + totalLines + " line" + (totalLines === 1 ? "" : "s") + "?\n\nNothing is released — you review and release in Acumatica.")) return;
+    setSubmitting(true); setDbg("");
+    try {
+      var msgs = [];
+      for (var gi = 0; gi < pos.length; gi++) {
+        var on = pos[gi];
+        var resp = await fetch("/api/acumatica-receipt-create", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: cred.username, password: cred.password, vendorID: vendor, orderNbr: on, orderType: groups[on].orderType, lines: groups[on].lines }) });
+        var j = await resp.json();
+        if (j.ok) msgs.push("PO " + on + ": created receipt " + (j.receiptNbr || "(on hold)") + " \u2014 " + j.lineCount + " line(s), status " + (j.status || "?") + (j.hold ? ", on hold" : ""));
+        else msgs.push("PO " + on + ": FAILED at " + (j.stage || "?") + (j.status ? (" HTTP " + j.status) : "") + " \u2014 " + (j.body ? String(j.body).slice(0, 400) : (j.error || "")));
+      }
+      setDbg(msgs.join("\n"));
+      var anyOk = msgs.some(function (m) { return m.indexOf(": created receipt") !== -1; });
+      toast(anyOk ? "Receipt(s) created on hold \u2014 review and release in Acumatica" : "Create failed \u2014 see details", anyOk ? "success" : "error");
+    } catch (err) { setDbg("Submit error: " + (err && err.message ? err.message : err)); } finally { setSubmitting(false); }
+  }
+
   // summary counts
   var counts = useMemo(function () {
     var c = { receive: 0, skip: 0, close: 0, cancel: 0 };
@@ -7053,6 +7087,12 @@ function ReceivingTool(props) {
       {[["Receive", counts.receive, "#7C3AED"], ["Skip", counts.skip, "#9CA3AF"], ["Close", counts.close, "#0EA5E9"], ["Cancel", counts.cancel, "#DC2626"]].map(function (s, i) {
         return <div key={i} style={Object.assign({}, S.card, { flex: 1, padding: "14px 18px", marginBottom: 0, minWidth: 100 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>{s[0]}</div><div style={{ fontSize: 22, fontWeight: 700, color: s[2], marginTop: 4 }}>{s[1]}</div></div>;
       })}
+    </div>}
+
+    {lines.length > 0 && <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
+      <button onClick={submitReceipt} disabled={submitting || counts.receive === 0} style={Object.assign({}, S.btn(), (submitting || counts.receive === 0) ? { opacity: 0.55, cursor: "not-allowed" } : {})}>{submitting ? <><Spinner color="#fff" size={14} /> Creating...</> : <>Create Receipt (on hold) \u00B7 {counts.receive}</>}</button>
+      <span style={{ fontSize: 12, color: "#6B7280" }}>Creates an unreleased receipt for the {counts.receive} Receive line{counts.receive === 1 ? "" : "s"}; you review and release in Acumatica.</span>
+      {(counts.close + counts.cancel) > 0 && <span style={{ fontSize: 12, color: "#92400E", background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 6, padding: "4px 8px" }}>{counts.close + counts.cancel} close/cancel line{(counts.close + counts.cancel) === 1 ? "" : "s"} are not submitted yet \u2014 that write is the next step. Handle those in Acumatica for now.</span>}
     </div>}
 
     {lines.length > 0 && <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden" })}>
@@ -7109,7 +7149,7 @@ function ReceivingTool(props) {
           </tbody>
         </table>
       </div>
-      <div style={{ padding: "12px 16px", fontSize: 12, color: "#9CA3AF", borderTop: "1px solid #F3F4F6" }}>Read-only worksheet. Submitting to Acumatica (creating the receipt, closing/cancelling lines) comes in Phase 2. The "End line" button reads <span style={{ color: "#0EA5E9", fontWeight: 600 }}>Close</span> when the line has been received before and <span style={{ color: "#DC2626", fontWeight: 600 }}>Cancel</span> when it never has.</div>
+      <div style={{ padding: "12px 16px", fontSize: 12, color: "#9CA3AF", borderTop: "1px solid #F3F4F6" }}>Receive lines create an unreleased receipt you review and release in Acumatica. Closing/cancelling lines is the next step. The "End line" button reads <span style={{ color: "#0EA5E9", fontWeight: 600 }}>Close</span> when the line has been received before and <span style={{ color: "#DC2626", fontWeight: 600 }}>Cancel</span> when it never has.</div>
     </div>}
 
     {!lines.length && loadedPo === "" && ok && <div style={{ fontSize: 13, color: "#9CA3AF", padding: "8px 4px" }}>Enter a PO number and Load it to see its open lines.</div>}
