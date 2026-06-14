@@ -89,7 +89,24 @@ export async function POST(req) {
       body: JSON.stringify(payload)
     });
     const text = await r.text();
-    if (!r.ok) return json({ ok: false, stage: "create", status: r.status, error: parseErr(text), body: text.slice(0, 1500), payloadSent: payload });
+    if (!r.ok) {
+      let verify = "";
+      try {
+        const vr = await fetch(`${BASE}/entity/Default/${API_VERSION}/PurchaseOrder?$filter=OrderNbr eq '${String(orderNbr).replace(/'/g, "''")}'&$top=1`, { headers: { "Cookie": cookies, "Accept": "application/json" } });
+        const vt = await vr.text();
+        if (vr.ok) {
+          const va = JSON.parse(vt);
+          const po = Array.isArray(va) && va.length ? va[0] : null;
+          if (po) {
+            const gv = (f) => (po[f] && typeof po[f] === "object" && "value" in po[f]) ? po[f].value : (po[f] != null ? po[f] : "");
+            verify = ` || PO CHECK (create session sees it): Type="${gv("Type")}" Status="${gv("Status")}" Hold=${gv("Hold")} VendorID="${gv("VendorID")}" Branch="${gv("Branch")}"`;
+          } else {
+            verify = ` || PO CHECK: create session does NOT see OrderNbr ${orderNbr} (company/tenant mismatch?)`;
+          }
+        } else { verify = ` || PO CHECK failed HTTP ${vr.status}`; }
+      } catch (e) { verify = " || PO CHECK error: " + String(e); }
+      return json({ ok: false, stage: "create", status: r.status, error: parseErr(text) + verify, body: text.slice(0, 1200), payloadSent: payload });
+    }
     let o; try { o = JSON.parse(text); } catch { o = null; }
     const receiptNbr = o && o.ReceiptNbr ? o.ReceiptNbr.value : null;
     return json({ ok: true, receiptNbr: receiptNbr, status: o && o.Status ? o.Status.value : null, hold: o && o.Hold ? o.Hold.value : null, lineCount: details.length });
