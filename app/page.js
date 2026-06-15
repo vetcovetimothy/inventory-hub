@@ -6688,10 +6688,19 @@ function ForecastingTool(props) {
   function effectiveForMonth(row, num) {
     var man = manualEdits[rowKey(row) + "@" + num];
     if (man != null && String(man).trim() !== "") { var mv = parseFloat(man); return isNaN(mv) ? null : mv; }
-    var v = computedForMonth(row, num);
-    if (v == null) return null;
-    if (dropBelowFinal) { var fi = anchors.finals[num]; if (fi != null) { var fin = fcNum(row, fi); if (fin != null && v < fin) return null; } }
-    return v;
+    return computedForMonth(row, num);
+  }
+  function rowBelowFinal(row) {
+    if (!dropBelowFinal) return false;
+    for (var i = 0; i < targetCols.length; i++) {
+      var num = uploadNum(targetCols[i]); if (num == null) continue;
+      var man = manualEdits[rowKey(row) + "@" + num];
+      if (man != null && String(man).trim() !== "") continue;
+      var v = computedForMonth(row, num); if (v == null) continue;
+      var fi = anchors.finals[num]; if (fi == null) continue;
+      var fin = fcNum(row, fi); if (fin != null && v < fin) return true;
+    }
+    return false;
   }
   function uploadNum(colIdx) { for (var i = 0; i < anchors.uploads.length; i++) { if (anchors.uploads[i].idx === colIdx) return anchors.uploads[i].num; } return null; }
   function setManualM(k, num, v) { var key = k + "@" + num; var u = Object.assign({}, manualEdits); if (v == null || String(v).trim() === "") delete u[key]; else u[key] = v; setManualEdits(u); }
@@ -6731,7 +6740,7 @@ function ForecastingTool(props) {
   function exportForecast() {
     if (!formatted || !formatted.length) { toast("Run Auto-format first", "error"); return; }
     if (!targetCols.length) { toast("Pick at least one month to fill", "error"); return; }
-    var out = formatted.map(function (row) {
+    var out = formatted.filter(function (row) { return !rowBelowFinal(row); }).map(function (row) {
       var r = row.slice();
       targetCols.forEach(function (c) {
         var num = uploadNum(c); if (num == null) return;
@@ -6745,8 +6754,13 @@ function ForecastingTool(props) {
 
   var filledCount = useMemo(function () {
     if (!formatted) return 0;
-    return formatted.reduce(function (n, row) { return effectiveForMonth(row, anchorNum) != null ? n + 1 : n; }, 0);
-  }, [formatted, globalMethod, growth, rowMethod, manualEdits, anchorNum]);
+    return formatted.reduce(function (n, row) { return (!rowBelowFinal(row) && effectiveForMonth(row, anchorNum) != null) ? n + 1 : n; }, 0);
+  }, [formatted, globalMethod, growth, rowMethod, manualEdits, anchorNum, dropBelowFinal, targetCols]);
+
+  var droppedCount = useMemo(function () {
+    if (!formatted) return 0;
+    return formatted.reduce(function (n, row) { return rowBelowFinal(row) ? n + 1 : n; }, 0);
+  }, [formatted, globalMethod, growth, rowMethod, manualEdits, dropBelowFinal, targetCols]);
 
   var lastMonthLabel = anchors.lastHist >= 0 ? String(headers[anchors.lastHist]).replace(/^hist:\s*/i, "") : "Last mo";
 
@@ -6886,9 +6900,9 @@ function ForecastingTool(props) {
             <div style={{ fontSize: 11, color: "#9CA3AF", position: "absolute", top: "100%", left: 0, marginTop: 4, whiteSpace: "nowrap" }}>1.10 = +10% (method B only)</div>
           </div>
           <div style={{ alignSelf: "flex-end" }}>
-            <button onClick={function () { setDropBelowFinal(!dropBelowFinal); }} title="When on, any computed value below that month's Netstock Final is dropped (left blank, not exported). Typed overrides are not affected." style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 8, border: "1px solid " + (dropBelowFinal ? "#0EA5E9" : "#E5E7EB"), background: dropBelowFinal ? "#F0F9FF" : "#fff", color: dropBelowFinal ? "#0369A1" : "#6B7280", fontSize: 12, fontWeight: 500, cursor: "pointer" }}>
+            <button onClick={function () { setDropBelowFinal(!dropBelowFinal); }} title="When on, any item whose computed value falls below that month's Netstock Final is removed entirely from the export (the whole row). Typed overrides are exempt." style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 8, border: "1px solid " + (dropBelowFinal ? "#0EA5E9" : "#E5E7EB"), background: dropBelowFinal ? "#F0F9FF" : "#fff", color: dropBelowFinal ? "#0369A1" : "#6B7280", fontSize: 12, fontWeight: 500, cursor: "pointer" }}>
               <span style={{ width: 30, height: 16, borderRadius: 9, background: dropBelowFinal ? "#0EA5E9" : "#D1D5DB", position: "relative", transition: "background 0.15s", flexShrink: 0 }}><span style={{ position: "absolute", top: 2, left: dropBelowFinal ? 16 : 2, width: 12, height: 12, borderRadius: "50%", background: "#fff", transition: "left 0.15s" }} /></span>
-              Drop below Netstock Final
+              Drop items below Netstock Final
             </button>
           </div>
           <div style={{ flex: 1 }} />
@@ -6925,8 +6939,9 @@ function ForecastingTool(props) {
             <tbody>
               {formatted.map(function (row, ri) {
                 var k = rowKey(row);
-                return <tr key={ri}>
-                  <td style={Object.assign({}, S.td, { fontWeight: 500, whiteSpace: "nowrap" })}>{row[productCol]}</td>
+                var dropRow = rowBelowFinal(row);
+                return <tr key={ri} style={dropRow ? { opacity: 0.45 } : null} title={dropRow ? "Below Netstock Final \u2014 excluded from export" : ""}>
+                  <td style={Object.assign({}, S.td, { fontWeight: 500, whiteSpace: "nowrap", textDecoration: dropRow ? "line-through" : "none" })}>{row[productCol]}</td>
                   <td style={Object.assign({}, S.td, { maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })}>{anchors && fcIdxExact(headers, "Description") >= 0 ? row[fcIdxExact(headers, "Description")] : ""}</td>
                   <td style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums" })}>{row[anchors.mtd]}</td>
                   <td style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums" })}>{anchors.lastHist >= 0 ? row[anchors.lastHist] : ""}</td>
@@ -6941,11 +6956,10 @@ function ForecastingTool(props) {
                     var num = uploadNum(c);
                     var man = manualEdits[k + "@" + num];
                     var isManual = man != null && String(man).trim() !== "";
-                    var eff = effectiveForMonth(row, num);
-                    var dropped = !isManual && dropBelowFinal && computedForMonth(row, num) != null && eff == null;
-                    var cellVal = eff == null ? "" : eff;
+                    var comp = computedForMonth(row, num);
+                    var cellVal = isManual ? man : (comp == null ? "" : comp);
                     return <td key={c} style={Object.assign({}, S.td, { textAlign: "right", padding: "6px 10px" })}>
-                      <input value={cellVal} onChange={function (e) { setManualM(k, num, e.target.value); }} placeholder={dropped ? "\u2014" : (eff == null ? "-" : "")} title={dropped ? "Below Netstock Final \u2014 dropped" : ""} style={{ width: 84, textAlign: "right", padding: "6px 8px", borderRadius: 8, fontSize: 13, fontVariantNumeric: "tabular-nums", border: "1px solid " + (isManual ? "#0EA5E9" : "#E5E7EB"), background: isManual ? "#F0F9FF" : "#F9FAFB", color: "#1F2937", outline: "none" }} />
+                      <input value={cellVal} onChange={function (e) { setManualM(k, num, e.target.value); }} placeholder={comp == null ? "-" : ""} style={{ width: 84, textAlign: "right", padding: "6px 8px", borderRadius: 8, fontSize: 13, fontVariantNumeric: "tabular-nums", border: "1px solid " + (isManual ? "#0EA5E9" : "#E5E7EB"), background: isManual ? "#F0F9FF" : "#F9FAFB", color: "#1F2937", outline: "none" }} />
                     </td>;
                   })}
                 </tr>;
@@ -6953,7 +6967,7 @@ function ForecastingTool(props) {
             </tbody>
           </table>
         </div>
-        <div style={{ padding: "10px 16px", fontSize: 12, color: "#9CA3AF", borderTop: "1px solid #F3F4F6" }}>{formatted.length} items - {filledCount} forecasted across {targetCols.length} month{targetCols.length === 1 ? "" : "s"}. Each cell exports into its own month column; blue cells are manual overrides.</div>
+        <div style={{ padding: "10px 16px", fontSize: 12, color: "#9CA3AF", borderTop: "1px solid #F3F4F6" }}>{formatted.length} items - {filledCount} forecasted across {targetCols.length} month{targetCols.length === 1 ? "" : "s"}{dropBelowFinal && droppedCount > 0 ? " \u00B7 " + droppedCount + " row" + (droppedCount === 1 ? "" : "s") + " below Netstock Final excluded" : ""}. Each cell exports into its own month column; blue cells are manual overrides.</div>
       </div>}
 
       {headers.length > 0 && (!formatted || !formatted.length) && stats === null && <div style={{ fontSize: 13, color: "#9CA3AF", padding: "8px 4px" }}>Pick a warehouse and mode, then Auto-format to filter the list down to the items worth forecasting.</div>}
