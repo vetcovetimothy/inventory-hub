@@ -6670,8 +6670,8 @@ function ForecastingTool(props) {
   // ── method engine ──
   var growthMult = (function () { var g = parseFloat(growth); return isNaN(g) ? 1 : g; })();
   function methodValueForMonth(row, m, num) {
-    if (m === "A") { if (num !== 1) return null; var mtd = fcNum(row, anchors.mtd); if (mtd == null) return null; return (mtd / denom) * daysInMonth; }
-    if (m === "B") { var lm = fcNum(row, anchors.lastHist); if (lm == null) return null; return lm * Math.pow(growthMult, num); }
+    if (m === "A") { if (num !== anchorNum) return null; var mtd = fcNum(row, anchors.mtd); if (mtd == null) return null; return (mtd / denom) * daysInMonth; }
+    if (m === "B") { var lm = fcNum(row, anchors.lastHist); if (lm == null) return null; var step = num - anchorNum + 1; if (step < 1) step = 1; return lm * Math.pow(growthMult, step); }
     if (m === "C") { var fi = anchors.finals[num]; return fi == null ? null : fcNum(row, fi); }
     if (m === "E") { var vals = anchors.trail3.map(function (i) { return fcNum(row, i); }).filter(function (v) { return v != null; }); if (!vals.length) return null; return vals.reduce(function (a, b) { return a + b; }, 0) / vals.length; }
     return null;
@@ -6683,23 +6683,29 @@ function ForecastingTool(props) {
     var v = methodValueForMonth(row, m, num); return v == null ? null : Math.round(v);
   }
   function effectiveForMonth(row, num) {
-    var k = rowKey(row);
-    var man = manualEdits[k];
+    var man = manualEdits[rowKey(row) + "@" + num];
     if (man != null && String(man).trim() !== "") { var mv = parseFloat(man); return isNaN(mv) ? null : mv; }
     return computedForMonth(row, num);
   }
   function uploadNum(colIdx) { for (var i = 0; i < anchors.uploads.length; i++) { if (anchors.uploads[i].idx === colIdx) return anchors.uploads[i].num; } return null; }
-  function setManual(k, v) { var u = Object.assign({}, manualEdits); if (v == null || String(v).trim() === "") delete u[k]; else u[k] = v; setManualEdits(u); }
+  function setManualM(k, num, v) { var key = k + "@" + num; var u = Object.assign({}, manualEdits); if (v == null || String(v).trim() === "") delete u[key]; else u[key] = v; setManualEdits(u); }
   function setRowM(k, v) { var u = Object.assign({}, rowMethod); if (!v) delete u[k]; else u[k] = v; setRowMethod(u); }
-  function toggleTarget(idx) {
-    if (globalMethod === "A") { var fa = anchors.uploads.length ? anchors.uploads[0].idx : null; setTargetCols(fa != null ? [fa] : []); return; }
-    var has = targetCols.indexOf(idx) !== -1; setTargetCols(has ? targetCols.filter(function (x) { return x !== idx; }) : targetCols.concat([idx]).sort(function (a, b) { return a - b; }));
+  var anchorIdx = (function () {
+    var monShort = now.toLocaleString("en-US", { month: "short" });
+    var yr = String(now.getFullYear());
+    for (var i = 0; i < anchors.uploads.length; i++) { var l = anchors.uploads[i].label; if (l.indexOf(monShort) !== -1 && l.indexOf(yr) !== -1) return anchors.uploads[i].idx; }
+    return anchors.uploads.length ? anchors.uploads[0].idx : null;
+  })();
+  var anchorNum = (function () { for (var i = 0; i < anchors.uploads.length; i++) { if (anchors.uploads[i].idx === anchorIdx) return anchors.uploads[i].num; } return 1; })();
+  var maxSelectedNum = (function () { var ns = targetCols.map(uploadNum).filter(function (n) { return n != null; }); return ns.length ? Math.max.apply(null, ns) : (anchorNum - 1); })();
+  function selectThrough(num) {
+    if (globalMethod !== "B") { setTargetCols(anchorIdx != null ? [anchorIdx] : []); return; }
+    var idxs = anchors.uploads.filter(function (u) { return u.num >= anchorNum && u.num <= num; }).map(function (u) { return u.idx; }).sort(function (a, b) { return a - b; });
+    setTargetCols(idxs.length ? idxs : (anchorIdx != null ? [anchorIdx] : []));
   }
-  var firstTargetNum = (function () { var nums = targetCols.map(uploadNum).filter(function (n) { return n != null; }); return nums.length ? Math.min.apply(null, nums) : 1; })();
-  var firstTargetLabel = (function () { for (var i = 0; i < anchors.uploads.length; i++) { if (anchors.uploads[i].num === firstTargetNum) return anchors.uploads[i].label; } return ""; })();
   function changeGlobalMethod(v) {
     setGlobalMethod(v);
-    if (v === "A") { var first = anchors.uploads.length ? anchors.uploads[0].idx : null; setTargetCols(first != null ? [first] : []); }
+    if (v !== "B") setTargetCols(anchorIdx != null ? [anchorIdx] : []);
   }
   function clearOverrides() { setRowMethod({}); setManualEdits({}); toast("Cleared per-row methods and manual edits"); }
 
@@ -6733,8 +6739,8 @@ function ForecastingTool(props) {
 
   var filledCount = useMemo(function () {
     if (!formatted) return 0;
-    return formatted.reduce(function (n, row) { return effectiveForMonth(row, firstTargetNum) != null ? n + 1 : n; }, 0);
-  }, [formatted, globalMethod, growth, rowMethod, manualEdits, firstTargetNum]);
+    return formatted.reduce(function (n, row) { return effectiveForMonth(row, anchorNum) != null ? n + 1 : n; }, 0);
+  }, [formatted, globalMethod, growth, rowMethod, manualEdits, anchorNum]);
 
   var lastMonthLabel = anchors.lastHist >= 0 ? String(headers[anchors.lastHist]).replace(/^hist:\s*/i, "") : "Last mo";
 
@@ -6868,10 +6874,10 @@ function ForecastingTool(props) {
               {FC_METHODS.map(function (m) { return <option key={m.id} value={m.id}>{m.label}</option>; })}
             </select>
           </div>
-          <div style={{ position: "relative" }}>
+          <div style={{ position: "relative", opacity: globalMethod === "B" ? 1 : 0.4 }}>
             <label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 6 }}>Growth (multiplier)</label>
-            <input value={growth} onChange={function (e) { setGrowth(e.target.value); }} style={Object.assign({}, S.inp, { width: 90 })} />
-            <div style={{ fontSize: 11, color: "#9CA3AF", position: "absolute", top: "100%", left: 0, marginTop: 4, whiteSpace: "nowrap" }}>1.10 = +10% (method B)</div>
+            <input value={growth} disabled={globalMethod !== "B"} onChange={function (e) { setGrowth(e.target.value); }} style={Object.assign({}, S.inp, { width: 90 }, globalMethod !== "B" ? { background: "#F3F4F6", cursor: "not-allowed" } : {})} />
+            <div style={{ fontSize: 11, color: "#9CA3AF", position: "absolute", top: "100%", left: 0, marginTop: 4, whiteSpace: "nowrap" }}>1.10 = +10% (method B only)</div>
           </div>
           <div style={{ flex: 1 }} />
           <div style={{ display: "flex", gap: 10 }}>
@@ -6882,13 +6888,14 @@ function ForecastingTool(props) {
 
         <div style={{ marginBottom: 6, fontSize: 12, color: "#6B7280", fontWeight: 500 }}>Fill these Upload month(s):</div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
-          {anchors.uploads.map(function (u, ui) {
+          {anchors.uploads.map(function (u) {
             var on = targetCols.indexOf(u.idx) !== -1;
-            var disabled = globalMethod === "A" && ui !== 0;
-            return <button key={u.idx} disabled={disabled} onClick={function () { toggleTarget(u.idx); }} style={{ padding: "5px 10px", borderRadius: 8, border: "1px solid " + (on ? "#0EA5E9" : "#E5E7EB"), background: on ? "#0EA5E9" : "#fff", color: on ? "#fff" : (disabled ? "#D1D5DB" : "#6B7280"), fontSize: 12, fontWeight: 500, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.5 : 1 }}>{u.label}</button>;
+            var enabled = globalMethod === "B" ? (u.num >= anchorNum && u.num <= maxSelectedNum + 1) : (u.num === anchorNum);
+            var disabled = !enabled;
+            return <button key={u.idx} disabled={disabled} onClick={function () { selectThrough(u.num); }} style={{ padding: "5px 10px", borderRadius: 8, border: "1px solid " + (on ? "#0EA5E9" : "#E5E7EB"), background: on ? "#0EA5E9" : "#fff", color: on ? "#fff" : (disabled ? "#D1D5DB" : "#6B7280"), fontSize: 12, fontWeight: 500, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.45 : 1 }}>{u.label}</button>;
           })}
         </div>
-        <div style={{ fontSize: 11, color: "#9CA3AF", marginBottom: 4 }}>Each selected month gets its own value &mdash; B compounds the growth, C pulls that month&rsquo;s Netstock Final, A fills only the current month. A typed value overrides all selected months; a per-row method overrides the global one.</div>
+        <div style={{ fontSize: 11, color: "#9CA3AF", marginBottom: 4 }}>Only method B can span multiple months &mdash; click forward one month at a time, each compounding the growth. A, C and E fill the current month only. A typed cell overrides that month; a per-row method overrides the global one.</div>
       </div>}
 
       {formatted && formatted.length > 0 && <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden" })}>
@@ -6900,39 +6907,40 @@ function ForecastingTool(props) {
               <th style={Object.assign({}, S.th, { textAlign: "right" })}>MTD</th>
               <th style={Object.assign({}, S.th, { textAlign: "right" })}>{lastMonthLabel}</th>
               <th style={Object.assign({}, S.th, { textAlign: "right" })}>Final 1</th>
-              <th style={Object.assign({}, S.th, { textAlign: "right" })}>Computer</th>
               <th style={S.th}>Method</th>
-              <th style={Object.assign({}, S.th, { textAlign: "right" })}>{firstTargetLabel ? "Upload (" + firstTargetLabel + ")" : "Upload"}</th>
+              {targetCols.map(function (c) { var u = anchors.uploads.filter(function (x) { return x.idx === c; })[0]; return <th key={c} style={Object.assign({}, S.th, { textAlign: "right" })}>{u ? u.label : "Upload"}</th>; })}
             </tr></thead>
             <tbody>
               {formatted.map(function (row, ri) {
                 var k = rowKey(row);
-                var comp = computedForMonth(row, firstTargetNum);
-                var man = manualEdits[k];
-                var isManual = man != null && String(man).trim() !== "";
-                var cellVal = isManual ? man : (comp == null ? "" : comp);
                 return <tr key={ri}>
                   <td style={Object.assign({}, S.td, { fontWeight: 500, whiteSpace: "nowrap" })}>{row[productCol]}</td>
                   <td style={Object.assign({}, S.td, { maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })}>{anchors && fcIdxExact(headers, "Description") >= 0 ? row[fcIdxExact(headers, "Description")] : ""}</td>
                   <td style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums" })}>{row[anchors.mtd]}</td>
                   <td style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums" })}>{anchors.lastHist >= 0 ? row[anchors.lastHist] : ""}</td>
                   <td style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums" })}>{anchors.final1 >= 0 ? row[anchors.final1] : ""}</td>
-                  <td style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums" })}>{anchors.comp1 >= 0 ? row[anchors.comp1] : ""}</td>
                   <td style={Object.assign({}, S.td, { padding: "6px 10px" })}>
                     <select value={rowMethod[k] || ""} onChange={function (e) { setRowM(k, e.target.value); }} style={Object.assign({}, S.sel, { padding: "5px 8px", fontSize: 12 })}>
                       <option value="">Global</option>
                       {FC_METHODS.map(function (m) { return <option key={m.id} value={m.id}>{m.id}</option>; })}
                     </select>
                   </td>
-                  <td style={Object.assign({}, S.td, { textAlign: "right", padding: "6px 10px" })}>
-                    <input value={cellVal} onChange={function (e) { setManual(k, e.target.value); }} placeholder={comp == null ? "-" : ""} style={{ width: 84, textAlign: "right", padding: "6px 8px", borderRadius: 8, fontSize: 13, fontVariantNumeric: "tabular-nums", border: "1px solid " + (isManual ? "#0EA5E9" : "#E5E7EB"), background: isManual ? "#F0F9FF" : "#F9FAFB", color: "#1F2937", outline: "none" }} />
-                  </td>
+                  {targetCols.map(function (c) {
+                    var num = uploadNum(c);
+                    var comp = computedForMonth(row, num);
+                    var man = manualEdits[k + "@" + num];
+                    var isManual = man != null && String(man).trim() !== "";
+                    var cellVal = isManual ? man : (comp == null ? "" : comp);
+                    return <td key={c} style={Object.assign({}, S.td, { textAlign: "right", padding: "6px 10px" })}>
+                      <input value={cellVal} onChange={function (e) { setManualM(k, num, e.target.value); }} placeholder={comp == null ? "-" : ""} style={{ width: 84, textAlign: "right", padding: "6px 8px", borderRadius: 8, fontSize: 13, fontVariantNumeric: "tabular-nums", border: "1px solid " + (isManual ? "#0EA5E9" : "#E5E7EB"), background: isManual ? "#F0F9FF" : "#F9FAFB", color: "#1F2937", outline: "none" }} />
+                    </td>;
+                  })}
                 </tr>;
               })}
             </tbody>
           </table>
         </div>
-        <div style={{ padding: "10px 16px", fontSize: 12, color: "#9CA3AF", borderTop: "1px solid #F3F4F6" }}>{formatted.length} items - preview shows {firstTargetLabel || "the first month"}; export writes each of the {targetCols.length} selected month{targetCols.length === 1 ? "" : "s"} its own value. Blue cells are manual overrides.</div>
+        <div style={{ padding: "10px 16px", fontSize: 12, color: "#9CA3AF", borderTop: "1px solid #F3F4F6" }}>{formatted.length} items - {filledCount} forecasted across {targetCols.length} month{targetCols.length === 1 ? "" : "s"}. Each cell exports into its own month column; blue cells are manual overrides.</div>
       </div>}
 
       {headers.length > 0 && (!formatted || !formatted.length) && stats === null && <div style={{ fontSize: 13, color: "#9CA3AF", padding: "8px 4px" }}>Pick a warehouse and mode, then Auto-format to filter the list down to the items worth forecasting.</div>}
