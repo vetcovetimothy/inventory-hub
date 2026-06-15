@@ -6412,6 +6412,7 @@ var FC_METHODS = [
   { id: "B", label: "B - Last month x growth (compounds each month)" },
   { id: "C", label: "C - Netstock Final (per month)" },
   { id: "E", label: "E - Trailing 3-month average (flat)" },
+  { id: "G", label: "G - Last month historical (flat)" },
 ];
 
 function ForecastingTool(props) {
@@ -6434,6 +6435,7 @@ function ForecastingTool(props) {
   var _tc = useState([]), targetCols = _tc[0], setTargetCols = _tc[1];
   var _rm = useState({}), rowMethod = _rm[0], setRowMethod = _rm[1];
   var _me = useState({}), manualEdits = _me[0], setManualEdits = _me[1];
+  var _dbf = useState(false), dropBelowFinal = _dbf[0], setDropBelowFinal = _dbf[1];
   // Phase 3 (TP Forecast) state
   var _tph = useState([]), tpHeaders = _tph[0], setTpHeaders = _tph[1];
   var _tpr = useState([]), tpRows = _tpr[0], setTpRows = _tpr[1];
@@ -6469,7 +6471,7 @@ function ForecastingTool(props) {
     (async function () {
       try { var inp = await idbGet("fc-input"); if (inp && inp.headers) { setHeaders(inp.headers); setRows(inp.rows || []); setFileName(inp.fileName || ""); setDetectedWh(inp.detectedWh || ""); } } catch (e) {}
       try { var res = await idbGet("fc-result"); if (res) { if (res.formattedRows) setFormatted(res.formattedRows); if (res.stats) setStats(res.stats); } } catch (e) {}
-      try { var fc = await idbGet("fc-forecast"); if (fc) { if (fc.globalMethod) setGlobalMethod(fc.globalMethod); if (fc.growth) setGrowth(fc.growth); if (fc.targetCols) setTargetCols(fc.targetCols); if (fc.rowMethod) setRowMethod(fc.rowMethod); if (fc.manualEdits) setManualEdits(fc.manualEdits); } } catch (e) {}
+      try { var fc = await idbGet("fc-forecast"); if (fc) { if (fc.globalMethod) setGlobalMethod(fc.globalMethod); if (fc.growth) setGrowth(fc.growth); if (fc.targetCols) setTargetCols(fc.targetCols); if (fc.rowMethod) setRowMethod(fc.rowMethod); if (fc.manualEdits) setManualEdits(fc.manualEdits); if (fc.dropBelowFinal != null) setDropBelowFinal(!!fc.dropBelowFinal); } } catch (e) {}
       try { var tpi = await idbGet("fc-tp-input"); if (tpi && tpi.headers) { setTpHeaders(tpi.headers); setTpRows(tpi.rows || []); setTpFileName(tpi.fileName || ""); if (tpi.finalCol != null) setTpFinalCol(tpi.finalCol); } } catch (e) {}
       try { var tpr = await idbGet("fc-tp-result"); if (tpr) { if (tpr.formatted) setTpFormatted(tpr.formatted); if (tpr.stats) setTpStats(tpr.stats); } } catch (e) {}
       var m = sGet("fc-mode"); if (m) setMode(m);
@@ -6484,8 +6486,8 @@ function ForecastingTool(props) {
   // persist Phase-2 working state
   useEffect(function () {
     if (!headers.length) return;
-    idbSet("fc-forecast", { globalMethod: globalMethod, growth: growth, targetCols: targetCols, rowMethod: rowMethod, manualEdits: manualEdits }).catch(function () {});
-  }, [globalMethod, growth, targetCols, rowMethod, manualEdits]);
+    idbSet("fc-forecast", { globalMethod: globalMethod, growth: growth, targetCols: targetCols, rowMethod: rowMethod, manualEdits: manualEdits, dropBelowFinal: dropBelowFinal }).catch(function () {});
+  }, [globalMethod, growth, targetCols, rowMethod, manualEdits, dropBelowFinal]);
 
   function chooseFile() { if (fileRef.current) fileRef.current.click(); }
 
@@ -6674,6 +6676,7 @@ function ForecastingTool(props) {
     if (m === "B") { var lm = fcNum(row, anchors.lastHist); if (lm == null) return null; var step = num - anchorNum + 1; if (step < 1) step = 1; return lm * Math.pow(growthMult, step); }
     if (m === "C") { var fi = anchors.finals[num]; return fi == null ? null : fcNum(row, fi); }
     if (m === "E") { var vals = anchors.trail3.map(function (i) { return fcNum(row, i); }).filter(function (v) { return v != null; }); if (!vals.length) return null; return vals.reduce(function (a, b) { return a + b; }, 0) / vals.length; }
+    if (m === "G") { var lg = fcNum(row, anchors.lastHist); return lg == null ? null : lg; }
     return null;
   }
   function rowKey(row) { return String(row[productCol] == null ? "" : row[productCol]); }
@@ -6685,7 +6688,10 @@ function ForecastingTool(props) {
   function effectiveForMonth(row, num) {
     var man = manualEdits[rowKey(row) + "@" + num];
     if (man != null && String(man).trim() !== "") { var mv = parseFloat(man); return isNaN(mv) ? null : mv; }
-    return computedForMonth(row, num);
+    var v = computedForMonth(row, num);
+    if (v == null) return null;
+    if (dropBelowFinal) { var fi = anchors.finals[num]; if (fi != null) { var fin = fcNum(row, fi); if (fin != null && v < fin) return null; } }
+    return v;
   }
   function uploadNum(colIdx) { for (var i = 0; i < anchors.uploads.length; i++) { if (anchors.uploads[i].idx === colIdx) return anchors.uploads[i].num; } return null; }
   function setManualM(k, num, v) { var key = k + "@" + num; var u = Object.assign({}, manualEdits); if (v == null || String(v).trim() === "") delete u[key]; else u[key] = v; setManualEdits(u); }
@@ -6714,7 +6720,7 @@ function ForecastingTool(props) {
     if (hasData && !window.confirm("Reset the Forecasting tool? This clears the loaded file(s), results, and selections on both tabs.")) return;
     setHeaders([]); setRows([]); setFileName(""); setDetectedWh(""); setWarehouse("");
     setMode("non"); setFormatted(null); setStats(null); setBusy(false); setTab("forecast");
-    setGlobalMethod("none"); setGrowth("1.10"); setTargetCols([]); setRowMethod({}); setManualEdits({});
+    setGlobalMethod("none"); setGrowth("1.10"); setTargetCols([]); setRowMethod({}); setManualEdits({}); setDropBelowFinal(false);
     setTpHeaders([]); setTpRows([]); setTpFileName(""); setTpFinalCol(-1); setTpFormatted(null); setTpStats(null); setTpBusy(false);
     idbDel("fc-input").catch(function () {}); idbDel("fc-result").catch(function () {}); idbDel("fc-forecast").catch(function () {});
     idbDel("fc-tp-input").catch(function () {}); idbDel("fc-tp-result").catch(function () {});
@@ -6879,6 +6885,12 @@ function ForecastingTool(props) {
             <input value={growth} disabled={globalMethod !== "B"} onChange={function (e) { setGrowth(e.target.value); }} style={Object.assign({}, S.inp, { width: 90 }, globalMethod !== "B" ? { background: "#F3F4F6", cursor: "not-allowed" } : {})} />
             <div style={{ fontSize: 11, color: "#9CA3AF", position: "absolute", top: "100%", left: 0, marginTop: 4, whiteSpace: "nowrap" }}>1.10 = +10% (method B only)</div>
           </div>
+          <div style={{ alignSelf: "flex-end" }}>
+            <button onClick={function () { setDropBelowFinal(!dropBelowFinal); }} title="When on, any computed value below that month's Netstock Final is dropped (left blank, not exported). Typed overrides are not affected." style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 8, border: "1px solid " + (dropBelowFinal ? "#0EA5E9" : "#E5E7EB"), background: dropBelowFinal ? "#F0F9FF" : "#fff", color: dropBelowFinal ? "#0369A1" : "#6B7280", fontSize: 12, fontWeight: 500, cursor: "pointer" }}>
+              <span style={{ width: 30, height: 16, borderRadius: 9, background: dropBelowFinal ? "#0EA5E9" : "#D1D5DB", position: "relative", transition: "background 0.15s", flexShrink: 0 }}><span style={{ position: "absolute", top: 2, left: dropBelowFinal ? 16 : 2, width: 12, height: 12, borderRadius: "50%", background: "#fff", transition: "left 0.15s" }} /></span>
+              Drop below Netstock Final
+            </button>
+          </div>
           <div style={{ flex: 1 }} />
           <div style={{ display: "flex", gap: 10 }}>
             <button onClick={clearOverrides} style={S.btn("ghost")}>Clear overrides</button>
@@ -6927,12 +6939,13 @@ function ForecastingTool(props) {
                   </td>
                   {targetCols.map(function (c) {
                     var num = uploadNum(c);
-                    var comp = computedForMonth(row, num);
                     var man = manualEdits[k + "@" + num];
                     var isManual = man != null && String(man).trim() !== "";
-                    var cellVal = isManual ? man : (comp == null ? "" : comp);
+                    var eff = effectiveForMonth(row, num);
+                    var dropped = !isManual && dropBelowFinal && computedForMonth(row, num) != null && eff == null;
+                    var cellVal = eff == null ? "" : eff;
                     return <td key={c} style={Object.assign({}, S.td, { textAlign: "right", padding: "6px 10px" })}>
-                      <input value={cellVal} onChange={function (e) { setManualM(k, num, e.target.value); }} placeholder={comp == null ? "-" : ""} style={{ width: 84, textAlign: "right", padding: "6px 8px", borderRadius: 8, fontSize: 13, fontVariantNumeric: "tabular-nums", border: "1px solid " + (isManual ? "#0EA5E9" : "#E5E7EB"), background: isManual ? "#F0F9FF" : "#F9FAFB", color: "#1F2937", outline: "none" }} />
+                      <input value={cellVal} onChange={function (e) { setManualM(k, num, e.target.value); }} placeholder={dropped ? "\u2014" : (eff == null ? "-" : "")} title={dropped ? "Below Netstock Final \u2014 dropped" : ""} style={{ width: 84, textAlign: "right", padding: "6px 8px", borderRadius: 8, fontSize: 13, fontVariantNumeric: "tabular-nums", border: "1px solid " + (isManual ? "#0EA5E9" : "#E5E7EB"), background: isManual ? "#F0F9FF" : "#F9FAFB", color: "#1F2937", outline: "none" }} />
                     </td>;
                   })}
                 </tr>;
