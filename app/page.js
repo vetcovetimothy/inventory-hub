@@ -6607,7 +6607,8 @@ function ForecastingTool(props) {
 
   function exportFormatted() {
     if (!formatted || !formatted.length) { toast("Run Auto-format first", "error"); return; }
-    fcDownload(fcToCSV(headers, formatted), "forecast_" + (warehouse || "all") + "_" + (mode === "gen" ? "generics" : mode === "all" ? "all" : "nongenerics") + "_formatted.csv");
+    var rowsOut = sefActive ? formatted.filter(inSef) : formatted;
+    fcDownload(fcToCSV(headers, rowsOut), "forecast_" + (warehouse || "all") + "_" + (mode === "gen" ? "generics" : mode === "all" ? "all" : "nongenerics") + "_formatted.csv");
   }
 
   function fcDownload(csv, name) {
