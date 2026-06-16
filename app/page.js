@@ -6411,9 +6411,9 @@ var FC_METHODS = [
   { id: "A", label: "A - MTD run-rate (current month only)" },
   { id: "B", label: "B - Last month x growth (compounds each month)" },
   { id: "C", label: "C - Netstock Final (per month)" },
-  { id: "E", label: "E - Trailing 3-month average (flat)" },
-  { id: "G", label: "G - Last month historical (flat)" },
-  { id: "H", label: "H - Max of last 3 months x growth (current month only)" },
+  { id: "D", label: "D - Trailing 3-month average (flat)" },
+  { id: "E", label: "E - Last month historical (flat)" },
+  { id: "F", label: "F - Max of last 3 months x growth (current month only)" },
 ];
 
 function ForecastingTool(props) {
@@ -6726,9 +6726,9 @@ function ForecastingTool(props) {
     if (m === "A") { if (num !== anchorNum) return null; var mtd = fcNum(row, anchors.mtd); if (mtd == null) return null; return (mtd / denom) * daysInMonth; }
     if (m === "B") { var lm = fcNum(row, anchors.lastHist); if (lm == null) return null; var step = num - anchorNum + 1; if (step < 1) step = 1; return lm * Math.pow(growthMult, step); }
     if (m === "C") { var fi = anchors.finals[num]; return fi == null ? null : fcNum(row, fi); }
-    if (m === "E") { var vals = anchors.trail3.map(function (i) { return fcNum(row, i); }).filter(function (v) { return v != null; }); if (!vals.length) return null; return vals.reduce(function (a, b) { return a + b; }, 0) / vals.length; }
-    if (m === "G") { var lg = fcNum(row, anchors.lastHist); return lg == null ? null : lg; }
-    if (m === "H") { var hv = anchors.trail3.map(function (i) { return fcNum(row, i); }).filter(function (v) { return v != null; }); if (!hv.length) return null; return Math.max.apply(null, hv) * growthMult; }
+    if (m === "D") { var vals = anchors.trail3.map(function (i) { return fcNum(row, i); }).filter(function (v) { return v != null; }); if (!vals.length) return null; return vals.reduce(function (a, b) { return a + b; }, 0) / vals.length; }
+    if (m === "E") { var lg = fcNum(row, anchors.lastHist); return lg == null ? null : lg; }
+    if (m === "F") { var hv = anchors.trail3.map(function (i) { return fcNum(row, i); }).filter(function (v) { return v != null; }); if (!hv.length) return null; return Math.max.apply(null, hv) * growthMult; }
     return null;
   }
   function rowKey(row) { return String(row[productCol] == null ? "" : row[productCol]); }
@@ -7036,10 +7036,10 @@ function ForecastingTool(props) {
               {FC_METHODS.map(function (m) { return <option key={m.id} value={m.id}>{m.label}</option>; })}
             </select>
           </div>
-          <div style={{ position: "relative", opacity: (globalMethod === "B" || globalMethod === "H") ? 1 : 0.4 }}>
+          <div style={{ position: "relative", opacity: (globalMethod === "B" || globalMethod === "F") ? 1 : 0.4 }}>
             <label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 6 }}>Growth (multiplier)</label>
-            <input value={growth} disabled={globalMethod !== "B" && globalMethod !== "H"} onChange={function (e) { setGrowth(e.target.value); }} style={Object.assign({}, S.inp, { width: 90 }, (globalMethod !== "B" && globalMethod !== "H") ? { background: "#F3F4F6", cursor: "not-allowed" } : {})} />
-            <div style={{ fontSize: 11, color: "#9CA3AF", position: "absolute", top: "100%", left: 0, marginTop: 4, whiteSpace: "nowrap" }}>1.10 = +10% (strategies B, H)</div>
+            <input value={growth} disabled={globalMethod !== "B" && globalMethod !== "F"} onChange={function (e) { setGrowth(e.target.value); }} style={Object.assign({}, S.inp, { width: 90 }, (globalMethod !== "B" && globalMethod !== "F") ? { background: "#F3F4F6", cursor: "not-allowed" } : {})} />
+            <div style={{ fontSize: 11, color: "#9CA3AF", position: "absolute", top: "100%", left: 0, marginTop: 4, whiteSpace: "nowrap" }}>1.10 = +10% (strategies B, F)</div>
           </div>
           <div style={{ alignSelf: "flex-end" }}>
             <button onClick={function () { setDropBelowFinal(!dropBelowFinal); }} title="When on, any item whose computed value falls below that month's Netstock Final is removed entirely from the export (the whole row). Typed overrides are exempt." style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 8, border: "1px solid " + (dropBelowFinal ? "#0EA5E9" : "#E5E7EB"), background: dropBelowFinal ? "#F0F9FF" : "#fff", color: dropBelowFinal ? "#0369A1" : "#6B7280", fontSize: 12, fontWeight: 500, cursor: "pointer" }}>
@@ -7063,7 +7063,7 @@ function ForecastingTool(props) {
             return <button key={u.idx} disabled={disabled} onClick={function () { selectThrough(u.num); }} style={{ padding: "5px 10px", borderRadius: 8, border: "1px solid " + (on ? "#0EA5E9" : "#E5E7EB"), background: on ? "#0EA5E9" : "#fff", color: on ? "#fff" : (disabled ? "#D1D5DB" : "#6B7280"), fontSize: 12, fontWeight: 500, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.45 : 1 }}>{u.label}</button>;
           })}
         </div>
-        <div style={{ fontSize: 11, color: "#9CA3AF", marginBottom: 4 }}>Only strategy B can span multiple months &mdash; click forward one month at a time, each compounding the growth. A, C, E, G and H fill the current month only. A typed cell overrides that month; a per-row strategy overrides the global one.</div>
+        <div style={{ fontSize: 11, color: "#9CA3AF", marginBottom: 4 }}>Only strategy B can span multiple months &mdash; click forward one month at a time, each compounding the growth. A, C, D, E and F fill the current month only. A typed cell overrides that month; a per-row strategy overrides the global one.</div>
       </div>}
 
       {formatted && formatted.length > 0 && <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden" })}>
