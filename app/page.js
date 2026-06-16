@@ -6445,6 +6445,7 @@ function ForecastingTool(props) {
   var _dgS = useState(false), dragS = _dgS[0], setDragS = _dgS[1];
   var _sk = useState(""), sortKey = _sk[0], setSortKey = _sk[1];
   var _sd = useState("asc"), sortDir = _sd[0], setSortDir = _sd[1];
+  var _so = useState(null), sortOrder = _so[0], setSortOrder = _so[1];
   // Phase 3 (TP Forecast) state
   var _tph = useState([]), tpHeaders = _tph[0], setTpHeaders = _tph[1];
   var _tpr = useState([]), tpRows = _tpr[0], setTpRows = _tpr[1];
@@ -6521,6 +6522,7 @@ function ForecastingTool(props) {
         setHeaders(hdr); setRows(dataRows); setFileName(file.name); setDetectedWh(dw);
         if (dw) { setWarehouse(dw); sSet("fc-wh", dw); }
         setFormatted(null); setStats(null);
+        setSortOrder(null); setSortKey("");
         // new file: clear per-row forecasting overrides, reset fill-month default
         setRowMethod({}); setManualEdits({}); setTargetCols(defaultTargetCols(fcAnchors(hdr)));
         idbSet("fc-input", { headers: hdr, rows: dataRows, fileName: file.name, detectedWh: dw }).catch(function () {});
@@ -6601,6 +6603,7 @@ function ForecastingTool(props) {
       });
       var st = { input: rows.length, allowed: allowedCount, kept: kept.length, dropped: rows.length - kept.length, warehouse: warehouse, mode: mode, at: Date.now() };
       setFormatted(kept); setStats(st);
+      setSortOrder(null); setSortKey("");
       // rows changed: clear stale per-row overrides
       setRowMethod({}); setManualEdits({});
       idbSet("fc-result", { formattedRows: kept, stats: st }).catch(function () {});
@@ -6735,8 +6738,12 @@ function ForecastingTool(props) {
     var v = methodValueForMonth(row, m, num); return v == null ? null : Math.round(v);
   }
   function effectiveForMonth(row, num) {
-    var man = manualEdits[rowKey(row) + "@" + num];
-    if (man != null && String(man).trim() !== "") { var mv = parseFloat(man); return isNaN(mv) ? null : mv; }
+    var key = rowKey(row) + "@" + num;
+    if (Object.prototype.hasOwnProperty.call(manualEdits, key)) {
+      var man = manualEdits[key];
+      if (man == null || String(man).trim() === "") return null;
+      var mv = parseFloat(man); return isNaN(mv) ? null : mv;
+    }
     return computedForMonth(row, num);
   }
   function rowBelowFinal(row) {
@@ -6759,7 +6766,20 @@ function ForecastingTool(props) {
     var fin = fcNum(row, fi); if (fin == null || fin === 0) return null;
     return ((v - fin) / fin) * 100;
   }
-  function toggleSort(key) { if (sortKey === key) { setSortDir(sortDir === "asc" ? "desc" : "asc"); } else { setSortKey(key); setSortDir("asc"); } }
+  function toggleSort(key) {
+    var dir = (sortKey === key && sortDir === "asc") ? "desc" : "asc";
+    var base = sefActive ? (formatted || []).filter(inSef) : (formatted || []);
+    var d = dir === "asc" ? 1 : -1;
+    var ordered = base.slice().sort(function (a, b) {
+      var va = sortVal(a, key), vb = sortVal(b, key);
+      var na = va == null, nb = vb == null;
+      if (na && nb) return 0; if (na) return 1; if (nb) return -1;
+      if (typeof va === "number" && typeof vb === "number") return (va - vb) * d;
+      va = String(va).toLowerCase(); vb = String(vb).toLowerCase();
+      return va < vb ? -d : (va > vb ? d : 0);
+    });
+    setSortKey(key); setSortDir(dir); setSortOrder(ordered.map(function (r) { return rowKey(r); }));
+  }
   function fcTh(key, label, align) {
     var active = sortKey === key;
     return <th key={key} onClick={function () { toggleSort(key); }} style={Object.assign({}, S.th, align === "right" ? { textAlign: "right" } : {}, { cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" })}>{label}{active ? (sortDir === "desc" ? " \u25BE" : " \u25B4") : ""}</th>;
@@ -6777,7 +6797,7 @@ function ForecastingTool(props) {
     return null;
   }
   function uploadNum(colIdx) { for (var i = 0; i < anchors.uploads.length; i++) { if (anchors.uploads[i].idx === colIdx) return anchors.uploads[i].num; } return null; }
-  function setManualM(k, num, v) { var key = k + "@" + num; var u = Object.assign({}, manualEdits); if (v == null || String(v).trim() === "") delete u[key]; else u[key] = v; setManualEdits(u); }
+  function setManualM(k, num, v) { var key = k + "@" + num; var u = Object.assign({}, manualEdits); u[key] = (v == null ? "" : v); setManualEdits(u); }
   function setRowM(k, v) { var u = Object.assign({}, rowMethod); if (!v) delete u[k]; else u[k] = v; setRowMethod(u); }
   var anchorIdx = (function () {
     var monShort = now.toLocaleString("en-US", { month: "short" });
@@ -6845,17 +6865,14 @@ function ForecastingTool(props) {
   var sortedRows = useMemo(function () {
     if (!formatted) return [];
     var base = sefActive ? formatted.filter(inSef) : formatted;
-    if (!sortKey) return base;
-    var dir = sortDir === "asc" ? 1 : -1;
+    if (!sortOrder || !sortOrder.length) return base;
+    var pos = {}; for (var i = 0; i < sortOrder.length; i++) { if (!(sortOrder[i] in pos)) pos[sortOrder[i]] = i; }
     return base.slice().sort(function (a, b) {
-      var va = sortVal(a, sortKey), vb = sortVal(b, sortKey);
-      var na = va == null, nb = vb == null;
-      if (na && nb) return 0; if (na) return 1; if (nb) return -1;
-      if (typeof va === "number" && typeof vb === "number") return (va - vb) * dir;
-      va = String(va).toLowerCase(); vb = String(vb).toLowerCase();
-      return va < vb ? -dir : (va > vb ? dir : 0);
+      var ia = pos[rowKey(a)]; var ib = pos[rowKey(b)];
+      if (ia == null) ia = Infinity; if (ib == null) ib = Infinity;
+      return ia - ib;
     });
-  }, [formatted, sefActive, sefCodes, sortKey, sortDir, globalMethod, rowMethod, manualEdits, growth, anchorNum, targetCols]);
+  }, [formatted, sefActive, sefCodes, sortOrder]);
 
   var lastMonthLabel = anchors.lastHist >= 0 ? String(headers[anchors.lastHist]).replace(/^hist:\s*/i, "") : "Last mo";
 
@@ -7074,10 +7091,12 @@ function ForecastingTool(props) {
                   <td style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums", fontWeight: 500, color: pct == null ? "#9CA3AF" : (pct > 0 ? "#059669" : (pct < 0 ? "#DC2626" : "#6B7280")) })}>{pct == null ? "-" : (pct > 0 ? "+" : "") + pct.toFixed(0) + "%"}</td>
                   {targetCols.map(function (c) {
                     var num = uploadNum(c);
-                    var man = manualEdits[k + "@" + num];
-                    var isManual = man != null && String(man).trim() !== "";
+                    var mkey = k + "@" + num;
+                    var overridden = Object.prototype.hasOwnProperty.call(manualEdits, mkey);
+                    var man = overridden ? manualEdits[mkey] : null;
+                    var isManual = overridden && man != null && String(man).trim() !== "";
                     var comp = computedForMonth(row, num);
-                    var cellVal = isManual ? man : (comp == null ? "" : comp);
+                    var cellVal = overridden ? (man == null ? "" : man) : (comp == null ? "" : comp);
                     return <td key={c} style={Object.assign({}, S.td, { textAlign: "right", padding: "6px 10px" })}>
                       <input value={cellVal} onChange={function (e) { setManualM(k, num, e.target.value); }} placeholder={comp == null ? "-" : ""} style={{ width: 84, textAlign: "right", padding: "6px 8px", borderRadius: 8, fontSize: 13, fontVariantNumeric: "tabular-nums", border: "1px solid " + (isManual ? "#0EA5E9" : "#E5E7EB"), background: isManual ? "#F0F9FF" : "#F9FAFB", color: "#1F2937", outline: "none" }} />
                     </td>;
