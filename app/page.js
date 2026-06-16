@@ -6440,6 +6440,8 @@ function ForecastingTool(props) {
   var _sef = useState([]), sefCodes = _sef[0], setSefCodes = _sef[1];
   var _sefn = useState(""), sefFileName = _sefn[0], setSefFileName = _sefn[1];
   var _sefo = useState(false), sefOnly = _sefo[0], setSefOnly = _sefo[1];
+  var _dgF = useState(false), dragF = _dgF[0], setDragF = _dgF[1];
+  var _dgS = useState(false), dragS = _dgS[0], setDragS = _dgS[1];
   // Phase 3 (TP Forecast) state
   var _tph = useState([]), tpHeaders = _tph[0], setTpHeaders = _tph[1];
   var _tpr = useState([]), tpRows = _tpr[0], setTpRows = _tpr[1];
@@ -6497,8 +6499,8 @@ function ForecastingTool(props) {
 
   function chooseFile() { if (fileRef.current) fileRef.current.click(); }
 
-  function onFile(e) {
-    var file = e.target.files && e.target.files[0]; if (!file) return;
+  function loadForecastFile(file) {
+    if (!file) return;
     var reader = new FileReader();
     reader.onload = function () {
       try {
@@ -6522,13 +6524,13 @@ function ForecastingTool(props) {
       } catch (err) { toast("Error parsing CSV: " + err.message, "error"); }
     };
     reader.readAsText(file);
-    e.target.value = "";
   }
+  function onFile(e) { var file = e.target.files && e.target.files[0]; loadForecastFile(file); e.target.value = ""; }
 
   function chooseSefFile() { if (sefFileRef.current) sefFileRef.current.click(); }
   function clearSef() { setSefCodes([]); setSefFileName(""); setSefOnly(false); idbDel("fc-sef").catch(function () {}); }
-  function onSefFile(e) {
-    var file = e.target.files && e.target.files[0]; if (!file) return;
+  function loadSefFile(file) {
+    if (!file) return;
     var isXlsx = /\.xlsx?$/i.test(file.name);
     var reader = new FileReader();
     reader.onload = function (ev) {
@@ -6556,8 +6558,8 @@ function ForecastingTool(props) {
       } catch (err) { toast("Error reading file: " + err.message, "error"); }
     };
     if (isXlsx) reader.readAsArrayBuffer(file); else reader.readAsText(file);
-    e.target.value = "";
   }
+  function onSefFile(e) { var file = e.target.files && e.target.files[0]; loadSefFile(file); e.target.value = ""; }
 
   function changeWarehouse(v) { setWarehouse(v); sSet("fc-wh", v); }
   function changeMode(v) { setMode(v); sSet("fc-mode", v); if (v === "non" && tab === "tp") setTab("forecast"); }
@@ -6800,6 +6802,11 @@ function ForecastingTool(props) {
     return formatted.reduce(function (n, row) { return (inSef(row) && !rowBelowFinal(row) && effectiveForMonth(row, anchorNum) != null) ? n + 1 : n; }, 0);
   }, [formatted, globalMethod, growth, rowMethod, manualEdits, anchorNum, dropBelowFinal, targetCols, sefActive, sefCodes]);
 
+  var keptCount = useMemo(function () {
+    if (!formatted) return stats ? stats.kept : 0;
+    return sefActive ? formatted.filter(inSef).length : formatted.length;
+  }, [formatted, stats, sefActive, sefCodes]);
+
   var droppedCount = useMemo(function () {
     if (!formatted) return 0;
     return formatted.reduce(function (n, row) { return (inSef(row) && rowBelowFinal(row)) ? n + 1 : n; }, 0);
@@ -6878,11 +6885,11 @@ function ForecastingTool(props) {
 
     {tab === "forecast" && <div>
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 20 }}>
-        <div style={Object.assign({}, S.card, { flex: 1, minWidth: 320, marginBottom: 0 })}>
+        <div onDragOver={function (e) { e.preventDefault(); setDragF(true); }} onDragLeave={function (e) { e.preventDefault(); setDragF(false); }} onDrop={function (e) { e.preventDefault(); setDragF(false); var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if (f) loadForecastFile(f); }} style={Object.assign({}, S.card, { flex: 1, minWidth: 320, marginBottom: 0 }, dragF ? { borderColor: "#0EA5E9", borderStyle: "dashed", background: "#F0F9FF" } : {})}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
             <div>
               <div style={{ fontSize: 15, fontWeight: 600, color: "#1F2937", marginBottom: 4 }}>Netstock forecast file</div>
-              <div style={{ fontSize: 13, color: "#6B7280" }}>{fileName ? (fileName + "  -  " + rows.length + " rows") : "Upload the multi-forecast CSV exported from Netstock."}</div>
+              <div style={{ fontSize: 13, color: "#6B7280" }}>{fileName ? (fileName + "  -  " + rows.length + " rows") : "Drag a CSV here, or click Upload \u2014 the multi-forecast export from Netstock."}</div>
             </div>
             <div>
               <input ref={fileRef} type="file" accept=".csv,text/csv" onChange={onFile} style={{ display: "none" }} />
@@ -6890,11 +6897,11 @@ function ForecastingTool(props) {
             </div>
           </div>
         </div>
-        <div style={Object.assign({}, S.card, { flex: 1, minWidth: 320, marginBottom: 0 })}>
+        <div onDragOver={function (e) { e.preventDefault(); setDragS(true); }} onDragLeave={function (e) { e.preventDefault(); setDragS(false); }} onDrop={function (e) { e.preventDefault(); setDragS(false); var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if (f) loadSefFile(f); }} style={Object.assign({}, S.card, { flex: 1, minWidth: 320, marginBottom: 0 }, dragS ? { borderColor: "#0EA5E9", borderStyle: "dashed", background: "#F0F9FF" } : {})}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
             <div>
               <div style={{ fontSize: 15, fontWeight: 600, color: "#1F2937", marginBottom: 4 }}>Sales exceeding forecast <span style={{ fontSize: 12, fontWeight: 500, color: "#9CA3AF" }}>(optional)</span></div>
-              <div style={{ fontSize: 13, color: "#6B7280" }}>{sefFileName ? (sefFileName + "  -  " + sefCodes.length + " items") : "Upload the sales-exceeding-forecast list (CSV or Excel)."}</div>
+              <div style={{ fontSize: 13, color: "#6B7280" }}>{sefFileName ? (sefFileName + "  -  " + sefCodes.length + " items") : "Drag a CSV or Excel file here, or click Upload."}</div>
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               <input ref={sefFileRef} type="file" accept=".csv,.xlsx,.xls,text/csv" onChange={onSefFile} style={{ display: "none" }} />
@@ -6944,7 +6951,7 @@ function ForecastingTool(props) {
 
       {stats && <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
         <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0, minWidth: 110 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Input rows</div><div style={{ fontSize: 24, fontWeight: 700, color: "#1F2937", marginTop: 4 }}>{stats.input}</div></div>
-        <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0, minWidth: 110 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Kept</div><div style={{ fontSize: 24, fontWeight: 700, color: "#0EA5E9", marginTop: 4 }}>{stats.kept}</div></div>
+        <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0, minWidth: 110 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Kept</div><div style={{ fontSize: 24, fontWeight: 700, color: "#0EA5E9", marginTop: 4 }}>{keptCount}</div></div>
         <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0, minWidth: 110 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Forecasted</div><div style={{ fontSize: 24, fontWeight: 700, color: "#059669", marginTop: 4 }}>{filledCount}</div></div>
       </div>}
 
