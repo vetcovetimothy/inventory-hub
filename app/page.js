@@ -6436,6 +6436,10 @@ function ForecastingTool(props) {
   var _rm = useState({}), rowMethod = _rm[0], setRowMethod = _rm[1];
   var _me = useState({}), manualEdits = _me[0], setManualEdits = _me[1];
   var _dbf = useState(false), dropBelowFinal = _dbf[0], setDropBelowFinal = _dbf[1];
+  // Sales-exceeding-forecast overlay
+  var _sef = useState([]), sefCodes = _sef[0], setSefCodes = _sef[1];
+  var _sefn = useState(""), sefFileName = _sefn[0], setSefFileName = _sefn[1];
+  var _sefo = useState(false), sefOnly = _sefo[0], setSefOnly = _sefo[1];
   // Phase 3 (TP Forecast) state
   var _tph = useState([]), tpHeaders = _tph[0], setTpHeaders = _tph[1];
   var _tpr = useState([]), tpRows = _tpr[0], setTpRows = _tpr[1];
@@ -6446,6 +6450,7 @@ function ForecastingTool(props) {
   var _tpbusy = useState(false), tpBusy = _tpbusy[0], setTpBusy = _tpbusy[1];
   var fileRef = useRef(null);
   var tpFileRef = useRef(null);
+  var sefFileRef = useRef(null);
 
   var anchors = useMemo(function () { return fcAnchors(headers); }, [headers]);
   var productCol = useMemo(function () { return fcIdxExact(headers, "Product code"); }, [headers]);
@@ -6471,7 +6476,8 @@ function ForecastingTool(props) {
     (async function () {
       try { var inp = await idbGet("fc-input"); if (inp && inp.headers) { setHeaders(inp.headers); setRows(inp.rows || []); setFileName(inp.fileName || ""); setDetectedWh(inp.detectedWh || ""); } } catch (e) {}
       try { var res = await idbGet("fc-result"); if (res) { if (res.formattedRows) setFormatted(res.formattedRows); if (res.stats) setStats(res.stats); } } catch (e) {}
-      try { var fc = await idbGet("fc-forecast"); if (fc) { if (fc.globalMethod) setGlobalMethod(fc.globalMethod); if (fc.growth) setGrowth(fc.growth); if (fc.targetCols) setTargetCols(fc.targetCols); if (fc.rowMethod) setRowMethod(fc.rowMethod); if (fc.manualEdits) setManualEdits(fc.manualEdits); if (fc.dropBelowFinal != null) setDropBelowFinal(!!fc.dropBelowFinal); } } catch (e) {}
+      try { var fc = await idbGet("fc-forecast"); if (fc) { if (fc.globalMethod) setGlobalMethod(fc.globalMethod); if (fc.growth) setGrowth(fc.growth); if (fc.targetCols) setTargetCols(fc.targetCols); if (fc.rowMethod) setRowMethod(fc.rowMethod); if (fc.manualEdits) setManualEdits(fc.manualEdits); if (fc.dropBelowFinal != null) setDropBelowFinal(!!fc.dropBelowFinal); if (fc.sefOnly != null) setSefOnly(!!fc.sefOnly); } } catch (e) {}
+      try { var sef = await idbGet("fc-sef"); if (sef && sef.codes) { setSefCodes(sef.codes); setSefFileName(sef.fileName || ""); } } catch (e) {}
       try { var tpi = await idbGet("fc-tp-input"); if (tpi && tpi.headers) { setTpHeaders(tpi.headers); setTpRows(tpi.rows || []); setTpFileName(tpi.fileName || ""); if (tpi.finalCol != null) setTpFinalCol(tpi.finalCol); } } catch (e) {}
       try { var tpr = await idbGet("fc-tp-result"); if (tpr) { if (tpr.formatted) setTpFormatted(tpr.formatted); if (tpr.stats) setTpStats(tpr.stats); } } catch (e) {}
       var m = sGet("fc-mode"); if (m) setMode(m);
@@ -6486,8 +6492,8 @@ function ForecastingTool(props) {
   // persist Phase-2 working state
   useEffect(function () {
     if (!headers.length) return;
-    idbSet("fc-forecast", { globalMethod: globalMethod, growth: growth, targetCols: targetCols, rowMethod: rowMethod, manualEdits: manualEdits, dropBelowFinal: dropBelowFinal }).catch(function () {});
-  }, [globalMethod, growth, targetCols, rowMethod, manualEdits, dropBelowFinal]);
+    idbSet("fc-forecast", { globalMethod: globalMethod, growth: growth, targetCols: targetCols, rowMethod: rowMethod, manualEdits: manualEdits, dropBelowFinal: dropBelowFinal, sefOnly: sefOnly }).catch(function () {});
+  }, [globalMethod, growth, targetCols, rowMethod, manualEdits, dropBelowFinal, sefOnly]);
 
   function chooseFile() { if (fileRef.current) fileRef.current.click(); }
 
@@ -6516,6 +6522,40 @@ function ForecastingTool(props) {
       } catch (err) { toast("Error parsing CSV: " + err.message, "error"); }
     };
     reader.readAsText(file);
+    e.target.value = "";
+  }
+
+  function chooseSefFile() { if (sefFileRef.current) sefFileRef.current.click(); }
+  function clearSef() { setSefCodes([]); setSefFileName(""); setSefOnly(false); idbDel("fc-sef").catch(function () {}); }
+  function onSefFile(e) {
+    var file = e.target.files && e.target.files[0]; if (!file) return;
+    var isXlsx = /\.xlsx?$/i.test(file.name);
+    var reader = new FileReader();
+    reader.onload = function (ev) {
+      try {
+        var hdr, rws;
+        if (isXlsx) {
+          var XLSX = require("xlsx");
+          var wb = XLSX.read(ev.target.result, { type: "array" });
+          var aoa = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: "", raw: true });
+          hdr = (aoa[0] || []).map(function (x) { return String(x).trim(); });
+          rws = aoa.slice(1);
+        } else {
+          var parsed = fcParseCSV(ev.target.result);
+          hdr = (parsed[0] || []).map(function (x) { return String(x).trim(); });
+          rws = parsed.slice(1);
+        }
+        var pc = -1; for (var i = 0; i < hdr.length; i++) { if (hdr[i].toLowerCase() === "product code") { pc = i; break; } }
+        if (pc < 0) { toast("No 'Product code' column found in that file", "error"); return; }
+        var seen = {}, uniq = [];
+        rws.forEach(function (r) { var v = r[pc] == null ? "" : String(r[pc]).trim().toUpperCase(); if (v && !seen[v]) { seen[v] = 1; uniq.push(v); } });
+        if (!uniq.length) { toast("No product codes found in that file", "error"); return; }
+        setSefCodes(uniq); setSefFileName(file.name);
+        idbSet("fc-sef", { codes: uniq, fileName: file.name }).catch(function () {});
+        toast("Loaded " + uniq.length + " items from sales-exceeding-forecast file");
+      } catch (err) { toast("Error reading file: " + err.message, "error"); }
+    };
+    if (isXlsx) reader.readAsArrayBuffer(file); else reader.readAsText(file);
     e.target.value = "";
   }
 
@@ -6702,6 +6742,8 @@ function ForecastingTool(props) {
     }
     return false;
   }
+  var sefActive = sefOnly && sefCodes && sefCodes.length > 0;
+  function inSef(row) { if (!sefActive) return true; return sefCodes.indexOf(String(row[productCol] == null ? "" : row[productCol]).trim().toUpperCase()) !== -1; }
   function uploadNum(colIdx) { for (var i = 0; i < anchors.uploads.length; i++) { if (anchors.uploads[i].idx === colIdx) return anchors.uploads[i].num; } return null; }
   function setManualM(k, num, v) { var key = k + "@" + num; var u = Object.assign({}, manualEdits); if (v == null || String(v).trim() === "") delete u[key]; else u[key] = v; setManualEdits(u); }
   function setRowM(k, v) { var u = Object.assign({}, rowMethod); if (!v) delete u[k]; else u[k] = v; setRowMethod(u); }
@@ -6730,8 +6772,9 @@ function ForecastingTool(props) {
     setHeaders([]); setRows([]); setFileName(""); setDetectedWh(""); setWarehouse("");
     setMode("non"); setFormatted(null); setStats(null); setBusy(false); setTab("forecast");
     setGlobalMethod("none"); setGrowth("1.10"); setTargetCols([]); setRowMethod({}); setManualEdits({}); setDropBelowFinal(false);
+    setSefCodes([]); setSefFileName(""); setSefOnly(false);
     setTpHeaders([]); setTpRows([]); setTpFileName(""); setTpFinalCol(-1); setTpFormatted(null); setTpStats(null); setTpBusy(false);
-    idbDel("fc-input").catch(function () {}); idbDel("fc-result").catch(function () {}); idbDel("fc-forecast").catch(function () {});
+    idbDel("fc-input").catch(function () {}); idbDel("fc-result").catch(function () {}); idbDel("fc-forecast").catch(function () {}); idbDel("fc-sef").catch(function () {});
     idbDel("fc-tp-input").catch(function () {}); idbDel("fc-tp-result").catch(function () {});
     sDel("fc-mode"); sDel("fc-wh");
     toast("Forecasting reset");
@@ -6740,7 +6783,7 @@ function ForecastingTool(props) {
   function exportForecast() {
     if (!formatted || !formatted.length) { toast("Run Auto-format first", "error"); return; }
     if (!targetCols.length) { toast("Pick at least one month to fill", "error"); return; }
-    var out = formatted.filter(function (row) { return !rowBelowFinal(row); }).map(function (row) {
+    var out = formatted.filter(function (row) { return inSef(row) && !rowBelowFinal(row); }).map(function (row) {
       var r = row.slice();
       targetCols.forEach(function (c) {
         var num = uploadNum(c); if (num == null) return;
@@ -6754,13 +6797,13 @@ function ForecastingTool(props) {
 
   var filledCount = useMemo(function () {
     if (!formatted) return 0;
-    return formatted.reduce(function (n, row) { return (!rowBelowFinal(row) && effectiveForMonth(row, anchorNum) != null) ? n + 1 : n; }, 0);
-  }, [formatted, globalMethod, growth, rowMethod, manualEdits, anchorNum, dropBelowFinal, targetCols]);
+    return formatted.reduce(function (n, row) { return (inSef(row) && !rowBelowFinal(row) && effectiveForMonth(row, anchorNum) != null) ? n + 1 : n; }, 0);
+  }, [formatted, globalMethod, growth, rowMethod, manualEdits, anchorNum, dropBelowFinal, targetCols, sefActive, sefCodes]);
 
   var droppedCount = useMemo(function () {
     if (!formatted) return 0;
-    return formatted.reduce(function (n, row) { return rowBelowFinal(row) ? n + 1 : n; }, 0);
-  }, [formatted, globalMethod, growth, rowMethod, manualEdits, dropBelowFinal, targetCols]);
+    return formatted.reduce(function (n, row) { return (inSef(row) && rowBelowFinal(row)) ? n + 1 : n; }, 0);
+  }, [formatted, globalMethod, growth, rowMethod, manualEdits, dropBelowFinal, targetCols, sefActive, sefCodes]);
 
   var lastMonthLabel = anchors.lastHist >= 0 ? String(headers[anchors.lastHist]).replace(/^hist:\s*/i, "") : "Last mo";
 
@@ -6834,15 +6877,30 @@ function ForecastingTool(props) {
     </div>}
 
     {tab === "forecast" && <div>
-      <div style={S.card}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
-          <div>
-            <div style={{ fontSize: 15, fontWeight: 600, color: "#1F2937", marginBottom: 4 }}>Netstock forecast file</div>
-            <div style={{ fontSize: 13, color: "#6B7280" }}>{fileName ? (fileName + "  -  " + rows.length + " rows") : "Upload the multi-forecast CSV exported from Netstock."}</div>
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 20 }}>
+        <div style={Object.assign({}, S.card, { flex: 1, minWidth: 320, marginBottom: 0 })}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+            <div>
+              <div style={{ fontSize: 15, fontWeight: 600, color: "#1F2937", marginBottom: 4 }}>Netstock forecast file</div>
+              <div style={{ fontSize: 13, color: "#6B7280" }}>{fileName ? (fileName + "  -  " + rows.length + " rows") : "Upload the multi-forecast CSV exported from Netstock."}</div>
+            </div>
+            <div>
+              <input ref={fileRef} type="file" accept=".csv,text/csv" onChange={onFile} style={{ display: "none" }} />
+              <button onClick={chooseFile} style={S.btn()}><IconUpload /> {fileName ? "Replace file" : "Upload CSV"}</button>
+            </div>
           </div>
-          <div>
-            <input ref={fileRef} type="file" accept=".csv,text/csv" onChange={onFile} style={{ display: "none" }} />
-            <button onClick={chooseFile} style={S.btn()}><IconUpload /> {fileName ? "Replace file" : "Upload CSV"}</button>
+        </div>
+        <div style={Object.assign({}, S.card, { flex: 1, minWidth: 320, marginBottom: 0 })}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+            <div>
+              <div style={{ fontSize: 15, fontWeight: 600, color: "#1F2937", marginBottom: 4 }}>Sales exceeding forecast <span style={{ fontSize: 12, fontWeight: 500, color: "#9CA3AF" }}>(optional)</span></div>
+              <div style={{ fontSize: 13, color: "#6B7280" }}>{sefFileName ? (sefFileName + "  -  " + sefCodes.length + " items") : "Upload the sales-exceeding-forecast list (CSV or Excel)."}</div>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input ref={sefFileRef} type="file" accept=".csv,.xlsx,.xls,text/csv" onChange={onSefFile} style={{ display: "none" }} />
+              <button onClick={chooseSefFile} style={sefFileName ? S.btn("ghost") : S.btn()}><IconUpload /> {sefFileName ? "Replace file" : "Upload file"}</button>
+              {sefFileName ? <button onClick={clearSef} style={Object.assign({}, S.btn("ghost"), { color: "#DC2626", borderColor: "#FCA5A5" })}>Remove</button> : null}
+            </div>
           </div>
         </div>
       </div>
@@ -6870,6 +6928,12 @@ function ForecastingTool(props) {
             </div>
           </div>
           <div style={{ flex: 1 }} />
+          {sefCodes && sefCodes.length > 0 ? <div style={{ alignSelf: "flex-end" }}>
+            <button onClick={function () { setSefOnly(!sefOnly); }} title="When on, only items that appear in the uploaded sales-exceeding-forecast file are kept in the table and export. Matched on Product code." style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 8, border: "1px solid " + (sefOnly ? "#0EA5E9" : "#E5E7EB"), background: sefOnly ? "#F0F9FF" : "#fff", color: sefOnly ? "#0369A1" : "#6B7280", fontSize: 12, fontWeight: 500, cursor: "pointer" }}>
+              <span style={{ width: 30, height: 16, borderRadius: 9, background: sefOnly ? "#0EA5E9" : "#D1D5DB", position: "relative", flexShrink: 0 }}><span style={{ position: "absolute", top: 2, left: sefOnly ? 16 : 2, width: 12, height: 12, borderRadius: "50%", background: "#fff", transition: "left 0.15s" }} /></span>
+              Only items exceeding forecast
+            </button>
+          </div> : null}
           <div style={{ display: "flex", gap: 10 }}>
             <button onClick={autoFormat} disabled={busy} style={Object.assign({}, S.btn(), busy ? { opacity: 0.7, cursor: "wait" } : {})}>{busy ? <><Spinner color="#fff" size={14} /> Formatting...</> : <><IconFilter /> Auto-format</>}</button>
             {formatted && formatted.length > 0 ? <button onClick={exportFormatted} style={S.btn("ghost")}><IconDL /> Formatted CSV</button> : null}
@@ -6881,7 +6945,6 @@ function ForecastingTool(props) {
       {stats && <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
         <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0, minWidth: 110 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Input rows</div><div style={{ fontSize: 24, fontWeight: 700, color: "#1F2937", marginTop: 4 }}>{stats.input}</div></div>
         <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0, minWidth: 110 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Kept</div><div style={{ fontSize: 24, fontWeight: 700, color: "#0EA5E9", marginTop: 4 }}>{stats.kept}</div></div>
-        <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0, minWidth: 110 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Dropped</div><div style={{ fontSize: 24, fontWeight: 700, color: "#9CA3AF", marginTop: 4 }}>{stats.dropped}</div></div>
         <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0, minWidth: 110 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Forecasted</div><div style={{ fontSize: 24, fontWeight: 700, color: "#059669", marginTop: 4 }}>{filledCount}</div></div>
       </div>}
 
@@ -6937,7 +7000,7 @@ function ForecastingTool(props) {
               {targetCols.map(function (c) { var u = anchors.uploads.filter(function (x) { return x.idx === c; })[0]; return <th key={c} style={Object.assign({}, S.th, { textAlign: "right" })}>{u ? u.label : "Upload"}</th>; })}
             </tr></thead>
             <tbody>
-              {formatted.map(function (row, ri) {
+              {(sefActive ? formatted.filter(inSef) : formatted).map(function (row, ri) {
                 var k = rowKey(row);
                 var dropRow = rowBelowFinal(row);
                 return <tr key={ri} style={dropRow ? { opacity: 0.45 } : null} title={dropRow ? "Below Netstock Final \u2014 excluded from export" : ""}>
