@@ -6780,6 +6780,16 @@ function ForecastingTool(props) {
     });
     setSortKey(key); setSortDir(dir); setSortOrder(ordered.map(function (r) { return rowKey(r); }));
   }
+  function fcCellKey(e, ri, ci) {
+    var key = e.key, t = e.target, mv = null;
+    if (key === "ArrowDown" || key === "Enter") mv = [ri + 1, ci];
+    else if (key === "ArrowUp") mv = [ri - 1, ci];
+    else if (key === "ArrowRight") { if (t.selectionStart === t.value.length && t.selectionEnd === t.value.length) mv = [ri, ci + 1]; }
+    else if (key === "ArrowLeft") { if (t.selectionStart === 0 && t.selectionEnd === 0) mv = [ri, ci - 1]; }
+    if (!mv) return;
+    var sel = document.querySelector('[data-fc="' + mv[0] + '-' + mv[1] + '"]');
+    if (sel) { e.preventDefault(); sel.focus(); if (sel.select) sel.select(); }
+  }
   function fcTh(key, label, align) {
     var active = sortKey === key;
     return <th key={key} onClick={function () { toggleSort(key); }} style={Object.assign({}, S.th, align === "right" ? { textAlign: "right" } : {}, { cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" })}>{label}{active ? (sortDir === "desc" ? " \u25BE" : " \u25B4") : ""}</th>;
@@ -7089,7 +7099,7 @@ function ForecastingTool(props) {
                     </select>
                   </td>
                   <td style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums", fontWeight: 500, color: pct == null ? "#9CA3AF" : (pct > 0 ? "#059669" : (pct < 0 ? "#DC2626" : "#6B7280")) })}>{pct == null ? "-" : (pct > 0 ? "+" : "") + pct.toFixed(0) + "%"}</td>
-                  {targetCols.map(function (c) {
+                  {targetCols.map(function (c, ci) {
                     var num = uploadNum(c);
                     var mkey = k + "@" + num;
                     var overridden = Object.prototype.hasOwnProperty.call(manualEdits, mkey);
@@ -7098,7 +7108,7 @@ function ForecastingTool(props) {
                     var comp = computedForMonth(row, num);
                     var cellVal = overridden ? (man == null ? "" : man) : (comp == null ? "" : comp);
                     return <td key={c} style={Object.assign({}, S.td, { textAlign: "right", padding: "6px 10px" })}>
-                      <input value={cellVal} onChange={function (e) { setManualM(k, num, e.target.value); }} placeholder={comp == null ? "-" : ""} style={{ width: 84, textAlign: "right", padding: "6px 8px", borderRadius: 8, fontSize: 13, fontVariantNumeric: "tabular-nums", border: "1px solid " + (isManual ? "#0EA5E9" : "#E5E7EB"), background: isManual ? "#F0F9FF" : "#F9FAFB", color: "#1F2937", outline: "none" }} />
+                      <input data-fc={ri + "-" + ci} value={cellVal} onChange={function (e) { setManualM(k, num, e.target.value); }} onKeyDown={function (e) { fcCellKey(e, ri, ci); }} placeholder={comp == null ? "-" : ""} style={{ width: 84, textAlign: "right", padding: "6px 8px", borderRadius: 8, fontSize: 13, fontVariantNumeric: "tabular-nums", border: "1px solid " + (isManual ? "#0EA5E9" : "#E5E7EB"), background: isManual ? "#F0F9FF" : "#F9FAFB", color: "#1F2937", outline: "none" }} />
                     </td>;
                   })}
                 </tr>;
