@@ -6413,6 +6413,7 @@ var FC_METHODS = [
   { id: "C", label: "C - Netstock Final (per month)" },
   { id: "E", label: "E - Trailing 3-month average (flat)" },
   { id: "G", label: "G - Last month historical (flat)" },
+  { id: "H", label: "H - Max of last 3 months x growth (current month only)" },
 ];
 
 function ForecastingTool(props) {
@@ -6442,6 +6443,8 @@ function ForecastingTool(props) {
   var _sefo = useState(false), sefOnly = _sefo[0], setSefOnly = _sefo[1];
   var _dgF = useState(false), dragF = _dgF[0], setDragF = _dgF[1];
   var _dgS = useState(false), dragS = _dgS[0], setDragS = _dgS[1];
+  var _sk = useState(""), sortKey = _sk[0], setSortKey = _sk[1];
+  var _sd = useState("asc"), sortDir = _sd[0], setSortDir = _sd[1];
   // Phase 3 (TP Forecast) state
   var _tph = useState([]), tpHeaders = _tph[0], setTpHeaders = _tph[1];
   var _tpr = useState([]), tpRows = _tpr[0], setTpRows = _tpr[1];
@@ -6456,6 +6459,8 @@ function ForecastingTool(props) {
 
   var anchors = useMemo(function () { return fcAnchors(headers); }, [headers]);
   var productCol = useMemo(function () { return fcIdxExact(headers, "Product code"); }, [headers]);
+  var descCol = useMemo(function () { return fcIdxExact(headers, "Description"); }, [headers]);
+  var classCol = useMemo(function () { return fcIdxExact(headers, "Classification"); }, [headers]);
 
   // Date facts for Method A (today excluded; ~5am pull means today is incomplete).
   var now = new Date();
@@ -6720,6 +6725,7 @@ function ForecastingTool(props) {
     if (m === "C") { var fi = anchors.finals[num]; return fi == null ? null : fcNum(row, fi); }
     if (m === "E") { var vals = anchors.trail3.map(function (i) { return fcNum(row, i); }).filter(function (v) { return v != null; }); if (!vals.length) return null; return vals.reduce(function (a, b) { return a + b; }, 0) / vals.length; }
     if (m === "G") { var lg = fcNum(row, anchors.lastHist); return lg == null ? null : lg; }
+    if (m === "H") { var hv = anchors.trail3.map(function (i) { return fcNum(row, i); }).filter(function (v) { return v != null; }); if (!hv.length) return null; return Math.max.apply(null, hv) * growthMult; }
     return null;
   }
   function rowKey(row) { return String(row[productCol] == null ? "" : row[productCol]); }
@@ -6747,6 +6753,29 @@ function ForecastingTool(props) {
   }
   var sefActive = sefOnly && sefCodes && sefCodes.length > 0;
   function inSef(row) { if (!sefActive) return true; return sefCodes.indexOf(String(row[productCol] == null ? "" : row[productCol]).trim().toUpperCase()) !== -1; }
+  function pctVsFinal(row, num) {
+    var v = effectiveForMonth(row, num); if (v == null) return null;
+    var fi = anchors.finals[num]; if (fi == null) return null;
+    var fin = fcNum(row, fi); if (fin == null || fin === 0) return null;
+    return ((v - fin) / fin) * 100;
+  }
+  function toggleSort(key) { if (sortKey === key) { setSortDir(sortDir === "asc" ? "desc" : "asc"); } else { setSortKey(key); setSortDir("asc"); } }
+  function fcTh(key, label, align) {
+    var active = sortKey === key;
+    return <th key={key} onClick={function () { toggleSort(key); }} style={Object.assign({}, S.th, align === "right" ? { textAlign: "right" } : {}, { cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" })}>{label}{active ? (sortDir === "desc" ? " \u25BE" : " \u25B4") : ""}</th>;
+  }
+  function sortVal(row, key) {
+    if (key === "product") return String(row[productCol] == null ? "" : row[productCol]);
+    if (key === "desc") return String(descCol >= 0 ? (row[descCol] == null ? "" : row[descCol]) : "");
+    if (key === "mtd") return fcNum(row, anchors.mtd);
+    if (key === "repl") return String(classCol >= 0 ? (row[classCol] == null ? "" : row[classCol]) : "");
+    if (key === "final1") return fcNum(row, anchors.final1);
+    if (key === "strategy") return String(rowMethod[rowKey(row)] || globalMethod || "");
+    if (key === "pct") return pctVsFinal(row, anchorNum);
+    if (key.indexOf("hist:") === 0) return fcNum(row, parseInt(key.slice(5), 10));
+    if (key.indexOf("upload:") === 0) return effectiveForMonth(row, parseInt(key.slice(7), 10));
+    return null;
+  }
   function uploadNum(colIdx) { for (var i = 0; i < anchors.uploads.length; i++) { if (anchors.uploads[i].idx === colIdx) return anchors.uploads[i].num; } return null; }
   function setManualM(k, num, v) { var key = k + "@" + num; var u = Object.assign({}, manualEdits); if (v == null || String(v).trim() === "") delete u[key]; else u[key] = v; setManualEdits(u); }
   function setRowM(k, v) { var u = Object.assign({}, rowMethod); if (!v) delete u[k]; else u[k] = v; setRowMethod(u); }
@@ -6812,6 +6841,21 @@ function ForecastingTool(props) {
     if (!formatted) return 0;
     return formatted.reduce(function (n, row) { return (inSef(row) && rowBelowFinal(row)) ? n + 1 : n; }, 0);
   }, [formatted, globalMethod, growth, rowMethod, manualEdits, dropBelowFinal, targetCols, sefActive, sefCodes]);
+
+  var sortedRows = useMemo(function () {
+    if (!formatted) return [];
+    var base = sefActive ? formatted.filter(inSef) : formatted;
+    if (!sortKey) return base;
+    var dir = sortDir === "asc" ? 1 : -1;
+    return base.slice().sort(function (a, b) {
+      var va = sortVal(a, sortKey), vb = sortVal(b, sortKey);
+      var na = va == null, nb = vb == null;
+      if (na && nb) return 0; if (na) return 1; if (nb) return -1;
+      if (typeof va === "number" && typeof vb === "number") return (va - vb) * dir;
+      va = String(va).toLowerCase(); vb = String(vb).toLowerCase();
+      return va < vb ? -dir : (va > vb ? dir : 0);
+    });
+  }, [formatted, sefActive, sefCodes, sortKey, sortDir, globalMethod, rowMethod, manualEdits, growth, anchorNum, targetCols]);
 
   var lastMonthLabel = anchors.lastHist >= 0 ? String(headers[anchors.lastHist]).replace(/^hist:\s*/i, "") : "Last mo";
 
@@ -6959,16 +7003,16 @@ function ForecastingTool(props) {
       {formatted && formatted.length > 0 && <div style={S.card}>
         <div style={{ display: "flex", alignItems: "flex-end", gap: 20, flexWrap: "wrap", marginBottom: 26 }}>
           <div>
-            <label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 6 }}>Method (all rows)</label>
+            <label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 6 }}>Strategy (all rows)</label>
             <select value={globalMethod} onChange={function (e) { changeGlobalMethod(e.target.value); }} style={Object.assign({}, S.sel, { minWidth: 280 })}>
               <option value="none">None - leave Upload blank</option>
               {FC_METHODS.map(function (m) { return <option key={m.id} value={m.id}>{m.label}</option>; })}
             </select>
           </div>
-          <div style={{ position: "relative", opacity: globalMethod === "B" ? 1 : 0.4 }}>
+          <div style={{ position: "relative", opacity: (globalMethod === "B" || globalMethod === "H") ? 1 : 0.4 }}>
             <label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 6 }}>Growth (multiplier)</label>
-            <input value={growth} disabled={globalMethod !== "B"} onChange={function (e) { setGrowth(e.target.value); }} style={Object.assign({}, S.inp, { width: 90 }, globalMethod !== "B" ? { background: "#F3F4F6", cursor: "not-allowed" } : {})} />
-            <div style={{ fontSize: 11, color: "#9CA3AF", position: "absolute", top: "100%", left: 0, marginTop: 4, whiteSpace: "nowrap" }}>1.10 = +10% (method B only)</div>
+            <input value={growth} disabled={globalMethod !== "B" && globalMethod !== "H"} onChange={function (e) { setGrowth(e.target.value); }} style={Object.assign({}, S.inp, { width: 90 }, (globalMethod !== "B" && globalMethod !== "H") ? { background: "#F3F4F6", cursor: "not-allowed" } : {})} />
+            <div style={{ fontSize: 11, color: "#9CA3AF", position: "absolute", top: "100%", left: 0, marginTop: 4, whiteSpace: "nowrap" }}>1.10 = +10% (strategies B, H)</div>
           </div>
           <div style={{ alignSelf: "flex-end" }}>
             <button onClick={function () { setDropBelowFinal(!dropBelowFinal); }} title="When on, any item whose computed value falls below that month's Netstock Final is removed entirely from the export (the whole row). Typed overrides are exempt." style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 8, border: "1px solid " + (dropBelowFinal ? "#0EA5E9" : "#E5E7EB"), background: dropBelowFinal ? "#F0F9FF" : "#fff", color: dropBelowFinal ? "#0369A1" : "#6B7280", fontSize: 12, fontWeight: 500, cursor: "pointer" }}>
@@ -6992,30 +7036,34 @@ function ForecastingTool(props) {
             return <button key={u.idx} disabled={disabled} onClick={function () { selectThrough(u.num); }} style={{ padding: "5px 10px", borderRadius: 8, border: "1px solid " + (on ? "#0EA5E9" : "#E5E7EB"), background: on ? "#0EA5E9" : "#fff", color: on ? "#fff" : (disabled ? "#D1D5DB" : "#6B7280"), fontSize: 12, fontWeight: 500, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.45 : 1 }}>{u.label}</button>;
           })}
         </div>
-        <div style={{ fontSize: 11, color: "#9CA3AF", marginBottom: 4 }}>Only method B can span multiple months &mdash; click forward one month at a time, each compounding the growth. A, C and E fill the current month only. A typed cell overrides that month; a per-row method overrides the global one.</div>
+        <div style={{ fontSize: 11, color: "#9CA3AF", marginBottom: 4 }}>Only strategy B can span multiple months &mdash; click forward one month at a time, each compounding the growth. A, C, E, G and H fill the current month only. A typed cell overrides that month; a per-row strategy overrides the global one.</div>
       </div>}
 
       {formatted && formatted.length > 0 && <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden" })}>
         <div style={{ maxHeight: 560, overflow: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead><tr>
-              <th style={S.th}>Product code</th>
-              <th style={S.th}>Description</th>
-              <th style={Object.assign({}, S.th, { textAlign: "right" })}>MTD</th>
-              <th style={Object.assign({}, S.th, { textAlign: "right" })}>{lastMonthLabel}</th>
-              <th style={Object.assign({}, S.th, { textAlign: "right" })}>Final 1</th>
-              <th style={S.th}>Method</th>
-              {targetCols.map(function (c) { var u = anchors.uploads.filter(function (x) { return x.idx === c; })[0]; return <th key={c} style={Object.assign({}, S.th, { textAlign: "right" })}>{u ? u.label : "Upload"}</th>; })}
+              {fcTh("product", "Product code", "left")}
+              {fcTh("desc", "Description", "left")}
+              {anchors.trail3.map(function (hi) { return fcTh("hist:" + hi, String(headers[hi]).replace(/^hist:\s*/i, ""), "right"); })}
+              {fcTh("mtd", "MTD", "right")}
+              {fcTh("repl", "Replenishment", "left")}
+              {fcTh("final1", "Final 1", "right")}
+              {fcTh("strategy", "Strategy", "left")}
+              {fcTh("pct", "% vs Final", "right")}
+              {targetCols.map(function (c) { var u = anchors.uploads.filter(function (x) { return x.idx === c; })[0]; return fcTh("upload:" + uploadNum(c), u ? u.label : "Upload", "right"); })}
             </tr></thead>
             <tbody>
-              {(sefActive ? formatted.filter(inSef) : formatted).map(function (row, ri) {
+              {sortedRows.map(function (row, ri) {
                 var k = rowKey(row);
                 var dropRow = rowBelowFinal(row);
+                var pct = pctVsFinal(row, anchorNum);
                 return <tr key={ri} style={dropRow ? { opacity: 0.45 } : null} title={dropRow ? "Below Netstock Final \u2014 excluded from export" : ""}>
                   <td style={Object.assign({}, S.td, { fontWeight: 500, whiteSpace: "nowrap", textDecoration: dropRow ? "line-through" : "none" })}>{row[productCol]}</td>
-                  <td style={Object.assign({}, S.td, { maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })}>{anchors && fcIdxExact(headers, "Description") >= 0 ? row[fcIdxExact(headers, "Description")] : ""}</td>
+                  <td style={Object.assign({}, S.td, { maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })}>{descCol >= 0 ? row[descCol] : ""}</td>
+                  {anchors.trail3.map(function (hi) { return <td key={hi} style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums" })}>{row[hi]}</td>; })}
                   <td style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums" })}>{row[anchors.mtd]}</td>
-                  <td style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums" })}>{anchors.lastHist >= 0 ? row[anchors.lastHist] : ""}</td>
+                  <td style={Object.assign({}, S.td)}>{classCol >= 0 ? row[classCol] : ""}</td>
                   <td style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums" })}>{anchors.final1 >= 0 ? row[anchors.final1] : ""}</td>
                   <td style={Object.assign({}, S.td, { padding: "6px 10px" })}>
                     <select value={rowMethod[k] || ""} onChange={function (e) { setRowM(k, e.target.value); }} style={Object.assign({}, S.sel, { padding: "5px 8px", fontSize: 12 })}>
@@ -7023,6 +7071,7 @@ function ForecastingTool(props) {
                       {FC_METHODS.map(function (m) { return <option key={m.id} value={m.id}>{m.id}</option>; })}
                     </select>
                   </td>
+                  <td style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums", fontWeight: 500, color: pct == null ? "#9CA3AF" : (pct > 0 ? "#059669" : (pct < 0 ? "#DC2626" : "#6B7280")) })}>{pct == null ? "-" : (pct > 0 ? "+" : "") + pct.toFixed(0) + "%"}</td>
                   {targetCols.map(function (c) {
                     var num = uploadNum(c);
                     var man = manualEdits[k + "@" + num];
