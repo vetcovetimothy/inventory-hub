@@ -6884,6 +6884,9 @@ function ForecastingTool(props) {
     });
   }, [formatted, sefActive, sefCodes, sortOrder]);
 
+  var btnBlue = Object.assign({}, S.btn(), { border: "2px solid #0284C7" });
+  var btnSecondary = Object.assign({}, S.btn("ghost"), { background: "#E8F0F8", color: "#1E5A82", border: "2px solid #6B95BB" });
+
   var lastMonthLabel = anchors.lastHist >= 0 ? String(headers[anchors.lastHist]).replace(/^hist:\s*/i, "") : "Last mo";
 
   return <div>
@@ -6956,8 +6959,8 @@ function ForecastingTool(props) {
     </div>}
 
     {tab === "forecast" && <div>
-      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 20 }}>
-        <div onDragOver={function (e) { e.preventDefault(); setDragF(true); }} onDragLeave={function (e) { e.preventDefault(); setDragF(false); }} onDrop={function (e) { e.preventDefault(); setDragF(false); var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if (f) loadForecastFile(f); }} style={Object.assign({}, S.card, { flex: 1, minWidth: 320, marginBottom: 0 }, dragF ? { borderColor: "#0EA5E9", borderStyle: "dashed", background: "#F0F9FF" } : {})}>
+      {(!stats || !sefFileName) && <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 20 }}>
+        {!stats && <div onDragOver={function (e) { e.preventDefault(); setDragF(true); }} onDragLeave={function (e) { e.preventDefault(); setDragF(false); }} onDrop={function (e) { e.preventDefault(); setDragF(false); var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if (f) loadForecastFile(f); }} style={Object.assign({}, S.card, { flex: 1, minWidth: 320, marginBottom: 0 }, dragF ? { borderColor: "#0EA5E9", borderStyle: "dashed", background: "#F0F9FF" } : {})}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
             <div>
               <div style={{ fontSize: 15, fontWeight: 600, color: "#1F2937", marginBottom: 4 }}>Netstock forecast file</div>
@@ -6968,21 +6971,20 @@ function ForecastingTool(props) {
               <button onClick={chooseFile} style={S.btn()}><IconUpload /> {fileName ? "Replace file" : "Upload CSV"}</button>
             </div>
           </div>
-        </div>
-        <div onDragOver={function (e) { e.preventDefault(); setDragS(true); }} onDragLeave={function (e) { e.preventDefault(); setDragS(false); }} onDrop={function (e) { e.preventDefault(); setDragS(false); var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if (f) loadSefFile(f); }} style={Object.assign({}, S.card, { flex: 1, minWidth: 320, marginBottom: 0 }, dragS ? { borderColor: "#0EA5E9", borderStyle: "dashed", background: "#F0F9FF" } : {})}>
+        </div>}
+        {!sefFileName && <div onDragOver={function (e) { e.preventDefault(); setDragS(true); }} onDragLeave={function (e) { e.preventDefault(); setDragS(false); }} onDrop={function (e) { e.preventDefault(); setDragS(false); var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if (f) loadSefFile(f); }} style={Object.assign({}, S.card, { flex: 1, minWidth: 320, marginBottom: 0 }, dragS ? { borderColor: "#0EA5E9", borderStyle: "dashed", background: "#F0F9FF" } : {})}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
             <div>
               <div style={{ fontSize: 15, fontWeight: 600, color: "#1F2937", marginBottom: 4 }}>Sales exceeding forecast <span style={{ fontSize: 12, fontWeight: 500, color: "#9CA3AF" }}>(optional)</span></div>
-              <div style={{ fontSize: 13, color: "#6B7280" }}>{sefFileName ? (sefFileName + "  -  " + sefCodes.length + " items") : "Drag a CSV or Excel file here, or click Upload."}</div>
+              <div style={{ fontSize: 13, color: "#6B7280" }}>Drag a CSV or Excel file here, or click Upload.</div>
             </div>
-            <div style={{ display: "flex", gap: 8 }}>
+            <div>
               <input ref={sefFileRef} type="file" accept=".csv,.xlsx,.xls,text/csv" onChange={onSefFile} style={{ display: "none" }} />
-              <button onClick={chooseSefFile} style={sefFileName ? S.btn("ghost") : S.btn()}><IconUpload /> {sefFileName ? "Replace file" : "Upload file"}</button>
-              {sefFileName ? <button onClick={clearSef} style={Object.assign({}, S.btn("ghost"), { color: "#DC2626", borderColor: "#FCA5A5" })}>Remove</button> : null}
+              <button onClick={chooseSefFile} style={S.btn()}><IconUpload /> Upload file</button>
             </div>
           </div>
-        </div>
-      </div>
+        </div>}
+      </div>}
 
       {headers.length > 0 && <div style={S.card}>
         <div style={{ display: "flex", alignItems: "flex-end", gap: 20, flexWrap: "wrap" }}>
@@ -7014,20 +7016,20 @@ function ForecastingTool(props) {
             </button>
           </div> : null}
           <div style={{ display: "flex", gap: 10 }}>
-            <button onClick={autoFormat} disabled={busy} style={Object.assign({}, S.btn(), busy ? { opacity: 0.7, cursor: "wait" } : {})}>{busy ? <><Spinner color="#fff" size={14} /> Formatting...</> : <><IconFilter /> Auto-format</>}</button>
-            {formatted && formatted.length > 0 ? <button onClick={exportFormatted} style={S.btn("ghost")}><IconDL /> Formatted CSV</button> : null}
+            <button onClick={autoFormat} disabled={busy} style={Object.assign({}, btnSecondary, busy ? { opacity: 0.7, cursor: "wait" } : {})}>{busy ? <><Spinner color="#1E5A82" size={14} /> Formatting...</> : <><IconFilter /> Auto-format</>}</button>
+            {formatted && formatted.length > 0 ? <button onClick={exportFormatted} style={btnBlue}><IconDL /> Formatted CSV</button> : null}
           </div>
         </div>
         {!ok && <div style={{ marginTop: 12, fontSize: 12, color: "#DC2626", display: "flex", alignItems: "center", gap: 6 }}><IconLock /> Log in to Acumatica to fetch warehouse data for auto-format.</div>}
       </div>}
 
-      {stats && <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
-        <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0, minWidth: 110 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Input rows</div><div style={{ fontSize: 24, fontWeight: 700, color: "#1F2937", marginTop: 4 }}>{stats.input}</div></div>
-        <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0, minWidth: 110 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Kept</div><div style={{ fontSize: 24, fontWeight: 700, color: "#0EA5E9", marginTop: 4 }}>{keptCount}</div></div>
-        <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0, minWidth: 110 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Forecasted</div><div style={{ fontSize: 24, fontWeight: 700, color: "#059669", marginTop: 4 }}>{filledCount}</div></div>
+      {stats && <div style={{ display: "flex", gap: 10, marginBottom: 20, flexWrap: "wrap" }}>
+        <div style={Object.assign({}, S.card, { padding: "8px 14px", marginBottom: 0, minWidth: 92 })}><div style={{ fontSize: 10, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Input rows</div><div style={{ fontSize: 18, fontWeight: 700, color: "#1F2937", marginTop: 2 }}>{stats.input}</div></div>
+        <div style={Object.assign({}, S.card, { padding: "8px 14px", marginBottom: 0, minWidth: 92 })}><div style={{ fontSize: 10, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Kept</div><div style={{ fontSize: 18, fontWeight: 700, color: "#0EA5E9", marginTop: 2 }}>{keptCount}</div></div>
+        <div style={Object.assign({}, S.card, { padding: "8px 14px", marginBottom: 0, minWidth: 92 })}><div style={{ fontSize: 10, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Forecasted</div><div style={{ fontSize: 18, fontWeight: 700, color: "#059669", marginTop: 2 }}>{filledCount}</div></div>
       </div>}
 
-      {formatted && formatted.length > 0 && <div style={S.card}>
+      {formatted && formatted.length > 0 && <div style={Object.assign({}, S.card, { background: "#F5F3FF", border: "0.5px solid #DDD6FE", borderBottom: "none", borderRadius: "14px 14px 0 0", marginBottom: 0 })}>
         <div style={{ display: "flex", alignItems: "flex-end", gap: 20, flexWrap: "wrap", marginBottom: 26 }}>
           <div>
             <label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 6 }}>Strategy (all rows)</label>
@@ -7049,8 +7051,8 @@ function ForecastingTool(props) {
           </div>
           <div style={{ flex: 1 }} />
           <div style={{ display: "flex", gap: 10 }}>
-            <button onClick={clearOverrides} style={S.btn("ghost")}>Clear overrides</button>
-            <button onClick={exportForecast} style={S.btn()}><IconDL /> Forecast CSV</button>
+            <button onClick={clearOverrides} style={btnSecondary}>Clear overrides</button>
+            <button onClick={exportForecast} style={btnBlue}><IconDL /> Forecast CSV</button>
           </div>
         </div>
 
@@ -7066,7 +7068,7 @@ function ForecastingTool(props) {
         <div style={{ fontSize: 11, color: "#9CA3AF", marginBottom: 4 }}>Only strategy B can span multiple months &mdash; click forward one month at a time, each compounding the growth. A, C, D, E and F fill the current month only. A typed cell overrides that month; a per-row strategy overrides the global one.</div>
       </div>}
 
-      {formatted && formatted.length > 0 && <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden" })}>
+      {formatted && formatted.length > 0 && <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden", borderRadius: "0 0 14px 14px" })}>
         <div style={{ maxHeight: 560, overflow: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead><tr>
