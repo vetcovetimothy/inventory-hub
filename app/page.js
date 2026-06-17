@@ -7098,7 +7098,7 @@ function ForecastingTool(props) {
                   <td style={Object.assign({}, S.td, { padding: "6px 10px" })}>
                     <select value={rowMethod[k] || ""} onChange={function (e) { setRowM(k, e.target.value); }} style={Object.assign({}, S.sel, { padding: "5px 8px", fontSize: 12 })}>
                       <option value="">Global</option>
-                      {FC_METHODS.map(function (m) { return <option key={m.id} value={m.id}>{m.short}</option>; })}
+                      {FC_METHODS.map(function (m) { return <option key={m.id} value={m.id}>{m.id + " - " + m.short}</option>; })}
                     </select>
                   </td>
                   <td style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums", fontWeight: 500, color: pct == null ? "#9CA3AF" : (pct > 0 ? "#059669" : (pct < 0 ? "#DC2626" : "#6B7280")) })}>{pct == null ? "-" : (pct > 0 ? "+" : "") + pct.toFixed(0) + "%"}</td>
