@@ -6453,6 +6453,8 @@ function ForecastingTool(props) {
   var _so = useState(null), sortOrder = _so[0], setSortOrder = _so[1];
   var _q = useState(""), query = _q[0], setQuery = _q[1];
   var _cf = useState([]), classFilter = _cf[0], setClassFilter = _cf[1];
+  var _sdi = useState({}), sdInfo = _sdi[0], setSdInfo = _sdi[1];
+  var _bki = useState({}), bkoInfo = _bki[0], setBkoInfo = _bki[1];
   // Phase 3 (TP Forecast) state
   var _tph = useState([]), tpHeaders = _tph[0], setTpHeaders = _tph[1];
   var _tpr = useState([]), tpRows = _tpr[0], setTpRows = _tpr[1];
@@ -6493,6 +6495,7 @@ function ForecastingTool(props) {
       try { var res = await idbGet("fc-result"); if (res) { if (res.formattedRows) setFormatted(res.formattedRows); if (res.stats) setStats(res.stats); } } catch (e) {}
       try { var fc = await idbGet("fc-forecast"); if (fc) { if (fc.globalMethod) setGlobalMethod(fc.globalMethod); if (fc.growth) setGrowth(fc.growth); if (fc.targetCols) setTargetCols(fc.targetCols); if (fc.rowMethod) setRowMethod(fc.rowMethod); if (fc.manualEdits) setManualEdits(fc.manualEdits); if (fc.dropBelowFinal != null) setDropBelowFinal(!!fc.dropBelowFinal); if (fc.sefOnly != null) setSefOnly(!!fc.sefOnly); } } catch (e) {}
       try { var sef = await idbGet("fc-sef"); if (sef && sef.codes) { setSefCodes(sef.codes); setSefFileName(sef.fileName || ""); } } catch (e) {}
+      try { var sb = await idbGet("fc-sdbko"); if (sb) { if (sb.sd) setSdInfo(sb.sd); if (sb.bko) setBkoInfo(sb.bko); } } catch (e) {}
       try { var tpi = await idbGet("fc-tp-input"); if (tpi && tpi.headers) { setTpHeaders(tpi.headers); setTpRows(tpi.rows || []); setTpFileName(tpi.fileName || ""); if (tpi.finalCol != null) setTpFinalCol(tpi.finalCol); } } catch (e) {}
       try { var tpr = await idbGet("fc-tp-result"); if (tpr) { if (tpr.formatted) setTpFormatted(tpr.formatted); if (tpr.stats) setTpStats(tpr.stats); } } catch (e) {}
       var m = sGet("fc-mode"); if (m) setMode(m);
@@ -6587,7 +6590,16 @@ function ForecastingTool(props) {
     if (classCol < 0) { toast("Could not find a 'Classification' column", "error"); return; }
     setBusy(true);
     try {
-      var whseRows = await fetchAcumatica("whse-replenish", null, cred.username, cred.password);
+      var fetched = await Promise.all([
+        fetchAcumatica("whse-replenish", null, cred.username, cred.password),
+        fetchAcumatica("short-dating", null, cred.username, cred.password).catch(function () { return []; }),
+        fetchAcumatica("backorder", null, cred.username, cred.password).catch(function () { return []; })
+      ]);
+      var whseRows = fetched[0];
+      var sdMap = {}; (fetched[1] || []).forEach(function (r) { var id = String(r.InventoryID || "").trim(); if (id && !sdMap[id]) sdMap[id] = r; });
+      var bkoMap = {}; (fetched[2] || []).forEach(function (r) { var id = String(r.InventoryID || "").trim(); if (id && !bkoMap[id]) bkoMap[id] = r; });
+      setSdInfo(sdMap); setBkoInfo(bkoMap);
+      idbSet("fc-sdbko", { sd: sdMap, bko: bkoMap }).catch(function () {});
       var allowed = {};
       (whseRows || []).forEach(function (r) {
         if (String(r.Warehouse || "").trim() !== warehouse) return;
@@ -6807,6 +6819,8 @@ function ForecastingTool(props) {
     if (key === "desc") return String(descCol >= 0 ? (row[descCol] == null ? "" : row[descCol]) : "");
     if (key === "mtd") return fcNum(row, anchors.mtd);
     if (key === "repl") return String(classCol >= 0 ? (row[classCol] == null ? "" : row[classCol]) : "");
+    if (key === "sd") { var s = sdInfo[String(row[productCol] == null ? "" : row[productCol]).trim()]; return s ? String(s.BestKnownDating || "1") : null; }
+    if (key === "bko") { var b = bkoInfo[String(row[productCol] == null ? "" : row[productCol]).trim()]; return b ? String(b.RecoveryDate || "1") : null; }
     if (key === "final1") return fcNum(row, anchors.final1);
     if (key === "strategy") return String(rowMethod[rowKey(row)] || globalMethod || "");
     if (key === "pct") return pctVsFinal(row, anchorNum);
@@ -6844,8 +6858,9 @@ function ForecastingTool(props) {
     setGlobalMethod("none"); setGrowth("1.10"); setTargetCols([]); setRowMethod({}); setManualEdits({}); setDropBelowFinal(false);
     setSefCodes([]); setSefFileName(""); setSefOnly(false);
     setQuery(""); setClassFilter([]); setSortOrder(null); setSortKey("");
+    setSdInfo({}); setBkoInfo({});
     setTpHeaders([]); setTpRows([]); setTpFileName(""); setTpFinalCol(-1); setTpFormatted(null); setTpStats(null); setTpBusy(false);
-    idbDel("fc-input").catch(function () {}); idbDel("fc-result").catch(function () {}); idbDel("fc-forecast").catch(function () {}); idbDel("fc-sef").catch(function () {});
+    idbDel("fc-input").catch(function () {}); idbDel("fc-result").catch(function () {}); idbDel("fc-forecast").catch(function () {}); idbDel("fc-sef").catch(function () {}); idbDel("fc-sdbko").catch(function () {});
     idbDel("fc-tp-input").catch(function () {}); idbDel("fc-tp-result").catch(function () {});
     sDel("fc-mode"); sDel("fc-wh");
     toast("Forecasting reset");
@@ -7107,6 +7122,8 @@ function ForecastingTool(props) {
               {anchors.trail3.map(function (hi) { return fcTh("hist:" + hi, String(headers[hi]).replace(/^hist:\s*/i, ""), "right"); })}
               {fcTh("mtd", "MTD", "right")}
               {fcTh("repl", "Replenishment", "left")}
+              {fcTh("sd", "Short-Dating", "left")}
+              {fcTh("bko", "Backorder", "left")}
               {fcTh("final1", "Final 1", "right")}
               {fcTh("strategy", "Strategy", "left")}
               {fcTh("pct", "% vs Final", "right")}
@@ -7123,6 +7140,8 @@ function ForecastingTool(props) {
                   {anchors.trail3.map(function (hi) { return <td key={hi} style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums", color: "#6B7280" })}>{fcFmt(row[hi])}</td>; })}
                   <td style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums" })}>{fcFmt(row[anchors.mtd])}</td>
                   <td style={Object.assign({}, S.td)}>{(function () { var cls = classCol >= 0 ? String(row[classCol] || "").trim().toUpperCase() : ""; if (!cls) return ""; var pal = { A: ["#065F46", "#D1FAE5"], B: ["#92400E", "#FEF3C7"], C: ["#475569", "#F1F5F9"] }[cls] || ["#475569", "#F1F5F9"]; return <span style={{ display: "inline-block", minWidth: 20, textAlign: "center", padding: "2px 8px", borderRadius: 999, fontSize: 11, fontWeight: 600, color: pal[0], background: pal[1] }}>{cls}</span>; })()}</td>
+                  <td style={Object.assign({}, S.td)}>{(function () { var s = sdInfo[String(row[productCol] == null ? "" : row[productCol]).trim()]; if (!s) return <span style={{ color: "#D1D5DB" }}>{"\u2013"}</span>; return <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600, color: "#92400E", background: "#FEF3C7", whiteSpace: "nowrap" }}>{s.BestKnownDating ? String(s.BestKnownDating) : "Short"}</span>; })()}</td>
+                  <td style={Object.assign({}, S.td)}>{(function () { var b = bkoInfo[String(row[productCol] == null ? "" : row[productCol]).trim()]; if (!b) return <span style={{ color: "#D1D5DB" }}>{"\u2013"}</span>; return <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600, color: "#9A3412", background: "#FFEDD5", whiteSpace: "nowrap" }}>{b.RecoveryDate ? String(b.RecoveryDate) : "Backorder"}</span>; })()}</td>
                   <td style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums" })}>{anchors.final1 >= 0 ? fcFmt(row[anchors.final1]) : ""}</td>
                   <td style={Object.assign({}, S.td, { padding: "6px 10px" })}>
                     <select value={rowMethod[k] || ""} onChange={function (e) { setRowM(k, e.target.value); }} style={Object.assign({}, S.sel, { padding: "5px 8px", fontSize: 12 })}>
