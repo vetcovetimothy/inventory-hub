@@ -6864,7 +6864,7 @@ function ForecastingTool(props) {
       });
       return r;
     });
-    fcDownload(fcToCSV(headers, out), "forecast_" + (warehouse || "all") + "_" + (mode === "gen" ? "generics" : mode === "all" ? "all" : "nongenerics") + "_upload.csv");
+    fcDownload(fcToCSV(headers, out), "forecast_" + (warehouse || "all") + "_" + (mode === "gen" ? "generics" : mode === "all" ? "all" : "nongenerics") + "_forecasted.csv");
   }
 
   var filledCount = useMemo(function () {
