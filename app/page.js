@@ -6453,6 +6453,7 @@ function ForecastingTool(props) {
   var _so = useState(null), sortOrder = _so[0], setSortOrder = _so[1];
   var _q = useState(""), query = _q[0], setQuery = _q[1];
   var _cf = useState([]), classFilter = _cf[0], setClassFilter = _cf[1];
+  var _dn = useState(false), dense = _dn[0], setDense = _dn[1];
   // Phase 3 (TP Forecast) state
   var _tph = useState([]), tpHeaders = _tph[0], setTpHeaders = _tph[1];
   var _tpr = useState([]), tpRows = _tpr[0], setTpRows = _tpr[1];
@@ -6896,9 +6897,9 @@ function ForecastingTool(props) {
     });
   }, [formatted, sefActive, sefCodes, sortOrder, query, classFilter]);
 
-  var btnBlue = Object.assign({}, S.btn(), { border: "1px solid #0C93D4" });
-  var btnSecondary = Object.assign({}, S.btn("ghost"), { background: "#EEF4FA", color: "#2A6196", border: "1px solid #C4D6E8" });
-  var PANEL_BG = "#F6F3EC", PANEL_BORDER = "#E7E2D6";
+  var btnBlue = Object.assign({}, S.btn(), { border: "1px solid #0A8FCC" });
+  var btnSecondary = Object.assign({}, S.btn("ghost"), { background: "#F3F8FC", color: "#0B6FA8", border: "1px solid #C2DCEE" });
+  var PANEL_BG = "#EFF2F6", PANEL_BORDER = "#DBE2EA";
 
   var lastMonthLabel = anchors.lastHist >= 0 ? String(headers[anchors.lastHist]).replace(/^hist:\s*/i, "") : "Last mo";
 
@@ -7029,17 +7030,19 @@ function ForecastingTool(props) {
             </button>
           </div> : null}
           <div style={{ display: "flex", gap: 10 }}>
-            <button onClick={autoFormat} disabled={busy} style={Object.assign({}, btnSecondary, busy ? { opacity: 0.7, cursor: "wait" } : {})}>{busy ? <><Spinner color="#2A6196" size={14} /> Formatting...</> : <><IconFilter /> Auto-format</>}</button>
-            {formatted && formatted.length > 0 ? <button onClick={exportFormatted} style={btnBlue}><IconDL /> Formatted CSV</button> : null}
+            <button onClick={autoFormat} disabled={busy} style={Object.assign({}, btnSecondary, busy ? { opacity: 0.7, cursor: "wait" } : {})}>{busy ? <><Spinner color="#0B6FA8" size={14} /> Formatting...</> : <><IconFilter /> Auto-format</>}</button>
           </div>
         </div>
         {!ok && <div style={{ marginTop: 12, fontSize: 12, color: "#DC2626", display: "flex", alignItems: "center", gap: 6 }}><IconLock /> Log in to Acumatica to fetch warehouse data for auto-format.</div>}
       </div>}
 
-      {stats && <div style={{ display: "flex", gap: 10, marginBottom: 20, flexWrap: "wrap" }}>
-        <div style={Object.assign({}, S.card, { padding: "8px 14px", marginBottom: 0, minWidth: 92 })}><div style={{ fontSize: 10, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Input rows</div><div style={{ fontSize: 18, fontWeight: 700, color: "#1F2937", marginTop: 2 }}>{stats.input}</div></div>
-        <div style={Object.assign({}, S.card, { padding: "8px 14px", marginBottom: 0, minWidth: 92 })}><div style={{ fontSize: 10, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Kept</div><div style={{ fontSize: 18, fontWeight: 700, color: "#0EA5E9", marginTop: 2 }}>{keptCount}</div></div>
-        <div style={Object.assign({}, S.card, { padding: "8px 14px", marginBottom: 0, minWidth: 92 })}><div style={{ fontSize: 10, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Forecasted</div><div style={{ fontSize: 18, fontWeight: 700, color: "#059669", marginTop: 2 }}>{filledCount}</div></div>
+      {stats && <div style={{ position: "sticky", top: 0, zIndex: 20, marginBottom: 20, display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap", padding: "10px 18px", background: "#FFFFFF", border: "0.5px solid " + PANEL_BORDER, borderRadius: 12, boxShadow: "0 1px 4px rgba(15,23,42,0.06)" }}>
+        <span style={{ fontSize: 12, color: "#6B7280" }}>Input <b style={{ color: "#1F2937", fontVariantNumeric: "tabular-nums" }}>{fcFmt(stats.input)}</b></span>
+        <span style={{ fontSize: 12, color: "#6B7280" }}>Kept <b style={{ color: "#0EA5E9", fontVariantNumeric: "tabular-nums" }}>{fcFmt(keptCount)}</b></span>
+        <span style={{ fontSize: 12, color: "#6B7280" }}>Forecasted <b style={{ color: "#059669", fontVariantNumeric: "tabular-nums" }}>{fcFmt(filledCount)}</b></span>
+        <span style={{ width: 1, height: 16, background: "#E5E7EB" }} />
+        <span style={{ fontSize: 12, color: "#6B7280" }}>Strategy <b style={{ color: "#1F2937" }}>{globalMethod === "none" ? "None" : ((FC_METHODS.filter(function (x) { return x.id === globalMethod; })[0] || {}).short || globalMethod)}</b></span>
+        <span style={{ fontSize: 12, color: "#6B7280", marginLeft: "auto" }}>Filling <b style={{ color: "#1F2937" }}>{targetCols.map(function (c) { var u = anchors.uploads.filter(function (x) { return x.idx === c; })[0]; return u ? u.label : ""; }).filter(Boolean).join(", ") || "-"}</b></span>
       </div>}
 
       {formatted && formatted.length > 0 && <div style={Object.assign({}, S.card, { background: PANEL_BG, border: "0.5px solid " + PANEL_BORDER, borderBottom: "none", borderRadius: "14px 14px 0 0", marginBottom: 0 })}>
@@ -7065,6 +7068,7 @@ function ForecastingTool(props) {
           <div style={{ flex: 1 }} />
           <div style={{ display: "flex", gap: 10 }}>
             <button onClick={clearOverrides} style={btnSecondary}>Clear overrides</button>
+            <button onClick={exportFormatted} style={btnBlue}><IconDL /> Cleaned CSV</button>
             <button onClick={exportForecast} style={btnBlue}><IconDL /> Forecast CSV</button>
           </div>
         </div>
@@ -7093,11 +7097,12 @@ function ForecastingTool(props) {
             })}
           </div>
           {(query.trim() || classFilter.length) ? <button onClick={function () { setQuery(""); setClassFilter([]); }} style={{ padding: "5px 10px", borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: "pointer", color: "#6B7280", background: "#fff", border: "1px solid #E5E7EB" }}>Clear filters</button> : null}
-          <div style={{ marginLeft: "auto", fontSize: 12, color: "#9CA3AF", fontVariantNumeric: "tabular-nums" }}>{sortedRows.length} shown</div>
+          <button onClick={function () { setDense(!dense); }} title="Toggle row density" style={{ marginLeft: "auto", padding: "5px 10px", borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: "pointer", border: "1px solid " + (dense ? "#C2DCEE" : "#E5E7EB"), background: dense ? "#F3F8FC" : "#fff", color: dense ? "#0B6FA8" : "#6B7280" }}>Compact rows</button>
+          <div style={{ fontSize: 12, color: "#9CA3AF", fontVariantNumeric: "tabular-nums" }}>{sortedRows.length} shown</div>
         </div>
         <div style={{ maxHeight: 560, overflow: "auto" }}>
-          <style>{".fc-tbl tbody tr:hover > td{background:#EFF6FF;}"}</style>
-          <table className="fc-tbl" style={{ width: "100%", borderCollapse: "collapse" }}>
+          <style>{".fc-tbl tbody tr:hover > td{background:#EFF6FF;}.fc-dense td,.fc-dense th{padding-top:7px !important;padding-bottom:7px !important;}"}</style>
+          <table className={dense ? "fc-tbl fc-dense" : "fc-tbl"} style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead><tr>
               {fcTh("product", "Product code", "left")}
               {fcTh("desc", "Description", "left")}
