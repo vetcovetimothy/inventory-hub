@@ -6884,8 +6884,9 @@ function ForecastingTool(props) {
     });
   }, [formatted, sefActive, sefCodes, sortOrder]);
 
-  var btnBlue = Object.assign({}, S.btn(), { border: "2px solid #0284C7" });
-  var btnSecondary = Object.assign({}, S.btn("ghost"), { background: "#E8F0F8", color: "#1E5A82", border: "2px solid #6B95BB" });
+  var btnBlue = Object.assign({}, S.btn(), { border: "1px solid #0C93D4" });
+  var btnSecondary = Object.assign({}, S.btn("ghost"), { background: "#EEF4FA", color: "#2A6196", border: "1px solid #C4D6E8" });
+  var PANEL_BG = "#FEF6E7", PANEL_BORDER = "#EFDFB6";
 
   var lastMonthLabel = anchors.lastHist >= 0 ? String(headers[anchors.lastHist]).replace(/^hist:\s*/i, "") : "Last mo";
 
@@ -7016,7 +7017,7 @@ function ForecastingTool(props) {
             </button>
           </div> : null}
           <div style={{ display: "flex", gap: 10 }}>
-            <button onClick={autoFormat} disabled={busy} style={Object.assign({}, btnSecondary, busy ? { opacity: 0.7, cursor: "wait" } : {})}>{busy ? <><Spinner color="#1E5A82" size={14} /> Formatting...</> : <><IconFilter /> Auto-format</>}</button>
+            <button onClick={autoFormat} disabled={busy} style={Object.assign({}, btnSecondary, busy ? { opacity: 0.7, cursor: "wait" } : {})}>{busy ? <><Spinner color="#2A6196" size={14} /> Formatting...</> : <><IconFilter /> Auto-format</>}</button>
             {formatted && formatted.length > 0 ? <button onClick={exportFormatted} style={btnBlue}><IconDL /> Formatted CSV</button> : null}
           </div>
         </div>
@@ -7029,7 +7030,7 @@ function ForecastingTool(props) {
         <div style={Object.assign({}, S.card, { padding: "8px 14px", marginBottom: 0, minWidth: 92 })}><div style={{ fontSize: 10, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Forecasted</div><div style={{ fontSize: 18, fontWeight: 700, color: "#059669", marginTop: 2 }}>{filledCount}</div></div>
       </div>}
 
-      {formatted && formatted.length > 0 && <div style={Object.assign({}, S.card, { background: "#F5F3FF", border: "0.5px solid #DDD6FE", borderBottom: "none", borderRadius: "14px 14px 0 0", marginBottom: 0 })}>
+      {formatted && formatted.length > 0 && <div style={Object.assign({}, S.card, { background: PANEL_BG, border: "0.5px solid " + PANEL_BORDER, borderBottom: "none", borderRadius: "14px 14px 0 0", marginBottom: 0 })}>
         <div style={{ display: "flex", alignItems: "flex-end", gap: 20, flexWrap: "wrap", marginBottom: 26 }}>
           <div>
             <label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 6 }}>Strategy (all rows)</label>
@@ -7068,7 +7069,7 @@ function ForecastingTool(props) {
         <div style={{ fontSize: 11, color: "#9CA3AF", marginBottom: 4 }}>Only strategy B can span multiple months &mdash; click forward one month at a time, each compounding the growth. A, C, D, E and F fill the current month only. A typed cell overrides that month; a per-row strategy overrides the global one.</div>
       </div>}
 
-      {formatted && formatted.length > 0 && <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden", borderRadius: "0 0 14px 14px" })}>
+      {formatted && formatted.length > 0 && <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden", border: "0.5px solid " + PANEL_BORDER, borderRadius: "0 0 14px 14px" })}>
         <div style={{ maxHeight: 560, overflow: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead><tr>
