@@ -6408,12 +6408,12 @@ function fcNum(row, idx) {
   var v = parseFloat(raw); return isNaN(v) ? null : v;
 }
 var FC_METHODS = [
-  { id: "A", label: "A - MTD run-rate (current month only)" },
-  { id: "B", label: "B - Last month x growth (compounds each month)" },
-  { id: "C", label: "C - Netstock Final (per month)" },
-  { id: "D", label: "D - Trailing 3-month average (flat)" },
-  { id: "E", label: "E - Last month historical (flat)" },
-  { id: "F", label: "F - Max of last 3 months x growth (current month only)" },
+  { id: "A", label: "A - MTD run-rate (current month only)", short: "MTD run-rate" },
+  { id: "B", label: "B - Last month x growth (compounds each month)", short: "Last mo x growth" },
+  { id: "C", label: "C - Netstock Final (per month)", short: "Netstock Final" },
+  { id: "D", label: "D - Trailing 3-month average (flat)", short: "Trailing 3-mo avg" },
+  { id: "E", label: "E - Last month historical (flat)", short: "Last month" },
+  { id: "F", label: "F - Max of last 3 months x growth (current month only)", short: "Max 3-mo x growth" },
 ];
 
 function ForecastingTool(props) {
@@ -7098,7 +7098,7 @@ function ForecastingTool(props) {
                   <td style={Object.assign({}, S.td, { padding: "6px 10px" })}>
                     <select value={rowMethod[k] || ""} onChange={function (e) { setRowM(k, e.target.value); }} style={Object.assign({}, S.sel, { padding: "5px 8px", fontSize: 12 })}>
                       <option value="">Global</option>
-                      {FC_METHODS.map(function (m) { return <option key={m.id} value={m.id}>{m.id}</option>; })}
+                      {FC_METHODS.map(function (m) { return <option key={m.id} value={m.id}>{m.short}</option>; })}
                     </select>
                   </td>
                   <td style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums", fontWeight: 500, color: pct == null ? "#9CA3AF" : (pct > 0 ? "#059669" : (pct < 0 ? "#DC2626" : "#6B7280")) })}>{pct == null ? "-" : (pct > 0 ? "+" : "") + pct.toFixed(0) + "%"}</td>
