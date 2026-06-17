@@ -6407,6 +6407,11 @@ function fcNum(row, idx) {
   if (raw === "" || raw === "-" || raw === ".") return null;
   var v = parseFloat(raw); return isNaN(v) ? null : v;
 }
+function fcFmt(v) {
+  if (v == null || v === "") return "";
+  var n = Number(String(v).replace(/,/g, ""));
+  return isNaN(n) ? String(v) : n.toLocaleString("en-US");
+}
 var FC_METHODS = [
   { id: "A", label: "A - MTD run-rate (current month only)", short: "MTD run-rate" },
   { id: "B", label: "B - Last month x growth (compounds each month)", short: "Last mo x growth" },
@@ -6446,6 +6451,8 @@ function ForecastingTool(props) {
   var _sk = useState(""), sortKey = _sk[0], setSortKey = _sk[1];
   var _sd = useState("asc"), sortDir = _sd[0], setSortDir = _sd[1];
   var _so = useState(null), sortOrder = _so[0], setSortOrder = _so[1];
+  var _q = useState(""), query = _q[0], setQuery = _q[1];
+  var _cf = useState([]), classFilter = _cf[0], setClassFilter = _cf[1];
   // Phase 3 (TP Forecast) state
   var _tph = useState([]), tpHeaders = _tph[0], setTpHeaders = _tph[1];
   var _tpr = useState([]), tpRows = _tpr[0], setTpRows = _tpr[1];
@@ -6522,7 +6529,7 @@ function ForecastingTool(props) {
         setHeaders(hdr); setRows(dataRows); setFileName(file.name); setDetectedWh(dw);
         if (dw) { setWarehouse(dw); sSet("fc-wh", dw); }
         setFormatted(null); setStats(null);
-        setSortOrder(null); setSortKey("");
+        setSortOrder(null); setSortKey(""); setQuery(""); setClassFilter([]);
         // new file: clear per-row forecasting overrides, reset fill-month default
         setRowMethod({}); setManualEdits({}); setTargetCols(defaultTargetCols(fcAnchors(hdr)));
         idbSet("fc-input", { headers: hdr, rows: dataRows, fileName: file.name, detectedWh: dw }).catch(function () {});
@@ -6603,7 +6610,7 @@ function ForecastingTool(props) {
       });
       var st = { input: rows.length, allowed: allowedCount, kept: kept.length, dropped: rows.length - kept.length, warehouse: warehouse, mode: mode, at: Date.now() };
       setFormatted(kept); setStats(st);
-      setSortOrder(null); setSortKey("");
+      setSortOrder(null); setSortKey(""); setQuery(""); setClassFilter([]);
       // rows changed: clear stale per-row overrides
       setRowMethod({}); setManualEdits({});
       idbSet("fc-result", { formattedRows: kept, stats: st }).catch(function () {});
@@ -6766,6 +6773,7 @@ function ForecastingTool(props) {
     var fin = fcNum(row, fi); if (fin == null || fin === 0) return null;
     return ((v - fin) / fin) * 100;
   }
+  function toggleClass(cl) { setClassFilter(classFilter.indexOf(cl) !== -1 ? classFilter.filter(function (x) { return x !== cl; }) : classFilter.concat([cl])); }
   function toggleSort(key) {
     var dir = (sortKey === key && sortDir === "asc") ? "desc" : "asc";
     var base = sefActive ? (formatted || []).filter(inSef) : (formatted || []);
@@ -6835,6 +6843,7 @@ function ForecastingTool(props) {
     setMode("non"); setFormatted(null); setStats(null); setBusy(false); setTab("forecast");
     setGlobalMethod("none"); setGrowth("1.10"); setTargetCols([]); setRowMethod({}); setManualEdits({}); setDropBelowFinal(false);
     setSefCodes([]); setSefFileName(""); setSefOnly(false);
+    setQuery(""); setClassFilter([]); setSortOrder(null); setSortKey("");
     setTpHeaders([]); setTpRows([]); setTpFileName(""); setTpFinalCol(-1); setTpFormatted(null); setTpStats(null); setTpBusy(false);
     idbDel("fc-input").catch(function () {}); idbDel("fc-result").catch(function () {}); idbDel("fc-forecast").catch(function () {}); idbDel("fc-sef").catch(function () {});
     idbDel("fc-tp-input").catch(function () {}); idbDel("fc-tp-result").catch(function () {});
@@ -6875,6 +6884,9 @@ function ForecastingTool(props) {
   var sortedRows = useMemo(function () {
     if (!formatted) return [];
     var base = sefActive ? formatted.filter(inSef) : formatted;
+    var q = query.trim().toLowerCase();
+    if (q) base = base.filter(function (r) { var pc = String(r[productCol] == null ? "" : r[productCol]).toLowerCase(); var d = descCol >= 0 ? String(r[descCol] == null ? "" : r[descCol]).toLowerCase() : ""; return pc.indexOf(q) !== -1 || d.indexOf(q) !== -1; });
+    if (classFilter.length) base = base.filter(function (r) { var c = classCol >= 0 ? String(r[classCol] == null ? "" : r[classCol]).trim().toUpperCase() : ""; return classFilter.indexOf(c) !== -1; });
     if (!sortOrder || !sortOrder.length) return base;
     var pos = {}; for (var i = 0; i < sortOrder.length; i++) { if (!(sortOrder[i] in pos)) pos[sortOrder[i]] = i; }
     return base.slice().sort(function (a, b) {
@@ -6882,7 +6894,7 @@ function ForecastingTool(props) {
       if (ia == null) ia = Infinity; if (ib == null) ib = Infinity;
       return ia - ib;
     });
-  }, [formatted, sefActive, sefCodes, sortOrder]);
+  }, [formatted, sefActive, sefCodes, sortOrder, query, classFilter]);
 
   var btnBlue = Object.assign({}, S.btn(), { border: "1px solid #0C93D4" });
   var btnSecondary = Object.assign({}, S.btn("ghost"), { background: "#EEF4FA", color: "#2A6196", border: "1px solid #C4D6E8" });
@@ -7070,8 +7082,22 @@ function ForecastingTool(props) {
       </div>}
 
       {formatted && formatted.length > 0 && <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden", border: "0.5px solid " + PANEL_BORDER, borderRadius: "0 0 14px 14px" })}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderBottom: "1px solid #F3F4F6", flexWrap: "wrap" }}>
+          <input value={query} onChange={function (e) { setQuery(e.target.value); }} placeholder="Search product code or description..." style={Object.assign({}, S.inp, { flex: "1 1 240px", maxWidth: 360, padding: "8px 12px" })} />
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ fontSize: 11, color: "#9CA3AF", textTransform: "uppercase", fontWeight: 600, letterSpacing: "0.5px" }}>Class</span>
+            {["A", "B", "C"].map(function (cl) {
+              var on = classFilter.indexOf(cl) !== -1;
+              var pal = { A: ["#065F46", "#D1FAE5", "#6EE7B7"], B: ["#92400E", "#FEF3C7", "#FCD34D"], C: ["#475569", "#F1F5F9", "#CBD5E1"] }[cl];
+              return <button key={cl} onClick={function () { toggleClass(cl); }} style={{ minWidth: 30, padding: "5px 10px", borderRadius: 999, fontSize: 12, fontWeight: 600, cursor: "pointer", color: on ? pal[0] : "#9CA3AF", background: on ? pal[1] : "#fff", border: "1px solid " + (on ? pal[2] : "#E5E7EB") }}>{cl}</button>;
+            })}
+          </div>
+          {(query.trim() || classFilter.length) ? <button onClick={function () { setQuery(""); setClassFilter([]); }} style={{ padding: "5px 10px", borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: "pointer", color: "#6B7280", background: "#fff", border: "1px solid #E5E7EB" }}>Clear filters</button> : null}
+          <div style={{ marginLeft: "auto", fontSize: 12, color: "#9CA3AF", fontVariantNumeric: "tabular-nums" }}>{sortedRows.length} shown</div>
+        </div>
         <div style={{ maxHeight: 560, overflow: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <style>{".fc-tbl tbody tr:hover > td{background:#EFF6FF;}"}</style>
+          <table className="fc-tbl" style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead><tr>
               {fcTh("product", "Product code", "left")}
               {fcTh("desc", "Description", "left")}
@@ -7088,13 +7114,13 @@ function ForecastingTool(props) {
                 var k = rowKey(row);
                 var dropRow = rowBelowFinal(row);
                 var pct = pctVsFinal(row, anchorNum);
-                return <tr key={ri} style={dropRow ? { opacity: 0.45 } : null} title={dropRow ? "Below Netstock Final \u2014 excluded from export" : ""}>
+                return <tr key={ri} style={Object.assign({}, ri % 2 === 1 ? { background: "#FAFBFC" } : null, dropRow ? { opacity: 0.45 } : null)} title={dropRow ? "Below Netstock Final \u2014 excluded from export" : ""}>
                   <td style={Object.assign({}, S.td, { fontWeight: 500, whiteSpace: "nowrap", textDecoration: dropRow ? "line-through" : "none" })}>{row[productCol]}</td>
-                  <td style={Object.assign({}, S.td, { maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })}>{descCol >= 0 ? row[descCol] : ""}</td>
-                  {anchors.trail3.map(function (hi) { return <td key={hi} style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums" })}>{row[hi]}</td>; })}
-                  <td style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums" })}>{row[anchors.mtd]}</td>
-                  <td style={Object.assign({}, S.td)}>{classCol >= 0 ? row[classCol] : ""}</td>
-                  <td style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums" })}>{anchors.final1 >= 0 ? row[anchors.final1] : ""}</td>
+                  <td title={descCol >= 0 ? String(row[descCol] || "") : ""} style={Object.assign({}, S.td, { maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })}>{descCol >= 0 ? row[descCol] : ""}</td>
+                  {anchors.trail3.map(function (hi) { return <td key={hi} style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums", color: "#6B7280" })}>{fcFmt(row[hi])}</td>; })}
+                  <td style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums" })}>{fcFmt(row[anchors.mtd])}</td>
+                  <td style={Object.assign({}, S.td)}>{(function () { var cls = classCol >= 0 ? String(row[classCol] || "").trim().toUpperCase() : ""; if (!cls) return ""; var pal = { A: ["#065F46", "#D1FAE5"], B: ["#92400E", "#FEF3C7"], C: ["#475569", "#F1F5F9"] }[cls] || ["#475569", "#F1F5F9"]; return <span style={{ display: "inline-block", minWidth: 20, textAlign: "center", padding: "2px 8px", borderRadius: 999, fontSize: 11, fontWeight: 600, color: pal[0], background: pal[1] }}>{cls}</span>; })()}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums" })}>{anchors.final1 >= 0 ? fcFmt(row[anchors.final1]) : ""}</td>
                   <td style={Object.assign({}, S.td, { padding: "6px 10px" })}>
                     <select value={rowMethod[k] || ""} onChange={function (e) { setRowM(k, e.target.value); }} style={Object.assign({}, S.sel, { padding: "5px 8px", fontSize: 12 })}>
                       <option value="">Global</option>
@@ -7119,7 +7145,7 @@ function ForecastingTool(props) {
             </tbody>
           </table>
         </div>
-        <div style={{ padding: "10px 16px", fontSize: 12, color: "#9CA3AF", borderTop: "1px solid #F3F4F6" }}>{formatted.length} items - {filledCount} forecasted across {targetCols.length} month{targetCols.length === 1 ? "" : "s"}{dropBelowFinal && droppedCount > 0 ? " \u00B7 " + droppedCount + " row" + (droppedCount === 1 ? "" : "s") + " below Netstock Final excluded" : ""}. Each cell exports into its own month column; blue cells are manual overrides.</div>
+        <div style={{ padding: "10px 16px", fontSize: 12, color: "#9CA3AF", borderTop: "1px solid #F3F4F6" }}>{formatted.length} items{(query.trim() || classFilter.length) ? " (showing " + sortedRows.length + ")" : ""} - {filledCount} forecasted across {targetCols.length} month{targetCols.length === 1 ? "" : "s"}{dropBelowFinal && droppedCount > 0 ? " \u00B7 " + droppedCount + " row" + (droppedCount === 1 ? "" : "s") + " below Netstock Final excluded" : ""}. Each cell exports into its own month column; blue cells are manual overrides.</div>
       </div>}
 
       {headers.length > 0 && (!formatted || !formatted.length) && stats === null && <div style={{ fontSize: 13, color: "#9CA3AF", padding: "8px 4px" }}>Pick a warehouse and mode, then Auto-format to filter the list down to the items worth forecasting.</div>}
