@@ -6819,8 +6819,7 @@ function ForecastingTool(props) {
     if (key === "desc") return String(descCol >= 0 ? (row[descCol] == null ? "" : row[descCol]) : "");
     if (key === "mtd") return fcNum(row, anchors.mtd);
     if (key === "repl") return String(classCol >= 0 ? (row[classCol] == null ? "" : row[classCol]) : "");
-    if (key === "sd") { var s = sdInfo[String(row[productCol] == null ? "" : row[productCol]).trim()]; return s ? String(s.BestKnownDating || "1") : null; }
-    if (key === "bko") { var b = bkoInfo[String(row[productCol] == null ? "" : row[productCol]).trim()]; return b ? String(b.RecoveryDate || "1") : null; }
+    if (key === "flag") { var pc = String(row[productCol] == null ? "" : row[productCol]).trim(); if (sdInfo[pc]) return "1_" + (sdInfo[pc].BestKnownDating || ""); if (bkoInfo[pc]) return "2_" + (bkoInfo[pc].RecoveryDate || ""); return null; }
     if (key === "final1") return fcNum(row, anchors.final1);
     if (key === "strategy") return String(rowMethod[rowKey(row)] || globalMethod || "");
     if (key === "pct") return pctVsFinal(row, anchorNum);
@@ -7122,8 +7121,7 @@ function ForecastingTool(props) {
               {anchors.trail3.map(function (hi) { return fcTh("hist:" + hi, String(headers[hi]).replace(/^hist:\s*/i, ""), "right"); })}
               {fcTh("mtd", "MTD", "right")}
               {fcTh("repl", "Replenishment", "left")}
-              {fcTh("sd", "Short-Dating", "left")}
-              {fcTh("bko", "Backorder", "left")}
+              {fcTh("flag", "SD / Backorder", "left")}
               {fcTh("final1", "Final 1", "right")}
               {fcTh("strategy", "Strategy", "left")}
               {fcTh("pct", "% vs Final", "right")}
@@ -7140,8 +7138,15 @@ function ForecastingTool(props) {
                   {anchors.trail3.map(function (hi) { return <td key={hi} style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums", color: "#6B7280" })}>{fcFmt(row[hi])}</td>; })}
                   <td style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums" })}>{fcFmt(row[anchors.mtd])}</td>
                   <td style={Object.assign({}, S.td)}>{(function () { var cls = classCol >= 0 ? String(row[classCol] || "").trim().toUpperCase() : ""; if (!cls) return ""; var pal = { A: ["#065F46", "#D1FAE5"], B: ["#92400E", "#FEF3C7"], C: ["#475569", "#F1F5F9"] }[cls] || ["#475569", "#F1F5F9"]; return <span style={{ display: "inline-block", minWidth: 20, textAlign: "center", padding: "2px 8px", borderRadius: 999, fontSize: 11, fontWeight: 600, color: pal[0], background: pal[1] }}>{cls}</span>; })()}</td>
-                  <td style={Object.assign({}, S.td)}>{(function () { var s = sdInfo[String(row[productCol] == null ? "" : row[productCol]).trim()]; if (!s) return <span style={{ color: "#D1D5DB" }}>{"\u2013"}</span>; return <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600, color: "#92400E", background: "#FEF3C7", whiteSpace: "nowrap" }}>{s.BestKnownDating ? String(s.BestKnownDating) : "Short"}</span>; })()}</td>
-                  <td style={Object.assign({}, S.td)}>{(function () { var b = bkoInfo[String(row[productCol] == null ? "" : row[productCol]).trim()]; if (!b) return <span style={{ color: "#D1D5DB" }}>{"\u2013"}</span>; return <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600, color: "#9A3412", background: "#FFEDD5", whiteSpace: "nowrap" }}>{b.RecoveryDate ? String(b.RecoveryDate) : "Backorder"}</span>; })()}</td>
+                  <td style={Object.assign({}, S.td)}>{(function () {
+                    var pc = String(row[productCol] == null ? "" : row[productCol]).trim();
+                    var s = sdInfo[pc], b = bkoInfo[pc];
+                    if (!s && !b) return <span style={{ color: "#D1D5DB" }}>{"\u2013"}</span>;
+                    var out = [];
+                    if (s) out.push(<span key="sd" title="Short-dating" style={{ display: "inline-block", padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600, color: "#B91C1C", background: "#FEE2E2", whiteSpace: "nowrap" }}>{"SD" + (s.BestKnownDating ? " \u00B7 " + s.BestKnownDating : "")}</span>);
+                    if (b) out.push(<span key="bo" title="Backorder" style={{ display: "inline-block", padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600, color: "#92400E", background: "#FEF3C7", whiteSpace: "nowrap" }}>{"BO" + (b.RecoveryDate ? " \u00B7 " + b.RecoveryDate : "")}</span>);
+                    return <span style={{ display: "inline-flex", gap: 4, flexWrap: "wrap" }}>{out}</span>;
+                  })()}</td>
                   <td style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums" })}>{anchors.final1 >= 0 ? fcFmt(row[anchors.final1]) : ""}</td>
                   <td style={Object.assign({}, S.td, { padding: "6px 10px" })}>
                     <select value={rowMethod[k] || ""} onChange={function (e) { setRowM(k, e.target.value); }} style={Object.assign({}, S.sel, { padding: "5px 8px", fontSize: 12 })}>
