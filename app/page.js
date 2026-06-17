@@ -6453,7 +6453,6 @@ function ForecastingTool(props) {
   var _so = useState(null), sortOrder = _so[0], setSortOrder = _so[1];
   var _q = useState(""), query = _q[0], setQuery = _q[1];
   var _cf = useState([]), classFilter = _cf[0], setClassFilter = _cf[1];
-  var _dn = useState(false), dense = _dn[0], setDense = _dn[1];
   // Phase 3 (TP Forecast) state
   var _tph = useState([]), tpHeaders = _tph[0], setTpHeaders = _tph[1];
   var _tpr = useState([]), tpRows = _tpr[0], setTpRows = _tpr[1];
@@ -7068,7 +7067,7 @@ function ForecastingTool(props) {
           <div style={{ flex: 1 }} />
           <div style={{ display: "flex", gap: 10 }}>
             <button onClick={clearOverrides} style={btnSecondary}>Clear overrides</button>
-            <button onClick={exportFormatted} style={btnBlue}><IconDL /> Cleaned CSV</button>
+            <button onClick={exportFormatted} style={btnBlue}><IconDL /> Only Auto-Formatted CSV</button>
             <button onClick={exportForecast} style={btnBlue}><IconDL /> Forecast CSV</button>
           </div>
         </div>
@@ -7097,12 +7096,11 @@ function ForecastingTool(props) {
             })}
           </div>
           {(query.trim() || classFilter.length) ? <button onClick={function () { setQuery(""); setClassFilter([]); }} style={{ padding: "5px 10px", borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: "pointer", color: "#6B7280", background: "#fff", border: "1px solid #E5E7EB" }}>Clear filters</button> : null}
-          <button onClick={function () { setDense(!dense); }} title="Toggle row density" style={{ marginLeft: "auto", padding: "5px 10px", borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: "pointer", border: "1px solid " + (dense ? "#C2DCEE" : "#E5E7EB"), background: dense ? "#F3F8FC" : "#fff", color: dense ? "#0B6FA8" : "#6B7280" }}>Compact rows</button>
-          <div style={{ fontSize: 12, color: "#9CA3AF", fontVariantNumeric: "tabular-nums" }}>{sortedRows.length} shown</div>
+          <div style={{ marginLeft: "auto", fontSize: 12, color: "#9CA3AF", fontVariantNumeric: "tabular-nums" }}>{sortedRows.length} shown</div>
         </div>
         <div style={{ maxHeight: 560, overflow: "auto" }}>
-          <style>{".fc-tbl tbody tr:hover > td{background:#EFF6FF;}.fc-dense td,.fc-dense th{padding-top:7px !important;padding-bottom:7px !important;}"}</style>
-          <table className={dense ? "fc-tbl fc-dense" : "fc-tbl"} style={{ width: "100%", borderCollapse: "collapse" }}>
+          <style>{".fc-tbl tbody tr:hover > td{background:#EFF6FF;}"}</style>
+          <table className="fc-tbl" style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead><tr>
               {fcTh("product", "Product code", "left")}
               {fcTh("desc", "Description", "left")}
