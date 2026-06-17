@@ -6886,7 +6886,7 @@ function ForecastingTool(props) {
 
   var btnBlue = Object.assign({}, S.btn(), { border: "1px solid #0C93D4" });
   var btnSecondary = Object.assign({}, S.btn("ghost"), { background: "#EEF4FA", color: "#2A6196", border: "1px solid #C4D6E8" });
-  var PANEL_BG = "#D1FAE5", PANEL_BORDER = "#A7F3D0";
+  var PANEL_BG = "#FFE4E6", PANEL_BORDER = "#FECDD3";
 
   var lastMonthLabel = anchors.lastHist >= 0 ? String(headers[anchors.lastHist]).replace(/^hist:\s*/i, "") : "Last mo";
 
