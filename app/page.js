@@ -4620,7 +4620,7 @@ function TruckloaderTool(props) {
       var needsFill = g.total < minW;
       var assignments = g.items.map(function(it) {
         var oi = orderItems[it.idx];
-        return { inventoryID: oi.inventoryID, description: oi.description, orderQty: it.isSplit ? it.splitPals * oi.casesPerPallet : oi.orderQty, pallets: it.isSplit ? it.splitPals : oi.roundedPallets, lbs: it.weight / 100, isSplit: it.isSplit, idx: it.idx };
+        return { inventoryID: oi.inventoryID, description: oi.description, orderQty: it.isSplit ? it.splitPals * oi.casesPerPallet : oi.orderQty, pallets: it.isSplit ? it.splitPals : oi.roundedPallets, lbs: it.weight / 100, isSplit: it.isSplit, isFill: !!oi.isFill, idx: it.idx };
       });
       return { label: "Truck " + (ti + 1), totalLbs: totalLbs, remaining: remaining, needsFill: needsFill, color: TRUCK_COLORS[ti % TRUCK_COLORS.length], assignments: assignments, errors: [] };
     });
@@ -5164,7 +5164,7 @@ function TruckloaderTool(props) {
               </tr></thead>
               <tbody>{t.assignments.map(function(a, ai) {
                 return <tr key={ai} style={{ background: t.color + "30" }}>
-                  <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 12, fontWeight: 600 })}>{a.inventoryID}</td>
+                  <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 12, fontWeight: 600 })}>{a.inventoryID}{a.isFill ? <span style={{ marginLeft: 6, padding: "1px 6px", borderRadius: 999, fontSize: 9, fontWeight: 700, fontFamily: "system-ui, -apple-system, sans-serif", letterSpacing: "0.3px", color: "#fff", background: "#7C3AED", verticalAlign: "middle" }}>FILL</span> : <span style={{ marginLeft: 6, padding: "1px 6px", borderRadius: 999, fontSize: 9, fontWeight: 600, fontFamily: "system-ui, -apple-system, sans-serif", letterSpacing: "0.3px", color: "#6B7280", background: "#F3F4F6", border: "1px solid #E5E7EB", verticalAlign: "middle" }}>REPLEN</span>}</td>
                   <td style={Object.assign({}, S.td, { maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })} title={a.description}>{a.description}{a.isSplit ? <span style={Object.assign({}, S.badge("purple"), { marginLeft: 6, fontSize: 10 })}>SPLIT</span> : ""}</td>
                   <td style={Object.assign({}, S.td, { textAlign: "right" })}>{a.orderQty}</td>
                   <td style={Object.assign({}, S.td, { textAlign: "right" })}>{a.pallets}</td>
