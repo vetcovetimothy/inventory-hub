@@ -7122,9 +7122,9 @@ function ForecastingTool(props) {
               {fcTh("mtd", "MTD", "right")}
               {fcTh("repl", "Replenishment", "left")}
               {fcTh("flag", "SD / Backorder", "left")}
-              {fcTh("final1", "Final 1", "right")}
+              {fcTh("final1", "Final FC", "right")}
               {fcTh("strategy", "Strategy", "left")}
-              {fcTh("pct", "% vs Final", "right")}
+              {fcTh("pct", "Final FC/Upload FC % Diff", "right")}
               {targetCols.map(function (c) { var u = anchors.uploads.filter(function (x) { return x.idx === c; })[0]; return fcTh("upload:" + uploadNum(c), u ? u.label : "Upload", "right"); })}
             </tr></thead>
             <tbody>
