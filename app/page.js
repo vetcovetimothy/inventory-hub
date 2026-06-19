@@ -6501,7 +6501,7 @@ function ForecastingTool(props) {
       try { var fc = await idbGet("fc-forecast"); if (fc) { if (fc.globalMethod) setGlobalMethod(fc.globalMethod); if (fc.growth) setGrowth(fc.growth); if (fc.targetCols) setTargetCols(fc.targetCols); if (fc.rowMethod) setRowMethod(fc.rowMethod); if (fc.rowGrowth) setRowGrowth(fc.rowGrowth); if (fc.manualEdits) setManualEdits(fc.manualEdits); if (fc.dropBelowFinal != null) setDropBelowFinal(!!fc.dropBelowFinal); if (fc.sefOnly != null) setSefOnly(!!fc.sefOnly); } } catch (e) {}
       try { var sef = await idbGet("fc-sef"); if (sef && sef.codes) { setSefCodes(sef.codes); setSefFileName(sef.fileName || ""); } } catch (e) {}
       try { var sb = await idbGet("fc-sdbko"); if (sb) { if (sb.sd) setSdInfo(sb.sd); if (sb.bko) setBkoInfo(sb.bko); } } catch (e) {}
-      try { var tpi = await idbGet("fc-tp-input"); if (tpi && tpi.headers) { setTpHeaders(tpi.headers); setTpRows(tpi.rows || []); setTpFileName(tpi.fileName || ""); if (tpi.finalCol != null) setTpFinalCol(tpi.finalCol); } } catch (e) {}
+      try { var tpi = await idbGet("fc-tp-input"); if (tpi && tpi.headers) { setTpHeaders(tpi.headers); setTpRows(tpi.rows || []); setTpFileName(tpi.fileName || ""); setTpFinalCol(tpDefaultFinal(tpi.headers)); } } catch (e) {}
       try { var tpr = await idbGet("fc-tp-result"); if (tpr) { if (tpr.formatted) setTpFormatted(tpr.formatted); if (tpr.stats) setTpStats(tpr.stats); } } catch (e) {}
       var m = sGet("fc-mode"); if (m) setMode(m);
       var w = sGet("fc-wh"); if (w) setWarehouse(w);
@@ -6657,6 +6657,14 @@ function ForecastingTool(props) {
     for (var i = 0; i < tpHeaders.length; i++) { if (/^final fc units/i.test(String(tpHeaders[i]))) out.push({ idx: i, label: String(tpHeaders[i]).replace(/^final fc units\s*/i, "") }); }
     return out;
   }
+  function tpDefaultFinal(hdr) {
+    if (!hdr || !hdr.length) return -1;
+    var finals = []; for (var i = 0; i < hdr.length; i++) { if (/^final fc units/i.test(String(hdr[i]))) finals.push(i); }
+    if (!finals.length) return -1;
+    var d = new Date(); var mon = d.toLocaleString("en-US", { month: "short" }).toLowerCase(); var yr = String(d.getFullYear());
+    for (var j = 0; j < finals.length; j++) { var lbl = String(hdr[finals[j]]).toLowerCase(); if (lbl.indexOf(mon) !== -1 && lbl.indexOf(yr) !== -1) return finals[j]; }
+    return finals[finals.length - 1];
+  }
   function chooseTpFile() { if (tpFileRef.current) tpFileRef.current.click(); }
   function onTpFile(e) {
     var file = e.target.files && e.target.files[0]; if (!file) return;
@@ -6677,8 +6685,7 @@ function ForecastingTool(props) {
           if (hasP && hasL) { hdr = h; rws = aoa.slice(1).filter(function (r) { return r.some(function (c) { return String(c).trim() !== ""; }); }); }
         });
         if (!hdr) { toast("No 'Report data' sheet with Product/Location code found", "error"); return; }
-        var finals = []; for (var i = 0; i < hdr.length; i++) { if (/^final fc units/i.test(hdr[i])) finals.push(i); }
-        var defFinal = finals.length ? finals[finals.length - 1] : -1;
+        var defFinal = tpDefaultFinal(hdr);
         setTpHeaders(hdr); setTpRows(rws); setTpFileName(file.name); setTpFinalCol(defFinal); setTpFormatted(null); setTpStats(null);
         idbSet("fc-tp-input", { headers: hdr, rows: rws, fileName: file.name, finalCol: defFinal }).catch(function () {});
         idbDel("fc-tp-result").catch(function () {});
