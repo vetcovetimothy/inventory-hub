@@ -6884,6 +6884,14 @@ function ForecastingTool(props) {
     toast("Forecasting reset");
   }
 
+  function clearTp() {
+    var hasTp = tpRows.length || tpFormatted || tpFileName;
+    if (hasTp && !window.confirm("Clear the TP Forecast tab? This clears its loaded file, results, and selection. The Forecast tab is not affected.")) return;
+    setTpHeaders([]); setTpRows([]); setTpFileName(""); setTpFinalCol(-1); setTpFormatted(null); setTpStats(null); setTpBusy(false);
+    idbDel("fc-tp-input").catch(function () {}); idbDel("fc-tp-result").catch(function () {});
+    toast("TP Forecast tab cleared");
+  }
+
   function exportForecast() {
     if (!formatted || !formatted.length) { toast("Run Auto-format first", "error"); return; }
     if (!targetCols.length) { toast("Pick at least one month to fill", "error"); return; }
@@ -6939,7 +6947,7 @@ function ForecastingTool(props) {
     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 20 }}>
       <button onClick={function () { setTab("forecast"); }} style={S.pill(tab === "forecast", "#0EA5E9")}>Forecast</button>
       {mode !== "non" && <button onClick={function () { setTab("tp"); }} style={S.pill(tab === "tp", "#0EA5E9")}>TP Forecast</button>}
-      <button onClick={resetAll} title="Clear loaded files, results, and selections on both tabs" style={Object.assign({}, S.btn("ghost"), { marginLeft: "auto", fontSize: 12, color: "#DC2626", borderColor: "#FCA5A5" })}>Reset</button>
+      <button onClick={tab === "tp" ? clearTp : resetAll} title={tab === "tp" ? "Clear the TP Forecast tab only (does not affect the Forecast tab)" : "Clear loaded files, results, and selections on both tabs"} style={Object.assign({}, S.btn("ghost"), { marginLeft: "auto", fontSize: 12, color: "#DC2626", borderColor: "#FCA5A5" })}>{tab === "tp" ? "Clear" : "Reset"}</button>
     </div>
 
     {tab === "tp" && <div>
