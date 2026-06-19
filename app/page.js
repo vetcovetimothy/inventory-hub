@@ -6469,13 +6469,24 @@ function ReplenishUpdate(props) {
     setBusy(true);
     try {
       var whseRows = await fetchAcumatica("whse-replenish", null, cred.username, cred.password);
+      whseRows = whseRows || [];
+      var keys = whseRows.length ? Object.keys(whseRows[0]) : [];
+      var find = function (pats) { for (var p = 0; p < pats.length; p++) { for (var i = 0; i < keys.length; i++) { if (pats[p].test(keys[i])) return keys[i]; } } return null; };
+      var kID = find([/^inventory ?id$/i, /inventoryid/i, /^inventory/i]);
+      var kWH = find([/^warehouse$/i, /warehouse/i]);
+      var kROP = find([/^reorder ?point$/i, /reorder/i]);
+      var kMAX = find([/^max ?qty\.?$/i, /^max ?quantity$/i, /\bmax\b/i]);
+      var kCLS = find([/^replenishment ?class$/i, /replenish.*class/i, /^class$/i]);
+      var kMV = find([/^movement ?class$/i, /movement/i]);
+      var numv = function (v) { var n = parseFloat(String(v == null ? "" : v).replace(/,/g, "")); return isNaN(n) ? 0 : n; };
       var cur = {};
-      (whseRows || []).forEach(function (w) {
-        var id = String(w.InventoryID == null ? "" : w.InventoryID).trim();
-        var wh = String(w.Warehouse == null ? "" : w.Warehouse).trim();
+      whseRows.forEach(function (w) {
+        var id = String(kID ? (w[kID] == null ? "" : w[kID]) : "").trim();
+        var wh = String(kWH ? (w[kWH] == null ? "" : w[kWH]) : "").trim();
         if (!id || !wh) return;
-        cur[id + "|" + wh] = { rop: Number(w.ReorderPoint) || 0, max: Number(w.MaxQty) || 0, cls: String(w.ReplenishmentClass == null ? "" : w.ReplenishmentClass).trim().toUpperCase(), mvmt: String(w.MovementClass == null ? "" : w.MovementClass).trim() };
+        cur[id + "|" + wh] = { rop: kROP ? numv(w[kROP]) : 0, max: kMAX ? numv(w[kMAX]) : 0, cls: String(kCLS ? (w[kCLS] == null ? "" : w[kCLS]) : "").trim().toUpperCase(), mvmt: String(kMV ? (w[kMV] == null ? "" : w[kMV]) : "").trim() };
       });
+      var fieldMap = { rop: kROP, max: kMAX, cls: kCLS, mvmt: kMV, id: kID, wh: kWH, keys: keys };
       var best = {};
       rpRows.forEach(function (rp) {
         var k = rp.pc + "|" + rp.loc; var score = rp.ss + rp.lt + rp.max;
@@ -6500,7 +6511,7 @@ function ReplenishUpdate(props) {
         if (include && (ropOut || maxOut)) outliers.push(rec);
       });
       included.sort(function (a, b) { return a.wh < b.wh ? -1 : a.wh > b.wh ? 1 : (a.id < b.id ? -1 : a.id > b.id ? 1 : 0); });
-      setResult({ included: included, decrease: decrease, outliers: outliers, matched: matched, rpTotal: rpRows.length });
+      setResult({ included: included, decrease: decrease, outliers: outliers, matched: matched, rpTotal: rpRows.length, fieldMap: fieldMap });
       toast("Built " + included.length + " upload rows (" + matched + " matched active items)");
     } catch (err) { toast("Build failed: " + (err && err.message || err), "error"); }
     finally { setBusy(false); }
@@ -6553,7 +6564,7 @@ function ReplenishUpdate(props) {
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
           <div>
             <div style={{ fontSize: 15, fontWeight: 600, color: "#1F2937", marginBottom: 4 }}>Reorder Points (Netstock)</div>
-            <div style={{ fontSize: 13, color: "#6B7280" }}>{rpName ? <span style={{ color: "#059669" }}>{"\u2713"} {rpName} \u00B7 {rpRows.length} rows</span> : "Drag the Reorder Points .xlsx here, or click Upload."}</div>
+            <div style={{ fontSize: 13, color: "#6B7280" }}>{rpName ? <span style={{ color: "#059669" }}>{"\u2713 " + rpName + " \u00B7 " + rpRows.length + " rows"}</span> : "Drag the Reorder Points .xlsx here, or click Upload."}</div>
           </div>
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
             <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={onFile} style={{ display: "none" }} />
@@ -6578,6 +6589,9 @@ function ReplenishUpdate(props) {
           {result.decrease.length ? <button onClick={exportDecrease} style={Object.assign({}, S.btn("ghost"), { background: "#F5F3FF", color: "#6D28D9", border: "1px solid #C4B5FD" })}><IconDL /> Decrease file ({result.decrease.length})</button> : null}
         </span>
       </div>}
+
+      {result && result.fieldMap && (!result.fieldMap.rop || !result.fieldMap.max) && <div style={{ padding: "10px 14px", marginBottom: 16, background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 10, fontSize: 12, color: "#991B1B" }}>{"Couldn't auto-detect the current Reorder Point / Max columns in the whse-replenish feed (current values are showing 0). Fields the feed returned: " + (result.fieldMap.keys || []).join(", ") + ". Tell me which of these is the current Reorder Point and which is Max, and I'll map them exactly."}</div>}
+      {result && result.fieldMap && result.fieldMap.rop && result.fieldMap.max && <div style={{ padding: "8px 14px", marginBottom: 16, background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 10, fontSize: 11, color: "#166534" }}>{"Current values mapped from feed fields \u2014 ROP: \"" + result.fieldMap.rop + "\", Max: \"" + result.fieldMap.max + "\"" + (result.fieldMap.cls ? ", Class: \"" + result.fieldMap.cls + "\"" : "")}</div>}
 
       {result && summary && <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden" })}>
         <div style={{ padding: "10px 16px", fontWeight: 600, fontSize: 13, color: "#1F2937", borderBottom: "1px solid #F3F4F6" }}>Change summary by warehouse</div>
@@ -6608,7 +6622,7 @@ function ReplenishUpdate(props) {
       </div>}
 
       {result && result.outliers.length > 0 && <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden", marginTop: 16, border: "1px solid #FCD34D" })}>
-        <div style={{ padding: "10px 16px", fontWeight: 600, fontSize: 13, color: "#92400E", background: "#FFFBEB", borderBottom: "1px solid #FDE68A" }}>{"\u26A0"} Outliers for review ({result.outliers.length}) \u2014 large increases; these are still in the upload file, just flagged</div>
+        <div style={{ padding: "10px 16px", fontWeight: 600, fontSize: 13, color: "#92400E", background: "#FFFBEB", borderBottom: "1px solid #FDE68A" }}>{"\u26A0 Outliers for review (" + result.outliers.length + ") \u2014 large increases; these are still in the upload file, just flagged"}</div>
         <div style={{ maxHeight: 320, overflow: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead><tr>{["Inventory ID", "Whse", "Class", "ROP now", "ROP new", "ROP %", "Max now", "Max new", "Max %"].map(function (h, i) { return <th key={i} style={Object.assign({}, S.th, { textAlign: i < 3 ? "left" : "right" })}>{h}</th>; })}</tr></thead>
@@ -6620,10 +6634,10 @@ function ReplenishUpdate(props) {
                 <td style={S.td}>{r.cls}</td>
                 <td style={Object.assign({}, S.td, { textAlign: "right" })}>{fmt(r.curROP)}</td>
                 <td style={Object.assign({}, S.td, { textAlign: "right" })}>{fmt(r.newROP)}</td>
-                <td style={Object.assign({}, S.td, { textAlign: "right", color: "#B45309" })}>{rPct == null ? "0\u21920" : (rPct > 0 ? "+" : "") + rPct + "%"}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right", color: "#B45309" })}>{rPct == null ? "new" : (rPct > 0 ? "+" : "") + rPct + "%"}</td>
                 <td style={Object.assign({}, S.td, { textAlign: "right" })}>{fmt(r.curMax)}</td>
                 <td style={Object.assign({}, S.td, { textAlign: "right" })}>{fmt(r.newMax)}</td>
-                <td style={Object.assign({}, S.td, { textAlign: "right", color: "#B45309" })}>{mPct == null ? "0\u2192" : (mPct > 0 ? "+" : "") + mPct + "%"}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right", color: "#B45309" })}>{mPct == null ? "new" : (mPct > 0 ? "+" : "") + mPct + "%"}</td>
               </tr>;
             })}</tbody>
           </table>
