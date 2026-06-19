@@ -6421,6 +6421,239 @@ var FC_METHODS = [
   { id: "F", label: "F - Max of last 3 months x growth (current month only)", short: "Max 3-mo x growth" },
 ];
 
+function ReplenishUpdate(props) {
+  var toast = props.toast, cred = props.cred, lp = props.lp;
+  var S = makeStyles("#7C3AED");
+
+  var _rp = useState([]), rpRows = _rp[0], setRpRows = _rp[1];
+  var _rpn = useState(""), rpName = _rpn[0], setRpName = _rpn[1];
+  var _busy = useState(false), busy = _busy[0], setBusy = _busy[1];
+  var _res = useState(null), result = _res[0], setResult = _res[1];
+  var _all = useState(false), inclAll = _all[0], setInclAll = _all[1];
+  var _drag = useState(false), drag = _drag[0], setDrag = _drag[1];
+  var fileRef = useRef(null);
+
+  function chooseFile() { if (fileRef.current) fileRef.current.click(); }
+  function onFile(e) { var f = e.target.files && e.target.files[0]; if (f) loadRp(f); e.target.value = ""; }
+  function loadRp(file) {
+    var reader = new FileReader();
+    reader.onload = function (ev) {
+      try {
+        var XLSX = require("xlsx");
+        var wb = XLSX.read(ev.target.result, { type: "array" });
+        var ws = wb.Sheets[wb.SheetNames[0]];
+        var aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "" });
+        if (!aoa.length) { toast("That file looks empty", "error"); return; }
+        var hdr = aoa[0].map(function (x) { return String(x).trim(); });
+        var idx = function (name) { for (var i = 0; i < hdr.length; i++) { if (hdr[i].toLowerCase() === name.toLowerCase()) return i; } return -1; };
+        var iP = idx("Product code"), iL = idx("Location code"), iC = idx("Class"), iSS = idx("SS units"), iLT = idx("LT units"), iMax = idx("Maximum level");
+        var missing = []; if (iP < 0) missing.push("Product code"); if (iL < 0) missing.push("Location code"); if (iSS < 0) missing.push("SS units"); if (iLT < 0) missing.push("LT units"); if (iMax < 0) missing.push("Maximum level");
+        if (missing.length) { toast("Reorder Points file is missing: " + missing.join(", "), "error"); return; }
+        var num = function (v) { var n = parseFloat(String(v == null ? "" : v).replace(/,/g, "")); return isNaN(n) ? 0 : n; };
+        var out = [];
+        for (var r = 1; r < aoa.length; r++) {
+          var row = aoa[r]; if (!row || !row.length) continue;
+          var pc = String(row[iP] == null ? "" : row[iP]).trim(); if (!pc) continue;
+          out.push({ pc: pc, loc: String(row[iL] == null ? "" : row[iL]).trim(), cls: String(iC >= 0 ? row[iC] : "").trim().toUpperCase(), ss: num(row[iSS]), lt: num(row[iLT]), max: num(row[iMax]) });
+        }
+        setRpRows(out); setRpName(file.name); setResult(null);
+        toast("Loaded " + out.length + " Reorder Point rows");
+      } catch (err) { toast("Error reading file: " + err.message, "error"); }
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  async function build() {
+    if (!rpRows.length) { toast("Upload the Netstock Reorder Points file first", "error"); return; }
+    if (!cred || !cred.username) { if (lp) lp(); return; }
+    setBusy(true);
+    try {
+      var whseRows = await fetchAcumatica("whse-replenish", null, cred.username, cred.password);
+      var cur = {};
+      (whseRows || []).forEach(function (w) {
+        var id = String(w.InventoryID == null ? "" : w.InventoryID).trim();
+        var wh = String(w.Warehouse == null ? "" : w.Warehouse).trim();
+        if (!id || !wh) return;
+        cur[id + "|" + wh] = { rop: Number(w.ReorderPoint) || 0, max: Number(w.MaxQty) || 0, cls: String(w.ReplenishmentClass == null ? "" : w.ReplenishmentClass).trim().toUpperCase(), mvmt: String(w.MovementClass == null ? "" : w.MovementClass).trim() };
+      });
+      var best = {};
+      rpRows.forEach(function (rp) {
+        var k = rp.pc + "|" + rp.loc; var score = rp.ss + rp.lt + rp.max;
+        if (!best[k] || score > best[k]._score) best[k] = Object.assign({}, rp, { _score: score });
+      });
+      var included = [], decrease = [], outliers = [], matched = 0;
+      Object.keys(best).forEach(function (k) {
+        var rp = best[k]; var c = cur[rp.pc + "|" + rp.loc];
+        if (!c) return;
+        if (["A", "B", "C"].indexOf(c.cls) === -1) return;
+        matched++;
+        var newSS = rp.ss; var newROP = rp.ss + rp.lt; if (newROP < 1) newROP = 1; var newMax = rp.max; if (newMax < 2) newMax = 2;
+        var curROP = c.rop, curMax = c.max;
+        var increases = (newROP > curROP) || (newMax > curMax);
+        var bothDrop15 = (newROP < curROP * 0.85) && (newMax < curMax * 0.85);
+        var include = inclAll ? true : (increases && !bothDrop15);
+        var rec = { id: rp.pc, wh: rp.loc, cls: c.cls, newSS: newSS, newROP: newROP, newMax: newMax, curROP: curROP, curMax: curMax, mvmt: c.mvmt };
+        if (include) included.push(rec);
+        if ((newROP < curROP) && (newMax < curMax)) decrease.push(rec);
+        var ropOut = (curROP > 0 && newROP > curROP * 3) || (curROP === 0 && newROP > 50);
+        var maxOut = (curMax > 0 && newMax > curMax * 3) || (curMax === 0 && newMax > 100);
+        if (include && (ropOut || maxOut)) outliers.push(rec);
+      });
+      included.sort(function (a, b) { return a.wh < b.wh ? -1 : a.wh > b.wh ? 1 : (a.id < b.id ? -1 : a.id > b.id ? 1 : 0); });
+      setResult({ included: included, decrease: decrease, outliers: outliers, matched: matched, rpTotal: rpRows.length });
+      toast("Built " + included.length + " upload rows (" + matched + " matched active items)");
+    } catch (err) { toast("Build failed: " + (err && err.message || err), "error"); }
+    finally { setBusy(false); }
+  }
+
+  function ldate() { var d = new Date(); return String(d.getMonth() + 1).padStart(2, "0") + "/" + String(d.getDate()).padStart(2, "0") + "/" + d.getFullYear(); }
+  function stamp() { var d = new Date(); return String(d.getMonth() + 1).padStart(2, "0") + String(d.getDate()).padStart(2, "0") + d.getFullYear(); }
+  var MAIN_HDR = ["Inventory ID", "Replenishment Warehouse", "Override Settings", "Replenishment Class", "Seasonality", "Overide Safety Stock", "Safety Stock", "Overide Reorder Point", "Reorder Point", "Overide Max Quantity", "Max Quantity", "Overide Launch Date", "Launch Date"];
+  function rowAoa(r, ld) { return [r.id, r.wh, true, r.cls, "None", true, r.newSS, true, r.newROP, true, r.newMax, true, ld]; }
+  function exportMain() {
+    if (!result || !result.included.length) { toast("Build first", "error"); return; }
+    var XLSX = require("xlsx"); var ld = ldate();
+    var aoa = [MAIN_HDR].concat(result.included.map(function (r) { return rowAoa(r, ld); }));
+    var ws = XLSX.utils.aoa_to_sheet(aoa); var wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "DATA");
+    XLSX.writeFile(wb, "IN_Update_Whse_Replenish_" + stamp() + ".xlsx");
+  }
+  function exportDecrease() {
+    if (!result || !result.decrease.length) { toast("No decrease rows to export", "error"); return; }
+    var XLSX = require("xlsx"); var ld = ldate();
+    var hdr = MAIN_HDR.concat(["ROP % Change", "Max Qty % Change", "Movement Class"]);
+    var aoa = [hdr].concat(result.decrease.map(function (r) {
+      var rp = r.curROP ? Math.round((r.newROP - r.curROP) / r.curROP * 1000) / 10 : "";
+      var mp = r.curMax ? Math.round((r.newMax - r.curMax) / r.curMax * 1000) / 10 : "";
+      return rowAoa(r, ld).concat([rp, mp, r.mvmt]);
+    }));
+    var ws = XLSX.utils.aoa_to_sheet(aoa); var wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "DATA");
+    XLSX.writeFile(wb, "IN_Update_Whse_Replenish_DECREASE_" + stamp() + ".xlsx");
+  }
+
+  var summary = useMemo(function () {
+    if (!result) return null;
+    var byWh = {}, counts = {};
+    result.included.forEach(function (r) {
+      if (!byWh[r.wh]) byWh[r.wh] = { items: 0, curROP: 0, newROP: 0, curMax: 0, newMax: 0 };
+      var b = byWh[r.wh]; b.items++; b.curROP += r.curROP; b.newROP += r.newROP; b.curMax += r.curMax; b.newMax += r.newMax;
+      if (!counts[r.wh]) counts[r.wh] = { A: 0, B: 0, C: 0, total: 0 };
+      if (counts[r.wh][r.cls] != null) counts[r.wh][r.cls]++; counts[r.wh].total++;
+    });
+    return { byWh: byWh, counts: counts };
+  }, [result]);
+
+  var pct = function (cur, nw) { return cur ? (Math.round((nw - cur) / cur * 1000) / 10) : null; };
+  var fmt = function (n) { return (Math.round(n) || 0).toLocaleString(); };
+
+  return (
+    <div>
+      <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 16 }}>Upload the Netstock <b>Reorder Points</b> export. The Hub pulls current replenishment settings live from Acumatica, joins on Inventory ID + Warehouse, recalculates SS / ROP / Max, applies the include/exclude rules, and produces the <b>IN Update Whse Replenish</b> upload file plus summaries.</div>
+
+      <div onDragOver={function (e) { e.preventDefault(); setDrag(true); }} onDragLeave={function (e) { e.preventDefault(); setDrag(false); }} onDrop={function (e) { e.preventDefault(); setDrag(false); var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if (f) loadRp(f); }} style={Object.assign({}, S.card, drag ? { borderColor: "#7C3AED", borderStyle: "dashed", background: "#F5F3FF" } : {})}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 600, color: "#1F2937", marginBottom: 4 }}>Reorder Points (Netstock)</div>
+            <div style={{ fontSize: 13, color: "#6B7280" }}>{rpName ? <span style={{ color: "#059669" }}>{"\u2713"} {rpName} \u00B7 {rpRows.length} rows</span> : "Drag the Reorder Points .xlsx here, or click Upload."}</div>
+          </div>
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={onFile} style={{ display: "none" }} />
+            <button onClick={chooseFile} style={S.btn()}><IconUpload /> {rpName ? "Replace file" : "Upload file"}</button>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap", margin: "16px 0" }}>
+        <button onClick={build} disabled={busy || !rpRows.length} style={Object.assign({}, S.btn(), (busy || !rpRows.length) ? { opacity: 0.6, cursor: "default" } : {})}>{busy ? <><Spinner color="#fff" size={14} /> Building...</> : "Build upload file"}</button>
+        <button onClick={function () { setInclAll(!inclAll); }} title="Include every matched item regardless of whether values went up or down" style={{ padding: "7px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", border: "1px solid " + (inclAll ? "#C4B5FD" : "#E5E7EB"), background: inclAll ? "#F5F3FF" : "#fff", color: inclAll ? "#6D28D9" : "#6B7280" }}>{inclAll ? "\u2713 " : ""}Include all (ignore direction)</button>
+        <span style={{ fontSize: 12, color: "#9CA3AF" }}>Current settings are pulled live from Acumatica on Build.</span>
+      </div>
+
+      {result && <div style={{ display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap", padding: "10px 18px", background: "#FFFFFF", border: "0.5px solid #E5E7EB", borderRadius: 12, marginBottom: 16, boxShadow: "0 1px 4px rgba(15,23,42,0.06)" }}>
+        <span style={{ fontSize: 12, color: "#6B7280" }}>Matched <b style={{ color: "#1F2937" }}>{fmt(result.matched)}</b></span>
+        <span style={{ fontSize: 12, color: "#6B7280" }}>Included <b style={{ color: "#7C3AED" }}>{fmt(result.included.length)}</b></span>
+        <span style={{ fontSize: 12, color: "#6B7280" }}>Decrease candidates <b style={{ color: "#1F2937" }}>{fmt(result.decrease.length)}</b></span>
+        <span style={{ fontSize: 12, color: "#6B7280" }}>Outliers <b style={{ color: result.outliers.length ? "#B45309" : "#1F2937" }}>{fmt(result.outliers.length)}</b></span>
+        <span style={{ marginLeft: "auto", display: "flex", gap: 10 }}>
+          <button onClick={exportMain} style={S.btn()}><IconDL /> Upload file ({result.included.length})</button>
+          {result.decrease.length ? <button onClick={exportDecrease} style={Object.assign({}, S.btn("ghost"), { background: "#F5F3FF", color: "#6D28D9", border: "1px solid #C4B5FD" })}><IconDL /> Decrease file ({result.decrease.length})</button> : null}
+        </span>
+      </div>}
+
+      {result && summary && <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden" })}>
+        <div style={{ padding: "10px 16px", fontWeight: 600, fontSize: 13, color: "#1F2937", borderBottom: "1px solid #F3F4F6" }}>Change summary by warehouse</div>
+        <div style={{ overflow: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead><tr>{["Warehouse", "Items", "A", "B", "C", "ROP now", "ROP new", "ROP \u0394", "ROP %", "Max now", "Max new", "Max \u0394", "Max %"].map(function (h, i) { return <th key={i} style={Object.assign({}, S.th, { textAlign: i === 0 ? "left" : "right" })}>{h}</th>; })}</tr></thead>
+            <tbody>{Object.keys(summary.byWh).sort().map(function (wh) {
+              var b = summary.byWh[wh], c = summary.counts[wh] || { A: 0, B: 0, C: 0 };
+              var rPct = pct(b.curROP, b.newROP), mPct = pct(b.curMax, b.newMax);
+              return <tr key={wh}>
+                <td style={Object.assign({}, S.td, { fontWeight: 600 })}>{wh}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right" })}>{b.items}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right" })}>{c.A}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right" })}>{c.B}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right" })}>{c.C}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right" })}>{fmt(b.curROP)}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right" })}>{fmt(b.newROP)}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right" })}>{fmt(b.newROP - b.curROP)}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right", color: rPct == null ? "#9CA3AF" : rPct >= 0 ? "#059669" : "#DC2626" })}>{rPct == null ? "-" : (rPct > 0 ? "+" : "") + rPct + "%"}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right" })}>{fmt(b.curMax)}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right" })}>{fmt(b.newMax)}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right" })}>{fmt(b.newMax - b.curMax)}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right", color: mPct == null ? "#9CA3AF" : mPct >= 0 ? "#059669" : "#DC2626" })}>{mPct == null ? "-" : (mPct > 0 ? "+" : "") + mPct + "%"}</td>
+              </tr>;
+            })}</tbody>
+          </table>
+        </div>
+      </div>}
+
+      {result && result.outliers.length > 0 && <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden", marginTop: 16, border: "1px solid #FCD34D" })}>
+        <div style={{ padding: "10px 16px", fontWeight: 600, fontSize: 13, color: "#92400E", background: "#FFFBEB", borderBottom: "1px solid #FDE68A" }}>{"\u26A0"} Outliers for review ({result.outliers.length}) \u2014 large increases; these are still in the upload file, just flagged</div>
+        <div style={{ maxHeight: 320, overflow: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead><tr>{["Inventory ID", "Whse", "Class", "ROP now", "ROP new", "ROP %", "Max now", "Max new", "Max %"].map(function (h, i) { return <th key={i} style={Object.assign({}, S.th, { textAlign: i < 3 ? "left" : "right" })}>{h}</th>; })}</tr></thead>
+            <tbody>{result.outliers.map(function (r, i) {
+              var rPct = pct(r.curROP, r.newROP), mPct = pct(r.curMax, r.newMax);
+              return <tr key={i}>
+                <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 12 })}>{r.id}</td>
+                <td style={S.td}>{r.wh}</td>
+                <td style={S.td}>{r.cls}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right" })}>{fmt(r.curROP)}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right" })}>{fmt(r.newROP)}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right", color: "#B45309" })}>{rPct == null ? "0\u21920" : (rPct > 0 ? "+" : "") + rPct + "%"}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right" })}>{fmt(r.curMax)}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right" })}>{fmt(r.newMax)}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right", color: "#B45309" })}>{mPct == null ? "0\u2192" : (mPct > 0 ? "+" : "") + mPct + "%"}</td>
+              </tr>;
+            })}</tbody>
+          </table>
+        </div>
+      </div>}
+
+      {result && <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden", marginTop: 16 })}>
+        <div style={{ padding: "10px 16px", fontWeight: 600, fontSize: 13, color: "#1F2937", borderBottom: "1px solid #F3F4F6" }}>Upload preview ({result.included.length})</div>
+        <div style={{ maxHeight: 480, overflow: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead><tr>{["Inventory ID", "Whse", "Class", "SS", "ROP now", "ROP new", "Max now", "Max new"].map(function (h, i) { return <th key={i} style={Object.assign({}, S.th, { textAlign: i < 3 ? "left" : "right" })}>{h}</th>; })}</tr></thead>
+            <tbody>{result.included.map(function (r, i) {
+              return <tr key={i}>
+                <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 12 })}>{r.id}</td>
+                <td style={S.td}>{r.wh}</td>
+                <td style={S.td}>{r.cls}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right" })}>{fmt(r.newSS)}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right", color: "#9CA3AF" })}>{fmt(r.curROP)}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right", fontWeight: 600 })}>{fmt(r.newROP)}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right", color: "#9CA3AF" })}>{fmt(r.curMax)}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right", fontWeight: 600 })}>{fmt(r.newMax)}</td>
+              </tr>;
+            })}</tbody>
+          </table>
+        </div>
+      </div>}
+    </div>
+  );
+}
+
 function ForecastingTool(props) {
   var toast = props.toast, cred = props.cred, ok = props.ok, lp = props.lp;
   var S = makeStyles("#0EA5E9");
@@ -7398,8 +7631,8 @@ export default function Hub() {
   );
 
   var isWH = page in WH;
-  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "backorder-resolver" ? "#14B8A6" : page === "po-import" ? "#06B6D4" : page === "cycle-count" ? "#14B8A6" : page === "fuze-tracker" ? "#F59E0B" : page === "ggm-tracker" ? "#8B5CF6" : page === "hills-pawtree" ? "#10B981" : page === "truckloader" ? "#D97706" : page === "oos-tracker" ? "#EF4444" : page === "vendor-settings" ? "#6366F1" : page === "forecasting" ? "#0EA5E9" : page === "how-to" ? "#6B7280" : "#3B82F6";
-  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "backorder-resolver" ? "Backorder Resolver" : page === "po-import" ? "Generic PO Translator" : page === "cycle-count" ? "Cycle Counting" : page === "fuze-tracker" ? "Fuze Tracker" : page === "ggm-tracker" ? "GGM Tracker" : page === "hills-pawtree" ? "Hills & Pawtree Tracker" : page === "truckloader" ? "Truckloader" : page === "oos-tracker" ? "OOS Tracker" : page === "vendor-settings" ? "Vendor Settings" : page === "forecasting" ? "Forecasting" : page === "how-to" ? "How-To Guide" : showLogin ? "Login" : "Vendor Settings";
+  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "backorder-resolver" ? "#14B8A6" : page === "po-import" ? "#06B6D4" : page === "cycle-count" ? "#14B8A6" : page === "fuze-tracker" ? "#F59E0B" : page === "ggm-tracker" ? "#8B5CF6" : page === "hills-pawtree" ? "#10B981" : page === "truckloader" ? "#D97706" : page === "oos-tracker" ? "#EF4444" : page === "vendor-settings" ? "#6366F1" : page === "forecasting" ? "#0EA5E9" : page === "replenish-update" ? "#7C3AED" : page === "how-to" ? "#6B7280" : "#3B82F6";
+  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "backorder-resolver" ? "Backorder Resolver" : page === "po-import" ? "Generic PO Translator" : page === "cycle-count" ? "Cycle Counting" : page === "fuze-tracker" ? "Fuze Tracker" : page === "ggm-tracker" ? "GGM Tracker" : page === "hills-pawtree" ? "Hills & Pawtree Tracker" : page === "truckloader" ? "Truckloader" : page === "oos-tracker" ? "OOS Tracker" : page === "vendor-settings" ? "Vendor Settings" : page === "forecasting" ? "Forecasting" : page === "replenish-update" ? "Replenishment Update" : page === "how-to" ? "How-To Guide" : showLogin ? "Login" : "Vendor Settings";
 
   function SideLink(p) {
     var active = page === p.id && !showLogin;
@@ -7425,7 +7658,7 @@ export default function Hub() {
             { key: "hills", label: "Hills Tools", items: [{ id: "hills-pawtree", label: "Hills & Pawtree", color: "#10B981" }, { id: "truckloader", label: "Truckloader", color: "#D97706" }] },
             { key: "oos", label: "OOS", items: [{ id: "oos-tracker", label: "OOS Tracker", color: "#EF4444" }] },
             { key: "tracking", label: "Tracking", items: [{ id: "fuze-tracker", label: "Fuze Tracker", color: "#F59E0B" }, { id: "ggm-tracker", label: "GGM Tracker", color: "#8B5CF6" }] },
-            { key: "inventory", label: "Inventory Tools", items: [{ id: "forecasting", label: "Forecasting", color: "#0EA5E9" }, { id: "short-dating", label: "Short-Dating", color: "#E879F9" }, { id: "backorder", label: "Backorders", color: "#F97316" }, { id: "backorder-resolver", label: "Backorder Resolver", color: "#14B8A6" }] },
+            { key: "inventory", label: "Inventory Tools", items: [{ id: "forecasting", label: "Forecasting", color: "#0EA5E9" }, { id: "replenish-update", label: "Replenishment Update", color: "#7C3AED" }, { id: "short-dating", label: "Short-Dating", color: "#E879F9" }, { id: "backorder", label: "Backorders", color: "#F97316" }, { id: "backorder-resolver", label: "Backorder Resolver", color: "#14B8A6" }] },
           ];
           return sections.map(function(sec, si) {
             var hasActive = sec.items.some(function(item) { return page === item.id && !showLogin; });
@@ -7487,6 +7720,7 @@ export default function Hub() {
           {!showLogin && page === "oos-tracker" && <OOSTracker toast={showToast} cred={cred} />}
           {!showLogin && page === "backorder-resolver" && <BackorderResolver toast={showToast} cred={cred} />}
           {!showLogin && page === "forecasting" && <ForecastingTool toast={showToast} cred={cred} ok={ok} lp={promptLogin} />}
+          {!showLogin && page === "replenish-update" && <ReplenishUpdate toast={showToast} cred={cred} ok={ok} lp={promptLogin} />}
           {!showLogin && (page === "vendor-settings" || page === "vendor-contacts" || page === "rules") && <VendorSettingsPage contacts={vendorContacts} updateContacts={updateVendorContacts} channels={vendorChannels} updateChannels={updateVendorChannels} shipRules={shipRules} updateShipRules={updateShipRules} toast={showToast} />}
           {!showLogin && page === "how-to" && <HowToGuide toast={showToast} />}
         </div>
