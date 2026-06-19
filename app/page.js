@@ -6746,8 +6746,11 @@ function ForecastingTool(props) {
       var ws = XLSX.utils.aoa_to_sheet([keptHeaders].concat(tpFormatted));
       var wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Report data");
-      var d = new Date().toISOString().slice(0, 10);
-      XLSX.writeFile(wb, "TPForecast_" + (warehouse || "all") + "_" + d + ".xlsx");
+      var _wh = warehouse || "";
+      var whShort = _wh.indexOf("-") !== -1 ? _wh.split("-").pop() : _wh; if (!whShort) whShort = "all";
+      var _d = new Date();
+      var md = (_d.getMonth() + 1) + "-" + _d.getDate();
+      XLSX.writeFile(wb, "TP Forecast - " + whShort + " " + md + ".xlsx");
     } catch (err) { toast("Export failed: " + err.message, "error"); }
   }
 
@@ -6946,7 +6949,7 @@ function ForecastingTool(props) {
   return <div>
     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 20 }}>
       <button onClick={function () { setTab("forecast"); }} style={S.pill(tab === "forecast", "#0EA5E9")}>Forecast</button>
-      {mode !== "non" && <button onClick={function () { setTab("tp"); }} style={S.pill(tab === "tp", "#0EA5E9")}>TP Forecast</button>}
+      {mode !== "non" && <button onClick={function () { setTab("tp"); }} style={S.pill(tab === "tp", "#0EA5E9")}>TP Forecast for Generics</button>}
       <button onClick={tab === "tp" ? clearTp : resetAll} title={tab === "tp" ? "Clear the TP Forecast tab only (does not affect the Forecast tab)" : "Clear loaded files, results, and selections on both tabs"} style={Object.assign({}, S.btn("ghost"), { marginLeft: "auto", fontSize: 12, color: "#DC2626", borderColor: "#FCA5A5" })}>{tab === "tp" ? "Clear" : "Reset"}</button>
     </div>
 
