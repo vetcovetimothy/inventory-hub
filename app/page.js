@@ -6440,6 +6440,7 @@ function ForecastingTool(props) {
   var _gr = useState("1.10"), growth = _gr[0], setGrowth = _gr[1];
   var _tc = useState([]), targetCols = _tc[0], setTargetCols = _tc[1];
   var _rm = useState({}), rowMethod = _rm[0], setRowMethod = _rm[1];
+  var _rg = useState({}), rowGrowth = _rg[0], setRowGrowth = _rg[1];
   var _me = useState({}), manualEdits = _me[0], setManualEdits = _me[1];
   var _dbf = useState(false), dropBelowFinal = _dbf[0], setDropBelowFinal = _dbf[1];
   // Sales-exceeding-forecast overlay
@@ -6455,6 +6456,7 @@ function ForecastingTool(props) {
   var _cf = useState([]), classFilter = _cf[0], setClassFilter = _cf[1];
   var _sdi = useState({}), sdInfo = _sdi[0], setSdInfo = _sdi[1];
   var _bki = useState({}), bkoInfo = _bki[0], setBkoInfo = _bki[1];
+  var _pd = useState(function () { var d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }), pullDate = _pd[0], setPullDate = _pd[1];
   // Phase 3 (TP Forecast) state
   var _tph = useState([]), tpHeaders = _tph[0], setTpHeaders = _tph[1];
   var _tpr = useState([]), tpRows = _tpr[0], setTpRows = _tpr[1];
@@ -6472,11 +6474,14 @@ function ForecastingTool(props) {
   var descCol = useMemo(function () { return fcIdxExact(headers, "Description"); }, [headers]);
   var classCol = useMemo(function () { return fcIdxExact(headers, "Classification"); }, [headers]);
 
-  // Date facts for Method A (today excluded; ~5am pull means today is incomplete).
+  // Date facts for Method A (pull-day excluded; ~5am pull means the pull day is incomplete).
+  // Uses the Netstock pull date (editable) so MTD divides by the right number of elapsed days,
+  // even when Netstock didn't refresh and the upload is older than today.
   var now = new Date();
-  var dom = now.getDate();
+  var pull = /^\d{4}-\d{2}-\d{2}$/.test(pullDate || "") ? new Date(pullDate + "T00:00:00") : now;
+  var dom = pull.getDate();
   var denom = dom - 1; if (denom < 1) denom = 1;
-  var daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  var daysInMonth = new Date(pull.getFullYear(), pull.getMonth() + 1, 0).getDate();
 
   function defaultTargetCols(an) {
     if (!an || !an.uploads.length) return [];
@@ -6493,7 +6498,7 @@ function ForecastingTool(props) {
     (async function () {
       try { var inp = await idbGet("fc-input"); if (inp && inp.headers) { setHeaders(inp.headers); setRows(inp.rows || []); setFileName(inp.fileName || ""); setDetectedWh(inp.detectedWh || ""); } } catch (e) {}
       try { var res = await idbGet("fc-result"); if (res) { if (res.formattedRows) setFormatted(res.formattedRows); if (res.stats) setStats(res.stats); } } catch (e) {}
-      try { var fc = await idbGet("fc-forecast"); if (fc) { if (fc.globalMethod) setGlobalMethod(fc.globalMethod); if (fc.growth) setGrowth(fc.growth); if (fc.targetCols) setTargetCols(fc.targetCols); if (fc.rowMethod) setRowMethod(fc.rowMethod); if (fc.manualEdits) setManualEdits(fc.manualEdits); if (fc.dropBelowFinal != null) setDropBelowFinal(!!fc.dropBelowFinal); if (fc.sefOnly != null) setSefOnly(!!fc.sefOnly); } } catch (e) {}
+      try { var fc = await idbGet("fc-forecast"); if (fc) { if (fc.globalMethod) setGlobalMethod(fc.globalMethod); if (fc.growth) setGrowth(fc.growth); if (fc.targetCols) setTargetCols(fc.targetCols); if (fc.rowMethod) setRowMethod(fc.rowMethod); if (fc.rowGrowth) setRowGrowth(fc.rowGrowth); if (fc.manualEdits) setManualEdits(fc.manualEdits); if (fc.dropBelowFinal != null) setDropBelowFinal(!!fc.dropBelowFinal); if (fc.sefOnly != null) setSefOnly(!!fc.sefOnly); } } catch (e) {}
       try { var sef = await idbGet("fc-sef"); if (sef && sef.codes) { setSefCodes(sef.codes); setSefFileName(sef.fileName || ""); } } catch (e) {}
       try { var sb = await idbGet("fc-sdbko"); if (sb) { if (sb.sd) setSdInfo(sb.sd); if (sb.bko) setBkoInfo(sb.bko); } } catch (e) {}
       try { var tpi = await idbGet("fc-tp-input"); if (tpi && tpi.headers) { setTpHeaders(tpi.headers); setTpRows(tpi.rows || []); setTpFileName(tpi.fileName || ""); if (tpi.finalCol != null) setTpFinalCol(tpi.finalCol); } } catch (e) {}
@@ -6510,8 +6515,8 @@ function ForecastingTool(props) {
   // persist Phase-2 working state
   useEffect(function () {
     if (!headers.length) return;
-    idbSet("fc-forecast", { globalMethod: globalMethod, growth: growth, targetCols: targetCols, rowMethod: rowMethod, manualEdits: manualEdits, dropBelowFinal: dropBelowFinal, sefOnly: sefOnly }).catch(function () {});
-  }, [globalMethod, growth, targetCols, rowMethod, manualEdits, dropBelowFinal, sefOnly]);
+    idbSet("fc-forecast", { globalMethod: globalMethod, growth: growth, targetCols: targetCols, rowMethod: rowMethod, rowGrowth: rowGrowth, manualEdits: manualEdits, dropBelowFinal: dropBelowFinal, sefOnly: sefOnly }).catch(function () {});
+  }, [globalMethod, growth, targetCols, rowMethod, rowGrowth, manualEdits, dropBelowFinal, sefOnly]);
 
   function chooseFile() { if (fileRef.current) fileRef.current.click(); }
 
@@ -6534,7 +6539,7 @@ function ForecastingTool(props) {
         setFormatted(null); setStats(null);
         setSortOrder(null); setSortKey(""); setQuery(""); setClassFilter([]);
         // new file: clear per-row forecasting overrides, reset fill-month default
-        setRowMethod({}); setManualEdits({}); setTargetCols(defaultTargetCols(fcAnchors(hdr)));
+        setRowMethod({}); setRowGrowth({}); setManualEdits({}); setTargetCols(defaultTargetCols(fcAnchors(hdr)));
         idbSet("fc-input", { headers: hdr, rows: dataRows, fileName: file.name, detectedWh: dw }).catch(function () {});
         idbDel("fc-result").catch(function () {}); idbDel("fc-forecast").catch(function () {});
         toast("Loaded " + dataRows.length + " forecast rows" + (dw ? " (" + dw + ")" : ""));
@@ -6624,7 +6629,7 @@ function ForecastingTool(props) {
       setFormatted(kept); setStats(st);
       setSortOrder(null); setSortKey(""); setQuery(""); setClassFilter([]);
       // rows changed: clear stale per-row overrides
-      setRowMethod({}); setManualEdits({});
+      setRowMethod({}); setRowGrowth({}); setManualEdits({});
       idbSet("fc-result", { formattedRows: kept, stats: st }).catch(function () {});
       toast("Kept " + kept.length + " of " + rows.length + " rows for " + warehouse);
     } catch (err) {
@@ -6741,20 +6746,26 @@ function ForecastingTool(props) {
 
   // ── method engine ──
   var growthMult = (function () { var g = parseFloat(growth); return isNaN(g) ? 1 : g; })();
-  function methodValueForMonth(row, m, num) {
+  var growthRelevant = globalMethod === "B" || globalMethod === "F" || Object.keys(rowMethod).some(function (k) { return rowMethod[k] === "B" || rowMethod[k] === "F"; });
+  function methodValueForMonth(row, m, num, gm) {
+    if (gm == null) gm = growthMult;
     if (m === "A") { if (num !== anchorNum) return null; var mtd = fcNum(row, anchors.mtd); if (mtd == null) return null; return (mtd / denom) * daysInMonth; }
-    if (m === "B") { var lm = fcNum(row, anchors.lastHist); if (lm == null) return null; var step = num - anchorNum + 1; if (step < 1) step = 1; return lm * Math.pow(growthMult, step); }
+    if (m === "B") { var lm = fcNum(row, anchors.lastHist); if (lm == null) return null; var step = num - anchorNum + 1; if (step < 1) step = 1; return lm * Math.pow(gm, step); }
     if (m === "C") { var fi = anchors.finals[num]; return fi == null ? null : fcNum(row, fi); }
     if (m === "D") { var vals = anchors.trail3.map(function (i) { return fcNum(row, i); }).filter(function (v) { return v != null; }); if (!vals.length) return null; return vals.reduce(function (a, b) { return a + b; }, 0) / vals.length; }
     if (m === "E") { var lg = fcNum(row, anchors.lastHist); return lg == null ? null : lg; }
-    if (m === "F") { var hv = anchors.trail3.map(function (i) { return fcNum(row, i); }).filter(function (v) { return v != null; }); if (!hv.length) return null; return Math.max.apply(null, hv) * growthMult; }
+    if (m === "F") { var hv = anchors.trail3.map(function (i) { return fcNum(row, i); }).filter(function (v) { return v != null; }); if (!hv.length) return null; return Math.max.apply(null, hv) * gm; }
     return null;
   }
   function rowKey(row) { return String(row[productCol] == null ? "" : row[productCol]); }
   function computedForMonth(row, num) {
-    var m = rowMethod[rowKey(row)] || globalMethod;
+    var rk = rowKey(row);
+    var rowM = rowMethod[rk];
+    var m = rowM || globalMethod;
     if (!m || m === "none") return null;
-    var v = methodValueForMonth(row, m, num); return v == null ? null : Math.round(v);
+    var gm = growthMult;
+    if ((rowM === "B" || rowM === "F") && rowGrowth[rk] != null && rowGrowth[rk] !== "") { var pg = parseFloat(rowGrowth[rk]); if (!isNaN(pg)) gm = pg; }
+    var v = methodValueForMonth(row, m, num, gm); return v == null ? null : Math.round(v);
   }
   function effectiveForMonth(row, num) {
     var key = rowKey(row) + "@" + num;
@@ -6830,6 +6841,7 @@ function ForecastingTool(props) {
   function uploadNum(colIdx) { for (var i = 0; i < anchors.uploads.length; i++) { if (anchors.uploads[i].idx === colIdx) return anchors.uploads[i].num; } return null; }
   function setManualM(k, num, v) { var key = k + "@" + num; var u = Object.assign({}, manualEdits); u[key] = (v == null ? "" : v); setManualEdits(u); }
   function setRowM(k, v) { var u = Object.assign({}, rowMethod); if (!v) delete u[k]; else u[k] = v; setRowMethod(u); }
+  function setRowG(k, v) { var u = Object.assign({}, rowGrowth); if (v == null || v === "") delete u[k]; else u[k] = v; setRowGrowth(u); }
   var anchorIdx = (function () {
     var monShort = now.toLocaleString("en-US", { month: "short" });
     var yr = String(now.getFullYear());
@@ -6847,14 +6859,14 @@ function ForecastingTool(props) {
     setGlobalMethod(v);
     if (v !== "B") setTargetCols(anchorIdx != null ? [anchorIdx] : []);
   }
-  function clearOverrides() { setRowMethod({}); setManualEdits({}); toast("Cleared per-row methods and manual edits"); }
+  function clearOverrides() { setRowMethod({}); setRowGrowth({}); setManualEdits({}); toast("Cleared per-row methods and manual edits"); }
 
   function resetAll() {
     var hasData = headers.length || rows.length || tpRows.length || formatted || tpFormatted || fileName || tpFileName;
     if (hasData && !window.confirm("Reset the Forecasting tool? This clears the loaded file(s), results, and selections on both tabs.")) return;
     setHeaders([]); setRows([]); setFileName(""); setDetectedWh(""); setWarehouse("");
     setMode("non"); setFormatted(null); setStats(null); setBusy(false); setTab("forecast");
-    setGlobalMethod("none"); setGrowth("1.10"); setTargetCols([]); setRowMethod({}); setManualEdits({}); setDropBelowFinal(false);
+    setGlobalMethod("none"); setGrowth("1.10"); setTargetCols([]); setRowMethod({}); setRowGrowth({}); setManualEdits({}); setDropBelowFinal(false);
     setSefCodes([]); setSefFileName(""); setSefOnly(false);
     setQuery(""); setClassFilter([]); setSortOrder(null); setSortKey("");
     setSdInfo({}); setBkoInfo({});
@@ -7055,7 +7067,8 @@ function ForecastingTool(props) {
         <span style={{ fontSize: 12, color: "#6B7280" }}>Forecasted <b style={{ color: "#059669", fontVariantNumeric: "tabular-nums" }}>{fcFmt(filledCount)}</b></span>
         <span style={{ width: 1, height: 16, background: "#E5E7EB" }} />
         <span style={{ fontSize: 12, color: "#6B7280" }}>Strategy <b style={{ color: "#1F2937" }}>{globalMethod === "none" ? "None" : ((FC_METHODS.filter(function (x) { return x.id === globalMethod; })[0] || {}).short || globalMethod)}</b></span>
-        <span style={{ fontSize: 12, color: "#6B7280", marginLeft: "auto" }}>Filling <b style={{ color: "#1F2937" }}>{targetCols.map(function (c) { var u = anchors.uploads.filter(function (x) { return x.idx === c; })[0]; return u ? u.label : ""; }).filter(Boolean).join(", ") || "-"}</b></span>
+        {(function () { var d = new Date(); var t = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); var notToday = pullDate !== t; return <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "#6B7280", marginLeft: "auto" }} title="Date the Netstock forecast was last pulled \u2014 MTD run-rate divides by the days elapsed up to this date"><span>Netstock pulled</span><input type="date" value={pullDate} max={t} onChange={function (e) { setPullDate(e.target.value || t); }} style={{ fontSize: 12, padding: "3px 6px", borderRadius: 6, fontFamily: "inherit", color: notToday ? "#92400E" : "#1F2937", background: notToday ? "#FEF3C7" : "#fff", border: "1px solid " + (notToday ? "#FCD34D" : "#D1D5DB") }} />{notToday ? <span style={{ fontSize: 10, color: "#92400E", fontWeight: 700 }}>not today</span> : null}</span>; })()}
+        <span style={{ fontSize: 12, color: "#6B7280" }}>Filling <b style={{ color: "#1F2937" }}>{targetCols.map(function (c) { var u = anchors.uploads.filter(function (x) { return x.idx === c; })[0]; return u ? u.label : ""; }).filter(Boolean).join(", ") || "-"}</b></span>
       </div>}
 
       {formatted && formatted.length > 0 && <div style={Object.assign({}, S.card, { background: PANEL_BG, border: "0.5px solid " + PANEL_BORDER, borderBottom: "none", borderRadius: "14px 14px 0 0", marginBottom: 0 })}>
@@ -7067,9 +7080,9 @@ function ForecastingTool(props) {
               {FC_METHODS.map(function (m) { return <option key={m.id} value={m.id}>{m.label}</option>; })}
             </select>
           </div>
-          <div style={{ position: "relative", opacity: (globalMethod === "B" || globalMethod === "F") ? 1 : 0.4 }}>
+          <div style={{ position: "relative", opacity: growthRelevant ? 1 : 0.4 }}>
             <label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 6 }}>Growth (multiplier)</label>
-            <input value={growth} disabled={globalMethod !== "B" && globalMethod !== "F"} onChange={function (e) { setGrowth(e.target.value); }} style={Object.assign({}, S.inp, { width: 90 }, (globalMethod !== "B" && globalMethod !== "F") ? { background: "#F3F4F6", cursor: "not-allowed" } : {})} />
+            <input value={growth} disabled={!growthRelevant} onChange={function (e) { setGrowth(e.target.value); }} style={Object.assign({}, S.inp, { width: 90 }, !growthRelevant ? { background: "#F3F4F6", cursor: "not-allowed" } : {})} />
             <div style={{ fontSize: 11, color: "#9CA3AF", position: "absolute", top: "100%", left: 0, marginTop: 4, whiteSpace: "nowrap" }}>1.10 = +10% (strategies B, F)</div>
           </div>
           <div style={{ alignSelf: "flex-end" }}>
@@ -7149,10 +7162,13 @@ function ForecastingTool(props) {
                   })()}</td>
                   <td style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums" })}>{anchors.final1 >= 0 ? fcFmt(row[anchors.final1]) : ""}</td>
                   <td style={Object.assign({}, S.td, { padding: "6px 10px" })}>
-                    <select value={rowMethod[k] || ""} onChange={function (e) { setRowM(k, e.target.value); }} style={Object.assign({}, S.sel, { padding: "5px 8px", fontSize: 12 })}>
-                      <option value="">Global</option>
-                      {FC_METHODS.map(function (m) { return <option key={m.id} value={m.id}>{m.id + " - " + m.short}</option>; })}
-                    </select>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <select value={rowMethod[k] || ""} onChange={function (e) { setRowM(k, e.target.value); }} style={Object.assign({}, S.sel, { padding: "5px 8px", fontSize: 12 })}>
+                        <option value="">Global</option>
+                        {FC_METHODS.map(function (m) { return <option key={m.id} value={m.id}>{m.id + " - " + m.short}</option>; })}
+                      </select>
+                      {(rowMethod[k] === "B" || rowMethod[k] === "F") ? <input type="number" step="0.05" min="0" value={rowGrowth[k] != null && rowGrowth[k] !== "" ? rowGrowth[k] : growth} onChange={function (e) { setRowG(k, e.target.value); }} title="Growth multiplier for this item (overrides the global rate)" style={{ width: 62, padding: "5px 6px", fontSize: 12, borderRadius: 6, border: "1px solid #C2DCEE", background: "#F3F8FC", color: "#0B6FA8", fontFamily: "inherit" }} /> : null}
+                    </div>
                   </td>
                   <td style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums", fontWeight: 500, color: pct == null ? "#9CA3AF" : (pct > 0 ? "#059669" : (pct < 0 ? "#DC2626" : "#6B7280")) })}>{pct == null ? "-" : (pct > 0 ? "+" : "") + pct.toFixed(0) + "%"}</td>
                   {targetCols.map(function (c, ci) {
