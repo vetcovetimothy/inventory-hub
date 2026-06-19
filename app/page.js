@@ -6749,7 +6749,7 @@ function ForecastingTool(props) {
       var _wh = warehouse || "";
       var whShort = _wh.indexOf("-") !== -1 ? _wh.split("-").pop() : _wh; if (!whShort) whShort = "all";
       var _d = new Date();
-      var md = (_d.getMonth() + 1) + "-" + _d.getDate();
+      var md = (_d.getMonth() + 1) + "." + _d.getDate();
       XLSX.writeFile(wb, "TP Forecast - " + whShort + " " + md + ".xlsx");
     } catch (err) { toast("Export failed: " + err.message, "error"); }
   }
