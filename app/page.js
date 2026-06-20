@@ -6470,7 +6470,9 @@ function ReplenishUpdate(props) {
     try {
       var whseRows = await fetchAcumatica("whse-replenish", null, cred.username, cred.password);
       whseRows = whseRows || [];
-      var keys = whseRows.length ? Object.keys(whseRows[0]) : [];
+      var keySet = {};
+      whseRows.forEach(function (w) { if (w) Object.keys(w).forEach(function (k) { keySet[k] = 1; }); });
+      var keys = Object.keys(keySet);
       var find = function (pats) { for (var p = 0; p < pats.length; p++) { for (var i = 0; i < keys.length; i++) { if (pats[p].test(keys[i])) return keys[i]; } } return null; };
       var kID = find([/^inventory ?id$/i, /inventoryid/i, /^inventory/i]);
       var kWH = find([/^warehouse$/i, /warehouse/i]);
