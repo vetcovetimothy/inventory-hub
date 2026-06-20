@@ -6427,6 +6427,10 @@ function ReplenishUpdate(props) {
 
   var _rp = useState([]), rpRows = _rp[0], setRpRows = _rp[1];
   var _rpn = useState(""), rpName = _rpn[0], setRpName = _rpn[1];
+  var _cur = useState([]), curRows = _cur[0], setCurRows = _cur[1];
+  var _curn = useState(""), curName = _curn[0], setCurName = _curn[1];
+  var _cdrag = useState(false), cdrag = _cdrag[0], setCdrag = _cdrag[1];
+  var curRef = useRef(null);
   var _busy = useState(false), busy = _busy[0], setBusy = _busy[1];
   var _res = useState(null), result = _res[0], setResult = _res[1];
   var _all = useState(false), inclAll = _all[0], setInclAll = _all[1];
@@ -6463,32 +6467,91 @@ function ReplenishUpdate(props) {
     reader.readAsArrayBuffer(file);
   }
 
+  function chooseCur() { if (curRef.current) curRef.current.click(); }
+  function onCurFile(e) { var f = e.target.files && e.target.files[0]; if (f) loadCur(f); e.target.value = ""; }
+  function normSheet(ws) {
+    var lower = false;
+    Object.keys(ws).forEach(function (k) { if (k[0] !== "!" && /[a-z]/.test(k)) lower = true; });
+    if (!lower) return ws;
+    var colNum = function (c) { var n = 0; for (var i = 0; i < c.length; i++) n = n * 26 + (c.charCodeAt(i) - 64); return n; };
+    var numCol = function (n) { var s = ""; for (; n; n = Math.floor((n - 1) / 26)) s = String.fromCharCode((n - 1) % 26 + 65) + s; return s; };
+    var ns = {}, minR = 1e9, maxR = 0, minC = 1e9, maxC = 0;
+    Object.keys(ws).forEach(function (k) {
+      if (k[0] === "!") { if (k !== "!ref") ns[k] = ws[k]; return; }
+      var m = k.match(/^([A-Za-z]+)(\d+)$/); if (!m) { ns[k] = ws[k]; return; }
+      var col = m[1].toUpperCase(), row = +m[2]; ns[col + row] = ws[k];
+      var cn = colNum(col); if (row < minR) minR = row; if (row > maxR) maxR = row; if (cn < minC) minC = cn; if (cn > maxC) maxC = cn;
+    });
+    if (maxR > 0) ns["!ref"] = numCol(minC) + minR + ":" + numCol(maxC) + maxR;
+    return ns;
+  }
+  function loadCur(file) {
+    var reader = new FileReader();
+    reader.onload = function (ev) {
+      try {
+        var XLSX = require("xlsx");
+        var wb = XLSX.read(ev.target.result, { type: "array" });
+        var nm = wb.SheetNames.indexOf("Data") >= 0 ? "Data" : wb.SheetNames[0];
+        var ws = normSheet(wb.Sheets[nm]);
+        var aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "" });
+        if (!aoa.length) { toast("That file looks empty", "error"); return; }
+        var hdrRow = -1;
+        for (var r = 0; r < Math.min(aoa.length, 15); r++) {
+          var low = (aoa[r] || []).map(function (x) { return String(x).toLowerCase().trim(); });
+          if (low.indexOf("inventory id") >= 0 && low.indexOf("reorder point") >= 0) { hdrRow = r; break; }
+        }
+        if (hdrRow < 0) { toast("Couldn't find the header row (Inventory ID / Reorder Point) in that file", "error"); return; }
+        var hdr = aoa[hdrRow].map(function (x) { return String(x).trim(); });
+        var idx = function (re) { for (var i = 0; i < hdr.length; i++) { if (re.test(hdr[i])) return i; } return -1; };
+        var iID = idx(/^inventory ?id$/i), iWH = idx(/^warehouse$/i), iROP = idx(/^reorder ?point$/i), iMAX = idx(/^max ?qty\.?$/i), iSS = idx(/^safety ?stock$/i), iCLS = idx(/^replenishment ?class$/i), iMV = idx(/^movement ?class$/i);
+        var missing = []; if (iID < 0) missing.push("Inventory ID"); if (iWH < 0) missing.push("Warehouse"); if (iROP < 0) missing.push("Reorder Point"); if (iMAX < 0) missing.push("Max Qty.");
+        if (missing.length) { toast("Current-settings file is missing: " + missing.join(", "), "error"); return; }
+        var num = function (v) { var n = parseFloat(String(v == null ? "" : v).replace(/,/g, "")); return isNaN(n) ? 0 : n; };
+        var out = [];
+        for (var d = hdrRow + 1; d < aoa.length; d++) {
+          var row = aoa[d]; if (!row || !row.length) continue;
+          var id = String(row[iID] == null ? "" : row[iID]).trim(); var wh = String(row[iWH] == null ? "" : row[iWH]).trim();
+          if (!id || !wh) continue;
+          out.push({ id: id, wh: wh, rop: num(row[iROP]), max: num(row[iMAX]), ss: iSS >= 0 ? num(row[iSS]) : 0, cls: String(iCLS >= 0 ? row[iCLS] : "").trim().toUpperCase(), mvmt: String(iMV >= 0 ? row[iMV] : "").trim() });
+        }
+        setCurRows(out); setCurName(file.name); setResult(null);
+        toast("Loaded " + out.length + " current-settings rows");
+      } catch (err) { toast("Error reading current-settings file: " + err.message, "error"); }
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
   async function build() {
     if (!rpRows.length) { toast("Upload the Netstock Reorder Points file first", "error"); return; }
     if (!cred || !cred.username) { if (lp) lp(); return; }
     setBusy(true);
     try {
-      var whseRows = await fetchAcumatica("whse-replenish", null, cred.username, cred.password);
-      whseRows = whseRows || [];
-      var keySet = {};
-      whseRows.forEach(function (w) { if (w) Object.keys(w).forEach(function (k) { keySet[k] = 1; }); });
-      var keys = Object.keys(keySet);
-      var find = function (pats) { for (var p = 0; p < pats.length; p++) { for (var i = 0; i < keys.length; i++) { if (pats[p].test(keys[i])) return keys[i]; } } return null; };
-      var kID = find([/^inventory ?id$/i, /inventoryid/i, /^inventory/i]);
-      var kWH = find([/^warehouse$/i, /warehouse/i]);
-      var kROP = find([/^reorder ?point$/i, /reorder/i]);
-      var kMAX = find([/^max ?qty\.?$/i, /^max ?quantity$/i, /\bmax\b/i]);
-      var kCLS = find([/^replenishment ?class$/i, /replenish.*class/i, /^class$/i]);
-      var kMV = find([/^movement ?class$/i, /movement/i]);
-      var numv = function (v) { var n = parseFloat(String(v == null ? "" : v).replace(/,/g, "")); return isNaN(n) ? 0 : n; };
-      var cur = {};
-      whseRows.forEach(function (w) {
-        var id = String(kID ? (w[kID] == null ? "" : w[kID]) : "").trim();
-        var wh = String(kWH ? (w[kWH] == null ? "" : w[kWH]) : "").trim();
-        if (!id || !wh) return;
-        cur[id + "|" + wh] = { rop: kROP ? numv(w[kROP]) : 0, max: kMAX ? numv(w[kMAX]) : 0, cls: String(kCLS ? (w[kCLS] == null ? "" : w[kCLS]) : "").trim().toUpperCase(), mvmt: String(kMV ? (w[kMV] == null ? "" : w[kMV]) : "").trim() };
-      });
-      var fieldMap = { rop: kROP, max: kMAX, cls: kCLS, mvmt: kMV, id: kID, wh: kWH, keys: keys };
+      var cur = {}, fieldMap;
+      if (curRows.length) {
+        curRows.forEach(function (w) { if (w.id && w.wh) cur[w.id + "|" + w.wh] = { rop: w.rop, max: w.max, cls: w.cls, mvmt: w.mvmt }; });
+        fieldMap = { source: "file", rows: curRows.length, name: curName };
+      } else {
+        var whseRows = await fetchAcumatica("whse-replenish", null, cred.username, cred.password);
+        whseRows = whseRows || [];
+        var keySet = {};
+        whseRows.forEach(function (w) { if (w) Object.keys(w).forEach(function (k) { keySet[k] = 1; }); });
+        var keys = Object.keys(keySet);
+        var find = function (pats) { for (var p = 0; p < pats.length; p++) { for (var i = 0; i < keys.length; i++) { if (pats[p].test(keys[i])) return keys[i]; } } return null; };
+        var kID = find([/^inventory ?id$/i, /inventoryid/i, /^inventory/i]);
+        var kWH = find([/^warehouse$/i, /warehouse/i]);
+        var kROP = find([/^reorder ?point$/i, /reorder/i]);
+        var kMAX = find([/^max ?qty\.?$/i, /^max ?quantity$/i, /\bmax\b/i]);
+        var kCLS = find([/^replenishment ?class$/i, /replenish.*class/i, /^class$/i]);
+        var kMV = find([/^movement ?class$/i, /movement/i]);
+        var numv = function (v) { var n = parseFloat(String(v == null ? "" : v).replace(/,/g, "")); return isNaN(n) ? 0 : n; };
+        whseRows.forEach(function (w) {
+          var id = String(kID ? (w[kID] == null ? "" : w[kID]) : "").trim();
+          var wh = String(kWH ? (w[kWH] == null ? "" : w[kWH]) : "").trim();
+          if (!id || !wh) return;
+          cur[id + "|" + wh] = { rop: kROP ? numv(w[kROP]) : 0, max: kMAX ? numv(w[kMAX]) : 0, cls: String(kCLS ? (w[kCLS] == null ? "" : w[kCLS]) : "").trim().toUpperCase(), mvmt: String(kMV ? (w[kMV] == null ? "" : w[kMV]) : "").trim() };
+        });
+        fieldMap = { source: "live", rop: kROP, max: kMAX, cls: kCLS, mvmt: kMV, id: kID, wh: kWH, keys: keys };
+      }
       var best = {};
       rpRows.forEach(function (rp) {
         var k = rp.pc + "|" + rp.loc; var score = rp.ss + rp.lt + rp.max;
@@ -6560,7 +6623,7 @@ function ReplenishUpdate(props) {
 
   return (
     <div>
-      <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 16 }}>Upload the Netstock <b>Reorder Points</b> export. The Hub pulls current replenishment settings live from Acumatica, joins on Inventory ID + Warehouse, recalculates SS / ROP / Max, applies the include/exclude rules, and produces the <b>IN Update Whse Replenish</b> upload file plus summaries.</div>
+      <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 16 }}>Upload the Netstock <b>Reorder Points</b> export and the current <b>Stock Item Whse Replenish</b> export. The Hub joins them on Inventory ID + Warehouse, recalculates SS / ROP / Max, applies the include/exclude rules, and produces the <b>IN Update Whse Replenish</b> upload file plus summaries.</div>
 
       <div onDragOver={function (e) { e.preventDefault(); setDrag(true); }} onDragLeave={function (e) { e.preventDefault(); setDrag(false); }} onDrop={function (e) { e.preventDefault(); setDrag(false); var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if (f) loadRp(f); }} style={Object.assign({}, S.card, drag ? { borderColor: "#7C3AED", borderStyle: "dashed", background: "#F5F3FF" } : {})}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
@@ -6575,10 +6638,23 @@ function ReplenishUpdate(props) {
         </div>
       </div>
 
+      <div onDragOver={function (e) { e.preventDefault(); setCdrag(true); }} onDragLeave={function (e) { e.preventDefault(); setCdrag(false); }} onDrop={function (e) { e.preventDefault(); setCdrag(false); var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if (f) loadCur(f); }} style={Object.assign({}, S.card, { marginTop: 12 }, cdrag ? { borderColor: "#7C3AED", borderStyle: "dashed", background: "#F5F3FF" } : {})}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 600, color: "#1F2937", marginBottom: 4 }}>Current Settings (Stock Item Whse Replenish)</div>
+            <div style={{ fontSize: 13, color: "#6B7280" }}>{curName ? <span style={{ color: "#059669" }}>{"\u2713 " + curName + " \u00B7 " + curRows.length + " rows"}</span> : "Export Stock Item Whse Replenish from Acumatica and drop the .xlsx here. This supplies the current ROP / Max."}</div>
+          </div>
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <input ref={curRef} type="file" accept=".xlsx,.xls" onChange={onCurFile} style={{ display: "none" }} />
+            <button onClick={chooseCur} style={S.btn()}><IconUpload /> {curName ? "Replace file" : "Upload file"}</button>
+          </div>
+        </div>
+      </div>
+
       <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap", margin: "16px 0" }}>
         <button onClick={build} disabled={busy || !rpRows.length} style={Object.assign({}, S.btn(), (busy || !rpRows.length) ? { opacity: 0.6, cursor: "default" } : {})}>{busy ? <><Spinner color="#fff" size={14} /> Building...</> : "Build upload file"}</button>
         <button onClick={function () { setInclAll(!inclAll); }} title="Include every matched item regardless of whether values went up or down" style={{ padding: "7px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", border: "1px solid " + (inclAll ? "#C4B5FD" : "#E5E7EB"), background: inclAll ? "#F5F3FF" : "#fff", color: inclAll ? "#6D28D9" : "#6B7280" }}>{inclAll ? "\u2713 " : ""}Include all (ignore direction)</button>
-        <span style={{ fontSize: 12, color: "#9CA3AF" }}>Current settings are pulled live from Acumatica on Build.</span>
+        <span style={{ fontSize: 12, color: "#9CA3AF" }}>{curRows.length ? ("Current settings from " + curName + " (" + curRows.length + " rows).") : "Upload the Stock Item Whse Replenish export above for current ROP / Max."}</span>
       </div>
 
       {result && <div style={{ display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap", padding: "10px 18px", background: "#FFFFFF", border: "0.5px solid #E5E7EB", borderRadius: 12, marginBottom: 16, boxShadow: "0 1px 4px rgba(15,23,42,0.06)" }}>
@@ -6592,8 +6668,9 @@ function ReplenishUpdate(props) {
         </span>
       </div>}
 
-      {result && result.fieldMap && (!result.fieldMap.rop || !result.fieldMap.max) && <div style={{ padding: "10px 14px", marginBottom: 16, background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 10, fontSize: 12, color: "#991B1B" }}>{"Couldn't auto-detect the current Reorder Point / Max columns in the whse-replenish feed (current values are showing 0). Fields the feed returned: " + (result.fieldMap.keys || []).join(", ") + ". Tell me which of these is the current Reorder Point and which is Max, and I'll map them exactly."}</div>}
-      {result && result.fieldMap && result.fieldMap.rop && result.fieldMap.max && <div style={{ padding: "8px 14px", marginBottom: 16, background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 10, fontSize: 11, color: "#166534" }}>{"Current values mapped from feed fields \u2014 ROP: \"" + result.fieldMap.rop + "\", Max: \"" + result.fieldMap.max + "\"" + (result.fieldMap.cls ? ", Class: \"" + result.fieldMap.cls + "\"" : "")}</div>}
+      {result && result.fieldMap && result.fieldMap.source === "file" && <div style={{ padding: "8px 14px", marginBottom: 16, background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 10, fontSize: 11, color: "#166534" }}>{"Current ROP / Max / Class read from the uploaded export (" + result.fieldMap.rows + " rows): " + (result.fieldMap.name || "")}</div>}
+      {result && result.fieldMap && result.fieldMap.source === "live" && (!result.fieldMap.rop || !result.fieldMap.max) && <div style={{ padding: "10px 14px", marginBottom: 16, background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 10, fontSize: 12, color: "#991B1B" }}>{"The live whse-replenish feed didn't return Reorder Point / Max (current values are 0). Fields it returned: " + (result.fieldMap.keys || []).join(", ") + ". Upload the Stock Item Whse Replenish export above and I'll read current values from that instead."}</div>}
+      {result && result.fieldMap && result.fieldMap.source === "live" && result.fieldMap.rop && result.fieldMap.max && <div style={{ padding: "8px 14px", marginBottom: 16, background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 10, fontSize: 11, color: "#166534" }}>{"Current values mapped from live feed fields \u2014 ROP: \"" + result.fieldMap.rop + "\", Max: \"" + result.fieldMap.max + "\"" + (result.fieldMap.cls ? ", Class: \"" + result.fieldMap.cls + "\"" : "")}</div>}
 
       {result && summary && <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden" })}>
         <div style={{ padding: "10px 16px", fontWeight: 600, fontSize: 13, color: "#1F2937", borderBottom: "1px solid #F3F4F6" }}>Change summary by warehouse</div>
