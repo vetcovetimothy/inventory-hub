@@ -125,6 +125,10 @@ const COLUMN_MAP = {
     { label: "Warehouse",         keys: ["Warehouse", "WarehouseID", "SiteID"] },
     { label: "ReplenishmentClass", keys: ["ReplenishmentClass", "Replenishment_Class", "Replenishment Class", "ReplenishmentClassID"] },
     { label: "ItemStatus",        keys: ["ItemStatus", "Item_Status", "Item Status", "Status"] },
+    { label: "ReorderPoint",      keys: ["ReorderPoint", "Reorder_Point", "Reorder Point", "ReorderPt", "MinQty"] },
+    { label: "SafetyStock",       keys: ["SafetyStock", "Safety_Stock", "Safety Stock"] },
+    { label: "MaxQty",            keys: ["MaxQty", "Max_Qty", "Max Qty", "Max Qty.", "MaxQty.", "MaxQuantity"] },
+    { label: "MovementClass",     keys: ["MovementClass", "Movement_Class", "Movement Class", "MovementClassID"] },
   ],
   "gen-pricing": [
     { label: "InventoryID",   keys: ["InventoryID", "InventoryId", "InventoryCd", "InventoryCD", "Inventory ID", "Inventory_ID"] },
@@ -275,7 +279,7 @@ export async function POST(request) {
       url += `?$top=5000`;
     }
 
-    // For whse replenish, fetch all (we only need 4 fields so it's lightweight)
+    // For whse replenish, fetch all rows (current ROP / Safety Stock / Max Qty per item-warehouse)
     if (type === "whse-replenish") {
       url += `?$top=15000`;
     }
@@ -361,9 +365,17 @@ export async function POST(request) {
 
     // Resolve column names (Acumatica field names vary between instances)
     const sample = rawRows.find(r => r && Object.keys(r).length) || rawRows[0];
+    const sampleKeys = Object.keys(sample);
+    const normKey = s => String(s).toLowerCase().replace(/[^a-z0-9]/g, "");
     const colDefs = COLUMN_MAP[type] || [];
     const resolved = colDefs.map(col => {
-      const found = col.keys.find(k => k in sample);
+      // 1) exact match against candidate names
+      let found = col.keys.find(k => k in sample);
+      // 2) fallback: match ignoring spaces, dots, and case
+      if (!found) {
+        const wanted = col.keys.map(normKey);
+        found = sampleKeys.find(k => wanted.indexOf(normKey(k)) !== -1) || null;
+      }
       return { label: col.label, key: found || null, keys: col.keys };
     });
 
