@@ -7275,7 +7275,7 @@ function ForecastingTool(props) {
   return <div>
     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 20 }}>
       <button onClick={function () { setTab("forecast"); }} style={S.pill(tab === "forecast", "#0EA5E9")}>Forecast</button>
-      {mode !== "non" && <button onClick={function () { setTab("tp"); }} style={S.pill(tab === "tp", "#0EA5E9")}>TP Forecast for Generics</button>}
+      {mode !== "non" && <button onClick={function () { setTab("tp"); }} style={S.pill(tab === "tp", "#0EA5E9")}>Generic TP Forecasts</button>}
       <button onClick={function () { setTab("replenish"); }} style={S.pill(tab === "replenish", "#0EA5E9")}>Replenishment Update</button>
       {tab !== "replenish" && <button onClick={tab === "tp" ? clearTp : resetAll} title={tab === "tp" ? "Clear the TP Forecast tab only (does not affect the Forecast tab)" : "Clear loaded files, results, and selections on both tabs"} style={Object.assign({}, S.btn("ghost"), { marginLeft: "auto", fontSize: 12, color: "#DC2626", borderColor: "#FCA5A5" })}>{tab === "tp" ? "Clear" : "Reset"}</button>}
     </div>
