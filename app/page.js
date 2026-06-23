@@ -5658,6 +5658,8 @@ function OOSTracker(props) {
   var _allWhse = useState([]), allWhseData = _allWhse[0], setAllWhseData = _allWhse[1];
   var _allWhseName = useState(null), allWhseName = _allWhseName[0], setAllWhseName = _allWhseName[1];
   var _totals = useState({}), totalsByVendor = _totals[0], setTotalsByVendor = _totals[1];
+  var _awSearch = useState(""), allWhseSearch = _awSearch[0], setAllWhseSearch = _awSearch[1];
+  var _awSort = useState({ col: null, dir: "asc" }), allWhseSort = _awSort[0], setAllWhseSort = _awSort[1];
   var _search = useState(""), search = _search[0], setSearch = _search[1];
   var _whFilter = useState("all"), whFilter = _whFilter[0], setWhFilter = _whFilter[1];
   var _sort = useState({ col: "warehouse", dir: "asc" }), sortState = _sort[0], setSortState = _sort[1];
@@ -6195,20 +6197,64 @@ function OOSTracker(props) {
   }
 
   function allWhseTable() {
-    var rows = allWhseData.filter(function(r) { return vendorMatch([r._vendor], tab); });
-    if (search) { var s = search.toLowerCase(); rows = rows.filter(function(r) { return (r.PRODUCT_LINE_NAME || "").toLowerCase().indexOf(s) >= 0 || (r.MANUFACTURER_NAME || "").toLowerCase().indexOf(s) >= 0 || (r.MANUFACTURER_NO || "").toLowerCase().indexOf(s) >= 0; }); }
+    var vendorRows = allWhseData.filter(function(r) { return vendorMatch([r._vendor], tab); });
+    var rows = vendorRows;
+    if (allWhseSearch) {
+      var s = allWhseSearch.toLowerCase();
+      rows = rows.filter(function(r) {
+        return (r.PRODUCT_LINE_NAME || "").toLowerCase().indexOf(s) >= 0
+          || (r.MANUFACTURER_NAME || "").toLowerCase().indexOf(s) >= 0
+          || (r.MANUFACTURER_NO || "").toLowerCase().indexOf(s) >= 0
+          || (r._vendor || "").toLowerCase().indexOf(s) >= 0
+          || (r._wh || "").toLowerCase().indexOf(s) >= 0
+          || (r.VENDOR_SUPPLY_IDS || "").toLowerCase().indexOf(s) >= 0
+          || (r.SUPPLY_STATUS || "").toLowerCase().indexOf(s) >= 0;
+      });
+    }
+    // Column header -> the value used for sorting that column.
+    var SORT_KEYS = {
+      "Mfr No.": function(r) { return r.MANUFACTURER_NO; },
+      "Manufacturer": function(r) { return r.MANUFACTURER_NAME; },
+      "Product": function(r) { return r.PRODUCT_LINE_NAME; },
+      "Vendor": function(r) { return r._vendor; },
+      "Warehouse": function(r) { return r._wh; },
+      "Supply IDs": function(r) { return r.VENDOR_SUPPLY_IDS; },
+      "Status": function(r) { return r.SUPPLY_STATUS; }
+    };
+    if (allWhseSort.col && SORT_KEYS[allWhseSort.col]) {
+      var getv = SORT_KEYS[allWhseSort.col];
+      var dir = allWhseSort.dir === "desc" ? -1 : 1;
+      rows = rows.slice().sort(function(a, b) {
+        var va = getv(a), vb = getv(b);
+        va = va == null ? "" : va; vb = vb == null ? "" : vb;
+        var na = parseFloat(va), nb = parseFloat(vb);
+        var bothNum = !isNaN(na) && !isNaN(nb) && String(va).trim() !== "" && String(vb).trim() !== "" && /^[0-9.,\-]+$/.test(String(va).trim()) && /^[0-9.,\-]+$/.test(String(vb).trim());
+        if (bothNum) return (na - nb) * dir;
+        return String(va).toLowerCase().localeCompare(String(vb).toLowerCase()) * dir;
+      });
+    }
+    function sortHeader(label) {
+      var active = allWhseSort.col === label;
+      var caret = active ? (allWhseSort.dir === "asc" ? " \u25B2" : " \u25BC") : "";
+      return <th style={Object.assign({}, S.th, { cursor: "pointer", userSelect: "none", whiteSpace: "nowrap", color: active ? "#EF4444" : undefined })}
+        onClick={function() { setAllWhseSort(active ? { col: label, dir: allWhseSort.dir === "asc" ? "desc" : "asc" } : { col: label, dir: "asc" }); }}
+        title="Click to sort">{label + caret}</th>;
+    }
     return <div style={{ marginTop: 28 }}>
       <div style={{ fontSize: 16, fontWeight: 600, color: "#1F2937", marginBottom: 12 }}>All Warehouse-Manufacturer Nos OOS</div>
+      <div style={{ marginBottom: 10 }}>
+        <input value={allWhseSearch} onChange={function(e) { setAllWhseSearch(e.target.value); }} placeholder={"Search this table\u2026"} style={Object.assign({}, S.inp, { maxWidth: 280 })} />
+      </div>
       <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto", maxHeight: 440 })}>
         <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
           <thead><tr>
-            <th style={S.th}>Mfr No.</th>
-            <th style={S.th}>Manufacturer</th>
-            <th style={S.th}>Product</th>
-            <th style={S.th}>Vendor</th>
-            <th style={S.th}>Warehouse</th>
-            <th style={S.th}>Supply IDs</th>
-            <th style={S.th}>Status</th>
+            {sortHeader("Mfr No.")}
+            {sortHeader("Manufacturer")}
+            {sortHeader("Product")}
+            {sortHeader("Vendor")}
+            {sortHeader("Warehouse")}
+            {sortHeader("Supply IDs")}
+            {sortHeader("Status")}
           </tr></thead>
           <tbody>{rows.map(function(r, i) {
             var st = whStyle(r._wh);
@@ -6225,7 +6271,7 @@ function OOSTracker(props) {
         </table>
       </div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8 }}>
-        <div style={{ fontSize: 11, color: "#9CA3AF" }}>{(allWhseName ? "Source: " + allWhseName : "") + (rows.length !== allWhseData.length ? "  \u00B7  showing " + rows.length + " of " + allWhseData.length : "")}</div>
+        <div style={{ fontSize: 11, color: "#9CA3AF" }}>{(allWhseName ? "Source: " + allWhseName : "") + (rows.length !== vendorRows.length ? "  \u00B7  showing " + rows.length + " of " + vendorRows.length : "")}</div>
         <DownloadMenu rows={rows} filename={"All_Warehouse_Manufacturer_Nos_OOS_" + tab} color={TOOL_COLOR} />
       </div>
     </div>;
@@ -6233,9 +6279,9 @@ function OOSTracker(props) {
 
   return <div>
     <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
-      <button onClick={function() { setTab("fuzerx"); setWhFilter("all"); setSearch(""); }} style={S.pill(tab === "fuzerx", "#3B82F6")}>FuzeRx{fuzeData.length > 0 && <span style={{ fontSize: 10, background: tab === "fuzerx" ? "rgba(255,255,255,0.2)" : "rgba(100,116,139,0.2)", padding: "1px 6px", borderRadius: 4, marginLeft: 6 }}>{fuzeData.length}</span>}</button>
-      <button onClick={function() { setTab("gogomeds"); setWhFilter("all"); setSearch(""); }} style={S.pill(tab === "gogomeds", "#8B5CF6")}>GoGoMeds{ggmData.length > 0 && <span style={{ fontSize: 10, background: tab === "gogomeds" ? "rgba(255,255,255,0.2)" : "rgba(100,116,139,0.2)", padding: "1px 6px", borderRadius: 4, marginLeft: 6 }}>{ggmData.length}</span>}</button>
-      <button onClick={function() { setTab("cgp"); setWhFilter("all"); setSearch(""); }} style={S.pill(tab === "cgp", "#10B981")}>Central Garden &amp; Pet{cgpData.length > 0 && <span style={{ fontSize: 10, background: tab === "cgp" ? "rgba(255,255,255,0.2)" : "rgba(100,116,139,0.2)", padding: "1px 6px", borderRadius: 4, marginLeft: 6 }}>{cgpData.length}</span>}</button>
+      <button onClick={function() { setTab("fuzerx"); setWhFilter("all"); setSearch(""); setAllWhseSearch(""); }} style={S.pill(tab === "fuzerx", "#3B82F6")}>FuzeRx{fuzeData.length > 0 && <span style={{ fontSize: 10, background: tab === "fuzerx" ? "rgba(255,255,255,0.2)" : "rgba(100,116,139,0.2)", padding: "1px 6px", borderRadius: 4, marginLeft: 6 }}>{fuzeData.length}</span>}</button>
+      <button onClick={function() { setTab("gogomeds"); setWhFilter("all"); setSearch(""); setAllWhseSearch(""); }} style={S.pill(tab === "gogomeds", "#8B5CF6")}>GoGoMeds{ggmData.length > 0 && <span style={{ fontSize: 10, background: tab === "gogomeds" ? "rgba(255,255,255,0.2)" : "rgba(100,116,139,0.2)", padding: "1px 6px", borderRadius: 4, marginLeft: 6 }}>{ggmData.length}</span>}</button>
+      <button onClick={function() { setTab("cgp"); setWhFilter("all"); setSearch(""); setAllWhseSearch(""); }} style={S.pill(tab === "cgp", "#10B981")}>Central Garden &amp; Pet{cgpData.length > 0 && <span style={{ fontSize: 10, background: tab === "cgp" ? "rgba(255,255,255,0.2)" : "rgba(100,116,139,0.2)", padding: "1px 6px", borderRadius: 4, marginLeft: 6 }}>{cgpData.length}</span>}</button>
       <div style={{ flex: 1 }} />
       <button onClick={loadFromSnowflake} disabled={sfLoading} style={Object.assign({}, S.btn("ghost"), { background: "#EF4444", color: "#fff", border: "none", padding: "8px 14px", fontSize: 12, opacity: sfLoading ? 0.6 : 1, cursor: sfLoading ? "default" : "pointer" })}>{sfLoading ? "Fetching\u2026" : "\u2601 Fetch from Snowflake"}</button>
     </div>
