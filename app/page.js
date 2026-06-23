@@ -5657,6 +5657,7 @@ function OOSTracker(props) {
   var _cgpName = useState(null), cgpName = _cgpName[0], setCgpName = _cgpName[1];
   var _allWhse = useState([]), allWhseData = _allWhse[0], setAllWhseData = _allWhse[1];
   var _allWhseName = useState(null), allWhseName = _allWhseName[0], setAllWhseName = _allWhseName[1];
+  var _totals = useState({}), totalsByVendor = _totals[0], setTotalsByVendor = _totals[1];
   var _search = useState(""), search = _search[0], setSearch = _search[1];
   var _whFilter = useState("all"), whFilter = _whFilter[0], setWhFilter = _whFilter[1];
   var _sort = useState({ col: "warehouse", dir: "asc" }), sortState = _sort[0], setSortState = _sort[1];
@@ -5666,6 +5667,7 @@ function OOSTracker(props) {
   var OOS_KV_KEY = "oos-notes-shared";
   var OOS_DATA_KEY = "oos-data-shared";
   var OOS_ALLWHSE_KEY = "oos-allwhse-shared";
+  var OOS_TOTALS_KEY = "oos-totals-shared";
   var OOS_NOTES_PERM_KEY = "oos-notes-permanent";
   var OOS_NOTES_MISS_KEY = "oos-notes-misscount";
   var NOTE_EXPIRY_MISSES = 7; // Note clears when item has been missing from this many uploads in a row
@@ -5724,15 +5726,36 @@ function OOSTracker(props) {
         kvPost(OOS_DATA_KEY, { _savedAt: Date.now() });
         return;
       }
-      if (parsed.fuze && parsed.fuze.length > 0) { setFuzeData(parsed.fuze); setFuzeName(parsed.fuzeName || "Loaded from cloud"); }
-      if (parsed.ggm && parsed.ggm.length > 0) { setGgmData(parsed.ggm); setGgmName(parsed.ggmName || "Loaded from cloud"); }
-      if (parsed.cgp && parsed.cgp.length > 0) { setCgpData(parsed.cgp); setCgpName(parsed.cgpName || "Loaded from cloud"); }
+      // Re-split the cached buckets under the CURRENT vendor aliases so an alias
+      // change (e.g. dropping Hill's from CGP) takes effect on reload without
+      // needing a re-fetch. Cached buckets can overlap, so dedupe by Mfr No +
+      // product line before re-splitting.
+      var combined = [], seen = {};
+      ["fuze", "ggm", "cgp"].forEach(function(k) {
+        (parsed[k] || []).forEach(function(row) {
+          var id = String(row.MANUFACTURER_NO == null ? "" : row.MANUFACTURER_NO) + "|" + String(row.PRODUCT_LINE_NAME == null ? "" : row.PRODUCT_LINE_NAME);
+          if (seen[id]) return;
+          seen[id] = 1; combined.push(row);
+        });
+      });
+      if (combined.length > 0) {
+        var sp0 = splitByVendor(combined);
+        var nm0 = parsed.fuzeName || parsed.cgpName || parsed.ggmName || "Loaded from cloud";
+        setFuzeData(sp0.fuze); setFuzeName(parsed.fuzeName || nm0);
+        setGgmData(sp0.ggm); setGgmName(parsed.ggmName || nm0);
+        setCgpData(sp0.cgp); setCgpName(parsed.cgpName || nm0);
+      }
     }).catch(function() {});
     // Load table 2 (All Warehouse-Manufacturer Nos OOS)
     kvGet(OOS_ALLWHSE_KEY).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
       if (!m || !d || !d.data) return;
       var parsed = typeof d.data === "string" ? JSON.parse(d.data) : d.data;
       if (parsed.rows && parsed.rows.length > 0) { setAllWhseData(parsed.rows.map(deriveAllWhse)); setAllWhseName(parsed.name || "Loaded from cloud"); }
+    }).catch(function() {});
+    kvGet(OOS_TOTALS_KEY).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+      if (!m || !d || !d.data) return;
+      var parsed = typeof d.data === "string" ? JSON.parse(d.data) : d.data;
+      if (parsed.totals) setTotalsByVendor(parsed.totals);
     }).catch(function() {});
     // Load previous items
     kvGet(OOS_PREV_ITEMS_KEY).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
@@ -5824,6 +5847,18 @@ function OOSTracker(props) {
       var t = String(v).toLowerCase().trim();
       return aliases.some(function(a) { return t.indexOf(a) >= 0; });
     });
+  }
+  // Canonical vendor name per tab, used to look up the totals denominator.
+  var TAB_VENDOR_LABEL = { fuzerx: "FuzeRx", gogomeds: "GoGoMeds", cgp: "Central Garden & Pet" };
+  // Build a { vendorName(lowercased): total } map from TOTALITEMSEVER rows.
+  function buildTotals(rows) {
+    var m = {};
+    (rows || []).forEach(function(r) {
+      var v = String(r.VENDOR_NAME == null ? "" : r.VENDOR_NAME).trim().toLowerCase();
+      var n = parseFloat(String(r.TOTAL_MNO_VENDOR_PAIRS == null ? "" : r.TOTAL_MNO_VENDOR_PAIRS).replace(/,/g, ""));
+      if (v) m[v] = isNaN(n) ? 0 : n;
+    });
+    return m;
   }
   function splitByVendor(rows) {
     var fuze = [], ggm = [], cgp = [];
@@ -5923,6 +5958,13 @@ function OOSTracker(props) {
       var nm = file.name;
       // Auto-detect which table this CSV belongs to by its columns.
       var sample = rows[0] || {};
+      if ("TOTAL_MNO_VENDOR_PAIRS" in sample) {
+        var m2 = buildTotals(rows);
+        setTotalsByVendor(m2);
+        kvPost(OOS_TOTALS_KEY, { totals: m2, _savedAt: Date.now() }).catch(function() {});
+        toast("Loaded vendor totals (" + rows.length + " vendors) from " + file.name);
+        return;
+      }
       var isAllWhse = ("VENDOR_NAME" in sample || "WAREHOUSE_SLUG" in sample) && !("OOS_VENDOR_NAMES" in sample);
       if (isAllWhse) {
         rows.forEach(deriveAllWhse);
@@ -5962,6 +6004,14 @@ function OOSTracker(props) {
         var nm2 = "Snowflake \u00B7 " + new Date().toLocaleString();
         setAllWhseData(rows2); setAllWhseName(nm2);
         kvPost(OOS_ALLWHSE_KEY, { rows: rows2, name: nm2, _savedAt: Date.now() }).catch(function() {});
+      }
+    }).catch(function() {});
+    // Totals (TOTALITEMSEVER) for the % Mfr Nos OOS denominator.
+    fetch("/api/oos-total-items-ever", { cache: "no-store" }).then(function(r) { return r.json(); }).then(function(dt) {
+      if (dt && dt.ok) {
+        var m = buildTotals(dt.rows || []);
+        setTotalsByVendor(m);
+        kvPost(OOS_TOTALS_KEY, { totals: m, _savedAt: Date.now() }).catch(function() {});
       }
     }).catch(function() {});
     fetch("/api/oos-vendor-report", { cache: "no-store" }).then(function(r) { return r.json(); }).then(function(d) {
@@ -6041,6 +6091,11 @@ function OOSTracker(props) {
       <div style={{ fontSize: 16, fontWeight: 600, color: "#1F2937", marginBottom: 12 }}>Manufacturer Nos OOS in All Warehouses</div>
       <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
         <div style={Object.assign({}, S.statCard, { background: "#FEF2F2" })}><div style={{ fontSize: 11, color: "#C47070", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>Total OOS</div><div style={{ fontSize: 28, fontWeight: 500, color: "#EF4444", marginTop: 6 }}>{data.length}</div></div>
+        {(function() {
+          var total = totalsByVendor[(TAB_VENDOR_LABEL[tab] || "").toLowerCase()];
+          var pct = total ? (data.length / total * 100) : null;
+          return <div style={Object.assign({}, S.statCard, { background: "#FFF7ED" })}><div style={{ fontSize: 11, color: "#B45309", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>% Mfr Nos OOS</div><div style={{ fontSize: 28, fontWeight: 500, color: "#EA580C", marginTop: 6 }}>{pct == null ? "\u2014" : pct.toFixed(1) + "%"}</div><div style={{ fontSize: 11, color: "#9A6B3F", marginTop: 2 }}>{total ? (data.length + " / " + total) : "no total"}</div></div>;
+        })()}
         {warehouses.map(function(wh) { var ct = data.filter(function(r) { return (r._whs || []).indexOf(wh) >= 0; }).length; return <div key={wh} style={Object.assign({}, S.statCard, { background: "#F9FAFB" })}><div style={{ fontSize: 11, color: "#6B7280", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>{wh}</div><div style={{ fontSize: 28, fontWeight: 500, color: "#374151", marginTop: 6 }}>{ct}</div></div>; })}
       </div>
       <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
