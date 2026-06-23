@@ -5655,6 +5655,8 @@ function OOSTracker(props) {
   var _fuzeName = useState(null), fuzeName = _fuzeName[0], setFuzeName = _fuzeName[1];
   var _ggmName = useState(null), ggmName = _ggmName[0], setGgmName = _ggmName[1];
   var _cgpName = useState(null), cgpName = _cgpName[0], setCgpName = _cgpName[1];
+  var _allWhse = useState([]), allWhseData = _allWhse[0], setAllWhseData = _allWhse[1];
+  var _allWhseName = useState(null), allWhseName = _allWhseName[0], setAllWhseName = _allWhseName[1];
   var _search = useState(""), search = _search[0], setSearch = _search[1];
   var _whFilter = useState("all"), whFilter = _whFilter[0], setWhFilter = _whFilter[1];
   var _sort = useState({ col: "warehouse", dir: "asc" }), sortState = _sort[0], setSortState = _sort[1];
@@ -5663,6 +5665,7 @@ function OOSTracker(props) {
   var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
   var OOS_KV_KEY = "oos-notes-shared";
   var OOS_DATA_KEY = "oos-data-shared";
+  var OOS_ALLWHSE_KEY = "oos-allwhse-shared";
   var OOS_NOTES_PERM_KEY = "oos-notes-permanent";
   var OOS_NOTES_MISS_KEY = "oos-notes-misscount";
   var NOTE_EXPIRY_MISSES = 7; // Note clears when item has been missing from this many uploads in a row
@@ -5724,6 +5727,12 @@ function OOSTracker(props) {
       if (parsed.fuze && parsed.fuze.length > 0) { setFuzeData(parsed.fuze); setFuzeName(parsed.fuzeName || "Loaded from cloud"); }
       if (parsed.ggm && parsed.ggm.length > 0) { setGgmData(parsed.ggm); setGgmName(parsed.ggmName || "Loaded from cloud"); }
       if (parsed.cgp && parsed.cgp.length > 0) { setCgpData(parsed.cgp); setCgpName(parsed.cgpName || "Loaded from cloud"); }
+    }).catch(function() {});
+    // Load table 2 (All Warehouse-Manufacturer Nos OOS)
+    kvGet(OOS_ALLWHSE_KEY).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+      if (!m || !d || !d.data) return;
+      var parsed = typeof d.data === "string" ? JSON.parse(d.data) : d.data;
+      if (parsed.rows && parsed.rows.length > 0) { setAllWhseData(parsed.rows.map(deriveAllWhse)); setAllWhseName(parsed.name || "Loaded from cloud"); }
     }).catch(function() {});
     // Load previous items
     kvGet(OOS_PREV_ITEMS_KEY).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
@@ -5793,6 +5802,12 @@ function OOSTracker(props) {
     var seen = {}, whs = [];
     r._whSlugs.forEach(function(s) { var d = mapWH(s); if (!seen[d]) { seen[d] = 1; whs.push(d); } });
     r._whs = whs;
+    return r;
+  }
+  // Table 2 (OOS_ALLWHSENOSOOS): one row per warehouse-manufacturer, single VENDOR_NAME/WAREHOUSE_SLUG.
+  function deriveAllWhse(r) {
+    r._vendor = String(r.VENDOR_NAME == null ? "" : r.VENDOR_NAME).trim();
+    r._wh = mapWH(String(r.WAREHOUSE_SLUG == null ? "" : r.WAREHOUSE_SLUG).trim());
     return r;
   }
   // Maps the raw OOS_VENDOR_NAMES values to a tab. A vendor name matches a tab
@@ -5905,8 +5920,19 @@ function OOSTracker(props) {
     var reader = new FileReader();
     reader.onload = function(e) {
       var rows = parseCSV(e.target.result);
-      var sp = splitByVendor(rows);
       var nm = file.name;
+      // Auto-detect which table this CSV belongs to by its columns.
+      var sample = rows[0] || {};
+      var isAllWhse = ("VENDOR_NAME" in sample || "WAREHOUSE_SLUG" in sample) && !("OOS_VENDOR_NAMES" in sample);
+      if (isAllWhse) {
+        rows.forEach(deriveAllWhse);
+        setAllWhseData(rows); setAllWhseName(nm);
+        kvPost(OOS_ALLWHSE_KEY, { rows: rows, name: nm, _savedAt: Date.now() }).catch(function() {});
+        setWhFilter("all"); setSearch("");
+        toast("Loaded " + rows.length + " rows into All Warehouse-Manufacturer Nos OOS from " + file.name);
+        return;
+      }
+      var sp = splitByVendor(rows);
       setFuzeData(sp.fuze); setFuzeName(nm);
       setGgmData(sp.ggm); setGgmName(nm);
       setCgpData(sp.cgp); setCgpName(nm);
@@ -5929,6 +5955,15 @@ function OOSTracker(props) {
 
   function loadFromSnowflake() {
     setSfLoading(true);
+    // Table 2 (All Warehouse-Manufacturer Nos OOS) loads independently of table 1.
+    fetch("/api/oos-allwhse-nos-oos", { cache: "no-store" }).then(function(r) { return r.json(); }).then(function(d2) {
+      if (d2 && d2.ok) {
+        var rows2 = (d2.rows || []).map(deriveAllWhse);
+        var nm2 = "Snowflake \u00B7 " + new Date().toLocaleString();
+        setAllWhseData(rows2); setAllWhseName(nm2);
+        kvPost(OOS_ALLWHSE_KEY, { rows: rows2, name: nm2, _savedAt: Date.now() }).catch(function() {});
+      }
+    }).catch(function() {});
     fetch("/api/oos-vendor-report", { cache: "no-store" }).then(function(r) { return r.json(); }).then(function(d) {
       if (!d || !d.ok) { setSfLoading(false); toast("Snowflake fetch failed: " + ((d && (d.message || d.hint || d.error)) || "unknown error"), "error"); return; }
       var all = d.rows || [];
@@ -6104,6 +6139,43 @@ function OOSTracker(props) {
     </div>;
   }
 
+  function allWhseTable() {
+    var rows = allWhseData.filter(function(r) { return vendorMatch([r._vendor], tab); });
+    if (search) { var s = search.toLowerCase(); rows = rows.filter(function(r) { return (r.PRODUCT_LINE_NAME || "").toLowerCase().indexOf(s) >= 0 || (r.MANUFACTURER_NAME || "").toLowerCase().indexOf(s) >= 0 || (r.MANUFACTURER_NO || "").toLowerCase().indexOf(s) >= 0; }); }
+    return <div style={{ marginTop: 28 }}>
+      <div style={{ fontSize: 16, fontWeight: 600, color: "#1F2937", marginBottom: 12 }}>All Warehouse-Manufacturer Nos OOS</div>
+      <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto" })}>
+        <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
+          <thead><tr>
+            <th style={S.th}>Mfr No.</th>
+            <th style={S.th}>Manufacturer</th>
+            <th style={S.th}>Product</th>
+            <th style={S.th}>Vendor</th>
+            <th style={S.th}>Warehouse</th>
+            <th style={S.th}>Supply IDs</th>
+            <th style={S.th}>Status</th>
+          </tr></thead>
+          <tbody>{rows.map(function(r, i) {
+            var st = whStyle(r._wh);
+            return <tr key={i}>
+              <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, fontWeight: 600, color: "#374151" })}>{r.MANUFACTURER_NO}</td>
+              <td style={Object.assign({}, S.td, { color: "#374151" })}>{r.MANUFACTURER_NAME}</td>
+              <td style={Object.assign({}, S.td, { color: "#374151", maxWidth: 300 })}>{r.PRODUCT_LINE_NAME}</td>
+              <td style={S.td}><span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 6, fontWeight: 500, background: "#FEF2F2", color: "#B91C1C" }}>{r._vendor}</span></td>
+              <td style={S.td}><span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 6, fontWeight: 500, background: st.bg, color: st.color }}>{r._wh}</span></td>
+              <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, color: "#6B7280" })}>{r.VENDOR_SUPPLY_IDS}</td>
+              <td style={S.td}>{r.SUPPLY_STATUS}</td>
+            </tr>;
+          })}</tbody>
+        </table>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8 }}>
+        <div style={{ fontSize: 11, color: "#9CA3AF" }}>{(allWhseName ? "Source: " + allWhseName : "") + (rows.length !== allWhseData.length ? "  \u00B7  showing " + rows.length + " of " + allWhseData.length : "")}</div>
+        <DownloadMenu rows={rows} filename={"All_Warehouse_Manufacturer_Nos_OOS_" + tab} color={TOOL_COLOR} />
+      </div>
+    </div>;
+  }
+
   return <div>
     <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
       <button onClick={function() { setTab("fuzerx"); setWhFilter("all"); setSearch(""); }} style={S.pill(tab === "fuzerx", "#3B82F6")}>FuzeRx{fuzeData.length > 0 && <span style={{ fontSize: 10, background: tab === "fuzerx" ? "rgba(255,255,255,0.2)" : "rgba(100,116,139,0.2)", padding: "1px 6px", borderRadius: 4, marginLeft: 6 }}>{fuzeData.length}</span>}</button>
@@ -6112,7 +6184,12 @@ function OOSTracker(props) {
       <div style={{ flex: 1 }} />
       <button onClick={loadFromSnowflake} disabled={sfLoading} style={Object.assign({}, S.btn("ghost"), { background: "#EF4444", color: "#fff", border: "none", padding: "8px 14px", fontSize: 12, opacity: sfLoading ? 0.6 : 1, cursor: sfLoading ? "default" : "pointer" })}>{sfLoading ? "Fetching\u2026" : "\u2601 Fetch from Snowflake"}</button>
     </div>
-    {(fuzeData.length === 0 && ggmData.length === 0 && cgpData.length === 0) ? uploadZone() : dataTable()}
+    {(fuzeData.length === 0 && ggmData.length === 0 && cgpData.length === 0 && allWhseData.length === 0)
+      ? uploadZone()
+      : <div>
+          {(fuzeData.length > 0 || ggmData.length > 0 || cgpData.length > 0) ? dataTable() : null}
+          {allWhseData.length > 0 ? allWhseTable() : null}
+        </div>}
   </div>;
 }
 
