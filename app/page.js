@@ -6051,7 +6051,7 @@ function OOSTracker(props) {
         <CacheStatus lastFetchedAt={orderMapLastFetched} cacheHit={orderMapCacheHit} refreshing={orderMapLoading} color={TOOL_COLOR} onRefresh={function() { loadOrderMap(true); }} />
         <button onClick={function() { setFuzeData([]); setFuzeName(null); setGgmData([]); setGgmName(null); setCgpData([]); setCgpName(null); saveDataToKV([], null, [], null, [], null); }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}><IconTrash /> Replace CSV</button>
       </div>
-      <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto" })}>
+      <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto", maxHeight: 440 })}>
         <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
           <thead><tr>
             <th style={Object.assign({}, S.th, { minWidth: 360 })}>Notes</th>
@@ -6144,7 +6144,7 @@ function OOSTracker(props) {
     if (search) { var s = search.toLowerCase(); rows = rows.filter(function(r) { return (r.PRODUCT_LINE_NAME || "").toLowerCase().indexOf(s) >= 0 || (r.MANUFACTURER_NAME || "").toLowerCase().indexOf(s) >= 0 || (r.MANUFACTURER_NO || "").toLowerCase().indexOf(s) >= 0; }); }
     return <div style={{ marginTop: 28 }}>
       <div style={{ fontSize: 16, fontWeight: 600, color: "#1F2937", marginBottom: 12 }}>All Warehouse-Manufacturer Nos OOS</div>
-      <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto" })}>
+      <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto", maxHeight: 440 })}>
         <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
           <thead><tr>
             <th style={S.th}>Mfr No.</th>
