@@ -5759,13 +5759,19 @@ function OOSTracker(props) {
     r._whs = whs;
     return r;
   }
+  // Maps the raw OOS_VENDOR_NAMES values to a tab. A vendor name matches a tab
+  // if it contains any of that tab's aliases (case-insensitive). Easy to extend:
+  // add more vendor names to a tab's list as the channel mappings are confirmed.
+  var TAB_VENDORS = {
+    fuzerx: ["fuzerx", "fuze"],
+    gogomeds: ["gogomeds", "gogo"],
+    cgp: ["central garden", "cgp", "hill's", "hills"]
+  };
   function vendorMatch(vendors, vendorTab) {
+    var aliases = TAB_VENDORS[vendorTab] || [];
     return (vendors || []).some(function(v) {
-      var t = String(v).toLowerCase();
-      if (vendorTab === "fuzerx") return t.indexOf("fuze") >= 0;
-      if (vendorTab === "gogomeds") return t.indexOf("gogo") >= 0;
-      if (vendorTab === "cgp") return t.indexOf("central garden") >= 0 || t === "cgp";
-      return false;
+      var t = String(v).toLowerCase().trim();
+      return aliases.some(function(a) { return t.indexOf(a) >= 0; });
     });
   }
   function splitByVendor(rows) {
