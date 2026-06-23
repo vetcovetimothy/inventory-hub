@@ -6099,7 +6099,7 @@ function OOSTracker(props) {
           })()}
         </div>
         {warehouses.length > 0 && <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {warehouses.map(function(wh) { var ct = data.filter(function(r) { return (r._whs || []).indexOf(wh) >= 0; }).length; return <div key={wh} style={{ borderRadius: 10, padding: "8px 14px", background: "#F9FAFB", minWidth: 88 }}><div style={{ fontSize: 10, color: "#6B7280", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>{wh}</div><div style={{ fontSize: 18, fontWeight: 600, color: "#374151", marginTop: 2 }}>{ct}</div></div>; })}
+          {warehouses.map(function(wh) { var ct = data.filter(function(r) { return (r._whs || []).indexOf(wh) >= 0; }).length; return <div key={wh} style={{ borderRadius: 12, padding: "12px 18px", background: "#F9FAFB", minWidth: 120 }}><div style={{ fontSize: 11, color: "#6B7280", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>{wh}</div><div style={{ fontSize: 23, fontWeight: 600, color: "#374151", marginTop: 4 }}>{ct}</div></div>; })}
         </div>}
       </div>
       <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
