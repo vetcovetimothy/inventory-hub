@@ -3,18 +3,19 @@
  *
  * Pulls the OOS vendor report from Snowflake (replacing the per-vendor CSV
  * upload in the OOS Tracker). Returns ALL rows as JSON; the front end splits by
- * VENDOR_NAME and filters by WAREHOUSE_SLUG, so this returns everything.
+ * OOS_VENDOR_NAMES and filters by WAREHOUSE_SLUGS, so this returns everything.
  *
  * Uses the same key-pair (JWT) auth as the connection tester. Self-contained on
  * purpose so it doesn't depend on the throwaway /api/snowflake-test route.
  *
  * Table is configurable via env (SNOWFLAKE_OOS_TABLE) so it can be repointed
  * from a personal schema to a governed one later without a code change.
- * Default: PERSONAL.TIMOTHY.OOS_VENDORREPORT
+ * Default: PERSONAL.TIMOTHY.OOS_MANNOSALLWHSE
  *
  * Returns: { ok, count, rows: [ { MANUFACTURER_NO, MANUFACTURER_NAME,
- *   PRODUCT_LINE_NAME, VENDOR_NAME, WAREHOUSE_SLUG, VENDOR_SUPPLY_IDS,
- *   SUPPLY_STATUS } ... ] }
+ *   PRODUCT_LINE_NAME, OOS_VENDOR_COUNT, OOS_VENDOR_NAMES,
+ *   ACTIVE_VENDOR_SUPPLY_WAREHOUSES, WAREHOUSE_SLUGS, ACTIVE_VENDOR_SUPPLIES,
+ *   VENDOR_SUPPLY_IDS, SUPPLY_STATUS } ... ] }
  */
 
 import crypto from "crypto";
@@ -22,8 +23,8 @@ import crypto from "crypto";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-var OOS_TABLE = process.env.SNOWFLAKE_OOS_TABLE || "PERSONAL.TIMOTHY.OOS_VENDORREPORT";
-var COLUMNS = ["MANUFACTURER_NO", "MANUFACTURER_NAME", "PRODUCT_LINE_NAME", "VENDOR_NAME", "WAREHOUSE_SLUG", "VENDOR_SUPPLY_IDS", "SUPPLY_STATUS"];
+var OOS_TABLE = process.env.SNOWFLAKE_OOS_TABLE || "PERSONAL.TIMOTHY.OOS_MANNOSALLWHSE";
+var COLUMNS = ["MANUFACTURER_NO", "MANUFACTURER_NAME", "PRODUCT_LINE_NAME", "OOS_VENDOR_COUNT", "OOS_VENDOR_NAMES", "ACTIVE_VENDOR_SUPPLY_WAREHOUSES", "WAREHOUSE_SLUGS", "ACTIVE_VENDOR_SUPPLIES", "VENDOR_SUPPLY_IDS", "SUPPLY_STATUS"];
 
 function b64url(buf) {
   return Buffer.from(buf).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
