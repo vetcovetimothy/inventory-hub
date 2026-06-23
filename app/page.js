@@ -6089,18 +6089,14 @@ function OOSTracker(props) {
   function dataTable() {
     return <div>
       <div style={{ fontSize: 16, fontWeight: 600, color: "#1F2937", marginBottom: 12 }}>Manufacturer Nos OOS in All Warehouses</div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 16 }}>
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-          <div style={Object.assign({}, S.statCard, { background: "#FEF2F2" })}><div style={{ fontSize: 11, color: "#C47070", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>Total OOS</div><div style={{ fontSize: 28, fontWeight: 500, color: "#EF4444", marginTop: 6 }}>{data.length}</div></div>
-          {(function() {
-            var total = totalsByVendor[(TAB_VENDOR_LABEL[tab] || "").toLowerCase()];
-            var pct = total ? (data.length / total * 100) : null;
-            return <div style={Object.assign({}, S.statCard, { background: "#FFF7ED" })}><div style={{ fontSize: 11, color: "#B45309", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>% Mfr Nos OOS</div><div style={{ fontSize: 28, fontWeight: 500, color: "#EA580C", marginTop: 6 }}>{pct == null ? "\u2014" : pct.toFixed(1) + "%"}</div><div style={{ fontSize: 11, color: "#9A6B3F", marginTop: 2 }}>{total ? (data.length + " / " + total) : "no total"}</div></div>;
-          })()}
-        </div>
-        {warehouses.length > 0 && <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {warehouses.map(function(wh) { var ct = data.filter(function(r) { return (r._whs || []).indexOf(wh) >= 0; }).length; return <div key={wh} style={{ borderRadius: 12, padding: "12px 18px", background: "#F9FAFB", minWidth: 120 }}><div style={{ fontSize: 11, color: "#6B7280", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>{wh}</div><div style={{ fontSize: 23, fontWeight: 600, color: "#374151", marginTop: 4 }}>{ct}</div></div>; })}
-        </div>}
+      <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+        <div style={Object.assign({}, S.statCard, { background: "#FEF2F2" })}><div style={{ fontSize: 11, color: "#C47070", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>Total OOS</div><div style={{ fontSize: 28, fontWeight: 500, color: "#EF4444", marginTop: 6 }}>{data.length}</div></div>
+        {(function() {
+          var total = totalsByVendor[(TAB_VENDOR_LABEL[tab] || "").toLowerCase()];
+          var pct = total ? (data.length / total * 100) : null;
+          return <div style={Object.assign({}, S.statCard, { background: "#FFF7ED" })}><div style={{ fontSize: 11, color: "#B45309", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>% Mfr Nos OOS</div><div style={{ fontSize: 28, fontWeight: 500, color: "#EA580C", marginTop: 6 }}>{pct == null ? "\u2014" : pct.toFixed(1) + "%"}</div><div style={{ fontSize: 11, color: "#9A6B3F", marginTop: 2 }}>{total ? (data.length + " / " + total) : "no total"}</div></div>;
+        })()}
+        {warehouses.map(function(wh) { var ct = data.filter(function(r) { return (r._whs || []).indexOf(wh) >= 0; }).length; return <div key={wh} style={Object.assign({}, S.statCard, { background: "#F9FAFB" })}><div style={{ fontSize: 11, color: "#6B7280", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>{wh}</div><div style={{ fontSize: 28, fontWeight: 500, color: "#374151", marginTop: 6 }}>{ct}</div></div>; })}
       </div>
       <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
         <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search..." style={Object.assign({}, S.inp, { padding: "8px 14px", width: 200 })} />
