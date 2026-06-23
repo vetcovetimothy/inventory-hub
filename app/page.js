@@ -5816,7 +5816,7 @@ function OOSTracker(props) {
   var TAB_VENDORS = {
     fuzerx: ["fuzerx", "fuze"],
     gogomeds: ["gogomeds", "gogo"],
-    cgp: ["central garden", "cgp", "hill's", "hills"]
+    cgp: ["central garden", "cgp"]
   };
   function vendorMatch(vendors, vendorTab) {
     var aliases = TAB_VENDORS[vendorTab] || [];
