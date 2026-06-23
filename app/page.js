@@ -5441,6 +5441,42 @@ function TruckloaderTool(props) {
 }
 
 /* ═══════ OOS TRACKER ═══════ */
+function DownloadMenu(props) {
+  var rows = props.rows || [];
+  var filename = props.filename || "export";
+  var color = props.color || "#6B7280";
+  var _open = useState(false), open = _open[0], setOpen = _open[1];
+  function cols() { if (!rows.length) return []; return Object.keys(rows[0]).filter(function(k) { return k.charAt(0) !== "_"; }); }
+  function downloadCSV() {
+    var c = cols();
+    var esc = function(v) { var s = String(v == null ? "" : v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+    var lines = [c.join(",")];
+    rows.forEach(function(r) { lines.push(c.map(function(k) { return esc(r[k]); }).join(",")); });
+    var blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a"); a.href = url; a.download = filename + ".csv"; a.click();
+    setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
+    setOpen(false);
+  }
+  function downloadXLSX() {
+    var XLSX = require("xlsx");
+    var c = cols();
+    var aoa = [c].concat(rows.map(function(r) { return c.map(function(k) { return r[k]; }); }));
+    var ws = XLSX.utils.aoa_to_sheet(aoa);
+    var wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "OOS");
+    XLSX.writeFile(wb, filename + ".xlsx");
+    setOpen(false);
+  }
+  var item = { padding: "8px 14px", fontSize: 12, color: "#374151", cursor: "pointer", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 8 };
+  return <div style={{ position: "relative", display: "inline-block" }} onMouseEnter={function() { setOpen(true); }} onMouseLeave={function() { setOpen(false); }}>
+    <button style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "transparent", border: "none", color: color, fontSize: 12, fontWeight: 500, cursor: "pointer", padding: "4px 6px" }}>{rows.length} rows <IconDL /></button>
+    {open && <div style={{ position: "absolute", right: 0, top: "100%", background: "#FFFFFF", border: "1px solid #E5E7EB", borderRadius: 8, boxShadow: "0 4px 16px rgba(0,0,0,0.12)", zIndex: 50, overflow: "hidden", minWidth: 190 }}>
+      <div onClick={downloadCSV} onMouseEnter={function(e) { e.currentTarget.style.background = "#F3F4F6"; }} onMouseLeave={function(e) { e.currentTarget.style.background = "transparent"; }} style={item}><IconDL /> Download as CSV</div>
+      <div onClick={downloadXLSX} onMouseEnter={function(e) { e.currentTarget.style.background = "#F3F4F6"; }} onMouseLeave={function(e) { e.currentTarget.style.background = "transparent"; }} style={item}><IconDL /> Download as XLSX</div>
+    </div>}
+  </div>;
+}
+
 function OOSTracker(props) {
   var toast = props.toast, cred = props.cred;
   var TOOL_COLOR = "#EF4444";
@@ -5967,6 +6003,7 @@ function OOSTracker(props) {
 
   function dataTable() {
     return <div>
+      <div style={{ fontSize: 16, fontWeight: 600, color: "#1F2937", marginBottom: 12 }}>Manufacturer Nos OOS in All Warehouses</div>
       <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
         <div style={Object.assign({}, S.statCard, { background: "#FEF2F2" })}><div style={{ fontSize: 11, color: "#C47070", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>Total OOS</div><div style={{ fontSize: 28, fontWeight: 500, color: "#EF4444", marginTop: 6 }}>{data.length}</div></div>
         {warehouses.map(function(wh) { var ct = data.filter(function(r) { return (r._whs || []).indexOf(wh) >= 0; }).length; return <div key={wh} style={Object.assign({}, S.statCard, { background: "#F9FAFB" })}><div style={{ fontSize: 11, color: "#6B7280", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>{wh}</div><div style={{ fontSize: 28, fontWeight: 500, color: "#374151", marginTop: 6 }}>{ct}</div></div>; })}
@@ -6060,7 +6097,10 @@ function OOSTracker(props) {
           })}</tbody>
         </table>
       </div>
-      {currentName && <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 8 }}>Source: {currentName}</div>}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8 }}>
+        <div style={{ fontSize: 11, color: "#9CA3AF" }}>{currentName ? "Source: " + currentName : ""}</div>
+        <DownloadMenu rows={filtered} filename={"Manufacturer_Nos_OOS_All_Warehouses_" + tab} color={TOOL_COLOR} />
+      </div>
     </div>;
   }
 
