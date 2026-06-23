@@ -5750,6 +5750,39 @@ function OOSTracker(props) {
 
   var WH_MAP = { "TRUEPILL_BROOKLYN": "Brooklyn", "TRUEPILL_OHIO": "Ohio", "TRUEPILL_HAYWARD": "Hayward", "GOGOMEDS_KY": "Kentucky", "GOGOMEDS_AZ": "Arizona", "GOGOMEDS_KENTUCKY": "Kentucky", "GOGOMEDS_ARIZONA": "Arizona", "HILLS_CGP_WAREHOUSE_CA": "Hills CA", "HILLS_CGP_WAREHOUSE_NJ": "Hills NJ", "HILLS_CGP_WAREHOUSE_FL": "Hills FL", "HILLS_CGP_WAREHOUSE_TX": "Hills TX" };
   function mapWH(slug) { return WH_MAP[slug] || slug || "\u2014"; }
+  function splitList(s) { return String(s == null ? "" : s).split(",").map(function(x) { return x.trim(); }).filter(Boolean); }
+  function deriveOOS(r) {
+    r._vendors = splitList(r.OOS_VENDOR_NAMES);
+    r._whSlugs = splitList(r.WAREHOUSE_SLUGS);
+    var seen = {}, whs = [];
+    r._whSlugs.forEach(function(s) { var d = mapWH(s); if (!seen[d]) { seen[d] = 1; whs.push(d); } });
+    r._whs = whs;
+    return r;
+  }
+  function vendorMatch(vendors, vendorTab) {
+    return (vendors || []).some(function(v) {
+      var t = String(v).toLowerCase();
+      if (vendorTab === "fuzerx") return t.indexOf("fuze") >= 0;
+      if (vendorTab === "gogomeds") return t.indexOf("gogo") >= 0;
+      if (vendorTab === "cgp") return t.indexOf("central garden") >= 0 || t === "cgp";
+      return false;
+    });
+  }
+  function splitByVendor(rows) {
+    var fuze = [], ggm = [], cgp = [];
+    (rows || []).forEach(function(r) {
+      deriveOOS(r);
+      if (vendorMatch(r._vendors, "fuzerx")) fuze.push(r);
+      if (vendorMatch(r._vendors, "gogomeds")) ggm.push(r);
+      if (vendorMatch(r._vendors, "cgp")) cgp.push(r);
+    });
+    return { fuze: fuze, ggm: ggm, cgp: cgp };
+  }
+  function whStyle(d) {
+    var bg = d === "Brooklyn" ? "#EFF6FF" : d === "Ohio" ? "#ECFDF5" : d === "Hayward" ? "#FFF7ED" : d === "Kentucky" ? "#F5F3FF" : d === "Arizona" ? "#FDF2F8" : d === "Hills CA" ? "#FEF9C3" : d === "Hills NJ" ? "#E0F2FE" : d === "Hills FL" ? "#FFE4E6" : d === "Hills TX" ? "#CCFBF1" : "#F3F4F6";
+    var color = d === "Brooklyn" ? "#2563EB" : d === "Ohio" ? "#059669" : d === "Hayward" ? "#D97706" : d === "Kentucky" ? "#7C3AED" : d === "Arizona" ? "#DB2777" : d === "Hills CA" ? "#A16207" : d === "Hills NJ" ? "#0369A1" : d === "Hills FL" ? "#BE123C" : d === "Hills TX" ? "#0F766E" : "#6B7280";
+    return { bg: bg, color: color };
+  }
 
 
   function updateNote(key, field, value) {
@@ -5773,7 +5806,7 @@ function OOSTracker(props) {
       var vals = []; var cur = ""; var inQuote = false;
       for (var c = 0; c < lines[i].length; c++) { var ch = lines[i][c]; if (ch === '"') { inQuote = !inQuote; } else if (ch === ',' && !inQuote) { vals.push(cur.trim()); cur = ""; } else { cur += ch; } }
       vals.push(cur.trim());
-      var obj = {}; headers.forEach(function(h, hi) { obj[h] = vals[hi] || ""; }); obj._wh = mapWH(obj.WAREHOUSE_SLUG || ""); rows.push(obj);
+      var obj = {}; headers.forEach(function(h, hi) { obj[h] = vals[hi] || ""; }); deriveOOS(obj); rows.push(obj);
     }
     return rows;
   }
@@ -5789,7 +5822,7 @@ function OOSTracker(props) {
     var prefix = vendorTab + ":";
     var seenKeys = {};
     (rows || []).forEach(function(r) {
-      seenKeys[vendorTab + ":" + r.MANUFACTURER_NO + ":" + (r.WAREHOUSE_SLUG || "")] = true;
+      seenKeys[vendorTab + ":" + r.MANUFACTURER_NO] = true;
     });
     var newMiss = Object.assign({}, missIn);
     var newNotes = Object.assign({}, notesIn);
@@ -5825,17 +5858,29 @@ function OOSTracker(props) {
     }
   }
 
-  function handleFile(file, vendor) {
+  function handleFile(file) {
     if (!file) return;
     var reader = new FileReader();
     reader.onload = function(e) {
       var rows = parseCSV(e.target.result);
-      if (vendor === "fuzerx") { setFuzeData(rows); setFuzeName(file.name); saveDataToKV(rows, file.name, ggmData, ggmName, cgpData, cgpName); }
-      else if (vendor === "cgp") { setCgpData(rows); setCgpName(file.name); saveDataToKV(fuzeData, fuzeName, ggmData, ggmName, rows, file.name); }
-      else { setGgmData(rows); setGgmName(file.name); saveDataToKV(fuzeData, fuzeName, rows, file.name, cgpData, cgpName); }
-      applyUploadToMissCount(rows, vendor);
+      var sp = splitByVendor(rows);
+      var nm = file.name;
+      setFuzeData(sp.fuze); setFuzeName(nm);
+      setGgmData(sp.ggm); setGgmName(nm);
+      setCgpData(sp.cgp); setCgpName(nm);
+      saveDataToKV(sp.fuze, nm, sp.ggm, nm, sp.cgp, nm);
+      var now = Date.now();
+      var u1 = computeMissUpdate(sp.fuze, "fuzerx", missCount, permNotes);
+      var u2 = computeMissUpdate(sp.ggm, "gogomeds", u1.miss, u1.notes);
+      var u3 = computeMissUpdate(sp.cgp, "cgp", u2.miss, u2.notes);
+      setMissCount(u3.miss);
+      kvPost(OOS_NOTES_MISS_KEY, Object.assign({}, u3.miss, { _savedAt: now })).catch(function() {});
+      if (u1.notesChanged || u2.notesChanged || u3.notesChanged) {
+        setPermNotes(u3.notes);
+        kvPost(OOS_NOTES_PERM_KEY, Object.assign({}, u3.notes, { _savedAt: now })).catch(function() {});
+      }
       setWhFilter("all"); setSearch("");
-      toast("Loaded " + rows.length + " OOS items from " + file.name);
+      toast("Loaded " + rows.length + " OOS products from " + file.name);
     };
     reader.readAsText(file);
   }
@@ -5845,15 +5890,9 @@ function OOSTracker(props) {
     fetch("/api/oos-vendor-report", { cache: "no-store" }).then(function(r) { return r.json(); }).then(function(d) {
       if (!d || !d.ok) { setSfLoading(false); toast("Snowflake fetch failed: " + ((d && (d.message || d.hint || d.error)) || "unknown error"), "error"); return; }
       var all = d.rows || [];
-      var fuze = [], ggm = [], cgp = [], dropped = 0;
-      all.forEach(function(r) {
-        r._wh = mapWH(r.WAREHOUSE_SLUG || "");
-        var v = (r.VENDOR_NAME || "").trim();
-        if (v === "FuzeRx") fuze.push(r);
-        else if (v === "GoGoMeds") ggm.push(r);
-        else if (v === "Central Garden & Pet") cgp.push(r);
-        else dropped++; // other vendors are intentionally not tracked here
-      });
+      var sp = splitByVendor(all);
+      var fuze = sp.fuze, ggm = sp.ggm, cgp = sp.cgp;
+      var dropped = all.filter(function(r) { return !(vendorMatch(r._vendors, "fuzerx") || vendorMatch(r._vendors, "gogomeds") || vendorMatch(r._vendors, "cgp")); }).length;
       var nm = "Snowflake \u00B7 " + new Date().toLocaleString();
       setFuzeData(fuze); setFuzeName(nm);
       setGgmData(ggm); setGgmName(nm);
@@ -5876,13 +5915,12 @@ function OOSTracker(props) {
     }).catch(function(e) { setSfLoading(false); toast("Snowflake fetch error: " + (e && e.message || e), "error"); });
   }
 
-  function uploadZone(vendor) {
-    var label = vendor === "fuzerx" ? "FuzeRx" : vendor === "cgp" ? "Central Garden & Pet" : "GoGoMeds";
+  function uploadZone() {
     return <div style={Object.assign({}, S.card, { textAlign: "center", padding: 40 })}>
-      <div onDragOver={function(e) { e.preventDefault(); }} onDrop={function(e) { e.preventDefault(); if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0], vendor); }} style={{ border: "2px dashed #E5E7EB", borderRadius: 12, padding: 40, cursor: "pointer" }} onClick={function() { var inp = document.createElement("input"); inp.type = "file"; inp.accept = ".csv"; inp.onchange = function(e) { handleFile(e.target.files[0], vendor); }; inp.click(); }}>
+      <div onDragOver={function(e) { e.preventDefault(); }} onDrop={function(e) { e.preventDefault(); if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); }} style={{ border: "2px dashed #E5E7EB", borderRadius: 12, padding: 40, cursor: "pointer" }} onClick={function() { var inp = document.createElement("input"); inp.type = "file"; inp.accept = ".csv"; inp.onchange = function(e) { handleFile(e.target.files[0]); }; inp.click(); }}>
         <div style={{ fontSize: 32, marginBottom: 8 }}>{"\uD83D\uDCC4"}</div>
-        <div style={{ fontSize: 14, fontWeight: 600, color: "#374151", marginBottom: 4 }}>Upload {label} OOS CSV</div>
-        <div style={{ fontSize: 12, color: "#9CA3AF" }}>Drag and drop or click to browse</div>
+        <div style={{ fontSize: 14, fontWeight: 600, color: "#374151", marginBottom: 4 }}>Upload OOS CSV (all vendors)</div>
+        <div style={{ fontSize: 12, color: "#9CA3AF" }}>{"Drag and drop or click to browse \u00B7 or Fetch from Snowflake above"}</div>
       </div>
     </div>;
   }
@@ -5905,14 +5943,14 @@ function OOSTracker(props) {
       }
     }).catch(function() {});
   }, []);
-  var warehouses = useMemo(function() { var w = {}; data.forEach(function(r) { w[r._wh] = 1; }); return Object.keys(w).sort(); }, [data]);
+  var warehouses = useMemo(function() { var w = {}; data.forEach(function(r) { (r._whs || []).forEach(function(x) { w[x] = 1; }); }); return Object.keys(w).sort(); }, [data]);
 
   var filtered = useMemo(function() {
     var d = data.slice();
-    if (whFilter !== "all") d = d.filter(function(r) { return r._wh === whFilter; });
+    if (whFilter !== "all") d = d.filter(function(r) { return (r._whs || []).indexOf(whFilter) >= 0; });
     if (search) { var s = search.toLowerCase(); d = d.filter(function(r) { return (r.PRODUCT_LINE_NAME || "").toLowerCase().indexOf(s) >= 0 || (r.MANUFACTURER_NAME || "").toLowerCase().indexOf(s) >= 0 || (r.MANUFACTURER_NO || "").toLowerCase().indexOf(s) >= 0; }); }
     var col = sortState.col; var dir = sortState.dir;
-    d.sort(function(a, b) { var va, vb; var nkA = tab + ":" + a.MANUFACTURER_NO + ":" + (a.WAREHOUSE_SLUG || ""); var nkB = tab + ":" + b.MANUFACTURER_NO + ":" + (b.WAREHOUSE_SLUG || ""); var nA = notes[nkA] || {}; var nB = notes[nkB] || {}; if (col === "warehouse") { va = a._wh; vb = b._wh; } else if (col === "manufacturer") { va = a.MANUFACTURER_NAME; vb = b.MANUFACTURER_NAME; } else if (col === "product") { va = a.PRODUCT_LINE_NAME; vb = b.PRODUCT_LINE_NAME; } else if (col === "status") { va = a.SUPPLY_STATUS; vb = b.SUPPLY_STATUS; } else if (col === "sd") { va = (nA.sd !== undefined ? nA.sd : sdIds[String(a.MANUFACTURER_NO)]) ? 1 : 0; vb = (nB.sd !== undefined ? nB.sd : sdIds[String(b.MANUFACTURER_NO)]) ? 1 : 0; return dir === "desc" ? vb - va : va - vb; } else if (col === "bo") { va = nA.bo ? 1 : 0; vb = nB.bo ? 1 : 0; return dir === "desc" ? vb - va : va - vb; } else if (col === "oos") { va = prevItems[tab + ":" + a.MANUFACTURER_NO] ? 1 : 0; vb = prevItems[tab + ":" + b.MANUFACTURER_NO] ? 1 : 0; return dir === "desc" ? vb - va : va - vb; } else { va = a.MANUFACTURER_NO; vb = b.MANUFACTURER_NO; } return dir === "desc" ? -(va || "").localeCompare(vb || "") : (va || "").localeCompare(vb || ""); });
+    d.sort(function(a, b) { var va, vb; var nkA = tab + ":" + a.MANUFACTURER_NO; var nkB = tab + ":" + b.MANUFACTURER_NO; var nA = notes[nkA] || {}; var nB = notes[nkB] || {}; if (col === "warehouse") { va = (a._whs || []).join(","); vb = (b._whs || []).join(","); } else if (col === "manufacturer") { va = a.MANUFACTURER_NAME; vb = b.MANUFACTURER_NAME; } else if (col === "product") { va = a.PRODUCT_LINE_NAME; vb = b.PRODUCT_LINE_NAME; } else if (col === "status") { va = a.SUPPLY_STATUS; vb = b.SUPPLY_STATUS; } else if (col === "sd") { va = (nA.sd !== undefined ? nA.sd : sdIds[String(a.MANUFACTURER_NO)]) ? 1 : 0; vb = (nB.sd !== undefined ? nB.sd : sdIds[String(b.MANUFACTURER_NO)]) ? 1 : 0; return dir === "desc" ? vb - va : va - vb; } else if (col === "bo") { va = nA.bo ? 1 : 0; vb = nB.bo ? 1 : 0; return dir === "desc" ? vb - va : va - vb; } else if (col === "oos") { va = prevItems[tab + ":" + a.MANUFACTURER_NO] ? 1 : 0; vb = prevItems[tab + ":" + b.MANUFACTURER_NO] ? 1 : 0; return dir === "desc" ? vb - va : va - vb; } else { va = a.MANUFACTURER_NO; vb = b.MANUFACTURER_NO; } return dir === "desc" ? -(va || "").localeCompare(vb || "") : (va || "").localeCompare(vb || ""); });
     return d;
   }, [data, whFilter, search, sortState, notes, sdIds, prevItems]);
 
@@ -5925,7 +5963,7 @@ function OOSTracker(props) {
     return <div>
       <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
         <div style={Object.assign({}, S.statCard, { background: "#FEF2F2" })}><div style={{ fontSize: 11, color: "#C47070", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>Total OOS</div><div style={{ fontSize: 28, fontWeight: 500, color: "#EF4444", marginTop: 6 }}>{data.length}</div></div>
-        {warehouses.map(function(wh) { var ct = data.filter(function(r) { return r._wh === wh; }).length; return <div key={wh} style={Object.assign({}, S.statCard, { background: "#F9FAFB" })}><div style={{ fontSize: 11, color: "#6B7280", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>{wh}</div><div style={{ fontSize: 28, fontWeight: 500, color: "#374151", marginTop: 6 }}>{ct}</div></div>; })}
+        {warehouses.map(function(wh) { var ct = data.filter(function(r) { return (r._whs || []).indexOf(wh) >= 0; }).length; return <div key={wh} style={Object.assign({}, S.statCard, { background: "#F9FAFB" })}><div style={{ fontSize: 11, color: "#6B7280", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>{wh}</div><div style={{ fontSize: 28, fontWeight: 500, color: "#374151", marginTop: 6 }}>{ct}</div></div>; })}
       </div>
       <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
         <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search..." style={Object.assign({}, S.inp, { padding: "8px 14px", width: 200 })} />
@@ -5933,7 +5971,7 @@ function OOSTracker(props) {
         <div style={{ flex: 1 }} />
         <span style={{ fontSize: 12, color: "#9CA3AF" }}>{filtered.length} of {data.length} items</span>
         <CacheStatus lastFetchedAt={orderMapLastFetched} cacheHit={orderMapCacheHit} refreshing={orderMapLoading} color={TOOL_COLOR} onRefresh={function() { loadOrderMap(true); }} />
-        <button onClick={function() { if (tab === "fuzerx") { setFuzeData([]); setFuzeName(null); saveDataToKV([], null, ggmData, ggmName, cgpData, cgpName); } else if (tab === "cgp") { setCgpData([]); setCgpName(null); saveDataToKV(fuzeData, fuzeName, ggmData, ggmName, [], null); } else { setGgmData([]); setGgmName(null); saveDataToKV(fuzeData, fuzeName, [], null, cgpData, cgpName); } }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}><IconTrash /> Replace CSV</button>
+        <button onClick={function() { setFuzeData([]); setFuzeName(null); setGgmData([]); setGgmName(null); setCgpData([]); setCgpName(null); saveDataToKV([], null, [], null, [], null); }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}><IconTrash /> Replace CSV</button>
       </div>
       <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto" })}>
         <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
@@ -5945,17 +5983,16 @@ function OOSTracker(props) {
             {sortHeader("id", "Mfr No.")}
             {sortHeader("manufacturer", "Manufacturer")}
             {sortHeader("product", "Product")}
+            <th style={S.th}>Vendors</th>
             {sortHeader("warehouse", "Warehouse")}
             <th style={Object.assign({}, S.th, { minWidth: 220 })}>Order Status</th>
           </tr></thead>
           <tbody>{filtered.map(function(r, i) {
-            var noteKey = tab + ":" + r.MANUFACTURER_NO + ":" + (r.WAREHOUSE_SLUG || "");
+            var noteKey = tab + ":" + r.MANUFACTURER_NO;
             var n = notes[noteKey] || {};
             var autoSD = sdIds[String(r.MANUFACTURER_NO)] || false;
             var isSD = n.sd !== undefined ? n.sd : autoSD;
             var isOld = prevItems[tab + ":" + r.MANUFACTURER_NO];
-            var whBg = r._wh === "Brooklyn" ? "#EFF6FF" : r._wh === "Ohio" ? "#ECFDF5" : r._wh === "Hayward" ? "#FFF7ED" : r._wh === "Kentucky" ? "#F5F3FF" : r._wh === "Arizona" ? "#FDF2F8" : r._wh === "Hills CA" ? "#FEF9C3" : r._wh === "Hills NJ" ? "#E0F2FE" : r._wh === "Hills FL" ? "#FFE4E6" : r._wh === "Hills TX" ? "#CCFBF1" : "#F3F4F6";
-            var whColor = r._wh === "Brooklyn" ? "#2563EB" : r._wh === "Ohio" ? "#059669" : r._wh === "Hayward" ? "#D97706" : r._wh === "Kentucky" ? "#7C3AED" : r._wh === "Arizona" ? "#DB2777" : r._wh === "Hills CA" ? "#A16207" : r._wh === "Hills NJ" ? "#0369A1" : r._wh === "Hills FL" ? "#BE123C" : r._wh === "Hills TX" ? "#0F766E" : "#6B7280";
             return <tr key={i}>
               <td style={S.td}><textarea value={permNotes[noteKey] !== undefined ? permNotes[noteKey] : ""} onChange={function(e) { updateNote(noteKey, "note", e.target.value); e.target.style.height = "auto"; e.target.style.height = e.target.scrollHeight + "px"; }} placeholder="Add notes..." rows={1} style={Object.assign({}, S.inp, { padding: "5px 10px", fontSize: 12, resize: "none", overflow: "hidden", minHeight: 32, lineHeight: "1.4", display: "block", width: "100%" })} ref={function(el) { if (el) { el.style.height = "auto"; el.style.height = el.scrollHeight + "px"; } }} /></td>
               <td style={Object.assign({}, S.td, { textAlign: "center" })}><button onClick={function() { updateNote(noteKey, "sd", !isSD); }} style={{ width: 20, height: 20, borderRadius: 4, border: isSD ? "2px solid #E879F9" : "2px solid #D1D5DB", background: isSD ? "#E879F9" : "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", transition: "all 0.15s" }}>{isSD && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}</button></td>
@@ -5964,11 +6001,12 @@ function OOSTracker(props) {
               <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, fontWeight: 600, color: "#374151" })}>{r.MANUFACTURER_NO}</td>
               <td style={Object.assign({}, S.td, { color: "#374151" })}>{r.MANUFACTURER_NAME}</td>
               <td style={Object.assign({}, S.td, { color: "#374151", maxWidth: 300 })}>{r.PRODUCT_LINE_NAME}</td>
-              <td style={S.td}><span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 6, fontWeight: 500, background: whBg, color: whColor }}>{r._wh}</span></td>
+              <td style={S.td}><div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>{(r._vendors || []).map(function(v, vi) { return <span key={vi} style={{ fontSize: 11, padding: "2px 8px", borderRadius: 6, fontWeight: 500, background: "#FEF2F2", color: "#B91C1C" }}>{v}</span>; })}</div></td>
+              <td style={S.td}><div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>{(r._whs || []).map(function(w, wi) { var st = whStyle(w); return <span key={wi} style={{ fontSize: 11, padding: "2px 8px", borderRadius: 6, fontWeight: 500, background: st.bg, color: st.color }}>{w}</span>; })}</div></td>
               <td style={S.td}>{(function() {
                 // Map OOS row's display warehouse to Acumatica warehouse codes
                 var OOS_TO_ACU = { "Brooklyn": ["TP-NY"], "Ohio": ["TP-OH"], "Hayward": ["TP-CA"], "Kentucky": ["GGM-KY"], "Arizona": ["GGM-AZ"], "Hills CA": ["HILL-CP-CA"], "Hills NJ": ["HILL-CP-NJ"], "Hills FL": ["HILL-CP-FL"], "Hills TX": ["HILL-CP-TX"] };
-                var allowed = OOS_TO_ACU[r._wh] || null;
+                var allowed = []; (r._whs || []).forEach(function(dn) { (OOS_TO_ACU[dn] || []).forEach(function(c) { if (allowed.indexOf(c) < 0) allowed.push(c); }); }); if (allowed.length === 0) allowed = null;
                 var allMatches = orderMap[String(r.MANUFACTURER_NO)] || [];
                 var matches = allowed ? allMatches.filter(function(m) { return allowed.indexOf((m.wh || "").trim().toUpperCase()) >= 0; }) : allMatches;
                 if (matches.length === 0) return <span style={{ color: "#D1D5DB", fontSize: 13 }}>{"\u2014"}</span>;
@@ -6028,7 +6066,7 @@ function OOSTracker(props) {
       <div style={{ flex: 1 }} />
       <button onClick={loadFromSnowflake} disabled={sfLoading} style={Object.assign({}, S.btn("ghost"), { background: "#EF4444", color: "#fff", border: "none", padding: "8px 14px", fontSize: 12, opacity: sfLoading ? 0.6 : 1, cursor: sfLoading ? "default" : "pointer" })}>{sfLoading ? "Fetching\u2026" : "\u2601 Fetch from Snowflake"}</button>
     </div>
-    {data.length === 0 ? uploadZone(tab) : dataTable()}
+    {(fuzeData.length === 0 && ggmData.length === 0 && cgpData.length === 0) ? uploadZone() : dataTable()}
   </div>;
 }
 
