@@ -4646,6 +4646,7 @@ function TruckloaderTool(props) {
   var _ediConfirm = useState(false), ediConfirm = _ediConfirm[0], setEdiConfirm = _ediConfirm[1];
   var _ediResult  = useState(null),  ediResult  = _ediResult[0],  setEdiResult  = _ediResult[1];
   var _ediSent    = useState(false), ediSent    = _ediSent[0],    setEdiSent    = _ediSent[1];
+  var _createdPOs = useState([]),    createdPOs = _createdPOs[0],  setCreatedPOs = _createdPOs[1];
 
   async function createPOsInAcumatica() {
     setAcuConfirm(false);
@@ -4672,6 +4673,7 @@ function TruckloaderTool(props) {
     setAcuLoading(true);
     setAcuResult(null);
     setEdiSent(false);
+    setCreatedPOs([]);
     try {
       var res = await fetch("/api/acumatica-create-po", {
         method: "POST",
@@ -4685,6 +4687,7 @@ function TruckloaderTool(props) {
       });
       var data = await res.json();
       setAcuResult(data);
+      setCreatedPOs((data && data.succeeded) || []);
       if (data.ok) {
         toast("Created " + (data.succeeded || []).length + " PO(s) in Acumatica", "success");
       } else {
@@ -4698,12 +4701,12 @@ function TruckloaderTool(props) {
     }
   }
 
-  // Send the just-created Truckloader POs (from acuResult.succeeded) to TrueCommerce
+  // Send the just-created Truckloader POs (held in createdPOs, which survives
   // EDI. Reuses the exact PO Tools route + channel; Vendor Ref = the PO's Order Nbr,
   // which the create-PO flow already wrote into Vendor Ref.
   async function sendAllPOsToEDI() {
     setEdiConfirm(false);
-    var succeeded = (acuResult && acuResult.succeeded) || [];
+    var succeeded = createdPOs || [];
     if (succeeded.length === 0) { toast("No created POs to send \u2014 create POs in the Truck Assignments tab first.", "error"); return; }
     if (!cred || !cred.username || !cred.password) { toast("Acumatica credentials required", "error"); lp && lp(); return; }
     setEdiSending(true);
@@ -5424,7 +5427,7 @@ function TruckloaderTool(props) {
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               <button onClick={function() { createDraft("hills"); }} disabled={hillsDraftSent} style={Object.assign({}, S.btn(), { opacity: hillsDraftSent ? 0.5 : 1 })}><IconMail /> {hillsDraftSent ? "Draft Created" : "Create Draft for Hill\u2019s"}</button>
               {(function() {
-                var ediCount = (acuResult && acuResult.succeeded) ? acuResult.succeeded.length : 0;
+                var ediCount = createdPOs ? createdPOs.length : 0;
                 return <button onClick={function() { if (ediCount === 0) { toast("No created POs to send \u2014 create POs in the Truck Assignments tab first.", "error"); return; } setEdiConfirm(true); }} disabled={ediSending || ediCount === 0 || ediSent} title={ediSent ? "Already sent to EDI \u2014 click Unlock to re-send the same POs" : ediCount === 0 ? "Create POs in the Truck Assignments tab first" : "Send the " + ediCount + " created PO(s) to TrueCommerce EDI"} style={{ background: ediSent ? "#059669" : (ediSending || ediCount === 0) ? "#93C5FD" : "#2563EB", color: "#fff", border: "none", padding: "9px 16px", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: (ediSending || ediCount === 0 || ediSent) ? "not-allowed" : "pointer", opacity: ediSent ? 0.7 : 1, display: "inline-flex", alignItems: "center", gap: 6 }}>{ediSent ? <><IconCheck /> Sent to EDI</> : ediSending ? <><Spinner /> Sending{"\u2026"}</> : <>{"\u2192"} Send all POs to EDI{ediCount > 0 ? " (" + ediCount + ")" : ""}</>}</button>;
               })()}
               {ediSent && <button onClick={function() { setEdiSent(false); }} title="Unlock so you can send these same POs to EDI again (no new POs are created)" style={Object.assign({}, S.btn("ghost"), { fontSize: 12, padding: "8px 12px" })}>{"\u21BB"} Unlock to re-send</button>}
@@ -5435,7 +5438,7 @@ function TruckloaderTool(props) {
               <div onClick={function(e) { e.stopPropagation(); }} style={{ background: "#fff", borderRadius: 12, padding: 24, maxWidth: 440, width: "90%", boxShadow: "0 20px 50px rgba(0,0,0,0.3)" }}>
                 <div style={{ fontSize: 18, fontWeight: 700, color: "#1F2937", marginBottom: 8 }}>Send POs to EDI?</div>
                 <div style={{ fontSize: 13, color: "#374151", lineHeight: 1.6, marginBottom: 16 }}>
-                  About to send <strong>{(acuResult && acuResult.succeeded ? acuResult.succeeded.length : 0)} Hill{"\u2019"}s PO(s)</strong> to TrueCommerce EDI (same action as Process All POs in PO Tools). This transmits the orders to the vendor and <strong>can{"\u2019"}t be undone</strong>. Vendor Ref will be each PO{"\u2019"}s Order Nbr.
+                  About to send <strong>{createdPOs.length} Hill{"\u2019"}s PO(s)</strong> to TrueCommerce EDI (same action as Process All POs in PO Tools). This transmits the orders to the vendor and <strong>can{"\u2019"}t be undone</strong>. Vendor Ref will be each PO{"\u2019"}s Order Nbr.
                 </div>
                 <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
                   <button onClick={function() { setEdiConfirm(false); }} style={Object.assign({}, S.btn("ghost"))}>Cancel</button>
