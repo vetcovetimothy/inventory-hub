@@ -4642,6 +4642,9 @@ function TruckloaderTool(props) {
   var _acuLoading = useState(false), acuLoading = _acuLoading[0], setAcuLoading = _acuLoading[1];
   var _acuConfirm = useState(false), acuConfirm = _acuConfirm[0], setAcuConfirm = _acuConfirm[1];
   var _acuResult  = useState(null),  acuResult  = _acuResult[0],  setAcuResult  = _acuResult[1];
+  var _ediSending = useState(false), ediSending = _ediSending[0], setEdiSending = _ediSending[1];
+  var _ediConfirm = useState(false), ediConfirm = _ediConfirm[0], setEdiConfirm = _ediConfirm[1];
+  var _ediResult  = useState(null),  ediResult  = _ediResult[0],  setEdiResult  = _ediResult[1];
 
   async function createPOsInAcumatica() {
     setAcuConfirm(false);
@@ -4690,6 +4693,45 @@ function TruckloaderTool(props) {
       toast("Network error: " + err.message, "error");
     } finally {
       setAcuLoading(false);
+    }
+  }
+
+  // Send the just-created Truckloader POs (from acuResult.succeeded) to TrueCommerce
+  // EDI. Reuses the exact PO Tools route + channel; Vendor Ref = the PO's Order Nbr,
+  // which the create-PO flow already wrote into Vendor Ref.
+  async function sendAllPOsToEDI() {
+    setEdiConfirm(false);
+    var succeeded = (acuResult && acuResult.succeeded) || [];
+    if (succeeded.length === 0) { toast("No created POs to send \u2014 create POs in the Truck Assignments tab first.", "error"); return; }
+    if (!cred || !cred.username || !cred.password) { toast("Acumatica credentials required", "error"); lp && lp(); return; }
+    setEdiSending(true);
+    setEdiResult(null);
+    try {
+      var posPayload = succeeded.map(function(s) {
+        return { orderNbr: s.orderNbr, vendorRef: s.orderNbr, channel: "TrueCommerce EDI" };
+      });
+      var res = await fetch("/api/acumatica-process-pos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: cred.username, password: cred.password, pos: posPayload })
+      });
+      var resp = await res.json();
+      setEdiResult({ resp: resp, orderNbrs: succeeded.map(function(s) { return s.orderNbr; }) });
+      if (!resp || !Array.isArray(resp.results)) { toast("Unexpected response from Acumatica", "error"); return; }
+      var s = resp.summary || {};
+      if (resp.ok) {
+        toast((s.ediSentCount || posPayload.length) + " PO(s) sent to EDI", "success");
+      } else {
+        var bits = [];
+        if (s.ediSentCount) bits.push(s.ediSentCount + " sent");
+        if (s.ediFailedCount) bits.push(s.ediFailedCount + " failed");
+        toast("EDI send: " + (bits.join(", ") || "see results"), "error");
+      }
+    } catch (err) {
+      setEdiResult({ resp: { ok: false, error: String(err) }, orderNbrs: succeeded.map(function(s) { return s.orderNbr; }) });
+      toast("Network error: " + err.message, "error");
+    } finally {
+      setEdiSending(false);
     }
   }
 
@@ -5383,7 +5425,45 @@ function TruckloaderTool(props) {
               Thanks,<br /><br />
               <span style={{ color: "#9CA3AF", fontSize: 11, fontStyle: "italic" }}>Your Vetcove Gmail signature will be appended automatically</span>
             </div>
-            <button onClick={function() { createDraft("hills"); }} disabled={hillsDraftSent} style={Object.assign({}, S.btn(), { opacity: hillsDraftSent ? 0.5 : 1 })}><IconMail /> {hillsDraftSent ? "Draft Created" : "Create Draft for Hill\u2019s"}</button>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <button onClick={function() { createDraft("hills"); }} disabled={hillsDraftSent} style={Object.assign({}, S.btn(), { opacity: hillsDraftSent ? 0.5 : 1 })}><IconMail /> {hillsDraftSent ? "Draft Created" : "Create Draft for Hill\u2019s"}</button>
+              {(function() {
+                var ediCount = (acuResult && acuResult.succeeded) ? acuResult.succeeded.length : 0;
+                return <button onClick={function() { if (ediCount === 0) { toast("No created POs to send \u2014 create POs in the Truck Assignments tab first.", "error"); return; } setEdiConfirm(true); }} disabled={ediSending || ediCount === 0} title={ediCount === 0 ? "Create POs in the Truck Assignments tab first" : "Send the " + ediCount + " created PO(s) to TrueCommerce EDI"} style={{ background: ediSending || ediCount === 0 ? "#93C5FD" : "#2563EB", color: "#fff", border: "none", padding: "9px 16px", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: ediSending || ediCount === 0 ? "not-allowed" : "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>{ediSending ? <><Spinner /> Sending{"\u2026"}</> : <>{"\u2192"} Send all POs to EDI{ediCount > 0 ? " (" + ediCount + ")" : ""}</>}</button>;
+              })()}
+            </div>
+
+            {/* Send to EDI — confirmation modal */}
+            {ediConfirm && <div onClick={function() { setEdiConfirm(false); }} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+              <div onClick={function(e) { e.stopPropagation(); }} style={{ background: "#fff", borderRadius: 12, padding: 24, maxWidth: 440, width: "90%", boxShadow: "0 20px 50px rgba(0,0,0,0.3)" }}>
+                <div style={{ fontSize: 18, fontWeight: 700, color: "#1F2937", marginBottom: 8 }}>Send POs to EDI?</div>
+                <div style={{ fontSize: 13, color: "#374151", lineHeight: 1.6, marginBottom: 16 }}>
+                  About to send <strong>{(acuResult && acuResult.succeeded ? acuResult.succeeded.length : 0)} Hill{"\u2019"}s PO(s)</strong> to TrueCommerce EDI (same action as Process All POs in PO Tools). This transmits the orders to the vendor and <strong>can{"\u2019"}t be undone</strong>. Vendor Ref will be each PO{"\u2019"}s Order Nbr.
+                </div>
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                  <button onClick={function() { setEdiConfirm(false); }} style={Object.assign({}, S.btn("ghost"))}>Cancel</button>
+                  <button onClick={sendAllPOsToEDI} style={{ background: "#2563EB", color: "#fff", border: "none", padding: "8px 16px", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Yes, send to EDI</button>
+                </div>
+              </div>
+            </div>}
+
+            {/* Send to EDI — results modal */}
+            {ediResult && <div onClick={function() { setEdiResult(null); }} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+              <div onClick={function(e) { e.stopPropagation(); }} style={{ background: "#fff", borderRadius: 12, padding: 24, maxWidth: 520, width: "90%", maxHeight: "80vh", overflow: "auto", boxShadow: "0 20px 50px rgba(0,0,0,0.3)" }}>
+                <div style={{ fontSize: 18, fontWeight: 700, color: (ediResult.resp && ediResult.resp.ok) ? "#059669" : "#DC2626", marginBottom: 12 }}>{(ediResult.resp && ediResult.resp.ok) ? "Sent to EDI" : "EDI send finished with issues"}</div>
+                {ediResult.resp && Array.isArray(ediResult.resp.results) ? <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 13 }}>
+                  <thead><tr><th style={Object.assign({}, S.th, { textAlign: "left" })}>PO Number</th><th style={Object.assign({}, S.th, { textAlign: "left" })}>Result</th></tr></thead>
+                  <tbody>{ediResult.resp.results.map(function(r, ri) {
+                    var sent = r.ok && r.ediSent;
+                    var label = sent ? "\u2713 Sent to EDI" : r.ediError ? ("\u26A0 " + r.ediError) : r.error ? ("\u26A0 " + r.error) : "\u26A0 Not sent";
+                    return <tr key={ri}><td style={Object.assign({}, S.td, { fontFamily: "monospace", fontWeight: 600 })}>{ediResult.orderNbrs[ri] || "\u2014"}</td><td style={Object.assign({}, S.td, { color: sent ? "#059669" : "#DC2626" })}>{label}</td></tr>;
+                  })}</tbody>
+                </table> : <div style={{ fontSize: 13, color: "#DC2626" }}>{(ediResult.resp && ediResult.resp.error) || "Unexpected response from Acumatica."}</div>}
+                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+                  <button onClick={function() { setEdiResult(null); }} style={Object.assign({}, S.btn())}>Close</button>
+                </div>
+              </div>
+            </div>}
           </div>
 
           {/* Central Pet Draft */}
