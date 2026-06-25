@@ -3665,6 +3665,37 @@ function HillsTracker(props) {
     return d < now;
   }
 
+  // For a bare month/day, anchor the year to a reference date (the PO's order
+  // date) rather than today \u2014 an ETA can't precede the order, so a month/day
+  // that falls before the order date must be the following year. This stays
+  // correct even when the ETA is entered late. Falls back to today if no
+  // reference date is available.
+  function smartEtaYear(month, day, refDate) {
+    var ref = (refDate && !isNaN(refDate.getTime()))
+      ? new Date(refDate.getFullYear(), refDate.getMonth(), refDate.getDate())
+      : (function() { var t = new Date(); return new Date(t.getFullYear(), t.getMonth(), t.getDate()); })();
+    var y = ref.getFullYear();
+    var cand = new Date(y, month - 1, day);
+    return cand < ref ? y + 1 : y;
+  }
+  // Normalize an ETA the user typed. Accepts M/D (year auto-filled from refDate),
+  // M/D/YY, or M/D/YYYY (also tolerates - as a separator). Unparseable input is
+  // left as-is so we never clobber what the user typed.
+  function normalizeEta(raw, refDate) {
+    if (raw == null) return "";
+    var s = String(raw).trim();
+    if (!s) return "";
+    var m = s.match(/^(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2}|\d{4}))?$/);
+    if (!m) return s;
+    var month = parseInt(m[1], 10), day = parseInt(m[2], 10);
+    if (month < 1 || month > 12 || day < 1 || day > 31) return s;
+    var year;
+    if (m[3] == null || m[3] === "") year = smartEtaYear(month, day, refDate);
+    else if (m[3].length === 2) year = 2000 + parseInt(m[3], 10);
+    else year = parseInt(m[3], 10);
+    return month + "/" + day + "/" + year;
+  }
+
   function formatDate(d) {
     var dt = parseDate(d);
     if (!dt) return "";
@@ -3736,7 +3767,7 @@ function HillsTracker(props) {
               </div>
             </td>
             <td style={S.td}>
-              <input type="text" value={poMeta.eta || ""} onChange={function(e) { updateMeta(po, "eta", e.target.value); }} placeholder="mm/dd/yyyy" style={Object.assign({}, S.inp, { padding: "6px 10px", background: etaPast ? "rgba(220,38,38,0.06)" : "#F9FAFB", borderColor: etaPast ? "rgba(220,38,38,0.3)" : "#E5E7EB", color: etaPast ? "#DC2626" : "#374151" })} />
+              <input type="text" value={poMeta.eta || ""} onChange={function(e) { updateMeta(po, "eta", e.target.value); }} onBlur={function(e) { var norm = normalizeEta(e.target.value, orderedDate); if (norm !== (poMeta.eta || "")) updateMeta(po, "eta", norm); }} placeholder="mm/dd or mm/dd/yyyy" style={Object.assign({}, S.inp, { padding: "6px 10px", background: etaPast ? "rgba(220,38,38,0.06)" : (poMeta.eta ? "#F9FAFB" : "#E2E8F2"), borderColor: etaPast ? "rgba(220,38,38,0.3)" : (poMeta.eta ? "#E5E7EB" : "#B6C2D4"), color: etaPast ? "#DC2626" : "#374151" })} />
               {etaPast && <div style={{ fontSize: 10, color: "#DC2626", marginTop: 2, fontWeight: 500 }}>Should be delivered</div>}
             </td>
             <td style={S.td}>
