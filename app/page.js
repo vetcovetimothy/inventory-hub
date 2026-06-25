@@ -5246,7 +5246,7 @@ function TruckloaderTool(props) {
                   var align = (h === "Inv ID" || h === "Description") ? "left" : "center";
                   if (h === "On Hand" || h === "Days/Pal" || h === "Order Qty" || h === "Total Lbs") align = "right";
                   var grp = (h === "DOH+DOO" || h === "+Days" || h === "= New DOH")
-                    ? Object.assign({ background: "#E9EBEF", padding: "8px 3px" },
+                    ? Object.assign({ background: "#EDE9FE", padding: "8px 3px" },
                         h === "+Days" ? { color: "#A78BFA" } : {},
                         h === "= New DOH" ? { color: "#7C3AED" } : {})
                     : {};
@@ -5263,7 +5263,7 @@ function TruckloaderTool(props) {
                 var rowLbs = curPals * (f.palletWeight || 0);
                 var addDays = (dailySales > 0 && f.unitsPerPallet > 0) ? Math.round((curPals * f.unitsPerPallet) / dailySales) : null;
                 var newDoh = addDays == null ? null : (f.combined + addDays);
-                var grpCell = { background: "#F1F2F4", padding: "6px 3px" };
+                var grpCell = { background: "#F5F3FF", padding: "6px 3px" };
                 return <tr key={fi} style={{ background: urgBg }}>
                   <td onClick={function() { navigator.clipboard.writeText(f.productCode); toast("Copied: " + f.productCode); }} style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, fontWeight: 600, padding: "6px 6px", cursor: "pointer", whiteSpace: "nowrap" })} title="Click to copy">{f.productCode}</td>
                   <td style={Object.assign({}, S.td, { maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", padding: "6px 6px", fontSize: 11 })} title={f.description}>{f.description}</td>
