@@ -3767,7 +3767,7 @@ function HillsTracker(props) {
               </div>
             </td>
             <td style={S.td}>
-              <input type="text" value={poMeta.eta || ""} onChange={function(e) { updateMeta(po, "eta", e.target.value); }} onBlur={function(e) { var norm = normalizeEta(e.target.value, orderedDate); if (norm !== (poMeta.eta || "")) updateMeta(po, "eta", norm); }} placeholder="mm/dd/yyyy" style={Object.assign({}, S.inp, { padding: "6px 10px", background: etaPast ? "rgba(220,38,38,0.06)" : (poMeta.eta ? "#F9FAFB" : "#FBEADB"), borderColor: etaPast ? "rgba(220,38,38,0.3)" : (poMeta.eta ? "#E5E7EB" : "#D98E4F"), color: etaPast ? "#DC2626" : "#374151" })} />
+              <input type="text" value={poMeta.eta || ""} onChange={function(e) { updateMeta(po, "eta", e.target.value); }} onBlur={function(e) { var norm = normalizeEta(e.target.value, orderedDate); if (norm !== (poMeta.eta || "")) updateMeta(po, "eta", norm); }} placeholder="mm/dd/yyyy" style={Object.assign({}, S.inp, { padding: "6px 10px", background: etaPast ? "rgba(220,38,38,0.06)" : (poMeta.eta ? "#F9FAFB" : "#FBEADB"), borderColor: etaPast ? "rgba(220,38,38,0.3)" : (poMeta.eta ? "#E5E7EB" : "transparent"), color: etaPast ? "#DC2626" : "#374151" })} />
               {etaPast && <div style={{ fontSize: 10, color: "#DC2626", marginTop: 2, fontWeight: 500 }}>Should be delivered</div>}
             </td>
             <td style={S.td}>
