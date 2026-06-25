@@ -5194,10 +5194,10 @@ function TruckloaderTool(props) {
           <div style={{ overflow: "auto", borderRadius: 10, border: "1px solid #E5E7EB", maxHeight: 600 }}>
             <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
               <thead><tr>
-                {["Inv ID", "Description", "R", "DOH+DOO", "On Hand", "Days/Pal", "+Days", "Pallets", "Order Qty", "Total Lbs", ""].map(function(h) {
+                {["Inv ID", "Description", "R", "On Hand", "Days/Pal", "DOH+DOO", "+Days", "= New DOH", "Pallets", "Order Qty", "Total Lbs", ""].map(function(h) {
                   var align = (h === "Inv ID" || h === "Description") ? "left" : "center";
                   if (h === "On Hand" || h === "Days/Pal" || h === "Order Qty" || h === "Total Lbs") align = "right";
-                  return <th key={h} style={Object.assign({}, S.th, { padding: "8px 6px", fontSize: 10, textAlign: align }, h === "+Days" ? { color: "#7C3AED" } : {}, (h === "Pallets" || h === "Order Qty" || h === "Total Lbs" || h === "") ? { background: "#F0FDF4" } : {})}>{h}</th>;
+                  return <th key={h} style={Object.assign({}, S.th, { padding: "8px 6px", fontSize: 10, textAlign: align }, h === "+Days" ? { color: "#A78BFA" } : {}, h === "= New DOH" ? { color: "#7C3AED", background: "#F5F3FF" } : {}, (h === "Pallets" || h === "Order Qty" || h === "Total Lbs" || h === "") ? { background: "#F0FDF4" } : {})}>{h}</th>;
                 })}
               </tr></thead>
               <tbody>{fillSuggestions.slice(0, 150).map(function(f, fi) {
@@ -5208,14 +5208,17 @@ function TruckloaderTool(props) {
                 var sugPals = (f.unitsPerPallet > 0 && dailySales > 0) ? Math.max(1, Math.ceil(unitsForTarget / f.unitsPerPallet)) : "";
                 var curPals = fillPals[f.productCode] || sugPals || 1;
                 var rowLbs = curPals * (f.palletWeight || 0);
+                var addDays = (dailySales > 0 && f.unitsPerPallet > 0) ? Math.round((curPals * f.unitsPerPallet) / dailySales) : null;
+                var newDoh = addDays == null ? null : (f.combined + addDays);
                 return <tr key={fi} style={{ background: urgBg }}>
                   <td onClick={function() { navigator.clipboard.writeText(f.productCode); toast("Copied: " + f.productCode); }} style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, fontWeight: 600, padding: "6px 6px", cursor: "pointer", whiteSpace: "nowrap" })} title="Click to copy">{f.productCode}</td>
                   <td style={Object.assign({}, S.td, { maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", padding: "6px 6px", fontSize: 11 })} title={f.description}>{f.description}</td>
                   <td style={Object.assign({}, S.td, { textAlign: "center", fontWeight: 700, padding: "6px 6px", fontSize: 11 })}>{f.replenClass}</td>
-                  <td style={Object.assign({}, S.td, { textAlign: "center", fontWeight: 700, color: urgCol, padding: "6px 6px", fontSize: 11 })}>{f.combined}</td>
                   <td style={Object.assign({}, S.td, { textAlign: "right", padding: "6px 6px", fontSize: 11 })}>{f.onHand}</td>
                   <td style={Object.assign({}, S.td, { textAlign: "right", padding: "6px 6px", fontSize: 11, color: "#9CA3AF" })}>{(dailySales > 0 && f.unitsPerPallet > 0) ? Math.round(f.unitsPerPallet / dailySales) : "\u2014"}</td>
-                  <td style={Object.assign({}, S.td, { textAlign: "center", padding: "6px 6px", fontSize: 11, fontWeight: 600, color: "#7C3AED" })}>{(dailySales > 0 && f.unitsPerPallet > 0) ? "+" + Math.round((curPals * f.unitsPerPallet) / dailySales) : "\u2014"}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "center", fontWeight: 700, color: urgCol, padding: "6px 6px", fontSize: 11 })}>{f.combined}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "center", padding: "6px 6px", fontSize: 11, fontWeight: 600, color: "#A78BFA" })}>{addDays == null ? "\u2014" : "+" + addDays}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "center", padding: "6px 6px", fontSize: 11, fontWeight: 700, color: "#7C3AED", background: "#F5F3FF" })}>{newDoh == null ? "\u2014" : newDoh}</td>
                   <td style={Object.assign({}, S.td, { textAlign: "center", width: 44, padding: "4px 2px" })}><input type="number" min="1" value={curPals} onChange={function(e) { var u = Object.assign({}, fillPals); u[f.productCode] = Math.max(1, parseInt(e.target.value) || 1); setFillPals(u); }} style={Object.assign({}, S.inp, { width: 38, textAlign: "center", padding: "2px 2px", fontSize: 11 })} /></td>
                   <td style={Object.assign({}, S.td, { textAlign: "right", padding: "6px 6px", fontSize: 12, fontWeight: 700, color: "#059669" })}>{f.unitsPerPallet > 0 ? (curPals * f.unitsPerPallet) : "\u2014"}</td>
                   <td style={Object.assign({}, S.td, { textAlign: "right", padding: "6px 6px", fontSize: 11, fontWeight: 600 })}>{rowLbs > 0 ? rowLbs.toLocaleString(undefined, { maximumFractionDigits: 0 }) : "\u2014"}</td>
