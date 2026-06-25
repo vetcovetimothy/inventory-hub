@@ -4645,6 +4645,7 @@ function TruckloaderTool(props) {
   var _ediSending = useState(false), ediSending = _ediSending[0], setEdiSending = _ediSending[1];
   var _ediConfirm = useState(false), ediConfirm = _ediConfirm[0], setEdiConfirm = _ediConfirm[1];
   var _ediResult  = useState(null),  ediResult  = _ediResult[0],  setEdiResult  = _ediResult[1];
+  var _ediSent    = useState(false), ediSent    = _ediSent[0],    setEdiSent    = _ediSent[1];
 
   async function createPOsInAcumatica() {
     setAcuConfirm(false);
@@ -4670,6 +4671,7 @@ function TruckloaderTool(props) {
 
     setAcuLoading(true);
     setAcuResult(null);
+    setEdiSent(false);
     try {
       var res = await fetch("/api/acumatica-create-po", {
         method: "POST",
@@ -4719,6 +4721,10 @@ function TruckloaderTool(props) {
       setEdiResult({ resp: resp, orderNbrs: succeeded.map(function(s) { return s.orderNbr; }) });
       if (!resp || !Array.isArray(resp.results)) { toast("Unexpected response from Acumatica", "error"); return; }
       var s = resp.summary || {};
+      // Lock the button if any PO actually went out, so a second click can't
+      // re-transmit the ones that already succeeded. A total failure (nothing
+      // sent) leaves it unlocked so it can be retried.
+      if (resp.ok || (s.ediSentCount && s.ediSentCount > 0)) setEdiSent(true);
       if (resp.ok) {
         toast((s.ediSentCount || posPayload.length) + " PO(s) sent to EDI", "success");
       } else {
@@ -5240,10 +5246,9 @@ function TruckloaderTool(props) {
                   var align = (h === "Inv ID" || h === "Description") ? "left" : "center";
                   if (h === "On Hand" || h === "Days/Pal" || h === "Order Qty" || h === "Total Lbs") align = "right";
                   var grp = (h === "DOH+DOO" || h === "+Days" || h === "= New DOH")
-                    ? Object.assign({ background: "#EDE9FE", borderTop: "2px solid #C4B5FD" },
-                        h === "DOH+DOO" ? { borderLeft: "2px solid #C4B5FD", borderTopLeftRadius: 12 } : {},
-                        h === "= New DOH" ? { borderRight: "2px solid #C4B5FD", borderTopRightRadius: 12, color: "#7C3AED" } : {},
-                        h === "+Days" ? { color: "#A78BFA" } : {})
+                    ? Object.assign({ background: "#E9EBEF", padding: "8px 3px" },
+                        h === "+Days" ? { color: "#A78BFA" } : {},
+                        h === "= New DOH" ? { color: "#7C3AED" } : {})
                     : {};
                   return <th key={h} style={Object.assign({}, S.th, { padding: "8px 6px", fontSize: 10, textAlign: align }, grp, (h === "Pallets" || h === "Order Qty" || h === "Total Lbs" || h === "") ? { background: "#F0FDF4" } : {})}>{h}</th>;
                 })}
@@ -5258,19 +5263,16 @@ function TruckloaderTool(props) {
                 var rowLbs = curPals * (f.palletWeight || 0);
                 var addDays = (dailySales > 0 && f.unitsPerPallet > 0) ? Math.round((curPals * f.unitsPerPallet) / dailySales) : null;
                 var newDoh = addDays == null ? null : (f.combined + addDays);
-                var isLast = fi === arr.length - 1;
-                var grpL = Object.assign({ background: "#F5F3FF", borderLeft: "2px solid #C4B5FD" }, isLast ? { borderBottom: "2px solid #C4B5FD", borderBottomLeftRadius: 12 } : {});
-                var grpM = Object.assign({ background: "#F5F3FF" }, isLast ? { borderBottom: "2px solid #C4B5FD" } : {});
-                var grpR = Object.assign({ background: "#F5F3FF", borderRight: "2px solid #C4B5FD" }, isLast ? { borderBottom: "2px solid #C4B5FD", borderBottomRightRadius: 12 } : {});
+                var grpCell = { background: "#F1F2F4", padding: "6px 3px" };
                 return <tr key={fi} style={{ background: urgBg }}>
                   <td onClick={function() { navigator.clipboard.writeText(f.productCode); toast("Copied: " + f.productCode); }} style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, fontWeight: 600, padding: "6px 6px", cursor: "pointer", whiteSpace: "nowrap" })} title="Click to copy">{f.productCode}</td>
                   <td style={Object.assign({}, S.td, { maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", padding: "6px 6px", fontSize: 11 })} title={f.description}>{f.description}</td>
                   <td style={Object.assign({}, S.td, { textAlign: "center", fontWeight: 700, padding: "6px 6px", fontSize: 11 })}>{f.replenClass}</td>
                   <td style={Object.assign({}, S.td, { textAlign: "right", padding: "6px 6px", fontSize: 11 })}>{f.onHand}</td>
                   <td style={Object.assign({}, S.td, { textAlign: "right", padding: "6px 6px", fontSize: 11, color: "#9CA3AF" })}>{(dailySales > 0 && f.unitsPerPallet > 0) ? Math.round(f.unitsPerPallet / dailySales) : "\u2014"}</td>
-                  <td style={Object.assign({}, S.td, { textAlign: "center", fontWeight: 700, color: urgCol, padding: "6px 6px", fontSize: 11 }, grpL)}>{f.combined}</td>
-                  <td style={Object.assign({}, S.td, { textAlign: "center", padding: "6px 6px", fontSize: 11, fontWeight: 600, color: "#A78BFA" }, grpM)}>{addDays == null ? "\u2014" : "+" + addDays}</td>
-                  <td style={Object.assign({}, S.td, { textAlign: "center", padding: "6px 6px", fontSize: 11, fontWeight: 700, color: "#7C3AED" }, grpR)}>{newDoh == null ? "\u2014" : newDoh}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "center", fontWeight: 700, color: urgCol, padding: "6px 6px", fontSize: 11 }, grpCell)}>{f.combined}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "center", padding: "6px 6px", fontSize: 11, fontWeight: 600, color: "#A78BFA" }, grpCell)}>{addDays == null ? "\u2014" : "+" + addDays}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "center", padding: "6px 6px", fontSize: 11, fontWeight: 700, color: "#7C3AED" }, grpCell)}>{newDoh == null ? "\u2014" : newDoh}</td>
                   <td style={Object.assign({}, S.td, { textAlign: "center", width: 44, padding: "4px 2px" })}><input type="number" min="1" value={curPals} onChange={function(e) { var u = Object.assign({}, fillPals); u[f.productCode] = Math.max(1, parseInt(e.target.value) || 1); setFillPals(u); }} style={Object.assign({}, S.inp, { width: 38, textAlign: "center", padding: "2px 2px", fontSize: 11 })} /></td>
                   <td style={Object.assign({}, S.td, { textAlign: "right", padding: "6px 6px", fontSize: 12, fontWeight: 700, color: "#059669" })}>{f.unitsPerPallet > 0 ? (curPals * f.unitsPerPallet) : "\u2014"}</td>
                   <td style={Object.assign({}, S.td, { textAlign: "right", padding: "6px 6px", fontSize: 11, fontWeight: 600 })}>{rowLbs > 0 ? rowLbs.toLocaleString(undefined, { maximumFractionDigits: 0 }) : "\u2014"}</td>
@@ -5429,7 +5431,7 @@ function TruckloaderTool(props) {
               <button onClick={function() { createDraft("hills"); }} disabled={hillsDraftSent} style={Object.assign({}, S.btn(), { opacity: hillsDraftSent ? 0.5 : 1 })}><IconMail /> {hillsDraftSent ? "Draft Created" : "Create Draft for Hill\u2019s"}</button>
               {(function() {
                 var ediCount = (acuResult && acuResult.succeeded) ? acuResult.succeeded.length : 0;
-                return <button onClick={function() { if (ediCount === 0) { toast("No created POs to send \u2014 create POs in the Truck Assignments tab first.", "error"); return; } setEdiConfirm(true); }} disabled={ediSending || ediCount === 0} title={ediCount === 0 ? "Create POs in the Truck Assignments tab first" : "Send the " + ediCount + " created PO(s) to TrueCommerce EDI"} style={{ background: ediSending || ediCount === 0 ? "#93C5FD" : "#2563EB", color: "#fff", border: "none", padding: "9px 16px", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: ediSending || ediCount === 0 ? "not-allowed" : "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>{ediSending ? <><Spinner /> Sending{"\u2026"}</> : <>{"\u2192"} Send all POs to EDI{ediCount > 0 ? " (" + ediCount + ")" : ""}</>}</button>;
+                return <button onClick={function() { if (ediCount === 0) { toast("No created POs to send \u2014 create POs in the Truck Assignments tab first.", "error"); return; } setEdiConfirm(true); }} disabled={ediSending || ediCount === 0 || ediSent} title={ediSent ? "Already sent to EDI \u2014 create a new batch of POs to send again" : ediCount === 0 ? "Create POs in the Truck Assignments tab first" : "Send the " + ediCount + " created PO(s) to TrueCommerce EDI"} style={{ background: ediSent ? "#059669" : (ediSending || ediCount === 0) ? "#93C5FD" : "#2563EB", color: "#fff", border: "none", padding: "9px 16px", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: (ediSending || ediCount === 0 || ediSent) ? "not-allowed" : "pointer", opacity: ediSent ? 0.7 : 1, display: "inline-flex", alignItems: "center", gap: 6 }}>{ediSent ? <><IconCheck /> Sent to EDI</> : ediSending ? <><Spinner /> Sending{"\u2026"}</> : <>{"\u2192"} Send all POs to EDI{ediCount > 0 ? " (" + ediCount + ")" : ""}</>}</button>;
               })()}
             </div>
 
