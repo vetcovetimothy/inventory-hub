@@ -6837,6 +6837,17 @@ function ReplenishUpdate(props) {
         var hdr = aoa[0].map(function (x) { return String(x).trim(); });
         var idx = function (name) { for (var i = 0; i < hdr.length; i++) { if (hdr[i].toLowerCase() === name.toLowerCase()) return i; } return -1; };
         var iP = idx("Product code"), iL = idx("Location code"), iC = idx("Class"), iSS = idx("SS units"), iLT = idx("LT units"), iMax = idx("Maximum level");
+        var iLTd = idx("LT days");
+        var iFinal = -1; for (var fc = 0; fc < hdr.length; fc++) { if (hdr[fc].toLowerCase().indexOf("final fc units") === 0) { iFinal = fc; break; } }
+        var fcDays = 30;
+        if (iFinal >= 0) {
+          var mm = String(hdr[iFinal]).match(/([A-Za-z]{3,})\s+(\d{4})/);
+          if (mm) {
+            var MN = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
+            var mi = MN[mm[1].slice(0, 3).toLowerCase()];
+            if (mi != null) fcDays = new Date(parseInt(mm[2], 10), mi + 1, 0).getDate();
+          }
+        }
         var missing = []; if (iP < 0) missing.push("Product code"); if (iL < 0) missing.push("Location code"); if (iSS < 0) missing.push("SS units"); if (iLT < 0) missing.push("LT units"); if (iMax < 0) missing.push("Maximum level");
         if (missing.length) { toast("Reorder Points file is missing: " + missing.join(", "), "error"); return; }
         var num = function (v) { var n = parseFloat(String(v == null ? "" : v).replace(/,/g, "")); return isNaN(n) ? 0 : n; };
@@ -6844,7 +6855,7 @@ function ReplenishUpdate(props) {
         for (var r = 1; r < aoa.length; r++) {
           var row = aoa[r]; if (!row || !row.length) continue;
           var pc = String(row[iP] == null ? "" : row[iP]).trim(); if (!pc) continue;
-          out.push({ pc: pc, loc: String(row[iL] == null ? "" : row[iL]).trim(), cls: String(iC >= 0 ? row[iC] : "").trim().toUpperCase(), ss: num(row[iSS]), lt: num(row[iLT]), max: num(row[iMax]) });
+          out.push({ pc: pc, loc: String(row[iL] == null ? "" : row[iL]).trim(), cls: String(iC >= 0 ? row[iC] : "").trim().toUpperCase(), ss: num(row[iSS]), lt: num(row[iLT]), max: num(row[iMax]), ltDays: iLTd >= 0 ? num(row[iLTd]) : null, fcDays: fcDays });
         }
         setRpRows(out); setRpName(file.name); setResult(null);
         toast("Loaded " + out.length + " Reorder Point rows");
@@ -6949,12 +6960,26 @@ function ReplenishUpdate(props) {
         if (!c) return;
         if (["A", "B", "C"].indexOf(c.cls) === -1) return;
         matched++;
-        var newSS = rp.ss; var newROP = rp.ss + rp.lt; if (newROP < 1) newROP = 1; var newMax = rp.max; if (newMax < 2) newMax = 2;
+        var newSS = rp.ss;
+        var newMax = rp.max; if (newMax < 2) newMax = 2;
+        var isGen = /gen-/i.test(rp.pc);
+        var newROP;
+        if (isGen) {
+          // Generic ROP = 9 days on hand, derived from the Max:
+          //   ROP = round( Max x 9 / days-in-forecast-month )
+          // The forecast month's real day count (28/29/30/31) comes from the
+          // "Final FC units <Mon Year>" header; defaults to 30 if unknown.
+          var dim = (rp.fcDays && rp.fcDays > 0) ? rp.fcDays : 30;
+          newROP = Math.round(newMax * 9 / dim);
+        } else {
+          newROP = rp.ss + rp.lt;
+        }
+        if (newROP < 1) newROP = 1;
         var curROP = c.rop, curMax = c.max;
         var increases = (newROP > curROP) || (newMax > curMax);
         var bothDrop15 = (newROP < curROP * 0.85) && (newMax < curMax * 0.85);
         var include = inclAll ? true : (increases && !bothDrop15);
-        var rec = { id: rp.pc, wh: rp.loc, cls: c.cls, newSS: newSS, newROP: newROP, newMax: newMax, curROP: curROP, curMax: curMax, mvmt: c.mvmt };
+        var rec = { id: rp.pc, wh: rp.loc, cls: c.cls, newSS: newSS, newROP: newROP, newMax: newMax, curROP: curROP, curMax: curMax, mvmt: c.mvmt, gen: isGen };
         if (include) included.push(rec);
         if ((newROP < curROP) && (newMax < curMax)) decrease.push(rec);
         var ropOut = (curROP > 0 && newROP > curROP * 3) || (curROP === 0 && newROP > 50);
@@ -7116,7 +7141,7 @@ function ReplenishUpdate(props) {
             <thead><tr>{["Inventory ID", "Whse", "Class", "SS", "ROP now", "ROP new", "Max now", "Max new"].map(function (h, i) { return <th key={i} style={Object.assign({}, S.th, { textAlign: i < 3 ? "left" : "right" })}>{h}</th>; })}</tr></thead>
             <tbody>{result.included.map(function (r, i) {
               return <tr key={i}>
-                <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 12 })}>{r.id}</td>
+                <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 12 })}>{r.id}{r.gen && <span style={{ marginLeft: 6, fontFamily: "inherit", fontSize: 9, fontWeight: 700, color: "#7C3AED", background: "#F5F3FF", borderRadius: 4, padding: "1px 5px" }}>9d ROP</span>}</td>
                 <td style={S.td}>{r.wh}</td>
                 <td style={S.td}>{r.cls}</td>
                 <td style={Object.assign({}, S.td, { textAlign: "right" })}>{fmt(r.newSS)}</td>
