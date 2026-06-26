@@ -6820,6 +6820,7 @@ function ReplenishUpdate(props) {
   var _busy = useState(false), busy = _busy[0], setBusy = _busy[1];
   var _res = useState(null), result = _res[0], setResult = _res[1];
   var _all = useState(false), inclAll = _all[0], setInclAll = _all[1];
+  var _genOnly = useState(false), genOnly = _genOnly[0], setGenOnly = _genOnly[1];
   var _drag = useState(false), drag = _drag[0], setDrag = _drag[1];
   var fileRef = useRef(null);
 
@@ -6959,6 +6960,7 @@ function ReplenishUpdate(props) {
         var rp = best[k]; var c = cur[rp.pc + "|" + rp.loc];
         if (!c) return;
         if (["A", "B", "C"].indexOf(c.cls) === -1) return;
+        if (genOnly && !/gen-/i.test(rp.pc)) return;
         matched++;
         var newSS = rp.ss;
         var newMax = rp.max; if (newMax < 2) newMax = 2;
@@ -7065,6 +7067,7 @@ function ReplenishUpdate(props) {
       <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap", margin: "16px 0" }}>
         <button onClick={build} disabled={busy || !rpRows.length} style={Object.assign({}, S.btn(), (busy || !rpRows.length) ? { opacity: 0.6, cursor: "default" } : {})}>{busy ? <><Spinner color="#fff" size={14} /> Building...</> : "Build upload file"}</button>
         <button onClick={function () { setInclAll(!inclAll); }} title="Include every matched item regardless of whether values went up or down" style={{ padding: "7px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", border: "1px solid " + (inclAll ? "#C4B5FD" : "#E5E7EB"), background: inclAll ? "#F5F3FF" : "#fff", color: inclAll ? "#6D28D9" : "#6B7280" }}>{inclAll ? "\u2713 " : ""}Include all (ignore direction)</button>
+        <button onClick={function () { setGenOnly(!genOnly); }} title="Only include generic items (Inventory ID starts with Gen-). Click Build upload file again to apply." style={{ padding: "7px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", border: "1px solid " + (genOnly ? "#C4B5FD" : "#E5E7EB"), background: genOnly ? "#F5F3FF" : "#fff", color: genOnly ? "#6D28D9" : "#6B7280" }}>{genOnly ? "\u2713 " : ""}Generics only</button>
         <span style={{ fontSize: 12, color: "#9CA3AF" }}>{curRows.length ? ("Current settings from " + curName + " (" + curRows.length + " rows).") : "Upload the Stock Item Whse Replenish export above for current ROP / Max."}</span>
       </div>
 
