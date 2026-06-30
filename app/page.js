@@ -7497,6 +7497,10 @@ function ForecastingTool(props) {
   // ── method engine ──
   var growthMult = (function () { var g = parseFloat(growth); return isNaN(g) ? 1 : g; })();
   var growthRelevant = globalMethod === "B" || globalMethod === "F" || Object.keys(rowMethod).some(function (k) { return rowMethod[k] === "B" || rowMethod[k] === "F"; });
+  // The "Fill these Upload month(s)" bar is only meaningful for strategy B (the
+  // one that can span multiple months). Show it when B is the global strategy or
+  // any single row overrides to B; every other strategy fills the current month only.
+  var monthBarActive = globalMethod === "B" || Object.keys(rowMethod).some(function (k) { return rowMethod[k] === "B"; });
   function methodValueForMonth(row, m, num, gm) {
     if (gm == null) gm = growthMult;
     if (m === "A") { if (num !== anchorNum) return null; var mtd = fcNum(row, anchors.mtd); if (mtd == null) return null; return (mtd / denom) * daysInMonth; }
@@ -7862,6 +7866,7 @@ function ForecastingTool(props) {
           </div>
         </div>
 
+        {monthBarActive && <>
         <div style={{ marginBottom: 6, fontSize: 12, color: "#6B7280", fontWeight: 500 }}>Fill these Upload month(s):</div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
           {anchors.uploads.map(function (u) {
@@ -7872,6 +7877,7 @@ function ForecastingTool(props) {
           })}
         </div>
         <div style={{ fontSize: 11, color: "#9CA3AF", marginBottom: 4 }}>Only strategy B can span multiple months &mdash; click forward one month at a time, each compounding the growth. A, C, D, E and F fill the current month only. A typed cell overrides that month; a per-row strategy overrides the global one.</div>
+        </>}
       </div>}
 
       {formatted && formatted.length > 0 && <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden", border: "0.5px solid " + PANEL_BORDER, borderRadius: "0 0 14px 14px" })}>
