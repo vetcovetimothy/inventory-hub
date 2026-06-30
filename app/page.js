@@ -7501,6 +7501,9 @@ function ForecastingTool(props) {
   // one that can span multiple months). Show it when B is the global strategy or
   // any single row overrides to B; every other strategy fills the current month only.
   var monthBarActive = globalMethod === "B" || Object.keys(rowMethod).some(function (k) { return rowMethod[k] === "B"; });
+  // A forecast strategy is in play (global, or any per-row override) \u2014 used to
+  // show controls (Drop toggle) that only matter when something is being forecast.
+  var strategyActive = globalMethod !== "none" || Object.keys(rowMethod).some(function (k) { return rowMethod[k] && rowMethod[k] !== "none"; });
   function methodValueForMonth(row, m, num, gm) {
     if (gm == null) gm = growthMult;
     if (m === "A") { if (num !== anchorNum) return null; var mtd = fcNum(row, anchors.mtd); if (mtd == null) return null; return (mtd / denom) * daysInMonth; }
@@ -7822,6 +7825,7 @@ function ForecastingTool(props) {
             </button>
           </div> : null}
           <div style={{ display: "flex", gap: 10 }}>
+            {formatted && formatted.length > 0 && <button onClick={exportFormatted} style={btnBlue}><IconDL /> Only Auto-Formatted CSV</button>}
             <button onClick={autoFormat} disabled={busy} style={Object.assign({}, btnSecondary, busy ? { opacity: 0.7, cursor: "wait" } : {})}>{busy ? <><Spinner color="#0B6FA8" size={14} /> Formatting...</> : <><IconFilter /> Auto-format</>}</button>
           </div>
         </div>
@@ -7847,21 +7851,20 @@ function ForecastingTool(props) {
               {FC_METHODS.map(function (m) { return <option key={m.id} value={m.id}>{m.label}</option>; })}
             </select>
           </div>
-          <div style={{ position: "relative", opacity: growthRelevant ? 1 : 0.4 }}>
+          {growthRelevant && <div style={{ position: "relative" }}>
             <label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 6 }}>Growth (multiplier)</label>
-            <input value={growth} disabled={!growthRelevant} onChange={function (e) { setGrowth(e.target.value); }} style={Object.assign({}, S.inp, { width: 90 }, !growthRelevant ? { background: "#F3F4F6", cursor: "not-allowed" } : {})} />
+            <input value={growth} onChange={function (e) { setGrowth(e.target.value); }} style={Object.assign({}, S.inp, { width: 90 })} />
             <div style={{ fontSize: 11, color: "#9CA3AF", position: "absolute", top: "100%", left: 0, marginTop: 4, whiteSpace: "nowrap" }}>1.10 = +10% (strategies B, F)</div>
-          </div>
-          <div style={{ alignSelf: "flex-end" }}>
+          </div>}
+          {strategyActive && <div style={{ alignSelf: "flex-end" }}>
             <button onClick={function () { setDropBelowFinal(!dropBelowFinal); }} title="When on, any item whose computed value falls below that month's Netstock Final is removed entirely from the export (the whole row). Typed overrides are exempt." style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 8, border: "1px solid " + (dropBelowFinal ? "#0EA5E9" : "#E5E7EB"), background: dropBelowFinal ? "#F0F9FF" : "#fff", color: dropBelowFinal ? "#0369A1" : "#6B7280", fontSize: 12, fontWeight: 500, cursor: "pointer" }}>
               <span style={{ width: 30, height: 16, borderRadius: 9, background: dropBelowFinal ? "#0EA5E9" : "#D1D5DB", position: "relative", transition: "background 0.15s", flexShrink: 0 }}><span style={{ position: "absolute", top: 2, left: dropBelowFinal ? 16 : 2, width: 12, height: 12, borderRadius: "50%", background: "#fff", transition: "left 0.15s" }} /></span>
               Drop items below Netstock Final
             </button>
-          </div>
+          </div>}
           <div style={{ flex: 1 }} />
           <div style={{ display: "flex", gap: 10 }}>
             <button onClick={clearOverrides} style={btnSecondary}>Clear overrides</button>
-            <button onClick={exportFormatted} style={btnBlue}><IconDL /> Only Auto-Formatted CSV</button>
             <button onClick={exportForecast} style={btnBlue}><IconDL /> Forecast CSV</button>
           </div>
         </div>
