@@ -7825,8 +7825,8 @@ function ForecastingTool(props) {
             </button>
           </div> : null}
           <div style={{ display: "flex", gap: 10 }}>
-            {formatted && formatted.length > 0 && <button onClick={exportFormatted} style={btnBlue}><IconDL /> Only Auto-Formatted CSV</button>}
             <button onClick={autoFormat} disabled={busy} style={Object.assign({}, btnSecondary, busy ? { opacity: 0.7, cursor: "wait" } : {})}>{busy ? <><Spinner color="#0B6FA8" size={14} /> Formatting...</> : <><IconFilter /> Auto-format</>}</button>
+            {formatted && formatted.length > 0 && <button onClick={exportFormatted} style={btnBlue}><IconDL /> Only Auto-Formatted CSV</button>}
           </div>
         </div>
         {!ok && <div style={{ marginTop: 12, fontSize: 12, color: "#DC2626", display: "flex", alignItems: "center", gap: 6 }}><IconLock /> Log in to Acumatica to fetch warehouse data for auto-format.</div>}
@@ -7865,7 +7865,7 @@ function ForecastingTool(props) {
           <div style={{ flex: 1 }} />
           <div style={{ display: "flex", gap: 10 }}>
             <button onClick={clearOverrides} style={btnSecondary}>Clear overrides</button>
-            <button onClick={exportForecast} style={btnBlue}><IconDL /> Forecast CSV</button>
+            <button onClick={exportForecast} style={btnBlue}><IconDL /> Forecasted CSV</button>
           </div>
         </div>
 
