@@ -5900,6 +5900,7 @@ function OOSTracker(props) {
   var OOS_DATA_KEY = "oos-data-shared";
   var OOS_ALLWHSE_KEY = "oos-allwhse-shared";
   var OOS_TOTALS_KEY = "oos-totals-shared";
+  var OOS_LASTPULL_KEY = "oos-lastpull-shared";
   var OOS_NOTES_PERM_KEY = "oos-notes-permanent";
   var OOS_NOTES_MISS_KEY = "oos-notes-misscount";
   var NOTE_EXPIRY_MISSES = 7; // Note clears when item has been missing from this many uploads in a row
@@ -5988,6 +5989,11 @@ function OOSTracker(props) {
       if (!m || !d || !d.data) return;
       var parsed = typeof d.data === "string" ? JSON.parse(d.data) : d.data;
       if (parsed.totals) setTotalsByVendor(parsed.totals);
+    }).catch(function() {});
+    kvGet(OOS_LASTPULL_KEY).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+      if (!m || !d || !d.data) return;
+      var parsed = typeof d.data === "string" ? JSON.parse(d.data) : d.data;
+      if (parsed && parsed.at) setLastPull({ at: parsed.at, by: parsed.by || "" });
     }).catch(function() {});
     // Load previous items
     kvGet(OOS_PREV_ITEMS_KEY).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
@@ -6270,6 +6276,9 @@ function OOSTracker(props) {
       }
       setWhFilter("all"); setSearch("");
       setSfLoading(false);
+      var pulledAt = Date.now(), pulledBy = cred && cred.username ? cred.username : "";
+      setLastPull({ at: pulledAt, by: pulledBy });
+      kvPost(OOS_LASTPULL_KEY, { at: pulledAt, by: pulledBy, _savedAt: pulledAt }).catch(function() {});
       toast("Loaded " + (fuze.length + ggm.length + cgp.length) + " OOS items from Snowflake" + (dropped > 0 ? " (" + dropped + " other-vendor rows skipped)" : ""));
     }).catch(function(e) { setSfLoading(false); toast("Snowflake fetch error: " + (e && e.message || e), "error"); });
   }
@@ -6288,6 +6297,7 @@ function OOSTracker(props) {
   var currentName = tab === "fuzerx" ? fuzeName : tab === "cgp" ? cgpName : ggmName;
   var _sdIds = useState({}), sdIds = _sdIds[0], setSdIds = _sdIds[1];
   var _sfLoading = useState(false), sfLoading = _sfLoading[0], setSfLoading = _sfLoading[1];
+  var _lastPull = useState(null), lastPull = _lastPull[0], setLastPull = _lastPull[1];
   useEffect(function() {
     // Try localStorage first
     var cached = sGet("tracker-short-dating");
@@ -6513,6 +6523,7 @@ function OOSTracker(props) {
       <button onClick={function() { setTab("gogomeds"); setWhFilter("all"); setSearch(""); setAllWhseSearch(""); }} style={S.pill(tab === "gogomeds", "#8B5CF6")}>GoGoMeds{ggmData.length > 0 && <span style={{ fontSize: 10, background: tab === "gogomeds" ? "rgba(255,255,255,0.2)" : "rgba(100,116,139,0.2)", padding: "1px 6px", borderRadius: 4, marginLeft: 6 }}>{ggmData.length}</span>}</button>
       <button onClick={function() { setTab("cgp"); setWhFilter("all"); setSearch(""); setAllWhseSearch(""); }} style={S.pill(tab === "cgp", "#10B981")}>Central Garden &amp; Pet{cgpData.length > 0 && <span style={{ fontSize: 10, background: tab === "cgp" ? "rgba(255,255,255,0.2)" : "rgba(100,116,139,0.2)", padding: "1px 6px", borderRadius: 4, marginLeft: 6 }}>{cgpData.length}</span>}</button>
       <div style={{ flex: 1 }} />
+      {lastPull && lastPull.at && <div style={{ fontSize: 11, color: "#9CA3AF", alignSelf: "center", marginRight: 4, whiteSpace: "nowrap" }}>Last pull: {(function() { try { return new Date(lastPull.at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); } catch (e) { return ""; } })()}{lastPull.by ? " by " + lastPull.by : ""}</div>}
       <button onClick={loadFromSnowflake} disabled={sfLoading} style={Object.assign({}, S.btn("ghost"), { background: "#EF4444", color: "#fff", border: "none", padding: "8px 14px", fontSize: 12, opacity: sfLoading ? 0.6 : 1, cursor: sfLoading ? "default" : "pointer" })}>{sfLoading ? "Fetching\u2026" : "\u2601 Fetch from Snowflake"}</button>
     </div>
     {(fuzeData.length === 0 && ggmData.length === 0 && cgpData.length === 0 && allWhseData.length === 0)
