@@ -2952,8 +2952,8 @@ function POImportTool(props) {
 
       setResults(matched);
       setStatedAmounts(function(prev) { return Object.assign({}, prev, newStatedAmounts); });
-      // Auto-select first file tab for "other" vendor
-      if (vendor === "other" && matched.length > 0) {
+      // Auto-select first file tab for multi-PO vendors (other + GGM crossovers)
+      if ((vendor === "other" || vendor === "ggm-crossovers") && matched.length > 0) {
         var files = {}; matched.forEach(function(r) { if (r.sourceFile) files[r.sourceFile] = 1; });
         var fileList = Object.keys(files);
         if (fileList.length > 0) setActiveFileTab(fileList[0]);
@@ -3272,8 +3272,11 @@ function POImportTool(props) {
 
 
   var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
-  var fileList = useMemo(function() { if (vendor !== "other" || results.length === 0) return []; var f = {}; results.forEach(function(r) { if (r.sourceFile) f[r.sourceFile] = (f[r.sourceFile] || 0) + 1; }); return Object.keys(f).map(function(name) { return { name: name, count: f[name] }; }); }, [results, vendor]);
-  var activeResults = useMemo(function() { if (vendor !== "other" || !activeFileTab || fileList.length <= 1) return results; return results.filter(function(r) { return r.sourceFile === activeFileTab; }); }, [results, vendor, activeFileTab, fileList]);
+  // "other" and GoGoMeds crossovers can carry multiple PDFs => one PO per file,
+  // shown in separate tabs. (McKesson is always a single PO.)
+  var perFileTabs = vendor === "other" || vendor === "ggm-crossovers";
+  var fileList = useMemo(function() { if (!perFileTabs || results.length === 0) return []; var f = {}; results.forEach(function(r) { if (r.sourceFile) f[r.sourceFile] = (f[r.sourceFile] || 0) + 1; }); return Object.keys(f).map(function(name) { return { name: name, count: f[name] }; }); }, [results, perFileTabs]);
+  var activeResults = useMemo(function() { if (!perFileTabs || !activeFileTab || fileList.length <= 1) return results; return results.filter(function(r) { return r.sourceFile === activeFileTab; }); }, [results, perFileTabs, activeFileTab, fileList]);
   var _deltaSort = useState(null), deltaSort = _deltaSort[0], setDeltaSort = _deltaSort[1];
   function computeDeltaPct(r) {
     if (r.avgCost == null || r.avgCost <= 0) return null;
@@ -3381,7 +3384,7 @@ function POImportTool(props) {
 
       {results.length > 0 && <div>
         {/* File tabs for "other" vendor with multiple files */}
-        {vendor === "other" && fileList.length > 1 && <div style={{ display: "flex", gap: 4, marginBottom: 16, background: "#FFFFFF", borderRadius: 10, padding: 3, border: "0.5px solid #E5E7EB", overflowX: "auto" }}>
+        {perFileTabs && fileList.length > 1 && <div style={{ display: "flex", gap: 4, marginBottom: 16, background: "#FFFFFF", borderRadius: 10, padding: 3, border: "0.5px solid #E5E7EB", overflowX: "auto" }}>
           {fileList.map(function(f) { var isActive = activeFileTab === f.name; return <button key={f.name} onClick={function() { setActiveFileTab(f.name); }} style={{ padding: "8px 16px", borderRadius: 8, fontSize: 12, fontWeight: 500, border: "none", cursor: "pointer", transition: "all 0.15s", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 6, background: isActive ? TOOL_COLOR : "transparent", color: isActive ? "#fff" : "#6B7280" }}>{f.name.replace(".pdf", "")}<span style={{ fontSize: 10, background: isActive ? "rgba(255,255,255,0.25)" : "rgba(100,116,139,0.15)", padding: "1px 6px", borderRadius: 4 }}>{f.count}</span></button>; })}
         </div>}
         <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
@@ -3399,9 +3402,9 @@ function POImportTool(props) {
             <span style={{ fontSize: 14, fontWeight: 600, color: "#1F2937" }}>Translation Results</span>
             <div style={{ display: "flex", gap: 8 }}>
               <button onClick={reset} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}><IconTrash /> Clear</button>
-              {vendor === "other" && fileList.length > 1 && <button onClick={function() { downloadCSV(activeResults); }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}><IconCSV /> Download Tab</button>}
-              {vendor === "other" && fileList.length > 1 && <button onClick={function() { fileList.forEach(function(f, idx) { setTimeout(function() { downloadCSV(results.filter(function(r) { return r.sourceFile === f.name; })); }, idx * 300); }); }} style={Object.assign({}, S.btn(), { padding: "6px 14px", fontSize: 12 })}><IconCSV /> Download All ({fileList.length} files)</button>}
-              {!(vendor === "other" && fileList.length > 1) && <button onClick={function() { downloadCSV(results); }} style={Object.assign({}, S.btn(), { padding: "6px 14px", fontSize: 12 })}><IconCSV /> Download CSV</button>}
+              {perFileTabs && fileList.length > 1 && <button onClick={function() { downloadCSV(activeResults); }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}><IconCSV /> Download Tab</button>}
+              {perFileTabs && fileList.length > 1 && <button onClick={function() { fileList.forEach(function(f, idx) { setTimeout(function() { downloadCSV(results.filter(function(r) { return r.sourceFile === f.name; })); }, idx * 300); }); }} style={Object.assign({}, S.btn(), { padding: "6px 14px", fontSize: 12 })}><IconCSV /> Download All ({fileList.length} files)</button>}
+              {!(perFileTabs && fileList.length > 1) && <button onClick={function() { downloadCSV(results); }} style={Object.assign({}, S.btn(), { padding: "6px 14px", fontSize: 12 })}><IconCSV /> Download CSV</button>}
               <button onClick={onCreatePOsClick} disabled={acuCreateLoading || !ok} style={{ background: (acuCreateLoading || !ok) ? "#D1D5DB" : "#047857", color: "#FFFFFF", border: "none", padding: "6px 14px", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: (acuCreateLoading || !ok) ? "not-allowed" : "pointer", display: "inline-flex", alignItems: "center", gap: 6 }} title={!ok ? "Acumatica credentials required" : "Create the parsed POs in Acumatica"}>{acuCreateLoading ? <><Spinner /> Creating...</> : <>{"\u2192"} Create POs in Acumatica</>}</button>
             </div>
           </div>
