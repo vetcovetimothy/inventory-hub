@@ -7295,6 +7295,56 @@ function ReplenishUpdate(props) {
   );
 }
 
+// Excel-style column-header filter: funnel icon opens a checkbox dropdown with
+// Select all / None / Clear. sel is null (no filter, all shown), or an array of
+// values to show ([] = show none). Collapses back to null when everything is checked.
+function FcHeadFilter(props) {
+  var _o = useState(false), open = _o[0], setOpen = _o[1];
+  var options = props.options || [];
+  var sel = props.sel;
+  var active = sel != null;
+  var allVals = options.map(function (o) { return o.value; });
+  function isChecked(v) { return sel == null ? true : sel.indexOf(v) !== -1; }
+  function apply(next) {
+    if (next != null && next.length === allVals.length && allVals.every(function (v) { return next.indexOf(v) !== -1; })) next = null;
+    props.onSel(next);
+  }
+  function toggle(v) {
+    var cur = sel == null ? allVals.slice() : sel.slice();
+    var i = cur.indexOf(v);
+    if (i === -1) cur.push(v); else cur.splice(i, 1);
+    apply(cur);
+  }
+  var lnk = { border: "none", background: "transparent", cursor: "pointer", padding: 0, fontSize: 11, fontWeight: 600 };
+  return <th style={Object.assign({}, props.thStyle, props.align === "right" ? { textAlign: "right" } : {}, { whiteSpace: "nowrap", position: "relative" })}>
+    <span onClick={props.onSort} style={{ cursor: "pointer", userSelect: "none" }}>{props.label}{props.sortActive ? (props.sortDir === "desc" ? " \u25BE" : " \u25B4") : ""}</span>
+    <button onClick={function (e) { e.stopPropagation(); setOpen(!open); }} title="Filter" style={{ marginLeft: 6, verticalAlign: "middle", border: "none", background: active ? "#E0F2FE" : "transparent", cursor: "pointer", padding: 3, borderRadius: 5, color: active ? "#0284C7" : "#9CA3AF", lineHeight: 0 }}>
+      <svg width="12" height="12" viewBox="0 0 24 24" fill={active ? "#0284C7" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>
+    </button>
+    {open && <>
+      <div onClick={function () { setOpen(false); }} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 1000 }} />
+      <div style={{ position: "absolute", top: "100%", left: 0, marginTop: 4, zIndex: 1001, background: "#fff", border: "1px solid #E5E7EB", borderRadius: 10, boxShadow: "0 8px 24px rgba(0,0,0,0.14)", padding: 8, minWidth: 168, textAlign: "left", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>
+        <div style={{ display: "flex", gap: 12, padding: "2px 6px 8px", borderBottom: "1px solid #F3F4F6", marginBottom: 6 }}>
+          <button onClick={function () { props.onSel(null); }} style={Object.assign({}, lnk, { color: "#0B6FA8" })}>Select all</button>
+          <button onClick={function () { props.onSel([]); }} style={Object.assign({}, lnk, { color: "#6B7280" })}>None</button>
+        </div>
+        <div style={{ maxHeight: 220, overflow: "auto" }}>
+          {options.map(function (o) {
+            var ck = isChecked(o.value);
+            return <div key={o.value} onClick={function () { toggle(o.value); }} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 6px", borderRadius: 6, cursor: "pointer", fontSize: 13, color: "#374151" }}>
+              <span style={{ width: 16, height: 16, borderRadius: 4, border: "1.5px solid " + (ck ? "#0EA5E9" : "#CBD5E1"), background: ck ? "#0EA5E9" : "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{ck && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}</span>
+              <span>{o.label}</span>
+            </div>;
+          })}
+        </div>
+        <div style={{ borderTop: "1px solid #F3F4F6", marginTop: 6, paddingTop: 6, textAlign: "right" }}>
+          <button onClick={function () { props.onSel(null); setOpen(false); }} style={{ border: "1px solid #E5E7EB", background: "#fff", color: "#6B7280", fontSize: 11, fontWeight: 600, cursor: "pointer", padding: "4px 10px", borderRadius: 6 }}>Clear filter</button>
+        </div>
+      </div>
+    </>}
+  </th>;
+}
+
 function ForecastingTool(props) {
   var toast = props.toast, cred = props.cred, ok = props.ok, lp = props.lp;
   var S = makeStyles("#0EA5E9");
@@ -7327,10 +7377,8 @@ function ForecastingTool(props) {
   var _sd = useState("asc"), sortDir = _sd[0], setSortDir = _sd[1];
   var _so = useState(null), sortOrder = _so[0], setSortOrder = _so[1];
   var _q = useState(""), query = _q[0], setQuery = _q[1];
-  var _cf = useState([]), classFilter = _cf[0], setClassFilter = _cf[1];
-  var _sf = useState([]), stratFilter = _sf[0], setStratFilter = _sf[1];
-  var _ff = useState([]), flagFilter = _ff[0], setFlagFilter = _ff[1];
-  var _gf = useState(false), growingOnly = _gf[0], setGrowingOnly = _gf[1];
+  var _colf = useState({}), colFilters = _colf[0], setColFilters = _colf[1];
+  function setColF(col, next) { var u = Object.assign({}, colFilters); if (next == null) delete u[col]; else u[col] = next; setColFilters(u); }
   var _sdi = useState({}), sdInfo = _sdi[0], setSdInfo = _sdi[1];
   var _bki = useState({}), bkoInfo = _bki[0], setBkoInfo = _bki[1];
   var _pd = useState(function () { var d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }), pullDate = _pd[0], setPullDate = _pd[1];
@@ -7414,7 +7462,7 @@ function ForecastingTool(props) {
         setHeaders(hdr); setRows(dataRows); setFileName(file.name); setDetectedWh(dw);
         if (dw) { setWarehouse(dw); sSet("fc-wh", dw); }
         setFormatted(null); setStats(null);
-        setSortOrder(null); setSortKey(""); setQuery(""); setClassFilter([]); setStratFilter([]); setFlagFilter([]); setGrowingOnly(false);
+        setSortOrder(null); setSortKey(""); setQuery(""); setColFilters({});
         // new file: clear per-row forecasting overrides, reset fill-month default
         setRowMethod({}); setRowGrowth({}); setManualEdits({}); setTargetCols(defaultTargetCols(fcAnchors(hdr)));
         idbSet("fc-input", { headers: hdr, rows: dataRows, fileName: file.name, detectedWh: dw }).catch(function () {});
@@ -7504,7 +7552,7 @@ function ForecastingTool(props) {
       });
       var st = { input: rows.length, allowed: allowedCount, kept: kept.length, dropped: rows.length - kept.length, warehouse: warehouse, mode: mode, at: Date.now() };
       setFormatted(kept); setStats(st);
-      setSortOrder(null); setSortKey(""); setQuery(""); setClassFilter([]); setStratFilter([]); setFlagFilter([]); setGrowingOnly(false);
+      setSortOrder(null); setSortKey(""); setQuery(""); setColFilters({});
       // rows changed: clear stale per-row overrides
       setRowMethod({}); setRowGrowth({}); setManualEdits({});
       idbSet("fc-result", { formattedRows: kept, stats: st }).catch(function () {});
@@ -7690,12 +7738,17 @@ function ForecastingTool(props) {
     var fin = fcNum(row, fi); if (fin == null || fin === 0) return null;
     return ((v - fin) / fin) * 100;
   }
-  function toggleClass(cl) { setClassFilter(classFilter.indexOf(cl) !== -1 ? classFilter.filter(function (x) { return x !== cl; }) : classFilter.concat([cl])); }
-  function toggleStrat(s) { setStratFilter(stratFilter.indexOf(s) !== -1 ? stratFilter.filter(function (x) { return x !== s; }) : stratFilter.concat([s])); }
-  function toggleFlag(f) { setFlagFilter(flagFilter.indexOf(f) !== -1 ? flagFilter.filter(function (x) { return x !== f; }) : flagFilter.concat([f])); }
-  // "Growing" = each of the trailing history months is strictly higher than the
-  // previous one (month A < month B < month C). Blank months count as 0.
-  function fcGrowing(row) { var t = anchors.trail3 || []; if (t.length < 2) return false; for (var i = 1; i < t.length; i++) { var p = fcNum(row, t[i - 1]); var c = fcNum(row, t[i]); p = (p == null ? 0 : p); c = (c == null ? 0 : c); if (!(p < c)) return false; } return true; }
+  // Trend across the trailing history months (blank = 0): "g" strictly increasing,
+  // "d" strictly decreasing, "flat" otherwise.
+  function fcTrend(row) { var t = anchors.trail3 || []; if (t.length < 2) return "flat"; var inc = true, dec = true; for (var i = 1; i < t.length; i++) { var p = fcNum(row, t[i - 1]); var c = fcNum(row, t[i]); p = (p == null ? 0 : p); c = (c == null ? 0 : c); if (!(p < c)) inc = false; if (!(p > c)) dec = false; } return inc ? "g" : dec ? "d" : "flat"; }
+  var FC_FILTER_OPTS = {
+    repl: [{ value: "A", label: "A" }, { value: "B", label: "B" }, { value: "C", label: "C" }, { value: "Other", label: "Other / blank" }],
+    strategy: [{ value: "none", label: "None (Global blank)" }, { value: "A", label: "A" }, { value: "B", label: "B" }, { value: "C", label: "C" }, { value: "D", label: "D" }, { value: "E", label: "E" }, { value: "F", label: "F" }],
+    flag: [{ value: "SD", label: "SD (short-dating)" }, { value: "BO", label: "BO (backorder)" }, { value: "None", label: "No flag" }],
+    growing: [{ value: "g", label: "Growing" }, { value: "d", label: "Decreasing" }, { value: "flat", label: "Flat / mixed" }]
+  };
+  function fcReplCat(r) { var c = classCol >= 0 ? String(r[classCol] == null ? "" : r[classCol]).trim().toUpperCase() : ""; return (c === "A" || c === "B" || c === "C") ? c : "Other"; }
+  function fcStratCat(r) { return String(rowMethod[rowKey(r)] || globalMethod || "") || "none"; }
   function toggleSort(key) {
     var dir = (sortKey === key && sortDir === "asc") ? "desc" : "asc";
     var base = sefActive ? (formatted || []).filter(inSef) : (formatted || []);
@@ -7728,7 +7781,7 @@ function ForecastingTool(props) {
     if (key === "product") return String(row[productCol] == null ? "" : row[productCol]);
     if (key === "desc") return String(descCol >= 0 ? (row[descCol] == null ? "" : row[descCol]) : "");
     if (key === "mtd") return fcNum(row, anchors.mtd);
-    if (key === "growing") return fcGrowing(row) ? 1 : 0;
+    if (key === "growing") { var tr = fcTrend(row); return tr === "g" ? 2 : tr === "flat" ? 1 : 0; }
     if (key === "repl") return String(classCol >= 0 ? (row[classCol] == null ? "" : row[classCol]) : "");
     if (key === "flag") { var pc = String(row[productCol] == null ? "" : row[productCol]).trim(); if (sdInfo[pc]) return "1_" + (sdInfo[pc].BestKnownDating || ""); if (bkoInfo[pc]) return "2_" + (bkoInfo[pc].RecoveryDate || ""); return null; }
     if (key === "final1") return fcNum(row, anchors.final1);
@@ -7768,7 +7821,7 @@ function ForecastingTool(props) {
     setMode("non"); setFormatted(null); setStats(null); setBusy(false); setTab("forecast");
     setGlobalMethod("none"); setGrowth("1.10"); setTargetCols([]); setRowMethod({}); setRowGrowth({}); setManualEdits({}); setDropBelowFinal(false);
     setSefCodes([]); setSefFileName(""); setSefOnly(false);
-    setQuery(""); setClassFilter([]); setStratFilter([]); setFlagFilter([]); setGrowingOnly(false); setSortOrder(null); setSortKey("");
+    setQuery(""); setColFilters({}); setSortOrder(null); setSortKey("");
     setSdInfo({}); setBkoInfo({});
     setTpHeaders([]); setTpRows([]); setTpFileName(""); setTpFinalCol(-1); setTpFormatted(null); setTpStats(null); setTpBusy(false);
     idbDel("fc-input").catch(function () {}); idbDel("fc-result").catch(function () {}); idbDel("fc-forecast").catch(function () {}); idbDel("fc-sef").catch(function () {}); idbDel("fc-sdbko").catch(function () {});
@@ -7820,10 +7873,11 @@ function ForecastingTool(props) {
     var base = sefActive ? formatted.filter(inSef) : formatted;
     var q = query.trim().toLowerCase();
     if (q) base = base.filter(function (r) { var pc = String(r[productCol] == null ? "" : r[productCol]).toLowerCase(); var d = descCol >= 0 ? String(r[descCol] == null ? "" : r[descCol]).toLowerCase() : ""; return pc.indexOf(q) !== -1 || d.indexOf(q) !== -1; });
-    if (classFilter.length) base = base.filter(function (r) { var c = classCol >= 0 ? String(r[classCol] == null ? "" : r[classCol]).trim().toUpperCase() : ""; return classFilter.indexOf(c) !== -1; });
-    if (stratFilter.length) base = base.filter(function (r) { var s = String(rowMethod[rowKey(r)] || globalMethod || ""); return stratFilter.indexOf(s) !== -1; });
-    if (flagFilter.length) base = base.filter(function (r) { var pc = String(r[productCol] == null ? "" : r[productCol]).trim(); return flagFilter.some(function (f) { return f === "SD" ? !!sdInfo[pc] : f === "BO" ? !!bkoInfo[pc] : false; }); });
-    if (growingOnly) base = base.filter(function (r) { return fcGrowing(r); });
+    var fRepl = colFilters.repl, fStrat = colFilters.strategy, fFlag = colFilters.flag, fGrow = colFilters.growing;
+    if (fRepl) base = base.filter(function (r) { return fRepl.indexOf(fcReplCat(r)) !== -1; });
+    if (fStrat) base = base.filter(function (r) { return fStrat.indexOf(fcStratCat(r)) !== -1; });
+    if (fFlag) base = base.filter(function (r) { var pc = String(r[productCol] == null ? "" : r[productCol]).trim(); var s = !!sdInfo[pc], b = !!bkoInfo[pc]; return (s && fFlag.indexOf("SD") !== -1) || (b && fFlag.indexOf("BO") !== -1) || (!s && !b && fFlag.indexOf("None") !== -1); });
+    if (fGrow) base = base.filter(function (r) { return fGrow.indexOf(fcTrend(r)) !== -1; });
     if (!sortOrder || !sortOrder.length) return base;
     var pos = {}; for (var i = 0; i < sortOrder.length; i++) { if (!(sortOrder[i] in pos)) pos[sortOrder[i]] = i; }
     return base.slice().sort(function (a, b) {
@@ -7831,7 +7885,7 @@ function ForecastingTool(props) {
       if (ia == null) ia = Infinity; if (ib == null) ib = Infinity;
       return ia - ib;
     });
-  }, [formatted, sefActive, sefCodes, sortOrder, query, classFilter, stratFilter, flagFilter, growingOnly, rowMethod, globalMethod, sdInfo, bkoInfo, anchors]);
+  }, [formatted, sefActive, sefCodes, sortOrder, query, colFilters, rowMethod, globalMethod, sdInfo, bkoInfo, anchors]);
 
   var btnBlue = Object.assign({}, S.btn(), { border: "1px solid #0A8FCC" });
   var btnSecondary = Object.assign({}, S.btn("ghost"), { background: "#F3F8FC", color: "#0B6FA8", border: "1px solid #C2DCEE" });
@@ -8032,30 +8086,8 @@ function ForecastingTool(props) {
       {formatted && formatted.length > 0 && <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden", border: "0.5px solid " + PANEL_BORDER, borderRadius: "0 0 14px 14px" })}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderBottom: "1px solid #F3F4F6", flexWrap: "wrap" }}>
           <input value={query} onChange={function (e) { setQuery(e.target.value); }} placeholder="Search product code or description..." style={Object.assign({}, S.inp, { flex: "1 1 240px", maxWidth: 360, padding: "8px 12px" })} />
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ fontSize: 11, color: "#9CA3AF", textTransform: "uppercase", fontWeight: 600, letterSpacing: "0.5px" }}>Class</span>
-            {["A", "B", "C"].map(function (cl) {
-              var on = classFilter.indexOf(cl) !== -1;
-              var pal = { A: ["#065F46", "#D1FAE5", "#6EE7B7"], B: ["#92400E", "#FEF3C7", "#FCD34D"], C: ["#475569", "#F1F5F9", "#CBD5E1"] }[cl];
-              return <button key={cl} onClick={function () { toggleClass(cl); }} style={{ minWidth: 30, padding: "5px 10px", borderRadius: 999, fontSize: 12, fontWeight: 600, cursor: "pointer", color: on ? pal[0] : "#9CA3AF", background: on ? pal[1] : "#fff", border: "1px solid " + (on ? pal[2] : "#E5E7EB") }}>{cl}</button>;
-            })}
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ fontSize: 11, color: "#9CA3AF", textTransform: "uppercase", fontWeight: 600, letterSpacing: "0.5px" }}>Strategy</span>
-            {["A", "B", "C", "D", "E", "F"].map(function (s) {
-              var on = stratFilter.indexOf(s) !== -1;
-              return <button key={s} onClick={function () { toggleStrat(s); }} style={{ minWidth: 26, padding: "5px 9px", borderRadius: 999, fontSize: 12, fontWeight: 600, cursor: "pointer", color: on ? "#0B6FA8" : "#9CA3AF", background: on ? "#EFF6FF" : "#fff", border: "1px solid " + (on ? "#93C5FD" : "#E5E7EB") }}>{s}</button>;
-            })}
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ fontSize: 11, color: "#9CA3AF", textTransform: "uppercase", fontWeight: 600, letterSpacing: "0.5px" }}>Flag</span>
-            {[["SD", "#B91C1C", "#FEE2E2"], ["BO", "#92400E", "#FEF3C7"]].map(function (f) {
-              var on = flagFilter.indexOf(f[0]) !== -1;
-              return <button key={f[0]} onClick={function () { toggleFlag(f[0]); }} style={{ padding: "5px 10px", borderRadius: 999, fontSize: 12, fontWeight: 600, cursor: "pointer", color: on ? f[1] : "#9CA3AF", background: on ? f[2] : "#fff", border: "1px solid " + (on ? f[1] : "#E5E7EB") }}>{f[0]}</button>;
-            })}
-          </div>
-          <button onClick={function () { setGrowingOnly(!growingOnly); }} style={{ padding: "5px 10px", borderRadius: 999, fontSize: 12, fontWeight: 600, cursor: "pointer", color: growingOnly ? "#065F46" : "#9CA3AF", background: growingOnly ? "#D1FAE5" : "#fff", border: "1px solid " + (growingOnly ? "#6EE7B7" : "#E5E7EB") }}>{"\u2191"} Growing</button>
-          {(query.trim() || classFilter.length || stratFilter.length || flagFilter.length || growingOnly) ? <button onClick={function () { setQuery(""); setClassFilter([]); setStratFilter([]); setFlagFilter([]); setGrowingOnly(false); }} style={{ padding: "5px 10px", borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: "pointer", color: "#6B7280", background: "#fff", border: "1px solid #E5E7EB" }}>Clear filters</button> : null}
+          <span style={{ fontSize: 11, color: "#9CA3AF", display: "inline-flex", alignItems: "center", gap: 5 }}><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>Filter via the icons in the Replenishment, Growing, SD / Backorder, and Strategy headers</span>
+          {(query.trim() || Object.keys(colFilters).length) ? <button onClick={function () { setQuery(""); setColFilters({}); }} style={{ padding: "5px 10px", borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: "pointer", color: "#6B7280", background: "#fff", border: "1px solid #E5E7EB" }}>Clear all filters</button> : null}
           <div style={{ marginLeft: "auto", fontSize: 12, color: "#9CA3AF", fontVariantNumeric: "tabular-nums" }}>{sortedRows.length} shown</div>
         </div>
         <div style={{ maxHeight: 560, overflow: "auto" }}>
@@ -8066,11 +8098,11 @@ function ForecastingTool(props) {
               {fcTh("desc", "Description", "left")}
               {anchors.trail3.map(function (hi) { return fcTh("hist:" + hi, String(headers[hi]).replace(/^hist:\s*/i, ""), "right"); })}
               {fcTh("mtd", "MTD", "right")}
-              {fcTh("growing", "Growing", "left")}
-              {fcTh("repl", "Replenishment", "left")}
-              {fcTh("flag", "SD / Backorder", "left")}
+              <FcHeadFilter label="Growing" align="left" thStyle={S.th} options={FC_FILTER_OPTS.growing} sel={colFilters.growing || null} onSel={function (n) { setColF("growing", n); }} sortActive={sortKey === "growing"} sortDir={sortDir} onSort={function () { toggleSort("growing"); }} />
+              <FcHeadFilter label="Replenishment" align="left" thStyle={S.th} options={FC_FILTER_OPTS.repl} sel={colFilters.repl || null} onSel={function (n) { setColF("repl", n); }} sortActive={sortKey === "repl"} sortDir={sortDir} onSort={function () { toggleSort("repl"); }} />
+              <FcHeadFilter label="SD / Backorder" align="left" thStyle={S.th} options={FC_FILTER_OPTS.flag} sel={colFilters.flag || null} onSel={function (n) { setColF("flag", n); }} sortActive={sortKey === "flag"} sortDir={sortDir} onSort={function () { toggleSort("flag"); }} />
               {fcTh("final1", "Final FC", "right")}
-              {fcTh("strategy", "Strategy", "left")}
+              <FcHeadFilter label="Strategy" align="left" thStyle={S.th} options={FC_FILTER_OPTS.strategy} sel={colFilters.strategy || null} onSel={function (n) { setColF("strategy", n); }} sortActive={sortKey === "strategy"} sortDir={sortDir} onSort={function () { toggleSort("strategy"); }} />
               {fcTh("pct", "Final FC/Upload FC % Diff", "right")}
               {targetCols.map(function (c) { var u = anchors.uploads.filter(function (x) { return x.idx === c; })[0]; return fcTh("upload:" + uploadNum(c), u ? u.label : "Upload", "right"); })}
             </tr></thead>
@@ -8084,7 +8116,7 @@ function ForecastingTool(props) {
                   <td title={descCol >= 0 ? String(row[descCol] || "") : ""} style={Object.assign({}, S.td, { maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })}>{descCol >= 0 ? row[descCol] : ""}</td>
                   {anchors.trail3.map(function (hi) { return <td key={hi} style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums", color: "#6B7280" })}>{fcFmt(row[hi])}</td>; })}
                   <td style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums" })}>{fcFmt(row[anchors.mtd])}</td>
-                  <td style={Object.assign({}, S.td)}>{fcGrowing(row) ? <span title="Each of the last 3 months is higher than the previous" style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "2px 8px", borderRadius: 999, fontSize: 11, fontWeight: 600, color: "#065F46", background: "#D1FAE5" }}>{"\u2191"} Growing</span> : <span style={{ color: "#D1D5DB" }}>{"\u2013"}</span>}</td>
+                  <td style={Object.assign({}, S.td)}>{(function () { var tr = fcTrend(row); if (tr === "g") return <span title="Each of the last 3 months is higher than the previous" style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "2px 8px", borderRadius: 999, fontSize: 11, fontWeight: 600, color: "#065F46", background: "#D1FAE5" }}>{"\u2191"} Growing</span>; if (tr === "d") return <span title="Each of the last 3 months is lower than the previous" style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "2px 8px", borderRadius: 999, fontSize: 11, fontWeight: 600, color: "#6D28D9", background: "#EDE9FE" }}>{"\u2193"} Decreasing</span>; return <span style={{ color: "#D1D5DB" }}>{"\u2013"}</span>; })()}</td>
                   <td style={Object.assign({}, S.td)}>{(function () { var cls = classCol >= 0 ? String(row[classCol] || "").trim().toUpperCase() : ""; if (!cls) return ""; var pal = { A: ["#065F46", "#D1FAE5"], B: ["#92400E", "#FEF3C7"], C: ["#475569", "#F1F5F9"] }[cls] || ["#475569", "#F1F5F9"]; return <span style={{ display: "inline-block", minWidth: 20, textAlign: "center", padding: "2px 8px", borderRadius: 999, fontSize: 11, fontWeight: 600, color: pal[0], background: pal[1] }}>{cls}</span>; })()}</td>
                   <td style={Object.assign({}, S.td)}>{(function () {
                     var pc = String(row[productCol] == null ? "" : row[productCol]).trim();
@@ -8123,7 +8155,7 @@ function ForecastingTool(props) {
             </tbody>
           </table>
         </div>
-        <div style={{ padding: "10px 16px", fontSize: 12, color: "#9CA3AF", borderTop: "1px solid #F3F4F6" }}>{formatted.length} items{(query.trim() || classFilter.length || stratFilter.length || flagFilter.length || growingOnly) ? " (showing " + sortedRows.length + ")" : ""} - {filledCount} forecasted across {targetCols.length} month{targetCols.length === 1 ? "" : "s"}{dropBelowFinal && droppedCount > 0 ? " \u00B7 " + droppedCount + " row" + (droppedCount === 1 ? "" : "s") + " below Netstock Final excluded" : ""}. Each cell exports into its own month column; blue cells are manual overrides.</div>
+        <div style={{ padding: "10px 16px", fontSize: 12, color: "#9CA3AF", borderTop: "1px solid #F3F4F6" }}>{formatted.length} items{(query.trim() || Object.keys(colFilters).length) ? " (showing " + sortedRows.length + ")" : ""} - {filledCount} forecasted across {targetCols.length} month{targetCols.length === 1 ? "" : "s"}{dropBelowFinal && droppedCount > 0 ? " \u00B7 " + droppedCount + " row" + (droppedCount === 1 ? "" : "s") + " below Netstock Final excluded" : ""}. Each cell exports into its own month column; blue cells are manual overrides.</div>
       </div>}
 
       {headers.length > 0 && (!formatted || !formatted.length) && stats === null && <div style={{ fontSize: 13, color: "#9CA3AF", padding: "8px 4px" }}>Pick a warehouse and mode, then Auto-format to filter the list down to the items worth forecasting.</div>}
