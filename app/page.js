@@ -3199,12 +3199,10 @@ function POImportTool(props) {
     var targets = [];
     posToCreate.forEach(function(p) {
       var wh = String(p.location || "");
-      var suffix = wh.replace(/^GGM-/i, "").toUpperCase(); // GGM-KY -> KY
-      if (!suffix) return;
-      var desc = "GOGOMEDS " + suffix;
-      if (seen[desc]) return;
-      seen[desc] = 1;
-      targets.push({ vendorId: "VID0041", description: desc, warehouse: wh });
+      if (!/^GGM-/i.test(wh)) return;
+      if (seen[wh]) return;
+      seen[wh] = 1;
+      targets.push({ vendorId: "VID0041", warehouse: wh });
     });
     if (targets.length === 0) return;
     setDummyDelete({ loading: true });
@@ -3427,7 +3425,7 @@ function POImportTool(props) {
           <div onClick={function(e) { e.stopPropagation(); }} style={{ background: "#FFFFFF", borderRadius: 8, padding: 24, width: "min(720px, 92vw)", maxHeight: "85vh", overflow: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.2)" }}>
             <div style={{ fontSize: 18, fontWeight: 700, color: "#1F2937", marginBottom: 8 }}>Create {posList.length} PO{posList.length === 1 ? "" : "s"} in Acumatica?</div>
             <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 16 }}>One PO per PDF will be created with Hold:false (Open) and the values shown below. Stops on first failure.</div>
-            {vendor === "ggm-crossovers" && <div style={{ fontSize: 12, color: "#6D28D9", background: "rgba(124,58,237,0.06)", border: "1px solid rgba(124,58,237,0.18)", borderRadius: 6, padding: "8px 10px", marginBottom: 16 }}>{"\u2192"} After each Bloodworth PO is created, the matching dummy PO (Vetcove Generics {"\u00B7"} same GOGOMEDS KY/AZ description {"\u00B7"} On Hold) is found and deleted. If zero or more than one dummy matches, it's left untouched and flagged.</div>}
+            {vendor === "ggm-crossovers" && <div style={{ fontSize: 12, color: "#6D28D9", background: "rgba(124,58,237,0.06)", border: "1px solid rgba(124,58,237,0.18)", borderRadius: 6, padding: "8px 10px", marginBottom: 16 }}>{"\u2192"} After each Bloodworth PO is created, the matching dummy PO (Vetcove Generics {"\u00B7"} On Hold {"\u00B7"} same GGM warehouse) is found and deleted. If zero or more than one dummy matches, it's left untouched and flagged.</div>}
 
             {posList.length > 0 && <div style={{ border: "1px solid #E5E7EB", borderRadius: 6, overflow: "hidden", marginBottom: blockedList.length > 0 ? 12 : 16 }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
@@ -3518,7 +3516,7 @@ function POImportTool(props) {
                   {(((dummyDelete.data || {}).results) || []).map(function(r, i) {
                     var good = r.deleted;
                     return <div key={i} style={{ fontSize: 12, border: "1px solid " + (good ? "rgba(4,120,87,0.25)" : "rgba(220,38,38,0.25)"), background: good ? "rgba(4,120,87,0.05)" : "rgba(220,38,38,0.04)", borderRadius: 6, padding: "8px 10px" }}>
-                      <div><span style={{ fontWeight: 600, color: good ? "#047857" : "#DC2626" }}>{good ? "\u2713 Deleted" : "\u26A0 Not deleted"}</span><span style={{ color: "#6B7280" }}>{" \u00B7 "}{r.vendorId} / "{r.description}"{r.orderNbr ? " \u00B7 " : ""}</span>{r.orderNbr ? <span style={{ fontFamily: "monospace", color: "#1F2937", fontWeight: 600 }}>{r.orderNbr}</span> : null}</div>
+                      <div><span style={{ fontWeight: 600, color: good ? "#047857" : "#DC2626" }}>{good ? "\u2713 Deleted" : "\u26A0 Not deleted"}</span><span style={{ color: "#6B7280" }}>{" \u00B7 "}{r.vendorId} {"\u00B7"} {r.warehouse}{r.orderNbr ? " \u00B7 " : ""}</span>{r.orderNbr ? <span style={{ fontFamily: "monospace", color: "#1F2937", fontWeight: 600 }}>{r.orderNbr}</span> : null}</div>
                       {r.error ? <div style={{ color: "#6B7280", marginTop: 3 }}>{r.error}</div> : null}
                       {r.hint ? <div style={{ color: "#B45309", marginTop: 2 }}>{r.hint}</div> : null}
                       {r.candidates ? <div style={{ color: "#6B7280", marginTop: 2 }}>Candidates: {r.candidates.map(function(c) { return c.orderNbr; }).join(", ")}</div> : null}
