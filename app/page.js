@@ -3220,10 +3220,54 @@ function POImportTool(props) {
       if (del > 0 && prob === 0) toast("Deleted " + del + " dummy PO(s)", "success");
       else if (del > 0) toast("Deleted " + del + " dummy PO(s), " + prob + " need attention", "error");
       else toast("No dummy PO deleted \u2014 see results", "error");
+      // Best-effort: check off the deleted dummy in the PO Tool's Shipping tab
+      // for that warehouse. Non-fatal if it can't (the delete already succeeded).
+      for (var mi = 0; mi < rs.length; mi++) {
+        if (rs[mi].deleted && rs[mi].orderNbr && rs[mi].warehouse) {
+          await markDummyShippingDone(rs[mi].warehouse, rs[mi].orderNbr);
+        }
+      }
     } catch (err) {
       setDummyDelete({ loading: false, data: { ok: false, results: [], error: String(err) } });
       toast("Dummy delete network error", "error");
     }
+  }
+
+  // Mark a just-deleted dummy PO as "done" (checkbox) in the PO Tool's Shipping
+  // tab for its warehouse. The PO Tool stores shipping state in the KV bundle
+  // "po:<warehouse>" under shipNotes, keyed by "<VendorName> || <OrderNbr>". We
+  // read that bundle, flip the matching group's done=true, and write it back —
+  // the PO Tool's 8s poll then reflects it. We also update the per-browser
+  // ship-notes cache so it shows immediately when the tab is next opened here.
+  async function markDummyShippingDone(warehouse, orderNbr) {
+    try {
+      var kvKey = "po:" + warehouse;
+      var resp = await kvGet(kvKey);
+      var j = await resp.json();
+      var bundle = j && j.data;
+      if (!bundle || typeof bundle !== "object") return; // nothing cached for this warehouse
+      var rows = Array.isArray(bundle.data) ? bundle.data : [];
+      var target = String(orderNbr);
+      // Resolve the group key from the cached PO rows (VendorName + " || " + OrderNbr).
+      var vendorName = null;
+      for (var i = 0; i < rows.length; i++) {
+        if (String(rows[i].OrderNbr || "") === target) { vendorName = rows[i].VendorName; break; }
+      }
+      var notes = Object.assign({}, bundle.shipNotes || {});
+      var key = null;
+      if (vendorName != null) {
+        key = vendorName + " || " + target;
+      } else {
+        // Fallback: match an existing shipNotes key ending with this PO#.
+        var suffix = " || " + target;
+        Object.keys(notes).forEach(function(k) { if (k.length >= suffix.length && k.slice(-suffix.length) === suffix) key = k; });
+      }
+      if (!key) return; // can't resolve which row — leave untouched
+      notes[key] = Object.assign({}, notes[key] || {}, { done: true });
+      bundle.shipNotes = notes;
+      sSet("ship-notes-" + warehouse, notes); // immediate for same-browser mount
+      await kvPost(kvKey, bundle);             // shared + picked up by the PO Tool poll
+    } catch (e) { /* best-effort cleanup marking; ignore */ }
   }
 
 
