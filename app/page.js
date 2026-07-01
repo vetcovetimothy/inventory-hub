@@ -7302,7 +7302,7 @@ function FcHeadFilter(props) {
   var _o = useState(false), open = _o[0], setOpen = _o[1];
   var options = props.options || [];
   var sel = props.sel;
-  var active = sel != null;
+  var active = sel != null && sel.length > 0;
   var allVals = options.map(function (o) { return o.value; });
   function isChecked(v) { return sel == null ? true : sel.indexOf(v) !== -1; }
   function apply(next) {
@@ -7326,7 +7326,7 @@ function FcHeadFilter(props) {
       <div style={{ position: "absolute", top: "100%", left: 0, marginTop: 4, zIndex: 1001, background: "#fff", border: "1px solid #E5E7EB", borderRadius: 10, boxShadow: "0 8px 24px rgba(0,0,0,0.14)", padding: 8, minWidth: 168, textAlign: "left", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>
         <div style={{ display: "flex", gap: 12, padding: "2px 6px 8px", borderBottom: "1px solid #F3F4F6", marginBottom: 6 }}>
           <button onClick={function () { props.onSel(null); }} style={Object.assign({}, lnk, { color: "#0B6FA8" })}>Select all</button>
-          <button onClick={function () { props.onSel([]); }} style={Object.assign({}, lnk, { color: "#6B7280" })}>None</button>
+          <button onClick={function () { props.onSel([]); }} style={Object.assign({}, lnk, { color: "#6B7280" })}>Uncheck all</button>
         </div>
         <div style={{ maxHeight: 220, overflow: "auto" }}>
           {options.map(function (o) {
@@ -7874,10 +7874,10 @@ function ForecastingTool(props) {
     var q = query.trim().toLowerCase();
     if (q) base = base.filter(function (r) { var pc = String(r[productCol] == null ? "" : r[productCol]).toLowerCase(); var d = descCol >= 0 ? String(r[descCol] == null ? "" : r[descCol]).toLowerCase() : ""; return pc.indexOf(q) !== -1 || d.indexOf(q) !== -1; });
     var fRepl = colFilters.repl, fStrat = colFilters.strategy, fFlag = colFilters.flag, fGrow = colFilters.growing;
-    if (fRepl) base = base.filter(function (r) { return fRepl.indexOf(fcReplCat(r)) !== -1; });
-    if (fStrat) base = base.filter(function (r) { return fStrat.indexOf(fcStratCat(r)) !== -1; });
-    if (fFlag) base = base.filter(function (r) { var pc = String(r[productCol] == null ? "" : r[productCol]).trim(); var s = !!sdInfo[pc], b = !!bkoInfo[pc]; return (s && fFlag.indexOf("SD") !== -1) || (b && fFlag.indexOf("BO") !== -1) || (!s && !b && fFlag.indexOf("None") !== -1); });
-    if (fGrow) base = base.filter(function (r) { return fGrow.indexOf(fcTrend(r)) !== -1; });
+    if (fRepl && fRepl.length) base = base.filter(function (r) { return fRepl.indexOf(fcReplCat(r)) !== -1; });
+    if (fStrat && fStrat.length) base = base.filter(function (r) { return fStrat.indexOf(fcStratCat(r)) !== -1; });
+    if (fFlag && fFlag.length) base = base.filter(function (r) { var pc = String(r[productCol] == null ? "" : r[productCol]).trim(); var s = !!sdInfo[pc], b = !!bkoInfo[pc]; return (s && fFlag.indexOf("SD") !== -1) || (b && fFlag.indexOf("BO") !== -1) || (!s && !b && fFlag.indexOf("None") !== -1); });
+    if (fGrow && fGrow.length) base = base.filter(function (r) { return fGrow.indexOf(fcTrend(r)) !== -1; });
     if (!sortOrder || !sortOrder.length) return base;
     var pos = {}; for (var i = 0; i < sortOrder.length; i++) { if (!(sortOrder[i] in pos)) pos[sortOrder[i]] = i; }
     return base.slice().sort(function (a, b) {
@@ -8155,7 +8155,7 @@ function ForecastingTool(props) {
             </tbody>
           </table>
         </div>
-        <div style={{ padding: "10px 16px", fontSize: 12, color: "#9CA3AF", borderTop: "1px solid #F3F4F6" }}>{formatted.length} items{(query.trim() || Object.keys(colFilters).length) ? " (showing " + sortedRows.length + ")" : ""} - {filledCount} forecasted across {targetCols.length} month{targetCols.length === 1 ? "" : "s"}{dropBelowFinal && droppedCount > 0 ? " \u00B7 " + droppedCount + " row" + (droppedCount === 1 ? "" : "s") + " below Netstock Final excluded" : ""}. Each cell exports into its own month column; blue cells are manual overrides.</div>
+        <div style={{ padding: "10px 16px", fontSize: 12, color: "#9CA3AF", borderTop: "1px solid #F3F4F6" }}>{formatted.length} items{(query.trim() || Object.keys(colFilters).some(function (k) { return colFilters[k] && colFilters[k].length > 0; })) ? " (showing " + sortedRows.length + ")" : ""} - {filledCount} forecasted across {targetCols.length} month{targetCols.length === 1 ? "" : "s"}{dropBelowFinal && droppedCount > 0 ? " \u00B7 " + droppedCount + " row" + (droppedCount === 1 ? "" : "s") + " below Netstock Final excluded" : ""}. Each cell exports into its own month column; blue cells are manual overrides.</div>
       </div>}
 
       {headers.length > 0 && (!formatted || !formatted.length) && stats === null && <div style={{ fontSize: 13, color: "#9CA3AF", padding: "8px 4px" }}>Pick a warehouse and mode, then Auto-format to filter the list down to the items worth forecasting.</div>}
