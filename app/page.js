@@ -7325,7 +7325,7 @@ function FcHeadFilter(props) {
     </button>
     {open && <>
       <div onClick={commitAndClose} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 1000 }} />
-      <div style={{ position: "fixed", top: pos ? pos.top : 0, left: pos ? pos.left : 0, zIndex: 1001, background: "#fff", border: "1px solid #E5E7EB", borderRadius: 10, boxShadow: "0 8px 24px rgba(0,0,0,0.14)", padding: 8, minWidth: 168, textAlign: "left", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>
+      <div style={{ position: "fixed", top: pos ? pos.top : 0, left: pos ? pos.left : 0, zIndex: 1001, background: "#fff", border: "1px solid #E5E7EB", borderRadius: 10, boxShadow: "0 8px 24px rgba(0,0,0,0.14)", padding: 8, minWidth: 180, maxWidth: 320, textAlign: "left", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>
         <div style={{ display: "flex", gap: 12, padding: "2px 6px 8px", borderBottom: "1px solid #F3F4F6", marginBottom: 6 }}>
           <button onClick={function () { setDraft(allVals.slice()); }} style={Object.assign({}, lnk, { color: "#0B6FA8" })}>Select all</button>
           <button onClick={function () { setDraft([]); }} style={Object.assign({}, lnk, { color: "#6B7280" })}>Uncheck all</button>
@@ -7333,9 +7333,9 @@ function FcHeadFilter(props) {
         <div style={{ maxHeight: 220, overflow: "auto" }}>
           {options.map(function (o) {
             var ck = isChecked(o.value);
-            return <div key={o.value} onClick={function () { toggle(o.value); }} style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 6px", borderRadius: 6, cursor: "pointer", fontSize: 13, color: "#374151" }}>
-              <span style={{ width: 16, height: 16, borderRadius: 4, border: "1.5px solid " + (ck ? "#0EA5E9" : "#CBD5E1"), background: ck ? "#0EA5E9" : "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{ck && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}</span>
-              <span>{o.label}</span>
+            return <div key={o.value} onClick={function () { toggle(o.value); }} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "5px 6px", borderRadius: 6, cursor: "pointer", fontSize: 13, color: "#374151" }}>
+              <span style={{ width: 16, height: 16, marginTop: 1, borderRadius: 4, border: "1.5px solid " + (ck ? "#0EA5E9" : "#CBD5E1"), background: ck ? "#0EA5E9" : "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{ck && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}</span>
+              <span style={{ flex: 1, lineHeight: 1.35 }}>{o.label}</span>
             </div>;
           })}
         </div>
@@ -7746,7 +7746,7 @@ function ForecastingTool(props) {
   function fcTrend(row) { var t = anchors.trail3 || []; if (t.length < 2) return "flat"; var inc = true, dec = true; for (var i = 1; i < t.length; i++) { var p = fcNum(row, t[i - 1]); var c = fcNum(row, t[i]); p = (p == null ? 0 : p); c = (c == null ? 0 : c); if (!(p < c)) inc = false; if (!(p > c)) dec = false; } return inc ? "g" : dec ? "d" : "flat"; }
   var FC_FILTER_OPTS = {
     repl: [{ value: "A", label: "A" }, { value: "B", label: "B" }, { value: "C", label: "C" }, { value: "Other", label: "Other / blank" }],
-    strategy: [{ value: "none", label: "None (Global blank)" }, { value: "A", label: "A" }, { value: "B", label: "B" }, { value: "C", label: "C" }, { value: "D", label: "D" }, { value: "E", label: "E" }, { value: "F", label: "F" }],
+    strategy: [{ value: "none", label: "Global" }].concat(FC_METHODS.map(function (m) { return { value: m.id, label: m.label }; })),
     flag: [{ value: "SD", label: "SD (short-dating)" }, { value: "BO", label: "BO (backorder)" }, { value: "None", label: "No flag" }],
     growing: [{ value: "g", label: "Growing" }, { value: "d", label: "Decreasing" }, { value: "flat", label: "Flat / mixed" }]
   };
