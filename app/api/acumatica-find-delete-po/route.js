@@ -1,39 +1,33 @@
 /**
  * POST /api/acumatica-find-delete-po
  *
- * Finds and deletes "dummy" On-Hold POs by VendorID + Description, enforcing an
- * EXACTLY-ONE match per target so it can never delete the wrong PO.
+ * Finds and deletes "dummy" On-Hold POs, enforcing an EXACTLY-ONE match per
+ * target so it can never delete the wrong PO.
  *
  * Used by the GoGoMeds crossover flow in the Generic PO Translator: after the
  * real Bloodworth PO is created from scratch (via /api/acumatica-po-import-create),
  * the placeholder "dummy" PO is removed. The dummy is always:
- *   - Vendor:      VID0041 (Vetcove Generics)
- *   - Description: "GOGOMEDS KY" or "GOGOMEDS AZ"
- *   - Status:      On Hold
- * This mirrors what the user did by hand: create the new PO, then delete the dummy.
+ *   - Vendor:    VID0041 (Vetcove Generics)
+ *   - Status:    On Hold
+ *   - Warehouse: GGM-KY or GGM-AZ (on its Location and/or its lines)
+ *
+ * NOTE ON MATCHING: the dummy's PO-header Description field is BLANK. The
+ * "GOGOMEDS KY" text visible in Acumatica's PO list is the *location* description,
+ * not the PO.Description field — so we do NOT filter on Description. We match on
+ * Vendor + Hold, then confirm the GoGoMeds warehouse on the PO Location or any line.
  *
  * Body:
- *   {
- *     username, password,
- *     targets: [ { vendorId, description, warehouse? }, ... ]
- *   }
+ *   { username, password, targets: [ { vendorId, warehouse, description? }, ... ] }
  *
  * Response:
- *   {
- *     ok,                       // false if any target errored or was ambiguous
- *     stage: "done",
- *     results: [
- *       { vendorId, description, warehouse, matched, deleted, orderNbr, id, status, reason, error?, hint?, candidates? }
- *     ]
- *   }
+ *   { ok, stage: "done", results: [ { vendorId, warehouse, matched, deleted, orderNbr, id, status, reason, error?, hint?, candidates? } ] }
  *
  * Safety model:
- *   - Narrows by VendorID + Description in the $filter (VID0041 alone has far too
- *     many POs — McKesson, Keysource, etc. — so Description is what isolates the
- *     GGM dummy), then keeps only On-Hold rows in code.
- *   - 0 On-Hold matches  => skip, reason "not-found" / "none-on-hold" (nothing deleted).
- *   - >1 On-Hold matches => skip, reason "ambiguous" (lists them; nothing deleted).
- *   - exactly 1          => DELETE that single PO by its id.
+ *   - Filter narrows to On-Hold POs for the vendor (Hold eq true).
+ *   - Keep only those whose Location or a line WarehouseID equals the target GGM warehouse.
+ *   - 0 matches  => skip, reason "not-found" (nothing deleted).
+ *   - >1 matches => skip, reason "ambiguous" (lists them; nothing deleted).
+ *   - exactly 1  => DELETE that single PO by its id.
  */
 
 const BASE = process.env.ACUMATICA_BASE_URL || "https://vetcove.acumatica.com";
@@ -58,11 +52,11 @@ export async function POST(req) {
   for (let i = 0; i < targets.length; i++) {
     const t = targets[i];
     if (!t || typeof t !== "object") return json({ ok: false, stage: "validate-input", error: `targets[${i}] is not an object` });
-    if (!t.vendorId)    return json({ ok: false, stage: "validate-input", error: `targets[${i}].vendorId is required` });
-    if (!t.description) return json({ ok: false, stage: "validate-input", error: `targets[${i}].description is required` });
+    if (!t.vendorId)  return json({ ok: false, stage: "validate-input", error: `targets[${i}].vendorId is required` });
+    if (!t.warehouse) return json({ ok: false, stage: "validate-input", error: `targets[${i}].warehouse is required` });
   }
 
-  // ── Login ───────────────────────────────────────────────────────────────
+  // -- Login ----------------------------------------------------------------
   let cookies = "";
   try {
     const loginRes = await fetch(`${BASE}/entity/auth/login`, {
@@ -80,7 +74,7 @@ export async function POST(req) {
     return json({ ok: false, stage: "login", error: String(err) });
   }
 
-  // ── Find + delete each target, always logging out at the end ─────────────
+  // -- Find + delete each target, always logging out at the end -------------
   const results = [];
   try {
     for (let i = 0; i < targets.length; i++) {
@@ -94,27 +88,25 @@ export async function POST(req) {
   return json({ ok: !anyProblem, stage: "done", results });
 }
 
-// ─────────────────────────────────────────────────────────────────────────
+// --------------------------------------------------------------------------
 async function findDeleteOne(cookies, t) {
   const vendorId = String(t.vendorId);
-  const description = String(t.description);
-  const warehouse = t.warehouse ? String(t.warehouse) : null;
-  const base = { vendorId, description, warehouse, matched: 0, deleted: false };
+  const warehouse = String(t.warehouse);
+  const description = t.description ? String(t.description) : "";
+  const base = { vendorId, warehouse, description, matched: 0, deleted: false };
 
-  // Narrow by VendorID + Description. Exact match — the caller guarantees the
-  // "GOGOMEDS KY"/"GOGOMEDS AZ" convention. No $select (avoids field-name risk);
-  // we only read OrderNbr / Status / id off each row.
-  const filter = `VendorID eq '${vendorId}' and Description eq '${description}'`;
+  // On-Hold POs for this vendor, with lines expanded so we can confirm the GGM warehouse.
+  const filter = `VendorID eq '${vendorId}' and Hold eq true`;
   const findUrl =
     `${BASE}/entity/Default/${API_VERSION}/PurchaseOrder` +
-    `?$filter=${encodeURIComponent(filter)}&$top=20`;
+    `?$filter=${encodeURIComponent(filter)}&$expand=Details&$top=50`;
 
   let list;
   try {
     const res = await fetch(findUrl, { method: "GET", headers: { "Accept": "application/json", "Cookie": cookies } });
     const text = await res.text();
     if (!res.ok) {
-      return Object.assign(base, { reason: "find-failed", status: res.status, error: `Lookup failed (HTTP ${res.status}) for ${vendorId} / "${description}"`, rawBody: text.slice(0, 800) });
+      return Object.assign(base, { reason: "find-failed", status: res.status, error: `Lookup failed (HTTP ${res.status}) for On-Hold ${vendorId}`, rawBody: text.slice(0, 800) });
     }
     try { list = JSON.parse(text); }
     catch { return Object.assign(base, { reason: "find-parse", error: "Acumatica returned non-JSON on lookup", rawBody: text.slice(0, 500) }); }
@@ -123,31 +115,30 @@ async function findDeleteOne(cookies, t) {
   }
   if (!Array.isArray(list)) list = [];
 
-  // Keep only On-Hold rows — the dummy is always On Hold, and the freshly created
-  // Bloodworth PO is a different vendor/description AND is Open, so it can't appear here.
-  const onHold = list
-    .filter(po => (po && po.Status && po.Status.value) === REQUIRED_STATUS)
-    .map(po => ({ orderNbr: po?.OrderNbr?.value, id: po?.id, status: po?.Status?.value }));
+  const wh = warehouse.trim().toUpperCase();
+  const matches = list.filter(po => {
+    if ((po && po.Status && po.Status.value) !== REQUIRED_STATUS) return false; // belt-and-suspenders
+    const loc = String(po?.Location?.value || "").trim().toUpperCase();
+    if (loc === wh) return true;
+    const details = Array.isArray(po?.Details) ? po.Details : [];
+    return details.some(d => String(d?.WarehouseID?.value || "").trim().toUpperCase() === wh);
+  }).map(po => ({ orderNbr: po?.OrderNbr?.value, id: po?.id, status: po?.Status?.value, location: po?.Location?.value }));
 
-  if (onHold.length === 0) {
+  if (matches.length === 0) {
     return Object.assign(base, {
-      reason: list.length > 0 ? "none-on-hold" : "not-found",
-      error: list.length > 0
-        ? `Found ${list.length} PO(s) for ${vendorId} / "${description}" but none are On Hold — nothing deleted.`
-        : `No PO found for ${vendorId} / "${description}" — nothing to delete.`
+      reason: "not-found",
+      error: `No On-Hold ${vendorId} PO in warehouse ${warehouse} found — nothing to delete.` + (list.length ? ` (${list.length} On-Hold ${vendorId} PO(s) scanned.)` : "")
     });
   }
-  if (onHold.length > 1) {
+  if (matches.length > 1) {
     return Object.assign(base, {
-      matched: onHold.length,
-      reason: "ambiguous",
-      candidates: onHold,
-      error: `${onHold.length} On-Hold POs match ${vendorId} / "${description}" (${onHold.map(c => c.orderNbr).join(", ")}). Refusing to delete — resolve manually.`
+      matched: matches.length, reason: "ambiguous", candidates: matches,
+      error: `${matches.length} On-Hold ${vendorId} POs match warehouse ${warehouse} (${matches.map(c => c.orderNbr).join(", ")}). Refusing to delete — resolve manually.`
     });
   }
 
   // Exactly one — delete by id (same pattern as acumatica-remove-po-lines).
-  const only = onHold[0];
+  const only = matches[0];
   const delUrl = `${BASE}/entity/Default/${API_VERSION}/PurchaseOrder/${encodeURIComponent(only.id)}`;
   try {
     const dres = await fetch(delUrl, { method: "DELETE", headers: { "Accept": "application/json", "Cookie": cookies } });
