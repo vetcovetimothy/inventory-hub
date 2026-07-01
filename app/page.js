@@ -7301,13 +7301,15 @@ function ReplenishUpdate(props) {
 function FcHeadFilter(props) {
   var _o = useState(false), open = _o[0], setOpen = _o[1];
   var _d = useState([]), draft = _d[0], setDraft = _d[1];
+  var _pos = useState(null), pos = _pos[0], setPos = _pos[1];
+  var btnRef = useRef(null);
   var options = props.options || [];
   var sel = props.sel;                       // committed: null = show all, [] = show none, array = show those
   var active = sel != null;                  // funnel lights up whenever a filter is committed
   var allVals = options.map(function (o) { return o.value; });
   function isChecked(v) { return draft.indexOf(v) !== -1; }
   function toggle(v) { var cur = draft.slice(); var i = cur.indexOf(v); if (i === -1) cur.push(v); else cur.splice(i, 1); setDraft(cur); }
-  function openMenu() { setDraft(sel == null ? allVals.slice() : sel.slice()); setOpen(true); }
+  function openMenu() { if (btnRef.current) { var r = btnRef.current.getBoundingClientRect(); setPos({ top: r.bottom + 4, left: Math.max(8, Math.min(r.left, (typeof window !== "undefined" ? window.innerWidth : 1200) - 190)) }); } setDraft(sel == null ? allVals.slice() : sel.slice()); setOpen(true); }
   function commitAndClose() {
     var next = draft.slice();
     // all checked => no filter (show all); otherwise keep the exact set (incl. [] = show none)
@@ -7318,12 +7320,12 @@ function FcHeadFilter(props) {
   var lnk = { border: "none", background: "transparent", cursor: "pointer", padding: 0, fontSize: 11, fontWeight: 600 };
   return <th style={Object.assign({}, props.thStyle, props.align === "right" ? { textAlign: "right" } : {}, { whiteSpace: "nowrap", position: "relative" })}>
     <span onClick={props.onSort} style={{ cursor: "pointer", userSelect: "none" }}>{props.label}{props.sortActive ? (props.sortDir === "desc" ? " \u25BE" : " \u25B4") : ""}</span>
-    <button onClick={function (e) { e.stopPropagation(); if (open) commitAndClose(); else openMenu(); }} title="Filter" style={{ marginLeft: 6, verticalAlign: "middle", border: "none", background: active ? "#E0F2FE" : "transparent", cursor: "pointer", padding: 3, borderRadius: 5, color: active ? "#0284C7" : "#9CA3AF", lineHeight: 0 }}>
+    <button ref={btnRef} onClick={function (e) { e.stopPropagation(); if (open) commitAndClose(); else openMenu(); }} title="Filter" style={{ marginLeft: 6, verticalAlign: "middle", border: "none", background: active ? "#E0F2FE" : "transparent", cursor: "pointer", padding: 3, borderRadius: 5, color: active ? "#0284C7" : "#9CA3AF", lineHeight: 0 }}>
       <svg width="12" height="12" viewBox="0 0 24 24" fill={active ? "#0284C7" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>
     </button>
     {open && <>
       <div onClick={commitAndClose} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 1000 }} />
-      <div style={{ position: "absolute", top: "100%", left: 0, marginTop: 4, zIndex: 1001, background: "#fff", border: "1px solid #E5E7EB", borderRadius: 10, boxShadow: "0 8px 24px rgba(0,0,0,0.14)", padding: 8, minWidth: 168, textAlign: "left", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>
+      <div style={{ position: "fixed", top: pos ? pos.top : 0, left: pos ? pos.left : 0, zIndex: 1001, background: "#fff", border: "1px solid #E5E7EB", borderRadius: 10, boxShadow: "0 8px 24px rgba(0,0,0,0.14)", padding: 8, minWidth: 168, textAlign: "left", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>
         <div style={{ display: "flex", gap: 12, padding: "2px 6px 8px", borderBottom: "1px solid #F3F4F6", marginBottom: 6 }}>
           <button onClick={function () { setDraft(allVals.slice()); }} style={Object.assign({}, lnk, { color: "#0B6FA8" })}>Select all</button>
           <button onClick={function () { setDraft([]); }} style={Object.assign({}, lnk, { color: "#6B7280" })}>Uncheck all</button>
