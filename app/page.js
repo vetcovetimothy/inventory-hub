@@ -6299,6 +6299,7 @@ function OOSTracker(props) {
   var data = tab === "fuzerx" ? fuzeData : tab === "cgp" ? cgpData : ggmData;
   var currentName = tab === "fuzerx" ? fuzeName : tab === "cgp" ? cgpName : ggmName;
   var _sdIds = useState({}), sdIds = _sdIds[0], setSdIds = _sdIds[1];
+  var _boIds = useState({}), boIds = _boIds[0], setBoIds = _boIds[1];
   var _sfLoading = useState(false), sfLoading = _sfLoading[0], setSfLoading = _sfLoading[1];
   var _lastPull = useState(null), lastPull = _lastPull[0], setLastPull = _lastPull[1];
   useEffect(function() {
@@ -6314,6 +6315,17 @@ function OOSTracker(props) {
         sSet("tracker-short-dating", d.data);
       }
     }).catch(function() {});
+    // Backorder feed (mirrors short-dating) -> powers the BO auto-check
+    var cachedBO = sGet("tracker-backorder");
+    if (cachedBO && cachedBO.data && cachedBO.data.length > 0) {
+      var bids = {}; cachedBO.data.forEach(function(r) { if (r.InventoryID) bids[String(r.InventoryID)] = true; }); setBoIds(bids);
+    }
+    kvGet("tracker-shared-backorder").then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+      if (d && d.data && d.data.data && d.data.data.length > 0) {
+        var bids = {}; d.data.data.forEach(function(r) { if (r.InventoryID) bids[String(r.InventoryID)] = true; }); setBoIds(bids);
+        sSet("tracker-backorder", d.data);
+      }
+    }).catch(function() {});
   }, []);
   var warehouses = useMemo(function() { var w = {}; data.forEach(function(r) { (r._whs || []).forEach(function(x) { w[x] = 1; }); }); return Object.keys(w).sort(); }, [data]);
 
@@ -6322,9 +6334,9 @@ function OOSTracker(props) {
     if (whFilter !== "all") d = d.filter(function(r) { return (r._whs || []).indexOf(whFilter) >= 0; });
     if (search) { var s = search.toLowerCase(); d = d.filter(function(r) { return (r.PRODUCT_LINE_NAME || "").toLowerCase().indexOf(s) >= 0 || (r.MANUFACTURER_NAME || "").toLowerCase().indexOf(s) >= 0 || (r.MANUFACTURER_NO || "").toLowerCase().indexOf(s) >= 0; }); }
     var col = sortState.col; var dir = sortState.dir;
-    d.sort(function(a, b) { var va, vb; var nkA = tab + ":" + a.MANUFACTURER_NO; var nkB = tab + ":" + b.MANUFACTURER_NO; var nA = notes[nkA] || {}; var nB = notes[nkB] || {}; if (col === "warehouse") { va = (a._whs || []).join(","); vb = (b._whs || []).join(","); } else if (col === "manufacturer") { va = a.MANUFACTURER_NAME; vb = b.MANUFACTURER_NAME; } else if (col === "product") { va = a.PRODUCT_LINE_NAME; vb = b.PRODUCT_LINE_NAME; } else if (col === "status") { va = a.SUPPLY_STATUS; vb = b.SUPPLY_STATUS; } else if (col === "sd") { va = (nA.sd !== undefined ? nA.sd : sdIds[String(a.MANUFACTURER_NO)]) ? 1 : 0; vb = (nB.sd !== undefined ? nB.sd : sdIds[String(b.MANUFACTURER_NO)]) ? 1 : 0; return dir === "desc" ? vb - va : va - vb; } else if (col === "bo") { va = nA.bo ? 1 : 0; vb = nB.bo ? 1 : 0; return dir === "desc" ? vb - va : va - vb; } else if (col === "oos") { va = prevItems[tab + ":" + a.MANUFACTURER_NO] ? 1 : 0; vb = prevItems[tab + ":" + b.MANUFACTURER_NO] ? 1 : 0; return dir === "desc" ? vb - va : va - vb; } else { va = a.MANUFACTURER_NO; vb = b.MANUFACTURER_NO; } return dir === "desc" ? -(va || "").localeCompare(vb || "") : (va || "").localeCompare(vb || ""); });
+    d.sort(function(a, b) { var va, vb; var nkA = tab + ":" + a.MANUFACTURER_NO; var nkB = tab + ":" + b.MANUFACTURER_NO; var nA = notes[nkA] || {}; var nB = notes[nkB] || {}; if (col === "warehouse") { va = (a._whs || []).join(","); vb = (b._whs || []).join(","); } else if (col === "manufacturer") { va = a.MANUFACTURER_NAME; vb = b.MANUFACTURER_NAME; } else if (col === "product") { va = a.PRODUCT_LINE_NAME; vb = b.PRODUCT_LINE_NAME; } else if (col === "status") { va = a.SUPPLY_STATUS; vb = b.SUPPLY_STATUS; } else if (col === "sd") { va = (nA.sd !== undefined ? nA.sd : sdIds[String(a.MANUFACTURER_NO)]) ? 1 : 0; vb = (nB.sd !== undefined ? nB.sd : sdIds[String(b.MANUFACTURER_NO)]) ? 1 : 0; return dir === "desc" ? vb - va : va - vb; } else if (col === "bo") { va = (nA.bo !== undefined ? nA.bo : boIds[String(a.MANUFACTURER_NO)]) ? 1 : 0; vb = (nB.bo !== undefined ? nB.bo : boIds[String(b.MANUFACTURER_NO)]) ? 1 : 0; return dir === "desc" ? vb - va : va - vb; } else if (col === "oos") { va = prevItems[tab + ":" + a.MANUFACTURER_NO] ? 1 : 0; vb = prevItems[tab + ":" + b.MANUFACTURER_NO] ? 1 : 0; return dir === "desc" ? vb - va : va - vb; } else { va = a.MANUFACTURER_NO; vb = b.MANUFACTURER_NO; } return dir === "desc" ? -(va || "").localeCompare(vb || "") : (va || "").localeCompare(vb || ""); });
     return d;
-  }, [data, whFilter, search, sortState, notes, sdIds, prevItems]);
+  }, [data, whFilter, search, sortState, notes, sdIds, boIds, prevItems]);
 
   function sortHeader(col, label) {
     var isSorted = sortState.col === col;
@@ -6370,11 +6382,13 @@ function OOSTracker(props) {
             var n = notes[noteKey] || {};
             var autoSD = sdIds[String(r.MANUFACTURER_NO)] || false;
             var isSD = n.sd !== undefined ? n.sd : autoSD;
+            var autoBO = boIds[String(r.MANUFACTURER_NO)] || false;
+            var isBO = n.bo !== undefined ? n.bo : autoBO;
             var isOld = prevItems[tab + ":" + r.MANUFACTURER_NO];
             return <tr key={i}>
               <td style={S.td}><textarea value={permNotes[noteKey] !== undefined ? permNotes[noteKey] : ""} onChange={function(e) { updateNote(noteKey, "note", e.target.value); e.target.style.height = "auto"; e.target.style.height = e.target.scrollHeight + "px"; }} placeholder="Add notes..." rows={1} style={Object.assign({}, S.inp, { padding: "5px 10px", fontSize: 12, resize: "none", overflow: "hidden", minHeight: 32, lineHeight: "1.4", display: "block", width: "100%" })} ref={function(el) { if (el) { el.style.height = "auto"; el.style.height = el.scrollHeight + "px"; } }} /></td>
               <td style={Object.assign({}, S.td, { textAlign: "center" })}><button onClick={function() { updateNote(noteKey, "sd", !isSD); }} style={{ width: 20, height: 20, borderRadius: 4, border: isSD ? "2px solid #E879F9" : "2px solid #D1D5DB", background: isSD ? "#E879F9" : "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", transition: "all 0.15s" }}>{isSD && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}</button></td>
-              <td style={Object.assign({}, S.td, { textAlign: "center" })}><button onClick={function() { updateNote(noteKey, "bo", !n.bo); }} style={{ width: 20, height: 20, borderRadius: 4, border: n.bo ? "2px solid #F97316" : "2px solid #D1D5DB", background: n.bo ? "#F97316" : "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", transition: "all 0.15s" }}>{n.bo && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}</button></td>
+              <td style={Object.assign({}, S.td, { textAlign: "center" })}><button onClick={function() { updateNote(noteKey, "bo", !isBO); }} style={{ width: 20, height: 20, borderRadius: 4, border: isBO ? "2px solid #F97316" : "2px solid #D1D5DB", background: isBO ? "#F97316" : "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", transition: "all 0.15s" }}>{isBO && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}</button></td>
               <td style={Object.assign({}, S.td, { textAlign: "center" })}><span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 6, fontWeight: 600, background: isOld ? "#FFF7ED" : "#ECFDF5", color: isOld ? "#D97706" : "#059669" }}>{isOld ? "Old" : "New"}</span></td>
               <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, fontWeight: 600, color: "#374151" })}>{r.MANUFACTURER_NO}</td>
               <td style={Object.assign({}, S.td, { color: "#374151" })}>{r.MANUFACTURER_NAME}</td>
