@@ -7300,33 +7300,33 @@ function ReplenishUpdate(props) {
 // values to show ([] = show none). Collapses back to null when everything is checked.
 function FcHeadFilter(props) {
   var _o = useState(false), open = _o[0], setOpen = _o[1];
+  var _d = useState([]), draft = _d[0], setDraft = _d[1];
   var options = props.options || [];
-  var sel = props.sel;
-  var active = sel != null && sel.length > 0;
+  var sel = props.sel;                       // committed: null = show all, [] = show none, array = show those
+  var active = sel != null;                  // funnel lights up whenever a filter is committed
   var allVals = options.map(function (o) { return o.value; });
-  function isChecked(v) { return sel == null ? true : sel.indexOf(v) !== -1; }
-  function apply(next) {
-    if (next != null && next.length === allVals.length && allVals.every(function (v) { return next.indexOf(v) !== -1; })) next = null;
+  function isChecked(v) { return draft.indexOf(v) !== -1; }
+  function toggle(v) { var cur = draft.slice(); var i = cur.indexOf(v); if (i === -1) cur.push(v); else cur.splice(i, 1); setDraft(cur); }
+  function openMenu() { setDraft(sel == null ? allVals.slice() : sel.slice()); setOpen(true); }
+  function commitAndClose() {
+    var next = draft.slice();
+    // all checked => no filter (show all); otherwise keep the exact set (incl. [] = show none)
+    if (next.length === allVals.length && allVals.every(function (v) { return next.indexOf(v) !== -1; })) next = null;
     props.onSel(next);
-  }
-  function toggle(v) {
-    var cur = sel == null ? allVals.slice() : sel.slice();
-    var i = cur.indexOf(v);
-    if (i === -1) cur.push(v); else cur.splice(i, 1);
-    apply(cur);
+    setOpen(false);
   }
   var lnk = { border: "none", background: "transparent", cursor: "pointer", padding: 0, fontSize: 11, fontWeight: 600 };
   return <th style={Object.assign({}, props.thStyle, props.align === "right" ? { textAlign: "right" } : {}, { whiteSpace: "nowrap", position: "relative" })}>
     <span onClick={props.onSort} style={{ cursor: "pointer", userSelect: "none" }}>{props.label}{props.sortActive ? (props.sortDir === "desc" ? " \u25BE" : " \u25B4") : ""}</span>
-    <button onClick={function (e) { e.stopPropagation(); setOpen(!open); }} title="Filter" style={{ marginLeft: 6, verticalAlign: "middle", border: "none", background: active ? "#E0F2FE" : "transparent", cursor: "pointer", padding: 3, borderRadius: 5, color: active ? "#0284C7" : "#9CA3AF", lineHeight: 0 }}>
+    <button onClick={function (e) { e.stopPropagation(); if (open) commitAndClose(); else openMenu(); }} title="Filter" style={{ marginLeft: 6, verticalAlign: "middle", border: "none", background: active ? "#E0F2FE" : "transparent", cursor: "pointer", padding: 3, borderRadius: 5, color: active ? "#0284C7" : "#9CA3AF", lineHeight: 0 }}>
       <svg width="12" height="12" viewBox="0 0 24 24" fill={active ? "#0284C7" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>
     </button>
     {open && <>
-      <div onClick={function () { setOpen(false); }} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 1000 }} />
+      <div onClick={commitAndClose} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 1000 }} />
       <div style={{ position: "absolute", top: "100%", left: 0, marginTop: 4, zIndex: 1001, background: "#fff", border: "1px solid #E5E7EB", borderRadius: 10, boxShadow: "0 8px 24px rgba(0,0,0,0.14)", padding: 8, minWidth: 168, textAlign: "left", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>
         <div style={{ display: "flex", gap: 12, padding: "2px 6px 8px", borderBottom: "1px solid #F3F4F6", marginBottom: 6 }}>
-          <button onClick={function () { props.onSel(null); }} style={Object.assign({}, lnk, { color: "#0B6FA8" })}>Select all</button>
-          <button onClick={function () { props.onSel([]); }} style={Object.assign({}, lnk, { color: "#6B7280" })}>Uncheck all</button>
+          <button onClick={function () { setDraft(allVals.slice()); }} style={Object.assign({}, lnk, { color: "#0B6FA8" })}>Select all</button>
+          <button onClick={function () { setDraft([]); }} style={Object.assign({}, lnk, { color: "#6B7280" })}>Uncheck all</button>
         </div>
         <div style={{ maxHeight: 220, overflow: "auto" }}>
           {options.map(function (o) {
@@ -7337,7 +7337,8 @@ function FcHeadFilter(props) {
             </div>;
           })}
         </div>
-        <div style={{ borderTop: "1px solid #F3F4F6", marginTop: 6, paddingTop: 6, textAlign: "right" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #F3F4F6", marginTop: 6, paddingTop: 6 }}>
+          <span style={{ fontSize: 10.5, color: "#9CA3AF" }}>Applies when you click away</span>
           <button onClick={function () { props.onSel(null); setOpen(false); }} style={{ border: "1px solid #E5E7EB", background: "#fff", color: "#6B7280", fontSize: 11, fontWeight: 600, cursor: "pointer", padding: "4px 10px", borderRadius: 6 }}>Clear filter</button>
         </div>
       </div>
@@ -7874,10 +7875,10 @@ function ForecastingTool(props) {
     var q = query.trim().toLowerCase();
     if (q) base = base.filter(function (r) { var pc = String(r[productCol] == null ? "" : r[productCol]).toLowerCase(); var d = descCol >= 0 ? String(r[descCol] == null ? "" : r[descCol]).toLowerCase() : ""; return pc.indexOf(q) !== -1 || d.indexOf(q) !== -1; });
     var fRepl = colFilters.repl, fStrat = colFilters.strategy, fFlag = colFilters.flag, fGrow = colFilters.growing;
-    if (fRepl && fRepl.length) base = base.filter(function (r) { return fRepl.indexOf(fcReplCat(r)) !== -1; });
-    if (fStrat && fStrat.length) base = base.filter(function (r) { return fStrat.indexOf(fcStratCat(r)) !== -1; });
-    if (fFlag && fFlag.length) base = base.filter(function (r) { var pc = String(r[productCol] == null ? "" : r[productCol]).trim(); var s = !!sdInfo[pc], b = !!bkoInfo[pc]; return (s && fFlag.indexOf("SD") !== -1) || (b && fFlag.indexOf("BO") !== -1) || (!s && !b && fFlag.indexOf("None") !== -1); });
-    if (fGrow && fGrow.length) base = base.filter(function (r) { return fGrow.indexOf(fcTrend(r)) !== -1; });
+    if (fRepl) base = base.filter(function (r) { return fRepl.indexOf(fcReplCat(r)) !== -1; });
+    if (fStrat) base = base.filter(function (r) { return fStrat.indexOf(fcStratCat(r)) !== -1; });
+    if (fFlag) base = base.filter(function (r) { var pc = String(r[productCol] == null ? "" : r[productCol]).trim(); var s = !!sdInfo[pc], b = !!bkoInfo[pc]; return (s && fFlag.indexOf("SD") !== -1) || (b && fFlag.indexOf("BO") !== -1) || (!s && !b && fFlag.indexOf("None") !== -1); });
+    if (fGrow) base = base.filter(function (r) { return fGrow.indexOf(fcTrend(r)) !== -1; });
     if (!sortOrder || !sortOrder.length) return base;
     var pos = {}; for (var i = 0; i < sortOrder.length; i++) { if (!(sortOrder[i] in pos)) pos[sortOrder[i]] = i; }
     return base.slice().sort(function (a, b) {
@@ -8155,7 +8156,7 @@ function ForecastingTool(props) {
             </tbody>
           </table>
         </div>
-        <div style={{ padding: "10px 16px", fontSize: 12, color: "#9CA3AF", borderTop: "1px solid #F3F4F6" }}>{formatted.length} items{(query.trim() || Object.keys(colFilters).some(function (k) { return colFilters[k] && colFilters[k].length > 0; })) ? " (showing " + sortedRows.length + ")" : ""} - {filledCount} forecasted across {targetCols.length} month{targetCols.length === 1 ? "" : "s"}{dropBelowFinal && droppedCount > 0 ? " \u00B7 " + droppedCount + " row" + (droppedCount === 1 ? "" : "s") + " below Netstock Final excluded" : ""}. Each cell exports into its own month column; blue cells are manual overrides.</div>
+        <div style={{ padding: "10px 16px", fontSize: 12, color: "#9CA3AF", borderTop: "1px solid #F3F4F6" }}>{formatted.length} items{(query.trim() || Object.keys(colFilters).length) ? " (showing " + sortedRows.length + ")" : ""} - {filledCount} forecasted across {targetCols.length} month{targetCols.length === 1 ? "" : "s"}{dropBelowFinal && droppedCount > 0 ? " \u00B7 " + droppedCount + " row" + (droppedCount === 1 ? "" : "s") + " below Netstock Final excluded" : ""}. Each cell exports into its own month column; blue cells are manual overrides.</div>
       </div>}
 
       {headers.length > 0 && (!formatted || !formatted.length) && stats === null && <div style={{ fontSize: 13, color: "#9CA3AF", padding: "8px 4px" }}>Pick a warehouse and mode, then Auto-format to filter the list down to the items worth forecasting.</div>}
