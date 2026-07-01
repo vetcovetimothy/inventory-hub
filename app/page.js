@@ -2508,6 +2508,7 @@ function POImportTool(props) {
   var _acuCreateLoading = useState(false), acuCreateLoading = _acuCreateLoading[0], setAcuCreateLoading = _acuCreateLoading[1];
   var _acuCreateConfirm = useState(null), acuCreateConfirm = _acuCreateConfirm[0], setAcuCreateConfirm = _acuCreateConfirm[1];
   var _acuCreateResult = useState(null), acuCreateResult = _acuCreateResult[0], setAcuCreateResult = _acuCreateResult[1];
+  var _dummyDelete = useState(null), dummyDelete = _dummyDelete[0], setDummyDelete = _dummyDelete[1];
   useEffect(function() {
     var mt = true;
     kvGet("po-translator-flag-threshold").then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
@@ -3147,6 +3148,7 @@ function POImportTool(props) {
   async function executeCreatePOs(posToCreate) {
     setAcuCreateConfirm(null);
     setAcuCreateLoading(true);
+    setDummyDelete(null);
     try {
       var resp = await fetch("/api/acumatica-po-import-create", {
         method: "POST",
@@ -3179,6 +3181,50 @@ function POImportTool(props) {
       toast("Network error \u2014 see results", "error");
     } finally {
       setAcuCreateLoading(false);
+    }
+    // GoGoMeds crossovers only: after a fully successful create, find and delete
+    // the placeholder dummy PO(s). Gated on data.ok so a partial/failed batch never
+    // triggers deletes. Runs after the finally so the create result is already shown.
+    if (vendor === "ggm-crossovers" && data && data.ok) {
+      await deleteDummyPOs(posToCreate);
+    }
+  }
+
+  // Find + delete the dummy PO for each GoGoMeds crossover just created. The dummy
+  // is Vetcove Generics (VID0041) with description "GOGOMEDS KY"/"GOGOMEDS AZ",
+  // On Hold. The server route enforces an exactly-one-match guard, so 0 or >1
+  // matches are reported and left untouched rather than risking the wrong delete.
+  async function deleteDummyPOs(posToCreate) {
+    var seen = {};
+    var targets = [];
+    posToCreate.forEach(function(p) {
+      var wh = String(p.location || "");
+      var suffix = wh.replace(/^GGM-/i, "").toUpperCase(); // GGM-KY -> KY
+      if (!suffix) return;
+      var desc = "GOGOMEDS " + suffix;
+      if (seen[desc]) return;
+      seen[desc] = 1;
+      targets.push({ vendorId: "VID0041", description: desc, warehouse: wh });
+    });
+    if (targets.length === 0) return;
+    setDummyDelete({ loading: true });
+    try {
+      var resp = await fetch("/api/acumatica-find-delete-po", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: cred.username, password: cred.password, targets: targets })
+      });
+      var ddata = await resp.json();
+      setDummyDelete({ loading: false, data: ddata });
+      var rs = (ddata && ddata.results) || [];
+      var del = rs.filter(function(r) { return r.deleted; }).length;
+      var prob = rs.length - del;
+      if (del > 0 && prob === 0) toast("Deleted " + del + " dummy PO(s)", "success");
+      else if (del > 0) toast("Deleted " + del + " dummy PO(s), " + prob + " need attention", "error");
+      else toast("No dummy PO deleted \u2014 see results", "error");
+    } catch (err) {
+      setDummyDelete({ loading: false, data: { ok: false, results: [], error: String(err) } });
+      toast("Dummy delete network error", "error");
     }
   }
 
@@ -3381,6 +3427,7 @@ function POImportTool(props) {
           <div onClick={function(e) { e.stopPropagation(); }} style={{ background: "#FFFFFF", borderRadius: 8, padding: 24, width: "min(720px, 92vw)", maxHeight: "85vh", overflow: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.2)" }}>
             <div style={{ fontSize: 18, fontWeight: 700, color: "#1F2937", marginBottom: 8 }}>Create {posList.length} PO{posList.length === 1 ? "" : "s"} in Acumatica?</div>
             <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 16 }}>One PO per PDF will be created with Hold:false (Open) and the values shown below. Stops on first failure.</div>
+            {vendor === "ggm-crossovers" && <div style={{ fontSize: 12, color: "#6D28D9", background: "rgba(124,58,237,0.06)", border: "1px solid rgba(124,58,237,0.18)", borderRadius: 6, padding: "8px 10px", marginBottom: 16 }}>{"\u2192"} After each Bloodworth PO is created, the matching dummy PO (Vetcove Generics {"\u00B7"} same GOGOMEDS KY/AZ description {"\u00B7"} On Hold) is found and deleted. If zero or more than one dummy matches, it's left untouched and flagged.</div>}
 
             {posList.length > 0 && <div style={{ border: "1px solid #E5E7EB", borderRadius: 6, overflow: "hidden", marginBottom: blockedList.length > 0 ? 12 : 16 }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
@@ -3435,7 +3482,7 @@ function POImportTool(props) {
         var allOk = data.ok === true && !failure;
         var failureRequested = failure ? requested[failure.poIndex] : null;
         var notAttempted = failure ? requested.slice(failure.poIndex + 1) : [];
-        return <div onClick={function() { setAcuCreateResult(null); }} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+        return <div onClick={function() { setAcuCreateResult(null); setDummyDelete(null); }} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
           <div onClick={function(e) { e.stopPropagation(); }} style={{ background: "#FFFFFF", borderRadius: 8, padding: 24, width: "min(720px, 92vw)", maxHeight: "85vh", overflow: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.2)" }}>
             <div style={{ fontSize: 18, fontWeight: 700, color: allOk ? "#047857" : "#DC2626", marginBottom: 8 }}>{allOk ? "\u2713 All POs created" : "\u26A0 Stopped on failure"}</div>
             <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 16 }}>{succeeded.length} created, {failure ? "1 failed" : "0 failed"}{notAttempted.length > 0 ? ", " + notAttempted.length + " not attempted" : ""}</div>
@@ -3462,6 +3509,23 @@ function POImportTool(props) {
                   })}</tbody>
                 </table>
               </div>
+            </div>}
+
+            {dummyDelete && <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 8 }}>Dummy PO cleanup:</div>
+              {dummyDelete.loading ? <div style={{ fontSize: 12, color: "#6B7280", display: "flex", alignItems: "center", gap: 6 }}><Spinner /> Finding and deleting dummy PO(s)...</div> :
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {(((dummyDelete.data || {}).results) || []).map(function(r, i) {
+                    var good = r.deleted;
+                    return <div key={i} style={{ fontSize: 12, border: "1px solid " + (good ? "rgba(4,120,87,0.25)" : "rgba(220,38,38,0.25)"), background: good ? "rgba(4,120,87,0.05)" : "rgba(220,38,38,0.04)", borderRadius: 6, padding: "8px 10px" }}>
+                      <div><span style={{ fontWeight: 600, color: good ? "#047857" : "#DC2626" }}>{good ? "\u2713 Deleted" : "\u26A0 Not deleted"}</span><span style={{ color: "#6B7280" }}>{" \u00B7 "}{r.vendorId} / "{r.description}"{r.orderNbr ? " \u00B7 " : ""}</span>{r.orderNbr ? <span style={{ fontFamily: "monospace", color: "#1F2937", fontWeight: 600 }}>{r.orderNbr}</span> : null}</div>
+                      {r.error ? <div style={{ color: "#6B7280", marginTop: 3 }}>{r.error}</div> : null}
+                      {r.hint ? <div style={{ color: "#B45309", marginTop: 2 }}>{r.hint}</div> : null}
+                      {r.candidates ? <div style={{ color: "#6B7280", marginTop: 2 }}>Candidates: {r.candidates.map(function(c) { return c.orderNbr; }).join(", ")}</div> : null}
+                    </div>;
+                  })}
+                  {(((dummyDelete.data || {}).results) || []).length === 0 && <div style={{ fontSize: 12, color: "#6B7280" }}>{(dummyDelete.data && dummyDelete.data.error) || "No dummy targets."}</div>}
+                </div>}
             </div>}
 
             {succeeded.length > 0 && <div style={{ marginBottom: 16 }}>
@@ -3517,7 +3581,7 @@ function POImportTool(props) {
             </div>}
 
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-              <button onClick={function() { setAcuCreateResult(null); }} style={Object.assign({}, S.btn(), { padding: "8px 16px" })}>Close</button>
+              <button onClick={function() { setAcuCreateResult(null); setDummyDelete(null); }} style={Object.assign({}, S.btn(), { padding: "8px 16px" })}>Close</button>
             </div>
           </div>
         </div>;
