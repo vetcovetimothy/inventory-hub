@@ -7318,8 +7318,8 @@ function FcHeadFilter(props) {
     setOpen(false);
   }
   var lnk = { border: "none", background: "transparent", cursor: "pointer", padding: 0, fontSize: 11, fontWeight: 600 };
-  return <th style={Object.assign({}, props.thStyle, props.align === "right" ? { textAlign: "right" } : {}, { whiteSpace: "nowrap", position: "relative" })}>
-    <span onClick={props.onSort} style={{ cursor: "pointer", userSelect: "none" }}>{props.label}{props.sortActive ? (props.sortDir === "desc" ? " \u25BE" : " \u25B4") : ""}</span>
+  return <th style={Object.assign({}, props.thStyle, props.align === "right" ? { textAlign: "right" } : {}, { whiteSpace: "nowrap", verticalAlign: "middle" })}>
+    <span onClick={props.onSort} style={{ cursor: "pointer", userSelect: "none", verticalAlign: "middle" }}>{props.label}{props.sortActive ? (props.sortDir === "desc" ? " \u25BE" : " \u25B4") : ""}</span>
     <button ref={btnRef} onClick={function (e) { e.stopPropagation(); if (open) commitAndClose(); else openMenu(); }} title="Filter" style={{ marginLeft: 6, verticalAlign: "middle", border: "none", background: active ? "#E0F2FE" : "transparent", cursor: "pointer", padding: 3, borderRadius: 5, color: active ? "#0284C7" : "#9CA3AF", lineHeight: 0 }}>
       <svg width="12" height="12" viewBox="0 0 24 24" fill={active ? "#0284C7" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>
     </button>
@@ -7778,7 +7778,7 @@ function ForecastingTool(props) {
   }
   function fcTh(key, label, align) {
     var active = sortKey === key;
-    return <th key={key} onClick={function () { toggleSort(key); }} style={Object.assign({}, S.th, align === "right" ? { textAlign: "right" } : {}, { cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" })}>{label}{active ? (sortDir === "desc" ? " \u25BE" : " \u25B4") : ""}</th>;
+    return <th key={key} onClick={function () { toggleSort(key); }} style={Object.assign({}, S.th, align === "right" ? { textAlign: "right" } : {}, { cursor: "pointer", userSelect: "none", whiteSpace: "nowrap", verticalAlign: "middle" })}>{label}{active ? (sortDir === "desc" ? " \u25BE" : " \u25B4") : ""}</th>;
   }
   function sortVal(row, key) {
     if (key === "product") return String(row[productCol] == null ? "" : row[productCol]);
