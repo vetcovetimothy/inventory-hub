@@ -3197,9 +3197,11 @@ function POImportTool(props) {
   async function deleteDummyPOs(posToCreate) {
     var seen = {};
     var targets = [];
+    var whRef = {};
     posToCreate.forEach(function(p) {
       var wh = String(p.location || "");
       if (!/^GGM-/i.test(wh)) return;
+      if (p.vendorRef) { if (!whRef[wh]) whRef[wh] = []; if (whRef[wh].indexOf(String(p.vendorRef)) === -1) whRef[wh].push(String(p.vendorRef)); }
       if (seen[wh]) return;
       seen[wh] = 1;
       targets.push({ vendorId: "VID0041", warehouse: wh });
@@ -3224,7 +3226,7 @@ function POImportTool(props) {
       // for that warehouse. Non-fatal if it can't (the delete already succeeded).
       for (var mi = 0; mi < rs.length; mi++) {
         if (rs[mi].deleted && rs[mi].orderNbr && rs[mi].warehouse) {
-          await markDummyShippingDone(rs[mi].warehouse, rs[mi].orderNbr);
+          await markDummyShippingDone(rs[mi].warehouse, rs[mi].orderNbr, (whRef[rs[mi].warehouse] || []).join(", "));
         }
       }
     } catch (err) {
@@ -3239,7 +3241,7 @@ function POImportTool(props) {
   // read that bundle, flip the matching group's done=true, and write it back —
   // the PO Tool's 8s poll then reflects it. We also update the per-browser
   // ship-notes cache so it shows immediately when the tab is next opened here.
-  async function markDummyShippingDone(warehouse, orderNbr) {
+  async function markDummyShippingDone(warehouse, orderNbr, vendorRef) {
     try {
       var kvKey = "po:" + warehouse;
       var resp = await kvGet(kvKey);
@@ -3263,7 +3265,11 @@ function POImportTool(props) {
         Object.keys(notes).forEach(function(k) { if (k.length >= suffix.length && k.slice(-suffix.length) === suffix) key = k; });
       }
       if (!key) return; // can't resolve which row — leave untouched
-      notes[key] = Object.assign({}, notes[key] || {}, { done: true });
+      // Check the box and, if the Vendor Reference is still blank, fill it with the
+      // GoGoMeds source PO number(s). Never overwrite a ref someone already entered.
+      var existing = notes[key] || {};
+      var haveRef = existing.notes != null && String(existing.notes).trim() !== "";
+      notes[key] = Object.assign({}, existing, { done: true }, (!haveRef && vendorRef) ? { notes: vendorRef } : {});
       bundle.shipNotes = notes;
       sSet("ship-notes-" + warehouse, notes); // immediate for same-browser mount
       await kvPost(kvKey, bundle);             // shared + picked up by the PO Tool poll
