@@ -5424,9 +5424,10 @@ function TruckloaderTool(props) {
         {netstockDoh ? <span style={S.badge("success")}><IconCheck /> {netstockDoh.items.length} items ({netstockDoh.fileName})</span> : <span style={{ fontSize: 12, color: "#DC2626" }}>Upload Netstock DOH above to build suggestions</span>}
         {netstockDoh && <button onClick={buildFillSuggestions} disabled={fillLoading} style={Object.assign({}, S.btn(), { opacity: fillLoading ? 0.6 : 1 })}>{fillLoading ? <><Spinner color="#fff" size={14} /> Loading...</> : <><IconFilter /> Build Suggestions</>}</button>}
       </div>
-      {fillSuggestions && fillSuggestions.length > 0 && <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
+      {fillSuggestions && (fillSuggestions.length > 0 || fillAdded.length > 0) && <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
         {/* LEFT - Suggestions table */}
         <div style={Object.assign({}, S.card, { marginTop: 0, flex: 1, minWidth: 0 })}>
+          {fillSuggestions.length > 0 ? <>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
             <div style={{ fontSize: 12, color: "#9CA3AF" }}>{fillSuggestions.length} items {fillSort ? "\u2022 sorted by " + fillSort.col + (fillSort.dir === "desc" ? " \u25BE" : " \u25B4") : "sorted by DOH+DOO"}</div>
           </div>
@@ -5468,6 +5469,7 @@ function TruckloaderTool(props) {
               })}</tbody>
             </table>
           </div>
+          </> : <div style={{ padding: "48px 24px", textAlign: "center", color: "#9CA3AF", fontSize: 13 }}>All suggestions added {"\u2014"} review or remove items in the panel on the right.</div>}
         </div>
 
         {/* RIGHT - Sticky order panel */}
