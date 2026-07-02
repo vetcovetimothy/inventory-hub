@@ -8180,7 +8180,7 @@ function ForecastingTool(props) {
                   <td style={Object.assign({}, S.td, { padding: "6px 10px" })}>
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                       <select value={rowMethod[k] || ""} onChange={function (e) { setRowM(k, e.target.value); }} style={Object.assign({}, S.sel, { padding: "5px 8px", fontSize: 12 })}>
-                        <option value="">Use overall</option>
+                        <option value="">Use Global Strat</option>
                         <option value="none">None (no strategy)</option>
                         {FC_METHODS.map(function (m) { return <option key={m.id} value={m.id}>{m.id + " - " + m.short}</option>; })}
                       </select>
