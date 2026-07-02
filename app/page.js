@@ -7790,7 +7790,7 @@ function ForecastingTool(props) {
   function fcTrend(row) { var t = anchors.trail3 || []; if (t.length < 2) return "flat"; var inc = true, dec = true; for (var i = 1; i < t.length; i++) { var p = fcNum(row, t[i - 1]); var c = fcNum(row, t[i]); p = (p == null ? 0 : p); c = (c == null ? 0 : c); if (!(p < c)) inc = false; if (!(p > c)) dec = false; } return inc ? "g" : dec ? "d" : "flat"; }
   var FC_FILTER_OPTS = {
     repl: [{ value: "A", label: "A" }, { value: "B", label: "B" }, { value: "C", label: "C" }, { value: "Other", label: "Other / blank" }],
-    strategy: [{ value: "none", label: "Global" }].concat(FC_METHODS.map(function (m) { return { value: m.id, label: m.label }; })),
+    strategy: [{ value: "none", label: "None" }].concat(FC_METHODS.map(function (m) { return { value: m.id, label: m.label }; })),
     flag: [{ value: "SD", label: "SD (short-dating)" }, { value: "BO", label: "BO (backorder)" }, { value: "None", label: "No flag" }],
     growing: [{ value: "g", label: "Growing" }, { value: "d", label: "Decreasing" }, { value: "flat", label: "Flat / mixed" }]
   };
@@ -8094,7 +8094,7 @@ function ForecastingTool(props) {
           <div>
             <label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 6 }}>Strategy (all rows)</label>
             <select value={globalMethod} onChange={function (e) { changeGlobalMethod(e.target.value); }} style={Object.assign({}, S.sel, { minWidth: 280 })}>
-              <option value="none">None - leave Upload blank</option>
+              <option value="none">None</option>
               {FC_METHODS.map(function (m) { return <option key={m.id} value={m.id}>{m.label}</option>; })}
             </select>
           </div>
@@ -8178,7 +8178,8 @@ function ForecastingTool(props) {
                   <td style={Object.assign({}, S.td, { padding: "6px 10px" })}>
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                       <select value={rowMethod[k] || ""} onChange={function (e) { setRowM(k, e.target.value); }} style={Object.assign({}, S.sel, { padding: "5px 8px", fontSize: 12 })}>
-                        <option value="">Global</option>
+                        <option value="">Use overall</option>
+                        <option value="none">None (no strategy)</option>
                         {FC_METHODS.map(function (m) { return <option key={m.id} value={m.id}>{m.id + " - " + m.short}</option>; })}
                       </select>
                       {(rowMethod[k] === "B" || rowMethod[k] === "F") ? <input type="number" step="0.05" min="0" value={rowGrowth[k] != null && rowGrowth[k] !== "" ? rowGrowth[k] : growth} onChange={function (e) { setRowG(k, e.target.value); }} title="Growth multiplier for this item (overrides the global rate)" style={{ width: 62, padding: "5px 6px", fontSize: 12, borderRadius: 6, border: "1px solid #C2DCEE", background: "#F3F8FC", color: "#0B6FA8", fontFamily: "inherit" }} /> : null}
