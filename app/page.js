@@ -1321,7 +1321,7 @@ function WHT(props) {
             <div style={{ fontSize: 18, fontWeight: 700, color: "#1F2937", marginBottom: 12 }}>Process {ready.length} of {ready.length + missing.length} POs?</div>
             <div style={{ fontSize: 13, color: "#374151", marginBottom: 16, lineHeight: 1.55 }}>
               <strong style={{ color: "#047857" }}>{ready.length}</strong> {ready.length === 1 ? "PO has" : "POs have"} a Vendor Ref and will be processed now.
-              <br /><strong style={{ color: "#6B7280" }}>{missing.length}</strong> {missing.length === 1 ? "PO is" : "POs are"} missing a Vendor Ref and will be skipped \u2014 you can fill them in and re-run later.
+              <br /><strong style={{ color: "#6B7280" }}>{missing.length}</strong> {missing.length === 1 ? "PO is" : "POs are"} missing a Vendor Ref and will be skipped {"\u2014"} you can fill them in and re-run later.
             </div>
             <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 16, padding: "8px 12px", background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 6 }}>
               <div style={{ fontWeight: 600, marginBottom: 4 }}>Skipping:</div>
