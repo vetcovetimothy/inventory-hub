@@ -7836,6 +7836,7 @@ function ForecastingTool(props) {
     if (key === "pct") return pctVsFinal(row, anchorNum);
     if (key.indexOf("hist:") === 0) return fcNum(row, parseInt(key.slice(5), 10));
     if (key.indexOf("upload:") === 0) return effectiveForMonth(row, parseInt(key.slice(7), 10));
+    if (key === "uploadview") return effectiveForMonth(row, anchorNum);
     return null;
   }
   function uploadNum(colIdx) { for (var i = 0; i < anchors.uploads.length; i++) { if (anchors.uploads[i].idx === colIdx) return anchors.uploads[i].num; } return null; }
@@ -8152,6 +8153,7 @@ function ForecastingTool(props) {
               <FcHeadFilter label="Strategy" align="left" thStyle={S.th} options={FC_FILTER_OPTS.strategy} sel={colFilters.strategy || null} onSel={function (n) { setColF("strategy", n); }} sortActive={sortKey === "strategy"} sortDir={sortDir} onSort={function () { toggleSort("strategy"); }} />
               {fcTh("pct", "Final FC/Upload FC % Diff", "right")}
               {targetCols.map(function (c) { var u = anchors.uploads.filter(function (x) { return x.idx === c; })[0]; return fcTh("upload:" + uploadNum(c), u ? u.label : "Upload", "right"); })}
+              {fcTh("uploadview", "Upload", "right")}
             </tr></thead>
             <tbody>
               {sortedRows.map(function (row, ri) {
@@ -8198,6 +8200,12 @@ function ForecastingTool(props) {
                       <input data-fc={ri + "-" + ci} value={cellVal} onChange={function (e) { setManualM(k, num, e.target.value); }} onKeyDown={function (e) { fcCellKey(e, ri, ci); }} placeholder={comp == null ? "-" : ""} style={{ width: 84, textAlign: "right", padding: "6px 8px", borderRadius: 8, fontSize: 13, fontVariantNumeric: "tabular-nums", border: "1px solid " + (isManual ? "#0EA5E9" : "#E5E7EB"), background: isManual ? "#F0F9FF" : "#F9FAFB", color: "#1F2937", outline: "none" }} />
                     </td>;
                   })}
+                  <td style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums", fontWeight: 600, borderLeft: "1px solid #E5E7EB" })}>{(function () {
+                    if (dropRow || !inSef(row)) return <span style={{ color: "#D1D5DB", fontWeight: 400 }} title="Excluded from the export CSV">{"\u2014"}</span>;
+                    var parts = targetCols.map(function (c) { var num = uploadNum(c); var v = num == null ? null : effectiveForMonth(row, num); return v == null ? null : Math.round(v).toLocaleString(); }).filter(function (x) { return x != null; });
+                    if (!parts.length) return <span style={{ color: "#D1D5DB", fontWeight: 400 }} title="Nothing will be written for this row">{"\u2014"}</span>;
+                    return <span style={{ color: "#0B6FA8" }} title="Value written to the export CSV">{parts.join(" / ")}</span>;
+                  })()}</td>
                 </tr>;
               })}
             </tbody>
