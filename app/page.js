@@ -5208,7 +5208,7 @@ function TruckloaderTool(props) {
     {/* TAB PILLS */}
     {orderItems.length > 0 && <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
       <button onClick={function() { setStep("order"); }} style={S.pill(step === "order", TOOL_COLOR)}>Order Table</button>
-      <button onClick={function() { if (truckGroups) setStep("trucks"); else toast("Run Optimize Trucks first", "info"); }} style={S.pill(step === "trucks", "#059669")}>Truck Assignments{truckGroups ? " (" + truckGroups.filter(function(t) { return !t.isError; }).length + ")" : ""}</button>
+      <button onClick={function() { if (fillAdded.length > 0) { optimizeTrucks(); } else if (truckGroups) { setStep("trucks"); } else { toast("Run Optimize Trucks first", "info"); } }} style={S.pill(step === "trucks", "#059669")}>Truck Assignments{truckGroups ? " (" + truckGroups.filter(function(t) { return !t.isError; }).length + ")" : ""}</button>
       <button onClick={function() { setStep("fill"); }} style={S.pill(step === "fill", "#7C3AED")}>Fill Suggestions</button>
       <button onClick={function() { setStep("email"); }} style={S.pill(step === "email", "#3B82F6")}>Email</button>
     </div>}
@@ -5498,7 +5498,7 @@ function TruckloaderTool(props) {
               <div style={{ height: 10, background: "#F3F4F6", borderRadius: 5, overflow: "hidden", marginBottom: 6 }}><div style={{ height: "100%", width: pct + "%", background: barColor, borderRadius: 5, transition: "width 0.3s" }} /></div>
               {remaining > 0 && <div style={{ fontSize: 11, color: remaining > 7500 ? "#D97706" : "#059669", fontWeight: 500 }}>{remaining.toLocaleString(undefined, { maximumFractionDigits: 0 })} lbs remaining</div>}
               {remaining <= 0 && <div style={{ fontSize: 11, color: "#DC2626", fontWeight: 500 }}>{Math.abs(remaining).toLocaleString(undefined, { maximumFractionDigits: 0 })} lbs over capacity</div>}
-              <button onClick={optimizeTrucks} style={Object.assign({}, S.btn(), { width: "100%", justifyContent: "center", marginTop: 8, fontSize: 12, padding: "8px 12px" })}><IconBox /> Re-optimize</button>
+              <button onClick={optimizeTrucks} style={Object.assign({}, S.btn(), { width: "100%", justifyContent: "center", marginTop: 8, fontSize: 12, padding: "8px 12px" })}><IconBox /> {fillAdded.length > 0 ? "Add fill to trucks" : "Re-optimize"}</button>
             </div>;
           }()}
 
