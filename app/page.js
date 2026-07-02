@@ -7776,10 +7776,14 @@ function ForecastingTool(props) {
     var sel = document.querySelector('[data-fc="' + mv[0] + '-' + mv[1] + '"]');
     if (sel) { e.preventDefault(); sel.focus(); if (sel.select) sel.select(); }
   }
-  function fcTh(key, label, align) {
+  function fcTh(key, label, align, extra, ttl) {
     var active = sortKey === key;
-    return <th key={key} onClick={function () { toggleSort(key); }} style={Object.assign({}, S.th, align === "right" ? { textAlign: "right" } : {}, { cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" })}>{label}{active ? (sortDir === "desc" ? " \u25BE" : " \u25B4") : ""}</th>;
+    return <th key={key} title={ttl || ""} onClick={function () { toggleSort(key); }} style={Object.assign({}, S.th, align === "right" ? { textAlign: "right" } : {}, { cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" }, extra || {})}>{label}{active ? (sortDir === "desc" ? " \u25BE" : " \u25B4") : ""}</th>;
   }
+  // Pinned (sticky) first two columns so horizontal scroll keeps row context.
+  var PIN_W_P = 92, PIN_W_D = 220;
+  var pinPHead = { position: "sticky", left: 0, zIndex: 3, width: PIN_W_P, minWidth: PIN_W_P, maxWidth: PIN_W_P, boxSizing: "border-box" };
+  var pinDHead = { position: "sticky", left: PIN_W_P, zIndex: 3, width: PIN_W_D, minWidth: PIN_W_D, maxWidth: PIN_W_D, boxSizing: "border-box" };
   function sortVal(row, key) {
     if (key === "product") return String(row[productCol] == null ? "" : row[productCol]);
     if (key === "desc") return String(descCol >= 0 ? (row[descCol] == null ? "" : row[descCol]) : "");
@@ -8089,7 +8093,7 @@ function ForecastingTool(props) {
       {formatted && formatted.length > 0 && <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden", border: "0.5px solid " + PANEL_BORDER, borderRadius: "0 0 14px 14px" })}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderBottom: "1px solid #F3F4F6", flexWrap: "wrap" }}>
           <input value={query} onChange={function (e) { setQuery(e.target.value); }} placeholder="Search product code or description..." style={Object.assign({}, S.inp, { flex: "1 1 240px", maxWidth: 360, padding: "8px 12px" })} />
-          <span style={{ fontSize: 11, color: "#9CA3AF", display: "inline-flex", alignItems: "center", gap: 5 }}><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>Filter via the icons in the Replenishment, Growing, SD / Backorder, and Strategy headers</span>
+          <span style={{ fontSize: 11, color: "#9CA3AF", display: "inline-flex", alignItems: "center", gap: 5 }}><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>Filter via the icons in the Replenishment, Growing, SD/BO, and Strategy headers</span>
           {(query.trim() || Object.keys(colFilters).length) ? <button onClick={function () { setQuery(""); setColFilters({}); }} style={{ padding: "5px 10px", borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: "pointer", color: "#6B7280", background: "#fff", border: "1px solid #E5E7EB" }}>Clear all filters</button> : null}
           <div style={{ marginLeft: "auto", fontSize: 12, color: "#9CA3AF", fontVariantNumeric: "tabular-nums" }}>{sortedRows.length} shown</div>
         </div>
@@ -8097,16 +8101,16 @@ function ForecastingTool(props) {
           <style>{".fc-tbl tbody tr:hover > td{background:#EFF6FF;}"}</style>
           <table className="fc-tbl" style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead><tr>
-              {fcTh("product", "Product code", "left")}
-              {fcTh("desc", "Description", "left")}
-              {anchors.trail3.map(function (hi) { return fcTh("hist:" + hi, String(headers[hi]).replace(/^hist:\s*/i, ""), "right"); })}
-              {fcTh("mtd", "MTD", "right")}
+              {fcTh("product", "Product code", "left", pinPHead)}
+              {fcTh("desc", "Description", "left", pinDHead)}
+              {anchors.trail3.map(function (hi) { return fcTh("hist:" + hi, String(headers[hi]).replace(/^hist:\s*/i, ""), "right", { width: 66 }); })}
+              {fcTh("mtd", "MTD", "right", { width: 58 })}
               <FcHeadFilter label="Growing" align="left" thStyle={S.th} options={FC_FILTER_OPTS.growing} sel={colFilters.growing || null} onSel={function (n) { setColF("growing", n); }} sortActive={sortKey === "growing"} sortDir={sortDir} onSort={function () { toggleSort("growing"); }} />
               <FcHeadFilter label="Replenishment" align="left" thStyle={S.th} options={FC_FILTER_OPTS.repl} sel={colFilters.repl || null} onSel={function (n) { setColF("repl", n); }} sortActive={sortKey === "repl"} sortDir={sortDir} onSort={function () { toggleSort("repl"); }} />
-              <FcHeadFilter label="SD / Backorder" align="left" thStyle={S.th} options={FC_FILTER_OPTS.flag} sel={colFilters.flag || null} onSel={function (n) { setColF("flag", n); }} sortActive={sortKey === "flag"} sortDir={sortDir} onSort={function () { toggleSort("flag"); }} />
-              {fcTh("final1", "Final FC", "right")}
+              <FcHeadFilter label="SD/BO" align="left" thStyle={S.th} options={FC_FILTER_OPTS.flag} sel={colFilters.flag || null} onSel={function (n) { setColF("flag", n); }} sortActive={sortKey === "flag"} sortDir={sortDir} onSort={function () { toggleSort("flag"); }} />
+              {fcTh("final1", "Final FC", "right", { width: 74 })}
               <FcHeadFilter label="Strategy" align="left" thStyle={S.th} options={FC_FILTER_OPTS.strategy} sel={colFilters.strategy || null} onSel={function (n) { setColF("strategy", n); }} sortActive={sortKey === "strategy"} sortDir={sortDir} onSort={function () { toggleSort("strategy"); }} />
-              {fcTh("pct", "Final FC/Upload FC % Diff", "right")}
+              {fcTh("pct", "% Diff", "right", { width: 74 }, "Final FC vs Upload FC % difference")}
               {targetCols.map(function (c) { var u = anchors.uploads.filter(function (x) { return x.idx === c; })[0]; return fcTh("upload:" + uploadNum(c), u ? u.label : "Upload", "right"); })}
             </tr></thead>
             <tbody>
@@ -8114,9 +8118,10 @@ function ForecastingTool(props) {
                 var k = rowKey(row);
                 var dropRow = rowBelowFinal(row);
                 var pct = pctVsFinal(row, anchorNum);
+                var rowBg = ri % 2 === 1 ? "#FAFBFC" : "#FFFFFF";
                 return <tr key={ri} style={Object.assign({}, ri % 2 === 1 ? { background: "#FAFBFC" } : null, dropRow ? { opacity: 0.45 } : null)} title={dropRow ? "Below Netstock Final \u2014 excluded from export" : ""}>
-                  <td style={Object.assign({}, S.td, { fontWeight: 500, whiteSpace: "nowrap", textDecoration: dropRow ? "line-through" : "none" })}>{row[productCol]}</td>
-                  <td title={descCol >= 0 ? String(row[descCol] || "") : ""} style={Object.assign({}, S.td, { maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })}>{descCol >= 0 ? row[descCol] : ""}</td>
+                  <td style={Object.assign({}, S.td, { fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", textDecoration: dropRow ? "line-through" : "none", position: "sticky", left: 0, zIndex: 1, background: rowBg, width: PIN_W_P, minWidth: PIN_W_P, maxWidth: PIN_W_P, boxSizing: "border-box" })}>{row[productCol]}</td>
+                  <td title={descCol >= 0 ? String(row[descCol] || "") : ""} style={Object.assign({}, S.td, { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", position: "sticky", left: PIN_W_P, zIndex: 1, background: rowBg, width: PIN_W_D, minWidth: PIN_W_D, maxWidth: PIN_W_D, boxSizing: "border-box" })}>{descCol >= 0 ? row[descCol] : ""}</td>
                   {anchors.trail3.map(function (hi) { return <td key={hi} style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums", color: "#6B7280" })}>{fcFmt(row[hi])}</td>; })}
                   <td style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums" })}>{fcFmt(row[anchors.mtd])}</td>
                   <td style={Object.assign({}, S.td)}>{(function () { var tr = fcTrend(row); if (tr === "g") return <span title="Each of the last 3 months is higher than the previous" style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "2px 8px", borderRadius: 999, fontSize: 11, fontWeight: 600, color: "#065F46", background: "#D1FAE5" }}>{"\u2191"} Growing</span>; if (tr === "d") return <span title="Each of the last 3 months is lower than the previous" style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "2px 8px", borderRadius: 999, fontSize: 11, fontWeight: 600, color: "#6D28D9", background: "#EDE9FE" }}>{"\u2193"} Decreasing</span>; return <span style={{ color: "#D1D5DB" }}>{"\u2013"}</span>; })()}</td>
