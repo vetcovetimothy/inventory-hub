@@ -4525,8 +4525,50 @@ function TruckloaderTool(props) {
   var _highlight = useState("all"), highlightTruck = _highlight[0], setHighlightTruck = _highlight[1];
   var _fillAdded = useState([]), fillAdded = _fillAdded[0], setFillAdded = _fillAdded[1];
   var _orderSort = useState(null), orderSort = _orderSort[0], setOrderSort = _orderSort[1];
+  var _fillSort = useState(null), fillSort = _fillSort[0], setFillSort = _fillSort[1];
   var _dohTarget = useState(45), dohTarget = _dohTarget[0], setDohTarget = _dohTarget[1];
   var _fillPals = useState({}), fillPals = _fillPals[0], setFillPals = _fillPals[1];
+  // Shared derived values for a Fill Suggestions row (used by both the table and its sort).
+  function fillCalc(f) {
+    var dailySales = f.avgSales > 0 ? f.avgSales / 30 : 0;
+    var unitsForTarget = Math.max(0, (dohTarget * dailySales) - f.onHand - f.onOrder);
+    var sugPals = (f.unitsPerPallet > 0 && dailySales > 0) ? Math.max(1, Math.ceil(unitsForTarget / f.unitsPerPallet)) : "";
+    var curPals = fillPals[f.productCode] || sugPals || 1;
+    var rowLbs = curPals * (f.palletWeight || 0);
+    var addDays = (dailySales > 0 && f.unitsPerPallet > 0) ? Math.round((curPals * f.unitsPerPallet) / dailySales) : null;
+    var newDoh = addDays == null ? null : (f.combined + addDays);
+    var daysPal = (dailySales > 0 && f.unitsPerPallet > 0) ? Math.round(f.unitsPerPallet / dailySales) : null;
+    var orderQty = f.unitsPerPallet > 0 ? (curPals * f.unitsPerPallet) : null;
+    return { dailySales: dailySales, sugPals: sugPals, curPals: curPals, rowLbs: rowLbs, addDays: addDays, newDoh: newDoh, daysPal: daysPal, orderQty: orderQty };
+  }
+  function fillSortVal(f, col) {
+    var c = fillCalc(f);
+    if (col === "Inv ID") return String(f.productCode || "");
+    if (col === "Description") return String(f.description || "");
+    if (col === "R") return String(f.replenClass || "");
+    if (col === "On Hand") return f.onHand;
+    if (col === "Days/Pal") return c.daysPal;
+    if (col === "DOH+DOO") return f.combined;
+    if (col === "+Days") return c.addDays;
+    if (col === "= New DOH") return c.newDoh;
+    if (col === "Pallets") return c.curPals;
+    if (col === "Order Qty") return c.orderQty;
+    if (col === "Total Lbs") return c.rowLbs;
+    return null;
+  }
+  function sortedFillList() {
+    if (!fillSuggestions) return [];
+    if (!fillSort) return fillSuggestions;
+    var d = fillSort.dir === "desc" ? -1 : 1;
+    return fillSuggestions.slice().sort(function (a, b) {
+      var va = fillSortVal(a, fillSort.col), vb = fillSortVal(b, fillSort.col);
+      var na = va == null || va === "", nb = vb == null || vb === "";
+      if (na && nb) return 0; if (na) return 1; if (nb) return -1;
+      if (typeof va === "number" && typeof vb === "number") return (va - vb) * d;
+      va = String(va).toLowerCase(); vb = String(vb).toLowerCase();
+      return va < vb ? -d : (va > vb ? d : 0);
+    });
+  }
   var _hillsDraftSent = useState(false), hillsDraftSent = _hillsDraftSent[0], setHillsDraftSent = _hillsDraftSent[1];
   var _cpDraftSent = useState(false), cpDraftSent = _cpDraftSent[0], setCpDraftSent = _cpDraftSent[1];
   var _emailOverrides = useState({}), emailOverrides = _emailOverrides[0], setEmailOverrides = _emailOverrides[1];
@@ -5380,7 +5422,7 @@ function TruckloaderTool(props) {
         {/* LEFT - Suggestions table */}
         <div style={Object.assign({}, S.card, { marginTop: 0, flex: 1, minWidth: 0 })}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
-            <div style={{ fontSize: 12, color: "#9CA3AF" }}>{fillSuggestions.length} items sorted by DOH+DOO</div>
+            <div style={{ fontSize: 12, color: "#9CA3AF" }}>{fillSuggestions.length} items {fillSort ? "\u2022 sorted by " + fillSort.col + (fillSort.dir === "desc" ? " \u25BE" : " \u25B4") : "sorted by DOH+DOO"}</div>
           </div>
           <div style={{ overflow: "auto", borderRadius: 10, border: "1px solid #E5E7EB", maxHeight: 600 }}>
             <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
@@ -5388,19 +5430,21 @@ function TruckloaderTool(props) {
                 {["Inv ID", "Description", "R", "On Hand", "Days/Pal", "DOH+DOO", "+Days", "= New DOH", "Pallets", "Order Qty", "Total Lbs", ""].map(function(h) {
                   var align = (h === "Inv ID" || h === "Description") ? "left" : "center";
                   if (h === "On Hand" || h === "Days/Pal" || h === "Order Qty" || h === "Total Lbs") align = "right";
-                  return <th key={h} style={Object.assign({}, S.th, { padding: "8px 6px", fontSize: 10, textAlign: align }, h === "+Days" ? { color: "#A78BFA" } : {}, h === "= New DOH" ? { color: "#7C3AED", background: "#F5F3FF" } : {}, (h === "Pallets" || h === "Order Qty" || h === "Total Lbs" || h === "") ? { background: "#F0FDF4" } : {})}>{h}</th>;
+                  var sortable = h !== "";
+                  var isSorted = fillSort && fillSort.col === h;
+                  return <th key={h} onClick={sortable ? function() { setFillSort(!isSorted ? { col: h, dir: "desc" } : fillSort.dir === "desc" ? { col: h, dir: "asc" } : null); } : undefined} style={Object.assign({}, S.th, { padding: "8px 6px", fontSize: 10, textAlign: align, cursor: sortable ? "pointer" : "default", userSelect: "none" }, h === "+Days" ? { color: "#A78BFA" } : {}, h === "= New DOH" ? { color: "#7C3AED", background: "#F5F3FF" } : {}, (h === "Pallets" || h === "Order Qty" || h === "Total Lbs" || h === "") ? { background: "#F0FDF4" } : {})}>{h}{isSorted ? (fillSort.dir === "desc" ? " \u25BE" : " \u25B4") : ""}</th>;
                 })}
               </tr></thead>
-              <tbody>{fillSuggestions.slice(0, 150).map(function(f, fi, arr) {
+              <tbody>{sortedFillList().slice(0, 150).map(function(f, fi, arr) {
                 var urgBg = f.combined === 0 ? "#FEF2F2" : f.combined <= 14 ? "#FFF7ED" : f.combined <= 30 ? "#FFFBEB" : "#FFFFFF";
                 var urgCol = f.combined === 0 ? "#DC2626" : f.combined <= 14 ? "#EA580C" : f.combined <= 30 ? "#CA8A04" : "#16A34A";
-                var dailySales = f.avgSales > 0 ? f.avgSales / 30 : 0;
-                var unitsForTarget = Math.max(0, (dohTarget * dailySales) - f.onHand - f.onOrder);
-                var sugPals = (f.unitsPerPallet > 0 && dailySales > 0) ? Math.max(1, Math.ceil(unitsForTarget / f.unitsPerPallet)) : "";
-                var curPals = fillPals[f.productCode] || sugPals || 1;
-                var rowLbs = curPals * (f.palletWeight || 0);
-                var addDays = (dailySales > 0 && f.unitsPerPallet > 0) ? Math.round((curPals * f.unitsPerPallet) / dailySales) : null;
-                var newDoh = addDays == null ? null : (f.combined + addDays);
+                var c = fillCalc(f);
+                var dailySales = c.dailySales;
+                var sugPals = c.sugPals;
+                var curPals = c.curPals;
+                var rowLbs = c.rowLbs;
+                var addDays = c.addDays;
+                var newDoh = c.newDoh;
                 return <tr key={fi} style={{ background: urgBg }}>
                   <td onClick={function() { navigator.clipboard.writeText(f.productCode); toast("Copied: " + f.productCode); }} style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, fontWeight: 600, padding: "6px 6px", cursor: "pointer", whiteSpace: "nowrap" })} title="Click to copy">{f.productCode}</td>
                   <td style={Object.assign({}, S.td, { maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", padding: "6px 6px", fontSize: 11 })} title={f.description}>{f.description}</td>
