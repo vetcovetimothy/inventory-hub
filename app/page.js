@@ -3084,7 +3084,7 @@ function POImportTool(props) {
       } else {
         // perFile: use the (unique) vendorSource from the PDF; if absent or multi, error
         if (vendorSourceList.length === 0) {
-          blocked.push({ file: fileKey, reason: "PDF parser did not detect sub-vendor (Keysource/Anda/Bloodworth)" });
+          blocked.push({ file: fileKey, reason: "PDF parser did not detect sub-vendor (Keysource/Anda/Bloodworth/TopRX)" });
           return;
         }
         if (vendorSourceList.length > 1) {
@@ -3324,7 +3324,7 @@ function POImportTool(props) {
             </div>
           </div>
           <div style={{ display: "flex", gap: 10 }}>
-            {[["other", "Keysource / Anda / Bloodworth"], ["mckesson", "McKesson"], ["ggm-crossovers", "GoGoMeds Crossovers"]].map(function(v) {
+            {[["other", "Keysource / Anda / Bloodworth / TopRX"], ["mckesson", "McKesson"], ["ggm-crossovers", "GoGoMeds Crossovers"]].map(function(v) {
               return <button key={v[0]} onClick={function() { switchVendor(v[0]); }}
                 style={{ padding: "8px 18px", borderRadius: 8, border: "1px solid " + (vendor === v[0] ? TOOL_COLOR : "#E5E7EB"), background: vendor === v[0] ? TOOL_COLOR + "20" : "transparent", color: vendor === v[0] ? TOOL_COLOR : "#6B7280", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>{v[1]}</button>;
             })}
