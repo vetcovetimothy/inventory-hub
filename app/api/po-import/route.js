@@ -21,6 +21,7 @@ function detectWarehouse(text) {
 function detectVendor(text) {
   var lower = text.toLowerCase();
   if (lower.includes("mckesson")) return "McKesson";
+  if (lower.includes("toprx") || lower.includes("top rx")) return "TopRX";
   if (lower.includes("keysource")) return "Keysource";
   if (lower.includes("anda")) return "Anda";
   if (lower.includes("bloodworth")) return "Bloodworth";
