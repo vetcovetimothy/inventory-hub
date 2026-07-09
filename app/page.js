@@ -658,6 +658,7 @@ function WHT(props) {
   var _esel = useState(null), emailSelected = _esel[0], setEmailSelected = _esel[1];
   var _il = useState(true), initLoading = _il[0], setInitLoading = _il[1];
   var _emailTo = useState(cfg.emailTo), emailTo = _emailTo[0], setEmailTo = _emailTo[1];
+  var _emailCc = useState(""), emailCc = _emailCc[0], setEmailCc = _emailCc[1];
   var _emailSubject = useState(""), emailSubject = _emailSubject[0], setEmailSubject = _emailSubject[1];
   var DEFAULT_BODY = "Good morning,\n\nAttached are today's POs.\n\nThanks in advance,";
   var _emailBody = useState(DEFAULT_BODY), emailBody = _emailBody[0], setEmailBody = _emailBody[1];
@@ -669,13 +670,14 @@ function WHT(props) {
       if (!m || !d || !d.data) return;
       var ov = typeof d.data === "string" ? JSON.parse(d.data) : d.data;
       if (ov.to != null) setEmailTo(ov.to);
+      if (ov.cc != null) setEmailCc(ov.cc);
       if (ov.subject != null) setEmailSubject(ov.subject);
       if (ov.body != null) setEmailBody(ov.body);
     }).catch(function() {});
     return function() { m = false; };
   }, [whKey]);
   function persistEmailOverride(patch) {
-    var current = { to: emailTo, subject: emailSubject, body: emailBody };
+    var current = { to: emailTo, cc: emailCc, subject: emailSubject, body: emailBody };
     var merged = Object.assign({}, current, patch);
     kvPost(EMAIL_OVERRIDE_KEY, merged).catch(function() {});
   }
@@ -1557,6 +1559,15 @@ function WHT(props) {
             </>}
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+            <span style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, width: 60, paddingTop: 8 }}>Cc:</span>
+            {editingField === "cc" ? <>
+              <input value={emailCc} onChange={function(e) { setEmailCc(e.target.value); }} autoFocus onBlur={function() { persistEmailOverride({ cc: emailCc }); setEditingField(null); }} onKeyDown={function(e) { if (e.key === "Enter") { persistEmailOverride({ cc: emailCc }); setEditingField(null); } if (e.key === "Escape") setEditingField(null); }} placeholder="cc@example.com, cc2@example.com" style={Object.assign({}, S.inp, { padding: "6px 10px", fontSize: 13, flex: 1 })} />
+            </> : <>
+              <span style={{ fontSize: 13, color: "#374151", flex: 1, paddingTop: 7, wordBreak: "break-all" }}>{emailCc || <span style={{ color: "#9CA3AF" }}>No Cc</span>}</span>
+              <button onClick={function() { setEditingField("cc"); }} title="Edit Cc" style={{ background: "transparent", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 14, padding: 4, alignSelf: "center" }}>{"\u270E"}</button>
+            </>}
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
             <span style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, width: 60, paddingTop: 8 }}>Subject:</span>
             {editingField === "subject" ? <>
               <input value={emailSubject || cfg.subjectFn(todayStr)} onChange={function(e) { setEmailSubject(e.target.value); }} autoFocus onBlur={function() { persistEmailOverride({ subject: emailSubject }); setEditingField(null); }} onKeyDown={function(e) { if (e.key === "Enter") { persistEmailOverride({ subject: emailSubject }); setEditingField(null); } if (e.key === "Escape") setEditingField(null); }} placeholder={cfg.subjectFn(todayStr)} style={Object.assign({}, S.inp, { padding: "6px 10px", fontSize: 13, flex: 1, fontWeight: 600 })} />
@@ -1606,7 +1617,7 @@ function WHT(props) {
                 });
                 return { filename: v + " PO Data - " + whKey + ".xlsx", columns: xlsCols, rows: rows };
               });
-              var draftPayloads = [{ to: toLine, subject: subject, htmlBody: htmlBody, attachments: attachments }];
+              var draftPayloads = [{ to: toLine, cc: emailCc, subject: subject, htmlBody: htmlBody, attachments: attachments }];
               var result = await postGmailDrafts(draftPayloads, gmail.token);
               if (result.failed > 0) throw new Error("Some drafts failed to create");
               setEmailSent(true); persist(data, true, runBy, runTime, shipNotes); toast(cfg.label + ": Draft created with " + selectedVendors.length + " attachment" + (selectedVendors.length > 1 ? "s" : ""));
