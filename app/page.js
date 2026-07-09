@@ -1725,6 +1725,9 @@ function CycleCountTool(props) {
   // Persisted so checked-off rows survive navigation; reset on regenerate / Clear.
   var _approvals = useState(function() { return sGet("cc-approvals") || {}; }), approvals = _approvals[0], setApprovals = _approvals[1];
   useEffect(function() { sSet("cc-approvals", approvals); }, [approvals]);
+  // Key approvals by Inventory ID + NDC so generic items that share an Inventory ID
+  // but differ by NDC are tracked as separate check rows (checking one won't check both).
+  function ccApprKey(r) { return String(r.inventoryId) + "|" + String(r.ndc || ""); }
   // Vendor Inventory rows are large, so they live in IndexedDB (localStorage's ~5MB cap
   // is shared with the results, and an oversized vendor file was silently pushing the
   // results save out). Load them on mount, and purge any legacy localStorage copy that
@@ -2236,13 +2239,13 @@ function CycleCountTool(props) {
     if (!hasDoh) return results;
     return results.filter(function(r) {
       if (!r.isFlagged) return true;
-      return !!approvals[r.inventoryId];
+      return !!approvals[ccApprKey(r)];
     });
   }
 
   // CC check routing: flagged rows that have NOT been approved (only meaningful when DOH is loaded)
   function getCheckRows() {
-    return results.filter(function(r) { return r.isFlagged && !approvals[r.inventoryId]; });
+    return results.filter(function(r) { return r.isFlagged && !approvals[ccApprKey(r)]; });
   }
 
   function downloadCSV() {
@@ -2400,8 +2403,8 @@ function CycleCountTool(props) {
       if (hasDoh) {
         var withIdx = sortedResults.map(function(r, idx) { return { r: r, idx: idx }; });
         withIdx.sort(function(a, b) {
-          var aNeeds = a.r.isFlagged && !approvals[a.r.inventoryId];
-          var bNeeds = b.r.isFlagged && !approvals[b.r.inventoryId];
+          var aNeeds = a.r.isFlagged && !approvals[ccApprKey(a.r)];
+          var bNeeds = b.r.isFlagged && !approvals[ccApprKey(b.r)];
           if (aNeeds !== bNeeds) return aNeeds ? -1 : 1;
           return a.idx - b.idx;
         });
@@ -2416,17 +2419,17 @@ function CycleCountTool(props) {
       // Header checkbox: if currently all flagged rows are approved → unapprove all;
       // otherwise (none or some approved) → approve all. Mirrors standard inbox UX.
       var flaggedRows = sortedResults.filter(function(r) { return r.isFlagged; });
-      var approvedFlaggedCount = flaggedRows.filter(function(r) { return !!approvals[r.inventoryId]; }).length;
+      var approvedFlaggedCount = flaggedRows.filter(function(r) { return !!approvals[ccApprKey(r)]; }).length;
       var allApproved = flaggedRows.length > 0 && approvedFlaggedCount === flaggedRows.length;
       var someApproved = approvedFlaggedCount > 0 && !allApproved;
       function toggleApproveAll() {
         var u = Object.assign({}, approvals);
         if (allApproved) {
           // Currently checked → uncheck → clear all flagged approvals
-          flaggedRows.forEach(function(r) { delete u[r.inventoryId]; });
+          flaggedRows.forEach(function(r) { delete u[ccApprKey(r)]; });
         } else {
           // Unchecked or mixed → check → approve all flagged
-          flaggedRows.forEach(function(r) { u[r.inventoryId] = true; });
+          flaggedRows.forEach(function(r) { u[ccApprKey(r)] = true; });
         }
         setApprovals(u);
       }
@@ -2449,7 +2452,7 @@ function CycleCountTool(props) {
             {hasDoh && <th style={S.th}>Days of Supply</th>}
           </tr></thead>
           <tbody>{sortedResults.map(function(r, i) {
-            var approved = !!approvals[r.inventoryId];
+            var approved = !!approvals[ccApprKey(r)];
             var needsCheck = r.isFlagged && !approved;
             var rowBg, borderLeft;
             if (needsCheck) { rowBg = "rgba(220,38,38,0.06)"; borderLeft = "3px solid #DC2626"; }
@@ -2457,13 +2460,13 @@ function CycleCountTool(props) {
             else { rowBg = "transparent"; borderLeft = "3px solid transparent"; }
             // Divider after the last "to be checked" (unapproved flagged) row, separating
             // the to-check section from the rest (which is in pasted-NDC / export order).
-            var nextNeedsCheck = (i + 1 < sortedResults.length) && sortedResults[i + 1].isFlagged && !approvals[sortedResults[i + 1].inventoryId];
+            var nextNeedsCheck = (i + 1 < sortedResults.length) && sortedResults[i + 1].isFlagged && !approvals[ccApprKey(sortedResults[i + 1])];
             var isLastNeedsCheck = hasDoh && needsCheck && (i + 1 < sortedResults.length) && !nextNeedsCheck;
             var borderBottom = isLastNeedsCheck ? "2px solid rgba(220,38,38,0.2)" : undefined;
             var dosDisplay = r.daysOfSupply == null ? "—" : (r.daysOfSupply > 0 ? "+" : "") + r.daysOfSupply.toFixed(1);
             var dosColor = r.daysOfSupply == null ? "#DC2626" : (Math.abs(r.daysOfSupply) > 14 ? "#DC2626" : "#374151");
             return <tr key={i} style={{ background: rowBg, borderBottom: borderBottom, borderLeft: borderLeft }}>
-              {hasDoh && <td style={Object.assign({}, S.td, { textAlign: "center" })}>{r.isFlagged ? <input type="checkbox" checked={approved} onChange={function() { toggleApproval(r.inventoryId); }} style={{ cursor: "pointer", width: 16, height: 16 }} /> : <span style={{ color: "#D1D5DB" }}>{"\u2014"}</span>}</td>}
+              {hasDoh && <td style={Object.assign({}, S.td, { textAlign: "center" })}>{r.isFlagged ? <input type="checkbox" checked={approved} onChange={function() { toggleApproval(ccApprKey(r)); }} style={{ cursor: "pointer", width: 16, height: 16 }} /> : <span style={{ color: "#D1D5DB" }}>{"\u2014"}</span>}</td>}
               <td style={Object.assign({}, S.td, { color: r.inventoryId.startsWith("GEN-") ? "#059669" : r.inventoryId.startsWith("UNV-") ? "#2563EB" : "#374151" })}>{r.inventoryId}</td>
               <td style={S.td}>{r.warehouse}</td>
               <td style={S.td}>{r.location}</td>
