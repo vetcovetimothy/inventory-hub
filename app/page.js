@@ -4945,6 +4945,7 @@ function TruckloaderTool(props) {
         if (sentNbrs.length > 0) {
           if (gmail && gmail.token) {
             var scode = (WH_META[warehouse] && WH_META[warehouse].shortCode) || warehouse;
+            scode = scode === "Tampa" ? "FL" : scode === "Dallas" ? "TX" : scode; // email uses state codes
             var dt = new Date();
             var dstr = (dt.getMonth() + 1) + "/" + dt.getDate() + "/" + String(dt.getFullYear()).slice(2);
             var poBlock = sentNbrs.map(function(n) { return n + " " + scode; }).join("\n");
