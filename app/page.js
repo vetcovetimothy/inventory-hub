@@ -4938,6 +4938,28 @@ function TruckloaderTool(props) {
         if (s.ediFailedCount) bits.push(s.ediFailedCount + " failed");
         toast("EDI send: " + (bits.join(", ") || "see results"), "error");
       }
+      // Extra step: draft a plain-text confirmation email listing the POs that went to EDI (no attachments).
+      try {
+        var sentNbrs = [];
+        resp.results.forEach(function(r, i) { if (r && r.ok && r.ediSent) { var nbr = (succeeded[i] && succeeded[i].orderNbr) || r.orderNbr; if (nbr) sentNbrs.push(nbr); } });
+        if (sentNbrs.length > 0) {
+          if (gmail && gmail.token) {
+            var scode = (WH_META[warehouse] && WH_META[warehouse].shortCode) || warehouse;
+            var dt = new Date();
+            var dstr = (dt.getMonth() + 1) + "/" + dt.getDate() + "/" + String(dt.getFullYear()).slice(2);
+            var poBlock = sentNbrs.map(function(n) { return n + " " + scode; }).join("\n");
+            var bodyText = "Hi,\n\nThe following list below have been sent through EDI, please respond back with confirmation of receipt and ETA at your earliest convenience. Let us know if you have any questions.\n\n" + poBlock + "\n\nThank you!";
+            var safe = bodyText.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+            var htmlBody = "<p>" + safe.replace(/\n\n+/g, "</p><p>").replace(/\n/g, "<br>") + "</p>";
+            var toAddr = (WH_META[warehouse] && WH_META[warehouse].cpTo) || "";
+            var dres = await postGmailDrafts([{ to: toAddr, subject: "Weekly Replenishment Orders " + scode + " " + dstr, htmlBody: htmlBody, attachments: [] }], gmail.token);
+            if (dres && dres.failed > 0) toast("PO-list draft failed to create", "error");
+            else toast("Draft created listing " + sentNbrs.length + " PO(s)", "success");
+          } else {
+            toast("POs sent to EDI \u2014 connect Gmail to auto-draft the PO list", "info");
+          }
+        }
+      } catch (de) { toast("PO-list draft error: " + de.message, "error"); }
     } catch (err) {
       setEdiResult({ resp: { ok: false, error: String(err) }, orderNbrs: succeeded.map(function(s) { return s.orderNbr; }) });
       toast("Network error: " + err.message, "error");
