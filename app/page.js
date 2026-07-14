@@ -3118,14 +3118,21 @@ function POImportTool(props) {
           warehouse: warehouse,
           orderQty: qty,
           unitCost: price || 0,
-          uom: r.uom || "",
+          uom: (r.uom || "").trim(),
           alternateId: r.ndc || ""
         };
       });
-      // Sanity: positive qty + non-empty uom for every line (the route will also enforce)
-      var badLine = lines.find(function(l) { return !(Number(l.orderQty) > 0) || !l.uom; });
-      if (badLine) {
-        blocked.push({ file: fileKey, reason: "Some line(s) have zero qty or missing UOM" });
+      // Sanity: positive qty + non-empty uom for every line (the route will also enforce).
+      // A blank/whitespace UOM comes from the matched Acumatica item having no purchasing
+      // UOM set — name those items so they can be fixed in Acumatica, then re-run.
+      var noUom = lines.filter(function(l) { return !l.uom; });
+      var badQty = lines.find(function(l) { return !(Number(l.orderQty) > 0); });
+      if (noUom.length) {
+        blocked.push({ file: fileKey, reason: "Missing UOM in Acumatica for: " + noUom.map(function(l) { return l.inventoryId || l.alternateId || "?"; }).join(", ") + " \u2014 set the item's purchasing UOM in Acumatica, then re-run." });
+        return;
+      }
+      if (badQty) {
+        blocked.push({ file: fileKey, reason: "Some line(s) have zero/blank quantity." });
         return;
       }
 
