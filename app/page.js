@@ -6565,7 +6565,7 @@ function OOSTracker(props) {
       "Vendor": function(r) { return r._vendor; },
       "Warehouse": function(r) { return r._wh; },
       "Supply IDs": function(r) { return r.VENDOR_SUPPLY_IDS; },
-      "Status": function(r) { return r.SUPPLY_STATUS; }
+      "Order Status": function(r) { return r.SUPPLY_STATUS; }
     };
     if (allWhseSort.col && SORT_KEYS[allWhseSort.col]) {
       var getv = SORT_KEYS[allWhseSort.col];
@@ -6600,7 +6600,7 @@ function OOSTracker(props) {
             {sortHeader("Vendor")}
             {sortHeader("Warehouse")}
             {sortHeader("Supply IDs")}
-            {sortHeader("Status")}
+            {sortHeader("Order Status")}
           </tr></thead>
           <tbody>{rows.map(function(r, i) {
             var st = whStyle(r._wh);
