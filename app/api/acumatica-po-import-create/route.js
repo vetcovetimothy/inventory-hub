@@ -80,7 +80,8 @@ export async function POST(req) {
       // unitCost can be 0 (the create will still work; some line items have zero cost legitimately)
       // uom is required because Acumatica defaults to the stock item's base UOM if omitted,
       // but our PDFs deliberately specify what UOM was ordered (e.g. BT, EA), so we pass it through.
-      if (!l.uom) return json({ ok: false, stage: "validate-input", error: `pos[${i}].lines[${li}].uom is required` });
+      l.uom = (l.uom == null ? "" : String(l.uom)).trim(); // whitespace-only counts as missing
+      if (!l.uom) return json({ ok: false, stage: "validate-input", error: `pos[${i}].lines[${li}].uom is empty \u2014 item ${l.inventoryId} has no purchasing UOM set in Acumatica` });
     }
   }
 
