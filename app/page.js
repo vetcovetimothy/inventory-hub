@@ -5961,6 +5961,7 @@ function OOSTracker(props) {
           map[invId].push({
             wh: row.Warehouse || "",
             po: po,
+            vendorRef: (row.VendorRef || "").trim(),
             orderDate: orderDate,
             expectedArrival: eta,
             etaSource: etaSource,
@@ -6522,7 +6523,8 @@ function OOSTracker(props) {
                       var ordStr = m.orderDate ? fmtDate(m.orderDate) : "";
                       var etaStr = m.expectedArrival ? fmtDate(m.expectedArrival) : "";
                       return <div key={mi} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                        <span style={{ fontFamily: "monospace", fontSize: 11, fontWeight: 600, color: m.received ? "#9CA3AF" : "#1F2937", textDecoration: m.received ? "line-through" : "none" }}>{m.po || "\u2014"}</span>
+                        <span style={{ fontFamily: "monospace", fontSize: 11, fontWeight: 600, color: m.received ? "#9CA3AF" : "#1F2937", textDecoration: m.received ? "line-through" : "none" }}>{m.vendorRef || "\u2014"}</span>
+                        {m.po && <span style={{ fontFamily: "monospace", fontSize: 10, fontWeight: 500, color: "#9CA3AF" }}>PO {m.po}</span>}
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
                           {ordStr && <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, color: m.received ? "#9CA3AF" : "#4B5563", background: m.received ? "#F9FAFB" : "#F3F4F6", padding: "2px 7px", borderRadius: 999, whiteSpace: "nowrap" }}>
                             <span style={{ fontWeight: 600, opacity: 0.7 }}>Order Date</span>
