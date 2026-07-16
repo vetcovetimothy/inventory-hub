@@ -6460,7 +6460,7 @@ function OOSTracker(props) {
         <CacheStatus lastFetchedAt={orderMapLastFetched} cacheHit={orderMapCacheHit} refreshing={orderMapLoading} color={TOOL_COLOR} onRefresh={function() { loadOrderMap(true); }} />
         <button onClick={function() { setFuzeData([]); setFuzeName(null); setGgmData([]); setGgmName(null); setCgpData([]); setCgpName(null); saveDataToKV([], null, [], null, [], null); }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}><IconTrash /> Replace CSV</button>
       </div>
-      <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto", maxHeight: 440 })}>
+      <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto", maxHeight: "calc(100vh - 300px)" })}>
         <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
           <thead><tr>
             <th style={Object.assign({}, S.th, { minWidth: 360 })}>Notes</th>
@@ -7468,6 +7468,7 @@ function ForecastingTool(props) {
   var _rg = useState({}), rowGrowth = _rg[0], setRowGrowth = _rg[1];
   var _me = useState({}), manualEdits = _me[0], setManualEdits = _me[1];
   var _dbf = useState(false), dropBelowFinal = _dbf[0], setDropBelowFinal = _dbf[1];
+  var _hd = useState(false), hideDropped = _hd[0], setHideDropped = _hd[1];
   // Sales-exceeding-forecast overlay
   var _sef = useState([]), sefCodes = _sef[0], setSefCodes = _sef[1];
   var _sefn = useState(""), sefFileName = _sefn[0], setSefFileName = _sefn[1];
@@ -7490,6 +7491,7 @@ function ForecastingTool(props) {
   var _tpfc = useState(-1), tpFinalCol = _tpfc[0], setTpFinalCol = _tpfc[1];
   var _tpfmt = useState(null), tpFormatted = _tpfmt[0], setTpFormatted = _tpfmt[1];
   var _tpst = useState(null), tpStats = _tpst[0], setTpStats = _tpst[1];
+  var _tps = useState(null), tpSort = _tps[0], setTpSort = _tps[1];
   var _tpbusy = useState(false), tpBusy = _tpbusy[0], setTpBusy = _tpbusy[1];
   var fileRef = useRef(null);
   var tpFileRef = useRef(null);
@@ -7844,7 +7846,7 @@ function ForecastingTool(props) {
   function fcTrend(row) { var t = anchors.trail3 || []; if (t.length < 2) return "flat"; var inc = true, dec = true; for (var i = 1; i < t.length; i++) { var p = fcNum(row, t[i - 1]); var c = fcNum(row, t[i]); p = (p == null ? 0 : p); c = (c == null ? 0 : c); if (!(p < c)) inc = false; if (!(p > c)) dec = false; } return inc ? "g" : dec ? "d" : "flat"; }
   var FC_FILTER_OPTS = {
     repl: [{ value: "A", label: "A" }, { value: "B", label: "B" }, { value: "C", label: "C" }, { value: "Other", label: "Other / blank" }],
-    strategy: [{ value: "none", label: "None" }].concat(FC_METHODS.map(function (m) { return { value: m.id, label: m.label }; })),
+    strategy: FC_METHODS.map(function (m) { return { value: m.id, label: m.label }; }),
     flag: [{ value: "SD", label: "SD (short-dating)" }, { value: "BO", label: "BO (backorder)" }, { value: "None", label: "No flag" }],
     growing: [{ value: "g", label: "Growing" }, { value: "d", label: "Decreasing" }, { value: "flat", label: "Flat / mixed" }]
   };
@@ -7980,6 +7982,7 @@ function ForecastingTool(props) {
     if (fStrat) base = base.filter(function (r) { return fStrat.indexOf(fcStratCat(r)) !== -1; });
     if (fFlag) base = base.filter(function (r) { var pc = String(r[productCol] == null ? "" : r[productCol]).trim(); var s = !!sdInfo[pc], b = !!bkoInfo[pc]; return (s && fFlag.indexOf("SD") !== -1) || (b && fFlag.indexOf("BO") !== -1) || (!s && !b && fFlag.indexOf("None") !== -1); });
     if (fGrow) base = base.filter(function (r) { return fGrow.indexOf(fcTrend(r)) !== -1; });
+    if (hideDropped) base = base.filter(function (r) { return !rowBelowFinal(r); });
     if (!sortOrder || !sortOrder.length) return base;
     var pos = {}; for (var i = 0; i < sortOrder.length; i++) { if (!(sortOrder[i] in pos)) pos[sortOrder[i]] = i; }
     return base.slice().sort(function (a, b) {
@@ -7987,7 +7990,22 @@ function ForecastingTool(props) {
       if (ia == null) ia = Infinity; if (ib == null) ib = Infinity;
       return ia - ib;
     });
-  }, [formatted, sefActive, sefCodes, sortOrder, query, colFilters, rowMethod, globalMethod, sdInfo, bkoInfo, anchors]);
+  }, [formatted, sefActive, sefCodes, sortOrder, query, colFilters, rowMethod, globalMethod, sdInfo, bkoInfo, anchors, hideDropped, dropBelowFinal, manualEdits, targetCols]);
+
+  var tpSortedRows = useMemo(function () {
+    if (!tpFormatted) return [];
+    if (!tpSort) return tpFormatted;
+    var col = tpSort.col, d = tpSort.dir === "asc" ? 1 : -1;
+    return tpFormatted.slice().sort(function (a, b) {
+      var va = a[col], vb = b[col];
+      var na = va == null || va === "", nb = vb == null || vb === "";
+      if (na && nb) return 0; if (na) return 1; if (nb) return -1;
+      var fa = parseFloat(String(va).replace(/,/g, "")), fb = parseFloat(String(vb).replace(/,/g, ""));
+      if (!isNaN(fa) && !isNaN(fb)) return (fa - fb) * d;
+      var sa = String(va).toLowerCase(), sb = String(vb).toLowerCase();
+      return sa < sb ? -d : (sa > sb ? d : 0);
+    });
+  }, [tpFormatted, tpSort]);
 
   var btnBlue = Object.assign({}, S.btn(), { border: "1px solid #0A8FCC" });
   var btnSecondary = Object.assign({}, S.btn("ghost"), { background: "#F3F8FC", color: "#0B6FA8", border: "1px solid #C2DCEE" });
@@ -8051,9 +8069,9 @@ function ForecastingTool(props) {
       {tpFormatted && tpFormatted.length > 0 && <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden" })}>
         <div style={{ maxHeight: 520, overflow: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead><tr>{tpKeepIdx().map(function (i, ci) { return <th key={ci} style={Object.assign({}, S.th, ci >= 4 ? { textAlign: "right" } : {})}>{tpHeaders[i]}</th>; })}</tr></thead>
+            <thead><tr>{tpKeepIdx().map(function (i, ci) { var active = tpSort && tpSort.col === ci; return <th key={ci} onClick={function () { setTpSort(active ? (tpSort.dir === "desc" ? { col: ci, dir: "asc" } : null) : { col: ci, dir: "desc" }); }} style={Object.assign({}, S.th, ci >= 4 ? { textAlign: "right" } : {}, { cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" })}>{tpHeaders[i]}{active ? (tpSort.dir === "desc" ? " \u25BE" : " \u25B4") : ""}</th>; })}</tr></thead>
             <tbody>
-              {tpFormatted.slice(0, 500).map(function (row, ri) {
+              {tpSortedRows.slice(0, 500).map(function (row, ri) {
                 return <tr key={ri}>{row.map(function (cell, ci) { return <td key={ci} style={Object.assign({}, S.td, ci >= 4 ? { textAlign: "right", fontVariantNumeric: "tabular-nums" } : {}, ci === 0 ? { fontWeight: 500, whiteSpace: "nowrap" } : {})}>{String(cell == null ? "" : cell)}</td>; })}</tr>;
               })}
             </tbody>
@@ -8162,6 +8180,12 @@ function ForecastingTool(props) {
             <button onClick={function () { setDropBelowFinal(!dropBelowFinal); }} title="When on, any item whose computed value falls below that month's Netstock Final is removed entirely from the export (the whole row). Typed overrides are exempt." style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 8, border: "1px solid " + (dropBelowFinal ? "#0EA5E9" : "#E5E7EB"), background: dropBelowFinal ? "#F0F9FF" : "#fff", color: dropBelowFinal ? "#0369A1" : "#6B7280", fontSize: 12, fontWeight: 500, cursor: "pointer" }}>
               <span style={{ width: 30, height: 16, borderRadius: 9, background: dropBelowFinal ? "#0EA5E9" : "#D1D5DB", position: "relative", transition: "background 0.15s", flexShrink: 0 }}><span style={{ position: "absolute", top: 2, left: dropBelowFinal ? 16 : 2, width: 12, height: 12, borderRadius: "50%", background: "#fff", transition: "left 0.15s" }} /></span>
               Drop items below Netstock Final
+            </button>
+          </div>}
+          {strategyActive && dropBelowFinal && <div style={{ alignSelf: "flex-end" }}>
+            <button onClick={function () { setHideDropped(!hideDropped); }} title="When on, rows dropped below Netstock Final are hidden from this table entirely (not just greyed out). Export behaviour is unchanged." style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 8, border: "1px solid " + (hideDropped ? "#0EA5E9" : "#E5E7EB"), background: hideDropped ? "#F0F9FF" : "#fff", color: hideDropped ? "#0369A1" : "#6B7280", fontSize: 12, fontWeight: 500, cursor: "pointer" }}>
+              <span style={{ width: 30, height: 16, borderRadius: 9, background: hideDropped ? "#0EA5E9" : "#D1D5DB", position: "relative", transition: "background 0.15s", flexShrink: 0 }}><span style={{ position: "absolute", top: 2, left: hideDropped ? 16 : 2, width: 12, height: 12, borderRadius: "50%", background: "#fff", transition: "left 0.15s" }} /></span>
+              Hide dropped rows
             </button>
           </div>}
           <div style={{ flex: 1 }} />
