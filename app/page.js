@@ -7522,6 +7522,8 @@ function ForecastingTool(props) {
   var _tpss = useState([]), tpSessions = _tpss[0], setTpSessions = _tpss[1];
   var _tpai = useState(0), tpActive = _tpai[0], setTpActive = _tpai[1];
   var _tpbusy = useState(false), tpBusy = _tpbusy[0], setTpBusy = _tpbusy[1];
+  var _tppend = useState(null), tpPending = _tppend[0], setTpPending = _tppend[1];   // parsed report awaiting warehouse pick: { fileName, headers, rows, warehouses }
+  var _tppick = useState({}), tpPicked = _tppick[0], setTpPicked = _tppick[1];       // { warehouse: true } checkbox map in the picker
   var tpReadyRef = useRef(false);
   var tpAct = tpSessions[tpActive] || null;
   var tpHeaders = tpAct ? tpAct.headers : [];
@@ -7747,34 +7749,47 @@ function ForecastingTool(props) {
   }
   function chooseTpFile() { if (tpFileRef.current) tpFileRef.current.click(); }
   function onTpFile(e) {
-    var files = e.target.files ? Array.prototype.slice.call(e.target.files) : [];
-    if (!files.length) return;
+    var file = e.target.files && e.target.files[0];
+    if (!file) return;
     e.target.value = "";
-    files.forEach(function (file) {
-      var reader = new FileReader();
-      reader.onload = function (ev) {
-        try {
-          var XLSX = require("xlsx");
-          var wb = XLSX.read(ev.target.result, { type: "array" });
-          // pick the sheet that has a "Product code" + "Location code" header (Report data)
-          var hdr = null, rws = null;
-          wb.SheetNames.forEach(function (nm) {
-            if (hdr) return;
-            var aoa = XLSX.utils.sheet_to_json(wb.Sheets[nm], { header: 1, defval: "", raw: true });
-            if (!aoa.length) return;
-            var h = aoa[0].map(function (x) { return String(x).trim(); });
-            var hasP = h.some(function (x) { return x.toLowerCase() === "product code"; });
-            var hasL = h.some(function (x) { return x.toLowerCase() === "location code"; });
-            if (hasP && hasL) { hdr = h; rws = aoa.slice(1).filter(function (r) { return r.some(function (c) { return String(c).trim() !== ""; }); }); }
-          });
-          if (!hdr) { toast(file.name + ": no 'Report data' sheet with Product/Location code found", "error"); return; }
-          var sess = { id: Date.now() + "-" + Math.random().toString(36).slice(2, 7), fileName: file.name, headers: hdr, rows: rws, finalCol: tpDefaultFinal(hdr), warehouse: "", formatted: null, stats: null, sort: null };
-          setTpSessions(function (prev) { var u = prev.concat([sess]); setTpActive(u.length - 1); return u; });
-          toast("Loaded " + file.name + ": " + rws.length + " rows");
-        } catch (err) { toast("Error reading " + file.name + ": " + err.message, "error"); }
-      };
-      reader.readAsArrayBuffer(file);
-    });
+    var reader = new FileReader();
+    reader.onload = function (ev) {
+      try {
+        var XLSX = require("xlsx");
+        var wb = XLSX.read(ev.target.result, { type: "array" });
+        // pick the sheet that has a "Product code" + "Location code" header (Report data)
+        var hdr = null, rws = null;
+        wb.SheetNames.forEach(function (nm) {
+          if (hdr) return;
+          var aoa = XLSX.utils.sheet_to_json(wb.Sheets[nm], { header: 1, defval: "", raw: true });
+          if (!aoa.length) return;
+          var h = aoa[0].map(function (x) { return String(x).trim(); });
+          var hasP = h.some(function (x) { return x.toLowerCase() === "product code"; });
+          var hasL = h.some(function (x) { return x.toLowerCase() === "location code"; });
+          if (hasP && hasL) { hdr = h; rws = aoa.slice(1).filter(function (r) { return r.some(function (c) { return String(c).trim() !== ""; }); }); }
+        });
+        if (!hdr) { toast(file.name + ": no 'Report data' sheet with Product/Location code found", "error"); return; }
+        var lCol = fcIdxExact(hdr, "Location code");
+        var seen = {}, whList = [];
+        rws.forEach(function (r) { var w = String(r[lCol] == null ? "" : r[lCol]).trim(); if (w && !seen[w]) { seen[w] = true; whList.push(w); } });
+        whList.sort();
+        if (!whList.length) { toast(file.name + ": no warehouses found in the Location code column", "error"); return; }
+        var picked = {}; whList.forEach(function (w) { picked[w] = true; });
+        setTpPending({ fileName: file.name, headers: hdr, rows: rws, warehouses: whList });
+        setTpPicked(picked);
+      } catch (err) { toast("Error reading " + file.name + ": " + err.message, "error"); }
+    };
+    reader.readAsArrayBuffer(file);
+  }
+  function confirmTpPick() {
+    if (!tpPending) return;
+    var chosen = tpPending.warehouses.filter(function (w) { return tpPicked[w]; });
+    if (!chosen.length) { toast("Select at least one warehouse", "error"); return; }
+    var base = { fileName: tpPending.fileName, headers: tpPending.headers, rows: tpPending.rows, finalCol: tpDefaultFinal(tpPending.headers) };
+    var newSessions = chosen.map(function (w) { return Object.assign({}, base, { id: Date.now() + "-" + Math.random().toString(36).slice(2, 7) + "-" + w, warehouse: w, formatted: null, stats: null, sort: null }); });
+    setTpSessions(function (prev) { var u = prev.concat(newSessions); setTpActive(prev.length); return u; });
+    setTpPending(null); setTpPicked({});
+    toast("Created " + newSessions.length + " tab" + (newSessions.length === 1 ? "" : "s") + " from " + tpPending.fileName);
   }
   function changeTpFinal(idx) { setTpFinalCol(idx); }
   function tpKeepIdx() {
@@ -7978,7 +7993,7 @@ function ForecastingTool(props) {
     setSefCodes([]); setSefFileName(""); setSefOnly(false);
     setQuery(""); setColFilters({}); setSortOrder(null); setSortKey("");
     setSdInfo({}); setBkoInfo({});
-    setTpSessions([]); setTpActive(0); setTpBusy(false);
+    setTpSessions([]); setTpActive(0); setTpBusy(false); setTpPending(null); setTpPicked({});
     idbDel("fc-input").catch(function () {}); idbDel("fc-result").catch(function () {}); idbDel("fc-forecast").catch(function () {}); idbDel("fc-sef").catch(function () {}); idbDel("fc-sdbko").catch(function () {});
     idbDel("fc-tp-sessions").catch(function () {});
     sDel("fc-mode"); sDel("fc-wh");
@@ -7987,8 +8002,8 @@ function ForecastingTool(props) {
 
   function clearTp() {
     var hasTp = tpSessions.length;
-    if (hasTp && !window.confirm("Clear the TP Forecast tab? This removes all loaded reports and their results. The Forecast tab is not affected.")) return;
-    setTpSessions([]); setTpActive(0); setTpBusy(false);
+    if (hasTp && !window.confirm("Clear the TP Forecast tab? This removes all warehouse tabs and their results. The Forecast tab is not affected.")) return;
+    setTpSessions([]); setTpActive(0); setTpBusy(false); setTpPending(null); setTpPicked({});
     idbDel("fc-tp-sessions").catch(function () {});
     toast("TP Forecast tab cleared");
   }
@@ -8078,23 +8093,44 @@ function ForecastingTool(props) {
 
     {tab === "tp" && <div>
       {tpSessions.length > 0 && <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
-        {tpSessions.map(function (s, i) { var on = i === tpActive; return <div key={s.id} onClick={function () { setTpActive(i); }} title={s.fileName} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 500, border: "1px solid " + (on ? "#0EA5E9" : "#E5E7EB"), background: on ? "#0EA5E9" : "#fff", color: on ? "#fff" : "#6B7280", maxWidth: 240 }}>
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.fileName}</span>
-          <span onClick={function (e) { e.stopPropagation(); closeTpSession(i); }} title="Close this report" style={{ fontWeight: 700, lineHeight: 1, opacity: 0.75 }}>{"\u00D7"}</span>
+        {tpSessions.map(function (s, i) { var on = i === tpActive; return <div key={s.id} onClick={function () { setTpActive(i); }} title={(s.warehouse || "(no warehouse)") + " \u2014 " + s.fileName} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 500, border: "1px solid " + (on ? "#0EA5E9" : "#E5E7EB"), background: on ? "#0EA5E9" : "#fff", color: on ? "#fff" : "#6B7280", maxWidth: 240 }}>
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.warehouse || s.fileName}</span>
+          <span onClick={function (e) { e.stopPropagation(); closeTpSession(i); }} title="Close this tab" style={{ fontWeight: 700, lineHeight: 1, opacity: 0.75 }}>{"\u00D7"}</span>
         </div>; })}
       </div>}
       <div style={S.card}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
           <div>
             <div style={{ fontSize: 15, fontWeight: 600, color: "#1F2937", marginBottom: 4 }}>TP Forecast report (generics)</div>
-            <div style={{ fontSize: 13, color: "#6B7280" }}>{tpSessions.length ? (tpFileName + "  -  " + tpRows.length + " rows  \u00B7  " + tpSessions.length + " report" + (tpSessions.length === 1 ? "" : "s") + " loaded") : "Upload one or more Netstock TP Forecast reports (.xlsx, 'Report data' sheet). Each becomes its own tab."}</div>
+            <div style={{ fontSize: 13, color: "#6B7280" }}>{tpSessions.length ? (tpFileName + "  \u00B7  " + tpRows.length + " rows  \u00B7  " + tpSessions.length + " warehouse tab" + (tpSessions.length === 1 ? "" : "s")) : "Upload one Netstock TP Forecast report (.xlsx, 'Report data' sheet). You'll pick which warehouses to open as tabs."}</div>
           </div>
           <div>
-            <input ref={tpFileRef} type="file" accept=".xlsx,.xls" multiple onChange={onTpFile} style={{ display: "none" }} />
-            <button onClick={chooseTpFile} style={S.btn()}><IconUpload /> {tpSessions.length ? "Add report(s)" : "Upload report(s)"}</button>
+            <input ref={tpFileRef} type="file" accept=".xlsx,.xls" onChange={onTpFile} style={{ display: "none" }} />
+            <button onClick={chooseTpFile} style={S.btn()}><IconUpload /> {tpSessions.length ? "Add report" : "Upload report"}</button>
           </div>
         </div>
       </div>
+
+      {tpPending && <div onClick={function () { setTpPending(null); }} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+        <div onClick={function (e) { e.stopPropagation(); }} style={{ background: "#fff", borderRadius: 12, padding: 24, width: 420, maxWidth: "90vw", maxHeight: "80vh", display: "flex", flexDirection: "column" }}>
+          <div style={{ fontSize: 16, fontWeight: 600, color: "#1F2937", marginBottom: 4 }}>Select warehouses</div>
+          <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 14 }}>{tpPending.warehouses.length} warehouse{tpPending.warehouses.length === 1 ? "" : "s"} found in {tpPending.fileName}. Each one you pick opens as its own tab.</div>
+          <div style={{ display: "flex", gap: 12, marginBottom: 8 }}>
+            <button onClick={function () { var p = {}; tpPending.warehouses.forEach(function (w) { p[w] = true; }); setTpPicked(p); }} style={{ border: "none", background: "transparent", color: "#0B6FA8", fontSize: 12, fontWeight: 600, cursor: "pointer", padding: 0 }}>Select all</button>
+            <button onClick={function () { setTpPicked({}); }} style={{ border: "none", background: "transparent", color: "#6B7280", fontSize: 12, fontWeight: 600, cursor: "pointer", padding: 0 }}>Clear all</button>
+          </div>
+          <div style={{ overflow: "auto", flex: 1, border: "1px solid #F3F4F6", borderRadius: 8, padding: 4 }}>
+            {tpPending.warehouses.map(function (w) { var ck = !!tpPicked[w]; return <div key={w} onClick={function () { var p = Object.assign({}, tpPicked); if (p[w]) delete p[w]; else p[w] = true; setTpPicked(p); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: 6, cursor: "pointer", fontSize: 14, color: "#374151" }}>
+              <span style={{ width: 18, height: 18, borderRadius: 4, border: "1.5px solid " + (ck ? "#0EA5E9" : "#CBD5E1"), background: ck ? "#0EA5E9" : "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{ck && <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}</span>
+              <span style={{ fontWeight: 500 }}>{w}</span>
+            </div>; })}
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 16 }}>
+            <button onClick={function () { setTpPending(null); }} style={S.btn("ghost")}>Cancel</button>
+            <button onClick={confirmTpPick} style={S.btn()}>Create {tpPending.warehouses.filter(function (w) { return tpPicked[w]; }).length} tab{tpPending.warehouses.filter(function (w) { return tpPicked[w]; }).length === 1 ? "" : "s"}</button>
+          </div>
+        </div>
+      </div>}
 
       {tpHeaders.length > 0 && <div style={S.card}>
         <div style={{ display: "flex", alignItems: "flex-end", gap: 20, flexWrap: "wrap" }}>
