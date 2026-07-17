@@ -4488,7 +4488,7 @@ function HowToGuide(props) {
       <Note>This tool does not require Acumatica login. Data comes directly from the shared Fuze tracking sheets.</Note>
     </Section>
 
-    <Section id="truck" title="Truckloader (Hills)" color="#D97706">
+    <Section id="truck" title="Hills Truckloader" color="#D97706">
       <p style={{ marginBottom: 12 }}>Automates the entire Hill's truck ordering workflow: pull replenishment needs from Acumatica, calculate pallet quantities, optimize items into 42,500 lb trucks, find fill items from Netstock, and export CSVs for import.</p>
 
       <div style={{ fontWeight: 500, color: "var(--color-text-primary)", marginTop: 16, marginBottom: 6, fontSize: 13 }}>Data sources</div>
@@ -4599,6 +4599,7 @@ function TruckloaderTool(props) {
   var _hillsDraftSent = useState(false), hillsDraftSent = _hillsDraftSent[0], setHillsDraftSent = _hillsDraftSent[1];
   var _cpDraftSent = useState(false), cpDraftSent = _cpDraftSent[0], setCpDraftSent = _cpDraftSent[1];
   var _emailOverrides = useState({}), emailOverrides = _emailOverrides[0], setEmailOverrides = _emailOverrides[1];
+  var DEFAULT_HILLS_TO = "truckloador@hillspet.com, brian_shively@hillspet.com, hd-purchaseorders@vetcove.com";
   var _editingEmail = useState(null), editingEmail = _editingEmail[0], setEditingEmail = _editingEmail[1];
   var _emailEditValue = useState(""), emailEditValue = _emailEditValue[0], setEmailEditValue = _emailEditValue[1];
   var fileRef = useRef(null);
@@ -4959,8 +4960,10 @@ function TruckloaderTool(props) {
             var bodyText = "Hi,\n\nThe following list below have been sent through EDI, please respond back with confirmation of receipt and ETA at your earliest convenience. Let us know if you have any questions.\n\n" + poBlock + "\n\nThank you!";
             var safe = bodyText.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
             var htmlBody = "<p>" + safe.replace(/\n\n+/g, "</p><p>").replace(/\n/g, "<br>") + "</p>";
-            var toAddr = (WH_META[warehouse] && WH_META[warehouse].cpTo) || "";
-            var dres = await postGmailDrafts([{ to: toAddr, subject: "Weekly Replenishment Orders " + scode + " " + dstr, htmlBody: htmlBody, attachments: [] }], gmail.token);
+            var _ovr = emailOverrides[warehouse] || {};
+            var toAddr = _ovr.hillsTo != null ? _ovr.hillsTo : DEFAULT_HILLS_TO;
+            var ccAddr = _ovr.hillsCc != null ? _ovr.hillsCc : "";
+            var dres = await postGmailDrafts([{ to: toAddr, cc: ccAddr, subject: "Weekly Replenishment Orders " + scode + " " + dstr, htmlBody: htmlBody, attachments: [] }], gmail.token);
             if (dres && dres.failed > 0) toast("PO-list draft failed to create", "error");
             else toast("Draft created listing " + sentNbrs.length + " PO(s)", "success");
           } else {
@@ -5587,7 +5590,7 @@ function TruckloaderTool(props) {
         var now = new Date();
         var dateStr = (now.getMonth() + 1) + "." + ("0" + now.getDate()).slice(-2) + "." + now.getFullYear();
         var subject = dateStr + " Weekly Replenishment - Vetcove " + whShort;
-        var defaultHillsTo = "truckloador@hillspet.com, brian_shively@hillspet.com, hd-purchaseorders@vetcove.com";
+        var defaultHillsTo = DEFAULT_HILLS_TO;
         var whOverrides = emailOverrides[warehouse] || {};
         var hillsTo = whOverrides.hillsTo != null ? whOverrides.hillsTo : defaultHillsTo;
         var hillsCc = whOverrides.hillsCc != null ? whOverrides.hillsCc : "";
@@ -7446,6 +7449,36 @@ function FcHeadFilter(props) {
   </th>;
 }
 
+function FcTextFilter(props) {
+  var _o = useState(false), open = _o[0], setOpen = _o[1];
+  var _pos = useState(null), pos = _pos[0], setPos = _pos[1];
+  var btnRef = useRef(null);
+  var val = props.value || null;                 // { mode, text } or null
+  var mode = val ? (val.mode || "contains") : "contains";
+  var text = val ? (val.text || "") : "";
+  var active = !!(val && val.text);
+  function openMenu() { if (btnRef.current) { var r = btnRef.current.getBoundingClientRect(); setPos({ top: r.bottom + 4, left: Math.max(8, Math.min(r.left, (typeof window !== "undefined" ? window.innerWidth : 1200) - 260)) }); } setOpen(true); }
+  function update(nextMode, nextText) { if (!nextText) props.onChange(null); else props.onChange({ mode: nextMode, text: nextText }); }
+  var modeBtn = function (m, lbl) { var on = mode === m; return <button onClick={function () { update(m, text); }} style={{ flex: 1, border: "1px solid " + (on ? "#0EA5E9" : "#E5E7EB"), background: on ? "#0EA5E9" : "#fff", color: on ? "#fff" : "#6B7280", fontSize: 11, fontWeight: 600, cursor: "pointer", padding: "6px 8px", borderRadius: 6 }}>{lbl}</button>; };
+  return <th style={Object.assign({}, props.thStyle, props.align === "right" ? { textAlign: "right" } : {}, { whiteSpace: "nowrap", verticalAlign: "middle" })}>
+    <span onClick={props.onSort} style={{ cursor: "pointer", userSelect: "none", verticalAlign: "middle" }}>{props.label}{props.sortActive ? (props.sortDir === "desc" ? " \u25BE" : " \u25B4") : ""}</span>
+    <button ref={btnRef} onClick={function (e) { e.stopPropagation(); if (open) setOpen(false); else openMenu(); }} title="Filter" style={{ marginLeft: 6, verticalAlign: "middle", border: "none", background: active ? "#E0F2FE" : "transparent", cursor: "pointer", padding: 3, borderRadius: 5, color: active ? "#0284C7" : "#9CA3AF", lineHeight: 0 }}>
+      <svg width="12" height="12" viewBox="0 0 24 24" fill={active ? "#0284C7" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>
+    </button>
+    {open && <>
+      <div onClick={function () { setOpen(false); }} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 1000 }} />
+      <div style={{ position: "fixed", top: pos ? pos.top : 0, left: pos ? pos.left : 0, zIndex: 1001, background: "#fff", border: "1px solid #E5E7EB", borderRadius: 10, boxShadow: "0 8px 24px rgba(0,0,0,0.14)", padding: 10, minWidth: 240, textAlign: "left", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>
+        <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>{modeBtn("contains", "contains")}{modeBtn("excludes", "does not contain")}</div>
+        <input autoFocus value={text} onChange={function (e) { update(mode, e.target.value); }} onKeyDown={function (e) { if (e.key === "Enter" || e.key === "Escape") setOpen(false); }} placeholder="Type to filter..." style={{ width: "100%", boxSizing: "border-box", padding: "8px 10px", border: "1px solid #E5E7EB", borderRadius: 6, fontSize: 13, color: "#374151", fontFamily: "'Varela Round', sans-serif" }} />
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #F3F4F6", marginTop: 8, paddingTop: 8 }}>
+          <span style={{ fontSize: 10.5, color: "#9CA3AF" }}>Filters as you type</span>
+          <button onClick={function () { props.onChange(null); setOpen(false); }} style={{ border: "1px solid #E5E7EB", background: "#fff", color: "#6B7280", fontSize: 11, fontWeight: 600, cursor: "pointer", padding: "4px 10px", borderRadius: 6 }}>Clear filter</button>
+        </div>
+      </div>
+    </>}
+  </th>;
+}
+
 function ForecastingTool(props) {
   var toast = props.toast, cred = props.cred, ok = props.ok, lp = props.lp;
   var S = makeStyles("#0EA5E9");
@@ -7479,7 +7512,6 @@ function ForecastingTool(props) {
   var _sd = useState("asc"), sortDir = _sd[0], setSortDir = _sd[1];
   var _so = useState(null), sortOrder = _so[0], setSortOrder = _so[1];
   var _q = useState(""), query = _q[0], setQuery = _q[1];
-  var _qm = useState("contains"), searchMode = _qm[0], setSearchMode = _qm[1];
   var _colf = useState({}), colFilters = _colf[0], setColFilters = _colf[1];
   function setColF(col, next) { var u = Object.assign({}, colFilters); if (next == null) delete u[col]; else u[col] = next; setColFilters(u); }
   var _sdi = useState({}), sdInfo = _sdi[0], setSdInfo = _sdi[1];
@@ -7995,7 +8027,11 @@ function ForecastingTool(props) {
     if (!formatted) return [];
     var base = sefActive ? formatted.filter(inSef) : formatted;
     var q = query.trim().toLowerCase();
-    if (q) base = base.filter(function (r) { var pc = String(r[productCol] == null ? "" : r[productCol]).toLowerCase(); var d = descCol >= 0 ? String(r[descCol] == null ? "" : r[descCol]).toLowerCase() : ""; var hit = pc.indexOf(q) !== -1 || d.indexOf(q) !== -1; return searchMode === "excludes" ? !hit : hit; });
+    if (q) base = base.filter(function (r) { var pc = String(r[productCol] == null ? "" : r[productCol]).toLowerCase(); var d = descCol >= 0 ? String(r[descCol] == null ? "" : r[descCol]).toLowerCase() : ""; return pc.indexOf(q) !== -1 || d.indexOf(q) !== -1; });
+    var fPt = colFilters.productText;
+    if (fPt && fPt.text) { var pq = String(fPt.text).toLowerCase(); base = base.filter(function (r) { var pc = String(r[productCol] == null ? "" : r[productCol]).toLowerCase(); var hit = pc.indexOf(pq) !== -1; return fPt.mode === "excludes" ? !hit : hit; }); }
+    var fDt = colFilters.descText;
+    if (fDt && fDt.text && descCol >= 0) { var dq = String(fDt.text).toLowerCase(); base = base.filter(function (r) { var d = String(r[descCol] == null ? "" : r[descCol]).toLowerCase(); var hit = d.indexOf(dq) !== -1; return fDt.mode === "excludes" ? !hit : hit; }); }
     var fRepl = colFilters.repl, fStrat = colFilters.strategy, fFlag = colFilters.flag, fGrow = colFilters.growing;
     if (fRepl) base = base.filter(function (r) { return fRepl.indexOf(fcReplCat(r)) !== -1; });
     if (fStrat) base = base.filter(function (r) { return fStrat.indexOf(fcStratCat(r)) !== -1; });
@@ -8009,7 +8045,7 @@ function ForecastingTool(props) {
       if (ia == null) ia = Infinity; if (ib == null) ib = Infinity;
       return ia - ib;
     });
-  }, [formatted, sefActive, sefCodes, sortOrder, query, searchMode, colFilters, rowMethod, globalMethod, sdInfo, bkoInfo, anchors, hideDropped, dropBelowFinal, manualEdits, targetCols]);
+  }, [formatted, sefActive, sefCodes, sortOrder, query, colFilters, rowMethod, globalMethod, sdInfo, bkoInfo, anchors, hideDropped, dropBelowFinal, manualEdits, targetCols]);
 
   var tpSortedRows = useMemo(function () {
     if (!tpFormatted) return [];
@@ -8237,10 +8273,6 @@ function ForecastingTool(props) {
       {formatted && formatted.length > 0 && <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden", border: "0.5px solid " + PANEL_BORDER, borderRadius: "0 0 14px 14px" })}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderBottom: "1px solid #F3F4F6", flexWrap: "wrap" }}>
           <input value={query} onChange={function (e) { setQuery(e.target.value); }} placeholder="Search product code or description..." style={Object.assign({}, S.inp, { flex: "1 1 240px", maxWidth: 360, padding: "8px 12px" })} />
-          <select value={searchMode} onChange={function (e) { setSearchMode(e.target.value); }} title="Whether the search box keeps matching rows or excludes them" style={Object.assign({}, S.sel, { padding: "8px 10px", flex: "0 0 auto" })}>
-            <option value="contains">contains</option>
-            <option value="excludes">does not contain</option>
-          </select>
           <span style={{ fontSize: 11, color: "#9CA3AF", display: "inline-flex", alignItems: "center", gap: 5 }}><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>Filter via the icons in the Replenishment, Growing, SD/BO, and Strategy headers</span>
           {(query.trim() || Object.keys(colFilters).length) ? <button onClick={function () { setQuery(""); setColFilters({}); }} style={{ padding: "5px 10px", borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: "pointer", color: "#6B7280", background: "#fff", border: "1px solid #E5E7EB" }}>Clear all filters</button> : null}
           <div style={{ marginLeft: "auto", fontSize: 12, color: "#9CA3AF", fontVariantNumeric: "tabular-nums" }}>{sortedRows.length} shown</div>
@@ -8249,8 +8281,8 @@ function ForecastingTool(props) {
           <style>{".fc-tbl tbody tr:hover > td{background:#EFF6FF;}"}</style>
           <table className="fc-tbl" style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead><tr>
-              {fcTh("product", "Product code", "left")}
-              {fcTh("desc", "Description", "left")}
+              <FcTextFilter label="Product code" align="left" thStyle={S.th} value={colFilters.productText || null} onChange={function (n) { setColF("productText", n); }} sortActive={sortKey === "product"} sortDir={sortDir} onSort={function () { toggleSort("product"); }} />
+              <FcTextFilter label="Description" align="left" thStyle={S.th} value={colFilters.descText || null} onChange={function (n) { setColF("descText", n); }} sortActive={sortKey === "desc"} sortDir={sortDir} onSort={function () { toggleSort("desc"); }} />
               {anchors.trail3.map(function (hi) { return fcTh("hist:" + hi, String(headers[hi]).replace(/^hist:\s*/i, ""), "right"); })}
               {fcTh("mtd", "MTD", "right")}
               <FcHeadFilter label="Growing" align="left" thStyle={S.th} options={FC_FILTER_OPTS.growing} sel={colFilters.growing || null} onSel={function (n) { setColF("growing", n); }} sortActive={sortKey === "growing"} sortDir={sortDir} onSort={function () { toggleSort("growing"); }} />
@@ -8511,7 +8543,7 @@ export default function Hub() {
 
   var isWH = page in WH;
   var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "backorder-resolver" ? "#14B8A6" : page === "po-import" ? "#06B6D4" : page === "cycle-count" ? "#14B8A6" : page === "fuze-tracker" ? "#F59E0B" : page === "ggm-tracker" ? "#8B5CF6" : page === "hills-pawtree" ? "#10B981" : page === "truckloader" ? "#D97706" : page === "oos-tracker" ? "#EF4444" : page === "vendor-settings" ? "#6366F1" : page === "forecasting" ? "#0EA5E9" : page === "how-to" ? "#6B7280" : "#3B82F6";
-  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "backorder-resolver" ? "Backorder Resolver" : page === "po-import" ? "Generic PO Translator" : page === "cycle-count" ? "Cycle Counting" : page === "fuze-tracker" ? "Fuze Tracker" : page === "ggm-tracker" ? "GGM Tracker" : page === "hills-pawtree" ? "Hills & Pawtree Tracker" : page === "truckloader" ? "Truckloader" : page === "oos-tracker" ? "OOS Tracker" : page === "vendor-settings" ? "Vendor Settings" : page === "forecasting" ? "Forecasting" : page === "how-to" ? "How-To Guide" : showLogin ? "Login" : "Vendor Settings";
+  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "backorder-resolver" ? "Backorder Resolver" : page === "po-import" ? "Generic PO Translator" : page === "cycle-count" ? "Cycle Counting" : page === "fuze-tracker" ? "Fuze Tracker" : page === "ggm-tracker" ? "GGM Tracker" : page === "hills-pawtree" ? "Hills & Pawtree Tracker" : page === "truckloader" ? "Hills Truckloader" : page === "oos-tracker" ? "OOS Tracker" : page === "vendor-settings" ? "Vendor Settings" : page === "forecasting" ? "Forecasting" : page === "how-to" ? "How-To Guide" : showLogin ? "Login" : "Vendor Settings";
 
   function SideLink(p) {
     var active = page === p.id && !showLogin;
@@ -8534,7 +8566,7 @@ export default function Hub() {
           var sections = [
             { key: "po", label: "PO Tools", items: Object.entries(WH).map(function(e) { return { id: e[0], label: e[1].full, color: e[1].color }; }) },
             { key: "generic", label: "Generic PO Tools", items: [{ id: "po-import", label: "Generic PO Translator", color: "#06B6D4" }, { id: "cycle-count", label: "Cycle Counting", color: "#14B8A6" }] },
-            { key: "hills", label: "Hills Tools", items: [{ id: "hills-pawtree", label: "Hills & Pawtree", color: "#10B981" }, { id: "truckloader", label: "Truckloader", color: "#D97706" }] },
+            { key: "hills", label: "Hills Tools", items: [{ id: "hills-pawtree", label: "Hills & Pawtree", color: "#10B981" }, { id: "truckloader", label: "Hills Truckloader", color: "#D97706" }] },
             { key: "oos", label: "OOS", items: [{ id: "oos-tracker", label: "OOS Tracker", color: "#EF4444" }] },
             { key: "tracking", label: "Tracking", items: [{ id: "fuze-tracker", label: "Fuze Tracker", color: "#F59E0B" }, { id: "ggm-tracker", label: "GGM Tracker", color: "#8B5CF6" }] },
             { key: "inventory", label: "Inventory Tools", items: [{ id: "forecasting", label: "Forecasting", color: "#0EA5E9" }, { id: "short-dating", label: "Short-Dating", color: "#E879F9" }, { id: "backorder", label: "Backorders", color: "#F97316" }, { id: "backorder-resolver", label: "Backorder Resolver", color: "#14B8A6" }] },
