@@ -7479,20 +7479,38 @@ function ForecastingTool(props) {
   var _sd = useState("asc"), sortDir = _sd[0], setSortDir = _sd[1];
   var _so = useState(null), sortOrder = _so[0], setSortOrder = _so[1];
   var _q = useState(""), query = _q[0], setQuery = _q[1];
+  var _qm = useState("contains"), searchMode = _qm[0], setSearchMode = _qm[1];
   var _colf = useState({}), colFilters = _colf[0], setColFilters = _colf[1];
   function setColF(col, next) { var u = Object.assign({}, colFilters); if (next == null) delete u[col]; else u[col] = next; setColFilters(u); }
   var _sdi = useState({}), sdInfo = _sdi[0], setSdInfo = _sdi[1];
   var _bki = useState({}), bkoInfo = _bki[0], setBkoInfo = _bki[1];
   var _pd = useState(function () { var d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }), pullDate = _pd[0], setPullDate = _pd[1];
   // Phase 3 (TP Forecast) state
-  var _tph = useState([]), tpHeaders = _tph[0], setTpHeaders = _tph[1];
-  var _tpr = useState([]), tpRows = _tpr[0], setTpRows = _tpr[1];
-  var _tpf = useState(""), tpFileName = _tpf[0], setTpFileName = _tpf[1];
-  var _tpfc = useState(-1), tpFinalCol = _tpfc[0], setTpFinalCol = _tpfc[1];
-  var _tpfmt = useState(null), tpFormatted = _tpfmt[0], setTpFormatted = _tpfmt[1];
-  var _tpst = useState(null), tpStats = _tpst[0], setTpStats = _tpst[1];
-  var _tps = useState(null), tpSort = _tps[0], setTpSort = _tps[1];
+  // TP Forecast: multiple independent report sessions (one sub-tab each).
+  var _tpss = useState([]), tpSessions = _tpss[0], setTpSessions = _tpss[1];
+  var _tpai = useState(0), tpActive = _tpai[0], setTpActive = _tpai[1];
   var _tpbusy = useState(false), tpBusy = _tpbusy[0], setTpBusy = _tpbusy[1];
+  var tpReadyRef = useRef(false);
+  var tpAct = tpSessions[tpActive] || null;
+  var tpHeaders = tpAct ? tpAct.headers : [];
+  var tpRows = tpAct ? tpAct.rows : [];
+  var tpFileName = tpAct ? tpAct.fileName : "";
+  var tpWarehouse = tpAct ? (tpAct.warehouse || "") : "";
+  var tpFinalCol = tpAct ? tpAct.finalCol : -1;
+  var tpFormatted = tpAct ? tpAct.formatted : null;
+  var tpStats = tpAct ? tpAct.stats : null;
+  var tpSort = tpAct ? (tpAct.sort || null) : null;
+  function patchTpSession(patch) { setTpSessions(function (prev) { var u = prev.slice(); if (u[tpActive]) u[tpActive] = Object.assign({}, u[tpActive], patch); return u; }); }
+  function setTpFinalCol(v) { patchTpSession({ finalCol: v }); }
+  function setTpFormatted(v) { patchTpSession({ formatted: v }); }
+  function setTpStats(v) { patchTpSession({ stats: v }); }
+  function setTpSort(v) { patchTpSession({ sort: v }); }
+  function setTpWarehouse(v) { patchTpSession({ warehouse: v }); }
+  function closeTpSession(i) {
+    var newLen = tpSessions.length - 1;
+    setTpSessions(function (prev) { var u = prev.slice(); u.splice(i, 1); return u; });
+    setTpActive(function (cur) { var ni = cur; if (i < cur) ni = cur - 1; if (ni > newLen - 1) ni = newLen - 1; if (ni < 0) ni = 0; return ni; });
+  }
   var fileRef = useRef(null);
   var tpFileRef = useRef(null);
   var sefFileRef = useRef(null);
@@ -7529,8 +7547,8 @@ function ForecastingTool(props) {
       try { var fc = await idbGet("fc-forecast"); if (fc) { if (fc.globalMethod) setGlobalMethod(fc.globalMethod); if (fc.growth) setGrowth(fc.growth); if (fc.targetCols) setTargetCols(fc.targetCols); if (fc.rowMethod) setRowMethod(fc.rowMethod); if (fc.rowGrowth) setRowGrowth(fc.rowGrowth); if (fc.manualEdits) setManualEdits(fc.manualEdits); if (fc.dropBelowFinal != null) setDropBelowFinal(!!fc.dropBelowFinal); if (fc.sefOnly != null) setSefOnly(!!fc.sefOnly); } } catch (e) {}
       try { var sef = await idbGet("fc-sef"); if (sef && sef.codes) { setSefCodes(sef.codes); setSefFileName(sef.fileName || ""); } } catch (e) {}
       try { var sb = await idbGet("fc-sdbko"); if (sb) { if (sb.sd) setSdInfo(sb.sd); if (sb.bko) setBkoInfo(sb.bko); } } catch (e) {}
-      try { var tpi = await idbGet("fc-tp-input"); if (tpi && tpi.headers) { setTpHeaders(tpi.headers); setTpRows(tpi.rows || []); setTpFileName(tpi.fileName || ""); setTpFinalCol(tpDefaultFinal(tpi.headers)); } } catch (e) {}
-      try { var tpr = await idbGet("fc-tp-result"); if (tpr) { if (tpr.formatted) setTpFormatted(tpr.formatted); if (tpr.stats) setTpStats(tpr.stats); } } catch (e) {}
+      try { var tps = await idbGet("fc-tp-sessions"); if (tps && tps.sessions && tps.sessions.length) { setTpSessions(tps.sessions); setTpActive(Math.min(tps.active || 0, tps.sessions.length - 1)); } } catch (e) {}
+      tpReadyRef.current = true;
       var m = sGet("fc-mode"); if (m) setMode(m);
       var w = sGet("fc-wh"); if (w) setWarehouse(w);
     })();
@@ -7545,6 +7563,8 @@ function ForecastingTool(props) {
     if (!headers.length) return;
     idbSet("fc-forecast", { globalMethod: globalMethod, growth: growth, targetCols: targetCols, rowMethod: rowMethod, rowGrowth: rowGrowth, manualEdits: manualEdits, dropBelowFinal: dropBelowFinal, sefOnly: sefOnly }).catch(function () {});
   }, [globalMethod, growth, targetCols, rowMethod, rowGrowth, manualEdits, dropBelowFinal, sefOnly]);
+
+  useEffect(function () { if (!tpReadyRef.current) return; idbSet("fc-tp-sessions", { sessions: tpSessions, active: tpActive }).catch(function () {}); }, [tpSessions, tpActive]);
 
   function chooseFile() { if (fileRef.current) fileRef.current.click(); }
 
@@ -7612,7 +7632,7 @@ function ForecastingTool(props) {
   function onSefFile(e) { var file = e.target.files && e.target.files[0]; loadSefFile(file); e.target.value = ""; }
 
   function changeWarehouse(v) { setWarehouse(v); sSet("fc-wh", v); }
-  function changeMode(v) { setMode(v); sSet("fc-mode", v); if (v === "non" && tab === "tp") setTab("forecast"); }
+  function changeMode(v) { setMode(v); sSet("fc-mode", v); }
 
   async function autoFormat() {
     if (!headers.length || !rows.length) { toast("Upload a forecast CSV first", "error"); return; }
@@ -7695,35 +7715,36 @@ function ForecastingTool(props) {
   }
   function chooseTpFile() { if (tpFileRef.current) tpFileRef.current.click(); }
   function onTpFile(e) {
-    var file = e.target.files && e.target.files[0]; if (!file) return;
-    var reader = new FileReader();
-    reader.onload = function (ev) {
-      try {
-        var XLSX = require("xlsx");
-        var wb = XLSX.read(ev.target.result, { type: "array" });
-        // pick the sheet that has a "Product code" + "Location code" header (Report data)
-        var hdr = null, rws = null;
-        wb.SheetNames.forEach(function (nm) {
-          if (hdr) return;
-          var aoa = XLSX.utils.sheet_to_json(wb.Sheets[nm], { header: 1, defval: "", raw: true });
-          if (!aoa.length) return;
-          var h = aoa[0].map(function (x) { return String(x).trim(); });
-          var hasP = h.some(function (x) { return x.toLowerCase() === "product code"; });
-          var hasL = h.some(function (x) { return x.toLowerCase() === "location code"; });
-          if (hasP && hasL) { hdr = h; rws = aoa.slice(1).filter(function (r) { return r.some(function (c) { return String(c).trim() !== ""; }); }); }
-        });
-        if (!hdr) { toast("No 'Report data' sheet with Product/Location code found", "error"); return; }
-        var defFinal = tpDefaultFinal(hdr);
-        setTpHeaders(hdr); setTpRows(rws); setTpFileName(file.name); setTpFinalCol(defFinal); setTpFormatted(null); setTpStats(null);
-        idbSet("fc-tp-input", { headers: hdr, rows: rws, fileName: file.name, finalCol: defFinal }).catch(function () {});
-        idbDel("fc-tp-result").catch(function () {});
-        toast("Loaded TP Forecast report: " + rws.length + " rows");
-      } catch (err) { toast("Error reading report: " + err.message, "error"); }
-    };
-    reader.readAsArrayBuffer(file);
+    var files = e.target.files ? Array.prototype.slice.call(e.target.files) : [];
+    if (!files.length) return;
     e.target.value = "";
+    files.forEach(function (file) {
+      var reader = new FileReader();
+      reader.onload = function (ev) {
+        try {
+          var XLSX = require("xlsx");
+          var wb = XLSX.read(ev.target.result, { type: "array" });
+          // pick the sheet that has a "Product code" + "Location code" header (Report data)
+          var hdr = null, rws = null;
+          wb.SheetNames.forEach(function (nm) {
+            if (hdr) return;
+            var aoa = XLSX.utils.sheet_to_json(wb.Sheets[nm], { header: 1, defval: "", raw: true });
+            if (!aoa.length) return;
+            var h = aoa[0].map(function (x) { return String(x).trim(); });
+            var hasP = h.some(function (x) { return x.toLowerCase() === "product code"; });
+            var hasL = h.some(function (x) { return x.toLowerCase() === "location code"; });
+            if (hasP && hasL) { hdr = h; rws = aoa.slice(1).filter(function (r) { return r.some(function (c) { return String(c).trim() !== ""; }); }); }
+          });
+          if (!hdr) { toast(file.name + ": no 'Report data' sheet with Product/Location code found", "error"); return; }
+          var sess = { id: Date.now() + "-" + Math.random().toString(36).slice(2, 7), fileName: file.name, headers: hdr, rows: rws, finalCol: tpDefaultFinal(hdr), warehouse: "", formatted: null, stats: null, sort: null };
+          setTpSessions(function (prev) { var u = prev.concat([sess]); setTpActive(u.length - 1); return u; });
+          toast("Loaded " + file.name + ": " + rws.length + " rows");
+        } catch (err) { toast("Error reading " + file.name + ": " + err.message, "error"); }
+      };
+      reader.readAsArrayBuffer(file);
+    });
   }
-  function changeTpFinal(idx) { setTpFinalCol(idx); idbSet("fc-tp-input", { headers: tpHeaders, rows: tpRows, fileName: tpFileName, finalCol: idx }).catch(function () {}); }
+  function changeTpFinal(idx) { setTpFinalCol(idx); }
   function tpKeepIdx() {
     var idxs = TP_KEEP.map(function (n) { return fcIdxExact(tpHeaders, n); }).filter(function (i) { return i >= 0; });
     if (tpFinalCol >= 0) idxs.push(tpFinalCol);
@@ -7731,10 +7752,9 @@ function ForecastingTool(props) {
   }
   async function prepareTp() {
     if (!tpHeaders.length || !tpRows.length) { toast("Upload the TP Forecast report first", "error"); return; }
-    if (!warehouse) { toast("Pick a warehouse first", "error"); return; }
+    if (!tpWarehouse) { toast("Pick a warehouse first", "error"); return; }
     if (!ok) { lp(); return; }
-    var pCol = fcIdxExact(tpHeaders, "Product code");
-    var lCol = fcIdxExact(tpHeaders, "Location code");
+    var pCol = fcIdxExact(tpHeaders, "Product code");    var lCol = fcIdxExact(tpHeaders, "Location code");
     var cCol = fcIdxExact(tpHeaders, "Class");
     if (pCol < 0 || lCol < 0 || cCol < 0) { toast("Report is missing Product code / Location code / Class", "error"); return; }
     setTpBusy(true);
@@ -7742,7 +7762,7 @@ function ForecastingTool(props) {
       var whseRows = await fetchAcumatica("whse-replenish", null, cred.username, cred.password);
       var allowed = {};
       (whseRows || []).forEach(function (r) {
-        if (String(r.Warehouse || "").trim() !== warehouse) return;
+        if (String(r.Warehouse || "").trim() !== tpWarehouse) return;
         var cl = String(r.ReplenishmentClass || "").trim().toUpperCase();
         if (cl !== "A" && cl !== "B" && cl !== "C") return;
         if (String(r.ItemStatus || "").trim().toLowerCase() === "no purchases") return;
@@ -7752,15 +7772,14 @@ function ForecastingTool(props) {
       });
       var keep = tpKeepIdx();
       var kept = tpRows.filter(function (row) {
-        if (String(row[lCol] || "").trim() !== warehouse) return false;
+        if (String(row[lCol] || "").trim() !== tpWarehouse) return false;
         if (!allowed[String(row[pCol] || "").trim()]) return false;
         var cl = String(row[cCol] || "").trim().toUpperCase();
         return cl === "A" || cl === "B" || cl === "C";
       }).map(function (row) { return keep.map(function (i) { return row[i]; }); });
-      var st = { input: tpRows.length, allowed: Object.keys(allowed).length, kept: kept.length, dropped: tpRows.length - kept.length, warehouse: warehouse, at: Date.now() };
-      setTpFormatted(kept); setTpStats(st);
-      idbSet("fc-tp-result", { formatted: kept, stats: st }).catch(function () {});
-      toast("Prepared " + kept.length + " of " + tpRows.length + " rows for " + warehouse);
+      var st = { input: tpRows.length, allowed: Object.keys(allowed).length, kept: kept.length, dropped: tpRows.length - kept.length, warehouse: tpWarehouse, at: Date.now() };
+      patchTpSession({ formatted: kept, stats: st });
+      toast("Prepared " + kept.length + " of " + tpRows.length + " rows for " + tpWarehouse);
     } catch (err) {
       toast("Prepare failed: " + (err && err.message ? err.message : err), "error");
     } finally { setTpBusy(false); }
@@ -7774,7 +7793,7 @@ function ForecastingTool(props) {
       var ws = XLSX.utils.aoa_to_sheet([keptHeaders].concat(tpFormatted));
       var wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Report data");
-      var _wh = warehouse || "";
+      var _wh = tpWarehouse || "";
       var whShort = _wh.indexOf("-") !== -1 ? _wh.split("-").pop() : _wh; if (!whShort) whShort = "all";
       var _d = new Date();
       var md = (_d.getMonth() + 1) + "." + _d.getDate();
@@ -7919,7 +7938,7 @@ function ForecastingTool(props) {
   function clearOverrides() { setRowMethod({}); setRowGrowth({}); setManualEdits({}); toast("Cleared per-row methods and manual edits"); }
 
   function resetAll() {
-    var hasData = headers.length || rows.length || tpRows.length || formatted || tpFormatted || fileName || tpFileName;
+    var hasData = headers.length || rows.length || tpSessions.length || formatted || fileName;
     if (hasData && !window.confirm("Reset the Forecasting tool? This clears the loaded file(s), results, and selections on both tabs.")) return;
     setHeaders([]); setRows([]); setFileName(""); setDetectedWh(""); setWarehouse("");
     setMode("non"); setFormatted(null); setStats(null); setBusy(false); setTab("forecast");
@@ -7927,18 +7946,18 @@ function ForecastingTool(props) {
     setSefCodes([]); setSefFileName(""); setSefOnly(false);
     setQuery(""); setColFilters({}); setSortOrder(null); setSortKey("");
     setSdInfo({}); setBkoInfo({});
-    setTpHeaders([]); setTpRows([]); setTpFileName(""); setTpFinalCol(-1); setTpFormatted(null); setTpStats(null); setTpBusy(false);
+    setTpSessions([]); setTpActive(0); setTpBusy(false);
     idbDel("fc-input").catch(function () {}); idbDel("fc-result").catch(function () {}); idbDel("fc-forecast").catch(function () {}); idbDel("fc-sef").catch(function () {}); idbDel("fc-sdbko").catch(function () {});
-    idbDel("fc-tp-input").catch(function () {}); idbDel("fc-tp-result").catch(function () {});
+    idbDel("fc-tp-sessions").catch(function () {});
     sDel("fc-mode"); sDel("fc-wh");
     toast("Forecasting reset");
   }
 
   function clearTp() {
-    var hasTp = tpRows.length || tpFormatted || tpFileName;
-    if (hasTp && !window.confirm("Clear the TP Forecast tab? This clears its loaded file, results, and selection. The Forecast tab is not affected.")) return;
-    setTpHeaders([]); setTpRows([]); setTpFileName(""); setTpFinalCol(-1); setTpFormatted(null); setTpStats(null); setTpBusy(false);
-    idbDel("fc-tp-input").catch(function () {}); idbDel("fc-tp-result").catch(function () {});
+    var hasTp = tpSessions.length;
+    if (hasTp && !window.confirm("Clear the TP Forecast tab? This removes all loaded reports and their results. The Forecast tab is not affected.")) return;
+    setTpSessions([]); setTpActive(0); setTpBusy(false);
+    idbDel("fc-tp-sessions").catch(function () {});
     toast("TP Forecast tab cleared");
   }
 
@@ -7976,7 +7995,7 @@ function ForecastingTool(props) {
     if (!formatted) return [];
     var base = sefActive ? formatted.filter(inSef) : formatted;
     var q = query.trim().toLowerCase();
-    if (q) base = base.filter(function (r) { var pc = String(r[productCol] == null ? "" : r[productCol]).toLowerCase(); var d = descCol >= 0 ? String(r[descCol] == null ? "" : r[descCol]).toLowerCase() : ""; return pc.indexOf(q) !== -1 || d.indexOf(q) !== -1; });
+    if (q) base = base.filter(function (r) { var pc = String(r[productCol] == null ? "" : r[productCol]).toLowerCase(); var d = descCol >= 0 ? String(r[descCol] == null ? "" : r[descCol]).toLowerCase() : ""; var hit = pc.indexOf(q) !== -1 || d.indexOf(q) !== -1; return searchMode === "excludes" ? !hit : hit; });
     var fRepl = colFilters.repl, fStrat = colFilters.strategy, fFlag = colFilters.flag, fGrow = colFilters.growing;
     if (fRepl) base = base.filter(function (r) { return fRepl.indexOf(fcReplCat(r)) !== -1; });
     if (fStrat) base = base.filter(function (r) { return fStrat.indexOf(fcStratCat(r)) !== -1; });
@@ -7990,7 +8009,7 @@ function ForecastingTool(props) {
       if (ia == null) ia = Infinity; if (ib == null) ib = Infinity;
       return ia - ib;
     });
-  }, [formatted, sefActive, sefCodes, sortOrder, query, colFilters, rowMethod, globalMethod, sdInfo, bkoInfo, anchors, hideDropped, dropBelowFinal, manualEdits, targetCols]);
+  }, [formatted, sefActive, sefCodes, sortOrder, query, searchMode, colFilters, rowMethod, globalMethod, sdInfo, bkoInfo, anchors, hideDropped, dropBelowFinal, manualEdits, targetCols]);
 
   var tpSortedRows = useMemo(function () {
     if (!tpFormatted) return [];
@@ -8005,7 +8024,7 @@ function ForecastingTool(props) {
       var sa = String(va).toLowerCase(), sb = String(vb).toLowerCase();
       return sa < sb ? -d : (sa > sb ? d : 0);
     });
-  }, [tpFormatted, tpSort]);
+  }, [tpFormatted, tpSort, tpActive]);
 
   var btnBlue = Object.assign({}, S.btn(), { border: "1px solid #0A8FCC" });
   var btnSecondary = Object.assign({}, S.btn("ghost"), { background: "#F3F8FC", color: "#0B6FA8", border: "1px solid #C2DCEE" });
@@ -8016,21 +8035,27 @@ function ForecastingTool(props) {
   return <div>
     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 20 }}>
       <button onClick={function () { setTab("forecast"); }} style={S.pill(tab === "forecast", "#0EA5E9")}>Forecast</button>
-      {mode !== "non" && <button onClick={function () { setTab("tp"); }} style={S.pill(tab === "tp", "#0EA5E9")}>Generic TP Forecasts</button>}
+      <button onClick={function () { setTab("tp"); }} style={S.pill(tab === "tp", "#0EA5E9")}>Generic TP Forecasts</button>
       <button onClick={function () { setTab("replenish"); }} style={S.pill(tab === "replenish", "#0EA5E9")}>Replenishment Update</button>
       {tab !== "replenish" && <button onClick={tab === "tp" ? clearTp : resetAll} title={tab === "tp" ? "Clear the TP Forecast tab only (does not affect the Forecast tab)" : "Clear loaded files, results, and selections on both tabs"} style={Object.assign({}, S.btn("ghost"), { marginLeft: "auto", fontSize: 12, color: "#DC2626", borderColor: "#FCA5A5" })}>{tab === "tp" ? "Clear" : "Reset"}</button>}
     </div>
 
     {tab === "tp" && <div>
+      {tpSessions.length > 0 && <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
+        {tpSessions.map(function (s, i) { var on = i === tpActive; return <div key={s.id} onClick={function () { setTpActive(i); }} title={s.fileName} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 500, border: "1px solid " + (on ? "#0EA5E9" : "#E5E7EB"), background: on ? "#0EA5E9" : "#fff", color: on ? "#fff" : "#6B7280", maxWidth: 240 }}>
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.fileName}</span>
+          <span onClick={function (e) { e.stopPropagation(); closeTpSession(i); }} title="Close this report" style={{ fontWeight: 700, lineHeight: 1, opacity: 0.75 }}>{"\u00D7"}</span>
+        </div>; })}
+      </div>}
       <div style={S.card}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
           <div>
             <div style={{ fontSize: 15, fontWeight: 600, color: "#1F2937", marginBottom: 4 }}>TP Forecast report (generics)</div>
-            <div style={{ fontSize: 13, color: "#6B7280" }}>{tpFileName ? (tpFileName + "  -  " + tpRows.length + " rows") : "Upload the Netstock TP Forecast report (.xlsx, 'Report data' sheet)."}</div>
+            <div style={{ fontSize: 13, color: "#6B7280" }}>{tpSessions.length ? (tpFileName + "  -  " + tpRows.length + " rows  \u00B7  " + tpSessions.length + " report" + (tpSessions.length === 1 ? "" : "s") + " loaded") : "Upload one or more Netstock TP Forecast reports (.xlsx, 'Report data' sheet). Each becomes its own tab."}</div>
           </div>
           <div>
-            <input ref={tpFileRef} type="file" accept=".xlsx,.xls" onChange={onTpFile} style={{ display: "none" }} />
-            <button onClick={chooseTpFile} style={S.btn()}><IconUpload /> {tpFileName ? "Replace file" : "Upload report"}</button>
+            <input ref={tpFileRef} type="file" accept=".xlsx,.xls" multiple onChange={onTpFile} style={{ display: "none" }} />
+            <button onClick={chooseTpFile} style={S.btn()}><IconUpload /> {tpSessions.length ? "Add report(s)" : "Upload report(s)"}</button>
           </div>
         </div>
       </div>
@@ -8039,9 +8064,9 @@ function ForecastingTool(props) {
         <div style={{ display: "flex", alignItems: "flex-end", gap: 20, flexWrap: "wrap" }}>
           <div>
             <label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 6 }}>Warehouse</label>
-            <select value={warehouse} onChange={function (e) { changeWarehouse(e.target.value); }} style={Object.assign({}, S.sel, { minWidth: 160 })}>
-              {warehouse === "" && <option value="">Select...</option>}
-              {(function () { var list = FC_KNOWN_WAREHOUSES.slice(); if (warehouse && list.indexOf(warehouse) === -1) list.unshift(warehouse); return list.map(function (w) { return <option key={w} value={w}>{w}</option>; }); })()}
+            <select value={tpWarehouse} onChange={function (e) { setTpWarehouse(e.target.value); }} style={Object.assign({}, S.sel, { minWidth: 160 })}>
+              {tpWarehouse === "" && <option value="">Select...</option>}
+              {(function () { var list = FC_KNOWN_WAREHOUSES.slice(); if (tpWarehouse && list.indexOf(tpWarehouse) === -1) list.unshift(tpWarehouse); return list.map(function (w) { return <option key={w} value={w}>{w}</option>; }); })()}
             </select>
           </div>
           <div>
@@ -8212,6 +8237,10 @@ function ForecastingTool(props) {
       {formatted && formatted.length > 0 && <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden", border: "0.5px solid " + PANEL_BORDER, borderRadius: "0 0 14px 14px" })}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderBottom: "1px solid #F3F4F6", flexWrap: "wrap" }}>
           <input value={query} onChange={function (e) { setQuery(e.target.value); }} placeholder="Search product code or description..." style={Object.assign({}, S.inp, { flex: "1 1 240px", maxWidth: 360, padding: "8px 12px" })} />
+          <select value={searchMode} onChange={function (e) { setSearchMode(e.target.value); }} title="Whether the search box keeps matching rows or excludes them" style={Object.assign({}, S.sel, { padding: "8px 10px", flex: "0 0 auto" })}>
+            <option value="contains">contains</option>
+            <option value="excludes">does not contain</option>
+          </select>
           <span style={{ fontSize: 11, color: "#9CA3AF", display: "inline-flex", alignItems: "center", gap: 5 }}><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>Filter via the icons in the Replenishment, Growing, SD/BO, and Strategy headers</span>
           {(query.trim() || Object.keys(colFilters).length) ? <button onClick={function () { setQuery(""); setColFilters({}); }} style={{ padding: "5px 10px", borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: "pointer", color: "#6B7280", background: "#fff", border: "1px solid #E5E7EB" }}>Clear all filters</button> : null}
           <div style={{ marginLeft: "auto", fontSize: 12, color: "#9CA3AF", fontVariantNumeric: "tabular-nums" }}>{sortedRows.length} shown</div>
