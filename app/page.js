@@ -7781,15 +7781,48 @@ function ForecastingTool(props) {
     };
     reader.readAsArrayBuffer(file);
   }
-  function confirmTpPick() {
+  async function confirmTpPick() {
     if (!tpPending) return;
     var chosen = tpPending.warehouses.filter(function (w) { return tpPicked[w]; });
     if (!chosen.length) { toast("Select at least one warehouse", "error"); return; }
-    var base = { fileName: tpPending.fileName, headers: tpPending.headers, rows: tpPending.rows, finalCol: tpDefaultFinal(tpPending.headers) };
-    var newSessions = chosen.map(function (w) { return Object.assign({}, base, { id: Date.now() + "-" + Math.random().toString(36).slice(2, 7) + "-" + w, warehouse: w, formatted: null, stats: null, sort: null }); });
-    setTpSessions(function (prev) { var u = prev.concat(newSessions); setTpActive(prev.length); return u; });
-    setTpPending(null); setTpPicked({});
-    toast("Created " + newSessions.length + " tab" + (newSessions.length === 1 ? "" : "s") + " from " + tpPending.fileName);
+    if (!cred || !cred.username || !cred.password || !ok) { toast("Log in to Acumatica first, then Prepare", "error"); lp && lp(); return; }
+    var pending = tpPending;
+    var hdr = pending.headers, rows = pending.rows;
+    var pCol = fcIdxExact(hdr, "Product code"), lCol = fcIdxExact(hdr, "Location code"), cCol = fcIdxExact(hdr, "Class");
+    if (pCol < 0 || lCol < 0 || cCol < 0) { toast("Report is missing Product code / Location code / Class", "error"); return; }
+    var finalCol = tpDefaultFinal(hdr);
+    var keepBase = TP_KEEP.map(function (n) { return fcIdxExact(hdr, n); }).filter(function (i) { return i >= 0; });
+    var keep = finalCol >= 0 ? keepBase.concat([finalCol]) : keepBase;
+    setTpBusy(true);
+    try {
+      var whseRows = await fetchAcumatica("whse-replenish", null, cred.username, cred.password);
+      var newSessions = chosen.map(function (w) {
+        var allowed = {};
+        (whseRows || []).forEach(function (r) {
+          if (String(r.Warehouse || "").trim() !== w) return;
+          var cl = String(r.ReplenishmentClass || "").trim().toUpperCase();
+          if (cl !== "A" && cl !== "B" && cl !== "C") return;
+          if (String(r.ItemStatus || "").trim().toLowerCase() === "no purchases") return;
+          var id = String(r.InventoryID || "").trim();
+          if (!id || id.toUpperCase().indexOf("GEN-") === -1) return;
+          allowed[id] = true;
+        });
+        var kept = rows.filter(function (row) {
+          if (String(row[lCol] || "").trim() !== w) return false;
+          if (!allowed[String(row[pCol] || "").trim()]) return false;
+          var cl = String(row[cCol] || "").trim().toUpperCase();
+          return cl === "A" || cl === "B" || cl === "C";
+        }).map(function (row) { return keep.map(function (i) { return row[i]; }); });
+        var st = { input: rows.length, allowed: Object.keys(allowed).length, kept: kept.length, dropped: rows.length - kept.length, warehouse: w, at: Date.now() };
+        return { id: Date.now() + "-" + Math.random().toString(36).slice(2, 7) + "-" + w, fileName: pending.fileName, headers: hdr, rows: rows, finalCol: finalCol, warehouse: w, formatted: kept, stats: st, sort: null };
+      });
+      setTpSessions(function (prev) { var u = prev.concat(newSessions); setTpActive(prev.length); return u; });
+      setTpPending(null); setTpPicked({});
+      var total = newSessions.reduce(function (a, s) { return a + s.stats.kept; }, 0);
+      toast("Prepared " + newSessions.length + " tab" + (newSessions.length === 1 ? "" : "s") + " (" + total + " rows kept)");
+    } catch (err) {
+      toast("Prepare failed: " + (err && err.message ? err.message : err), "error");
+    } finally { setTpBusy(false); }
   }
   function changeTpFinal(idx) { setTpFinalCol(idx); }
   function tpKeepIdx() {
@@ -8092,24 +8125,18 @@ function ForecastingTool(props) {
     </div>
 
     {tab === "tp" && <div>
-      {tpSessions.length > 0 && <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
-        {tpSessions.map(function (s, i) { var on = i === tpActive; return <div key={s.id} onClick={function () { setTpActive(i); }} title={(s.warehouse || "(no warehouse)") + " \u2014 " + s.fileName} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 500, border: "1px solid " + (on ? "#0EA5E9" : "#E5E7EB"), background: on ? "#0EA5E9" : "#fff", color: on ? "#fff" : "#6B7280", maxWidth: 240 }}>
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.warehouse || s.fileName}</span>
-          <span onClick={function (e) { e.stopPropagation(); closeTpSession(i); }} title="Close this tab" style={{ fontWeight: 700, lineHeight: 1, opacity: 0.75 }}>{"\u00D7"}</span>
-        </div>; })}
-      </div>}
-      <div style={S.card}>
+      {tpSessions.length === 0 && <div style={S.card}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
           <div>
             <div style={{ fontSize: 15, fontWeight: 600, color: "#1F2937", marginBottom: 4 }}>TP Forecast report (generics)</div>
-            <div style={{ fontSize: 13, color: "#6B7280" }}>{tpSessions.length ? (tpFileName + "  \u00B7  " + tpRows.length + " rows  \u00B7  " + tpSessions.length + " warehouse tab" + (tpSessions.length === 1 ? "" : "s")) : "Upload one Netstock TP Forecast report (.xlsx, 'Report data' sheet). You'll pick which warehouses to open as tabs."}</div>
+            <div style={{ fontSize: 13, color: "#6B7280" }}>Upload one Netstock TP Forecast report (.xlsx, 'Report data' sheet). You'll pick which warehouses to open as tabs.</div>
           </div>
           <div>
             <input ref={tpFileRef} type="file" accept=".xlsx,.xls" onChange={onTpFile} style={{ display: "none" }} />
-            <button onClick={chooseTpFile} style={S.btn()}><IconUpload /> {tpSessions.length ? "Add report" : "Upload report"}</button>
+            <button onClick={chooseTpFile} style={S.btn()}><IconUpload /> Upload report</button>
           </div>
         </div>
-      </div>
+      </div>}
 
       {tpPending && <div onClick={function () { setTpPending(null); }} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
         <div onClick={function (e) { e.stopPropagation(); }} style={{ background: "#fff", borderRadius: 12, padding: 24, width: 420, maxWidth: "90vw", maxHeight: "80vh", display: "flex", flexDirection: "column" }}>
@@ -8126,25 +8153,10 @@ function ForecastingTool(props) {
             </div>; })}
           </div>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 16 }}>
-            <button onClick={function () { setTpPending(null); }} style={S.btn("ghost")}>Cancel</button>
-            <button onClick={confirmTpPick} style={S.btn()}>Create {tpPending.warehouses.filter(function (w) { return tpPicked[w]; }).length} tab{tpPending.warehouses.filter(function (w) { return tpPicked[w]; }).length === 1 ? "" : "s"}</button>
+            <button onClick={function () { setTpPending(null); }} disabled={tpBusy} style={S.btn("ghost")}>Cancel</button>
+            <button onClick={confirmTpPick} disabled={tpBusy} style={Object.assign({}, S.btn(), tpBusy ? { opacity: 0.7, cursor: "wait" } : {})}>{tpBusy ? <><Spinner color="#fff" size={14} /> Preparing...</> : ("Prepare " + tpPending.warehouses.filter(function (w) { return tpPicked[w]; }).length + " tab" + (tpPending.warehouses.filter(function (w) { return tpPicked[w]; }).length === 1 ? "" : "s"))}</button>
           </div>
         </div>
-      </div>}
-
-      {tpHeaders.length > 0 && <div style={S.card}>
-        <div style={{ display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap" }}>
-          <div>
-            <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, marginBottom: 4 }}>Warehouse</div>
-            <div style={{ fontSize: 15, fontWeight: 600, color: "#1F2937" }}>{tpWarehouse || "\u2014"}</div>
-          </div>
-          <div style={{ flex: 1 }} />
-          <div style={{ display: "flex", gap: 10 }}>
-            <button onClick={prepareTp} disabled={tpBusy} style={Object.assign({}, S.btn(), tpBusy ? { opacity: 0.7, cursor: "wait" } : {})}>{tpBusy ? <><Spinner color="#fff" size={14} /> Preparing...</> : <><IconFilter /> Prepare</>}</button>
-            {tpFormatted && tpFormatted.length > 0 ? <button onClick={exportTp} style={S.btn("ghost")}><IconDL /> Export xlsx</button> : null}
-          </div>
-        </div>
-        {!ok && <div style={{ marginTop: 12, fontSize: 12, color: "#DC2626", display: "flex", alignItems: "center", gap: 6 }}><IconLock /> Log in to Acumatica to fetch warehouse data for Prepare.</div>}
       </div>}
 
       {tpStats && <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
@@ -8155,6 +8167,10 @@ function ForecastingTool(props) {
       </div>}
 
       {tpFormatted && tpFormatted.length > 0 && <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden" })}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderBottom: "1px solid #F3F4F6" }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: "#1F2937" }}>{tpWarehouse}<span style={{ fontWeight: 400, color: "#9CA3AF" }}>{"  \u00B7  " + (tpStats ? tpStats.kept : tpFormatted.length) + " rows"}</span></div>
+          <button onClick={exportTp} style={S.btn("ghost")}><IconDL /> Export xlsx</button>
+        </div>
         <div style={{ maxHeight: 520, overflow: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead><tr>{tpKeepIdx().map(function (i, ci) { var active = tpSort && tpSort.col === ci; return <th key={ci} onClick={function () { setTpSort(active ? (tpSort.dir === "desc" ? { col: ci, dir: "asc" } : null) : { col: ci, dir: "desc" }); }} style={Object.assign({}, S.th, ci >= 4 ? { textAlign: "right" } : {}, { cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" })}>{tpHeaders[i]}{active ? (tpSort.dir === "desc" ? " \u25BE" : " \u25B4") : ""}</th>; })}</tr></thead>
@@ -8168,7 +8184,13 @@ function ForecastingTool(props) {
         {tpFormatted.length > 500 && <div style={{ padding: "10px 16px", fontSize: 12, color: "#9CA3AF", borderTop: "1px solid #F3F4F6" }}>Showing first 500 of {tpFormatted.length} rows. The export includes all of them.</div>}
       </div>}
 
-      {tpHeaders.length > 0 && tpStats === null && <div style={{ fontSize: 13, color: "#9CA3AF", padding: "8px 4px" }}>Prepare keeps only generics stocked in this warehouse (Acumatica Class A/B/C) and the report's A/B/C rows for this location.</div>}
+      {tpSessions.length > 0 && tpStats && (!tpFormatted || tpFormatted.length === 0) && <div style={{ fontSize: 13, color: "#9CA3AF", padding: "8px 4px" }}>No generics stocked in {tpWarehouse} matched the report's A/B/C rows for this location.</div>}
+      {tpSessions.length > 0 && <div style={{ display: "flex", alignItems: "flex-end", gap: 3, marginTop: 24, borderBottom: "2px solid #E5E7EB", overflowX: "auto" }}>
+        {tpSessions.map(function (s, i) { var on = i === tpActive; return <div key={s.id} onClick={function () { setTpActive(i); }} title={(s.warehouse || "(no warehouse)") + " \u2014 " + s.fileName} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 16px", borderRadius: "10px 10px 0 0", cursor: "pointer", fontSize: 12.5, fontWeight: 600, border: "1px solid " + (on ? "#0EA5E9" : "#E5E7EB"), borderBottom: "none", background: on ? "#0EA5E9" : "#fff", color: on ? "#fff" : "#6B7280", marginBottom: -2, whiteSpace: "nowrap", flexShrink: 0 }}>
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 180 }}>{s.warehouse || s.fileName}</span>
+          <span onClick={function (e) { e.stopPropagation(); closeTpSession(i); }} title="Close this tab" style={{ fontWeight: 700, lineHeight: 1, opacity: 0.6 }}>{"\u00D7"}</span>
+        </div>; })}
+      </div>}
     </div>}
 
     {tab === "replenish" && <div>
