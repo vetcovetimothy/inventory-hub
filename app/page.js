@@ -8133,19 +8133,10 @@ function ForecastingTool(props) {
       </div>}
 
       {tpHeaders.length > 0 && <div style={S.card}>
-        <div style={{ display: "flex", alignItems: "flex-end", gap: 20, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap" }}>
           <div>
-            <label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 6 }}>Warehouse</label>
-            <select value={tpWarehouse} onChange={function (e) { setTpWarehouse(e.target.value); }} style={Object.assign({}, S.sel, { minWidth: 160 })}>
-              {tpWarehouse === "" && <option value="">Select...</option>}
-              {(function () { var list = FC_KNOWN_WAREHOUSES.slice(); if (tpWarehouse && list.indexOf(tpWarehouse) === -1) list.unshift(tpWarehouse); return list.map(function (w) { return <option key={w} value={w}>{w}</option>; }); })()}
-            </select>
-          </div>
-          <div>
-            <label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 6 }}>Final FC units month</label>
-            <select value={tpFinalCol} onChange={function (e) { changeTpFinal(parseInt(e.target.value)); }} style={Object.assign({}, S.sel, { minWidth: 160 })}>
-              {tpFinalCols().map(function (f) { return <option key={f.idx} value={f.idx}>{f.label}</option>; })}
-            </select>
+            <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, marginBottom: 4 }}>Warehouse</div>
+            <div style={{ fontSize: 15, fontWeight: 600, color: "#1F2937" }}>{tpWarehouse || "\u2014"}</div>
           </div>
           <div style={{ flex: 1 }} />
           <div style={{ display: "flex", gap: 10 }}>
@@ -8177,7 +8168,7 @@ function ForecastingTool(props) {
         {tpFormatted.length > 500 && <div style={{ padding: "10px 16px", fontSize: 12, color: "#9CA3AF", borderTop: "1px solid #F3F4F6" }}>Showing first 500 of {tpFormatted.length} rows. The export includes all of them.</div>}
       </div>}
 
-      {tpHeaders.length > 0 && tpStats === null && <div style={{ fontSize: 13, color: "#9CA3AF", padding: "8px 4px" }}>Pick a warehouse, then Prepare to keep only generics stocked in that warehouse (Acumatica Class A/B/C) and the report's A/B/C rows for that location.</div>}
+      {tpHeaders.length > 0 && tpStats === null && <div style={{ fontSize: 13, color: "#9CA3AF", padding: "8px 4px" }}>Prepare keeps only generics stocked in this warehouse (Acumatica Class A/B/C) and the report's A/B/C rows for this location.</div>}
     </div>}
 
     {tab === "replenish" && <div>
