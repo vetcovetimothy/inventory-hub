@@ -7864,21 +7864,37 @@ function ForecastingTool(props) {
       toast("Prepare failed: " + (err && err.message ? err.message : err), "error");
     } finally { setTpBusy(false); }
   }
+  function tpKeepIdxFor(hdr, finalCol) {
+    var idxs = TP_KEEP.map(function (n) { return fcIdxExact(hdr, n); }).filter(function (i) { return i >= 0; });
+    if (finalCol >= 0) idxs.push(finalCol);
+    return idxs;
+  }
+  function exportSessionData(sess) {
+    if (!sess || !sess.formatted || !sess.formatted.length) return false;
+    var XLSX = require("xlsx");
+    var keep = tpKeepIdxFor(sess.headers, sess.finalCol);
+    var keptHeaders = keep.map(function (i) { return sess.headers[i]; });
+    var ws = XLSX.utils.aoa_to_sheet([keptHeaders].concat(sess.formatted));
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Report data");
+    var _wh = sess.warehouse || "";
+    var whShort = _wh.indexOf("-") !== -1 ? _wh.split("-").pop() : _wh; if (!whShort) whShort = "all";
+    var _d = new Date();
+    var md = (_d.getMonth() + 1) + "." + _d.getDate();
+    XLSX.writeFile(wb, "TP Forecast - " + whShort + " " + md + ".xlsx");
+    return true;
+  }
   function exportTp() {
-    if (!tpFormatted || !tpFormatted.length) { toast("Run Prepare first", "error"); return; }
-    try {
-      var XLSX = require("xlsx");
-      var keep = tpKeepIdx();
-      var keptHeaders = keep.map(function (i) { return tpHeaders[i]; });
-      var ws = XLSX.utils.aoa_to_sheet([keptHeaders].concat(tpFormatted));
-      var wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Report data");
-      var _wh = tpWarehouse || "";
-      var whShort = _wh.indexOf("-") !== -1 ? _wh.split("-").pop() : _wh; if (!whShort) whShort = "all";
-      var _d = new Date();
-      var md = (_d.getMonth() + 1) + "." + _d.getDate();
-      XLSX.writeFile(wb, "TP Forecast - " + whShort + " " + md + ".xlsx");
-    } catch (err) { toast("Export failed: " + err.message, "error"); }
+    if (!exportSessionData(tpAct)) { toast("Run Prepare first", "error"); }
+  }
+  async function exportAllTp() {
+    var ready = tpSessions.filter(function (s) { return s.formatted && s.formatted.length; });
+    if (!ready.length) { toast("No prepared tabs to export", "error"); return; }
+    for (var i = 0; i < ready.length; i++) {
+      exportSessionData(ready[i]);
+      await new Promise(function (r) { setTimeout(r, 350); }); // stagger so the browser doesn't drop downloads
+    }
+    toast("Exported " + ready.length + " file" + (ready.length === 1 ? "" : "s"));
   }
 
   // ── method engine ──
@@ -8176,7 +8192,10 @@ function ForecastingTool(props) {
       {tpFormatted && tpFormatted.length > 0 && <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden" })}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderBottom: "1px solid #F3F4F6" }}>
           <div style={{ fontSize: 14, fontWeight: 600, color: "#1F2937" }}>{tpWarehouse}<span style={{ fontWeight: 400, color: "#9CA3AF" }}>{"  \u00B7  " + (tpStats ? tpStats.kept : tpFormatted.length) + " rows"}</span></div>
-          <button onClick={exportTp} style={S.btn("ghost")}><IconDL /> Export xlsx</button>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {tpSessions.length > 1 && <button onClick={exportAllTp} style={S.btn("ghost")}><IconDL /> Export all ({tpSessions.filter(function (s) { return s.formatted && s.formatted.length; }).length})</button>}
+            <button onClick={exportTp} style={S.btn("ghost")}><IconDL /> Export xlsx</button>
+          </div>
         </div>
         <div style={{ maxHeight: 520, overflow: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
