@@ -7745,7 +7745,7 @@ function ForecastingTool(props) {
     if (!finals.length) return -1;
     var d = new Date(); var mon = d.toLocaleString("en-US", { month: "short" }).toLowerCase(); var yr = String(d.getFullYear());
     for (var j = 0; j < finals.length; j++) { var lbl = String(hdr[finals[j]]).toLowerCase(); if (lbl.indexOf(mon) !== -1 && lbl.indexOf(yr) !== -1) return finals[j]; }
-    return finals[finals.length - 1];
+    return -1;
   }
   function chooseTpFile() { if (tpFileRef.current) tpFileRef.current.click(); }
   function onTpFile(e) {
