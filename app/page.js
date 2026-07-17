@@ -8159,6 +8159,13 @@ function ForecastingTool(props) {
         </div>
       </div>}
 
+      {tpSessions.length > 0 && <div style={{ display: "flex", alignItems: "flex-end", gap: 3, marginBottom: 20, borderBottom: "2px solid #E5E7EB", overflowX: "auto" }}>
+        {tpSessions.map(function (s, i) { var on = i === tpActive; return <div key={s.id} onClick={function () { setTpActive(i); }} title={(s.warehouse || "(no warehouse)") + " \u2014 " + s.fileName} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 16px", borderRadius: "10px 10px 0 0", cursor: "pointer", fontSize: 12.5, fontWeight: 600, border: "1px solid " + (on ? "#0EA5E9" : "#E5E7EB"), borderBottom: "none", background: on ? "#0EA5E9" : "#fff", color: on ? "#fff" : "#6B7280", marginBottom: -2, whiteSpace: "nowrap", flexShrink: 0 }}>
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 180 }}>{s.warehouse || s.fileName}</span>
+          <span onClick={function (e) { e.stopPropagation(); closeTpSession(i); }} title="Close this tab" style={{ fontWeight: 700, lineHeight: 1, opacity: 0.6 }}>{"\u00D7"}</span>
+        </div>; })}
+      </div>}
+
       {tpStats && <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
         <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0, minWidth: 120 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Report rows</div><div style={{ fontSize: 24, fontWeight: 700, color: "#1F2937", marginTop: 4 }}>{tpStats.input}</div></div>
         <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0, minWidth: 120 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Kept</div><div style={{ fontSize: 24, fontWeight: 700, color: "#0EA5E9", marginTop: 4 }}>{tpStats.kept}</div></div>
@@ -8185,12 +8192,6 @@ function ForecastingTool(props) {
       </div>}
 
       {tpSessions.length > 0 && tpStats && (!tpFormatted || tpFormatted.length === 0) && <div style={{ fontSize: 13, color: "#9CA3AF", padding: "8px 4px" }}>No generics stocked in {tpWarehouse} matched the report's A/B/C rows for this location.</div>}
-      {tpSessions.length > 0 && <div style={{ display: "flex", alignItems: "flex-end", gap: 3, marginTop: 24, borderBottom: "2px solid #E5E7EB", overflowX: "auto" }}>
-        {tpSessions.map(function (s, i) { var on = i === tpActive; return <div key={s.id} onClick={function () { setTpActive(i); }} title={(s.warehouse || "(no warehouse)") + " \u2014 " + s.fileName} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 16px", borderRadius: "10px 10px 0 0", cursor: "pointer", fontSize: 12.5, fontWeight: 600, border: "1px solid " + (on ? "#0EA5E9" : "#E5E7EB"), borderBottom: "none", background: on ? "#0EA5E9" : "#fff", color: on ? "#fff" : "#6B7280", marginBottom: -2, whiteSpace: "nowrap", flexShrink: 0 }}>
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 180 }}>{s.warehouse || s.fileName}</span>
-          <span onClick={function (e) { e.stopPropagation(); closeTpSession(i); }} title="Close this tab" style={{ fontWeight: 700, lineHeight: 1, opacity: 0.6 }}>{"\u00D7"}</span>
-        </div>; })}
-      </div>}
     </div>}
 
     {tab === "replenish" && <div>
