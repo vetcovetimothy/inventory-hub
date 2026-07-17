@@ -8141,6 +8141,9 @@ function ForecastingTool(props) {
     </div>
 
     {tab === "tp" && <div>
+      {tpSessions.length > 1 && <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+        <button onClick={exportAllTp} style={S.btn("ghost")}><IconDL /> Export all ({tpSessions.filter(function (s) { return s.formatted && s.formatted.length; }).length})</button>
+      </div>}
       {tpSessions.length === 0 && <div style={S.card}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
           <div>
@@ -8175,7 +8178,7 @@ function ForecastingTool(props) {
         </div>
       </div>}
 
-      {tpSessions.length > 0 && <div style={{ display: "flex", alignItems: "flex-end", gap: 3, marginBottom: 20, borderBottom: "2px solid #E5E7EB", overflowX: "auto" }}>
+      {tpSessions.length > 0 && <div style={{ display: "flex", alignItems: "flex-end", gap: 3, marginBottom: 20, borderBottom: "2px solid #E5E7EB", flexWrap: "wrap" }}>
         {tpSessions.map(function (s, i) { var on = i === tpActive; return <div key={s.id} onClick={function () { setTpActive(i); }} title={(s.warehouse || "(no warehouse)") + " \u2014 " + s.fileName} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 16px", borderRadius: "10px 10px 0 0", cursor: "pointer", fontSize: 12.5, fontWeight: 600, border: "1px solid " + (on ? "#0EA5E9" : "#E5E7EB"), borderBottom: "none", background: on ? "#0EA5E9" : "#fff", color: on ? "#fff" : "#6B7280", marginBottom: -2, whiteSpace: "nowrap", flexShrink: 0 }}>
           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 180 }}>{s.warehouse || s.fileName}</span>
           <span onClick={function (e) { e.stopPropagation(); closeTpSession(i); }} title="Close this tab" style={{ fontWeight: 700, lineHeight: 1, opacity: 0.6 }}>{"\u00D7"}</span>
@@ -8192,10 +8195,7 @@ function ForecastingTool(props) {
       {tpFormatted && tpFormatted.length > 0 && <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden" })}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderBottom: "1px solid #F3F4F6" }}>
           <div style={{ fontSize: 14, fontWeight: 600, color: "#1F2937" }}>{tpWarehouse}<span style={{ fontWeight: 400, color: "#9CA3AF" }}>{"  \u00B7  " + (tpStats ? tpStats.kept : tpFormatted.length) + " rows"}</span></div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            {tpSessions.length > 1 && <button onClick={exportAllTp} style={S.btn("ghost")}><IconDL /> Export all ({tpSessions.filter(function (s) { return s.formatted && s.formatted.length; }).length})</button>}
-            <button onClick={exportTp} style={S.btn("ghost")}><IconDL /> Export xlsx</button>
-          </div>
+          <button onClick={exportTp} style={S.btn("ghost")}><IconDL /> Export xlsx</button>
         </div>
         <div style={{ maxHeight: 520, overflow: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
