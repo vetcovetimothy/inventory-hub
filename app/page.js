@@ -1394,6 +1394,10 @@ function WHT(props) {
               {s.ediFailedCount > 0 && <div style={{ padding: "8px 14px", background: "#FEF2F2", color: "#DC2626", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>{s.ediFailedCount} EDI failed</div>}
               {s.failedCount > 0 && <div style={{ padding: "8px 14px", background: "#FEF2F2", color: "#DC2626", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>{s.failedCount} failed</div>}
             </div>
+            {(s.ediSentCount > 0 || s.ediFailedCount > 0) && <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", padding: "12px 14px", background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 8, marginBottom: 16 }}>
+              <div style={{ fontSize: 12.5, color: "#1E3A8A" }}>{s.ediSentCount > 0 ? (s.ediSentCount + " PO" + (s.ediSentCount === 1 ? "" : "s") + " sent to TrueCommerce EDI.") : "EDI send was attempted."} Open the portal to confirm the transmission.</div>
+              <a href="https://foundry.truecommerce.com/core/Default.html" target="_blank" rel="noopener noreferrer" style={{ textDecoration: "none", background: "#2563EB", color: "#fff", padding: "8px 14px", borderRadius: 8, fontSize: 12.5, fontWeight: 600, whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 6 }}>Open TrueCommerce EDI {"\u2197"}</a>
+            </div>}
             <div style={{ border: "1px solid #E5E7EB", borderRadius: 8, overflow: "auto", maxHeight: "55vh" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                 <thead><tr style={{ background: "#F9FAFB", position: "sticky", top: 0 }}><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>PO #</th><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>Vendor Ref</th><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>Channel</th><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>Result</th></tr></thead>
@@ -3727,6 +3731,15 @@ function HillsTracker(props) {
     kvPost(kvMetaKey, updated).catch(function() {});
   }
 
+  // Arrow up/down move focus between rows within the same editable column (ETA / Notes).
+  function hpNav(e, col, i) {
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+    e.preventDefault();
+    var target = i + (e.key === "ArrowDown" ? 1 : -1);
+    var el = document.querySelector('[data-navcol="' + col + '"][data-navrow="' + target + '"]');
+    if (el) { el.focus(); if (el.select) el.select(); }
+  }
+
   var fetchData = useCallback(async function() {
     if (!ok) { lp(); return; }
     setLoading(true);
@@ -3903,11 +3916,11 @@ function HillsTracker(props) {
               </div>
             </td>
             <td style={S.td}>
-              <input type="text" value={poMeta.eta || ""} onChange={function(e) { updateMeta(po, "eta", e.target.value); }} onBlur={function(e) { var norm = normalizeEta(e.target.value, orderedDate); if (norm !== (poMeta.eta || "")) updateMeta(po, "eta", norm); }} placeholder="mm/dd/yyyy" style={Object.assign({}, S.inp, { padding: "6px 10px", background: etaPast ? "rgba(220,38,38,0.06)" : (poMeta.eta ? "#F9FAFB" : "#FBEADB"), borderColor: etaPast ? "rgba(220,38,38,0.3)" : (poMeta.eta ? "#E5E7EB" : "transparent"), color: etaPast ? "#DC2626" : "#374151" })} />
+              <input type="text" data-navcol="eta" data-navrow={i} onKeyDown={function(e) { hpNav(e, "eta", i); }} value={poMeta.eta || ""} onChange={function(e) { updateMeta(po, "eta", e.target.value); }} onBlur={function(e) { var norm = normalizeEta(e.target.value, orderedDate); if (norm !== (poMeta.eta || "")) updateMeta(po, "eta", norm); }} placeholder="mm/dd/yyyy" style={Object.assign({}, S.inp, { padding: "6px 10px", background: etaPast ? "rgba(220,38,38,0.06)" : (poMeta.eta ? "#F9FAFB" : "#FBEADB"), borderColor: etaPast ? "rgba(220,38,38,0.3)" : (poMeta.eta ? "#E5E7EB" : "transparent"), color: etaPast ? "#DC2626" : "#374151" })} />
               {etaPast && <div style={{ fontSize: 10, color: "#DC2626", marginTop: 2, fontWeight: 500 }}>Should be delivered</div>}
             </td>
             <td style={S.td}>
-              <input type="text" value={poMeta.notes || ""} onChange={function(e) { updateMeta(po, "notes", e.target.value); }} placeholder="Add notes..." style={Object.assign({}, S.inp, { padding: "6px 10px" })} />
+              <input type="text" data-navcol="notes" data-navrow={i} onKeyDown={function(e) { hpNav(e, "notes", i); }} value={poMeta.notes || ""} onChange={function(e) { updateMeta(po, "notes", e.target.value); }} placeholder="Add notes..." style={Object.assign({}, S.inp, { padding: "6px 10px" })} />
             </td>
           </tr>;
         })}</tbody>
