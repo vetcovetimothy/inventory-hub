@@ -8141,9 +8141,6 @@ function ForecastingTool(props) {
     </div>
 
     {tab === "tp" && <div>
-      {tpSessions.length > 1 && <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
-        <button onClick={exportAllTp} style={S.btn("ghost")}><IconDL /> Export all ({tpSessions.filter(function (s) { return s.formatted && s.formatted.length; }).length})</button>
-      </div>}
       {tpSessions.length === 0 && <div style={S.card}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
           <div>
@@ -8178,11 +8175,14 @@ function ForecastingTool(props) {
         </div>
       </div>}
 
-      {tpSessions.length > 0 && <div style={{ display: "flex", alignItems: "flex-end", gap: 3, marginBottom: 20, borderBottom: "2px solid #E5E7EB", flexWrap: "wrap" }}>
-        {tpSessions.map(function (s, i) { var on = i === tpActive; return <div key={s.id} onClick={function () { setTpActive(i); }} title={(s.warehouse || "(no warehouse)") + " \u2014 " + s.fileName} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 16px", borderRadius: "10px 10px 0 0", cursor: "pointer", fontSize: 12.5, fontWeight: 600, border: "1px solid " + (on ? "#0EA5E9" : "#E5E7EB"), borderBottom: "none", background: on ? "#0EA5E9" : "#fff", color: on ? "#fff" : "#6B7280", marginBottom: -2, whiteSpace: "nowrap", flexShrink: 0 }}>
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 180 }}>{s.warehouse || s.fileName}</span>
-          <span onClick={function (e) { e.stopPropagation(); closeTpSession(i); }} title="Close this tab" style={{ fontWeight: 700, lineHeight: 1, opacity: 0.6 }}>{"\u00D7"}</span>
-        </div>; })}
+      {tpSessions.length > 0 && <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
+          {tpSessions.map(function (s, i) { var on = i === tpActive; return <div key={s.id} onClick={function () { setTpActive(i); }} title={(s.warehouse || "(no warehouse)") + " \u2014 " + s.fileName} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 16px", borderRadius: "10px 10px 0 0", cursor: "pointer", fontSize: 12.5, fontWeight: 600, border: "1px solid " + (on ? "#0EA5E9" : "#E5E7EB"), background: on ? "#0EA5E9" : "#fff", color: on ? "#fff" : "#6B7280", whiteSpace: "nowrap", flexShrink: 0 }}>
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 180 }}>{s.warehouse || s.fileName}</span>
+            <span onClick={function (e) { e.stopPropagation(); closeTpSession(i); }} title="Close this tab" style={{ fontWeight: 700, lineHeight: 1, opacity: 0.6 }}>{"\u00D7"}</span>
+          </div>; })}
+        </div>
+        {tpSessions.length > 1 && <button onClick={exportAllTp} style={S.btn("ghost")}><IconDL /> Export all ({tpSessions.filter(function (s) { return s.formatted && s.formatted.length; }).length})</button>}
       </div>}
 
       {tpStats && <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
