@@ -1394,10 +1394,6 @@ function WHT(props) {
               {s.ediFailedCount > 0 && <div style={{ padding: "8px 14px", background: "#FEF2F2", color: "#DC2626", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>{s.ediFailedCount} EDI failed</div>}
               {s.failedCount > 0 && <div style={{ padding: "8px 14px", background: "#FEF2F2", color: "#DC2626", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>{s.failedCount} failed</div>}
             </div>
-            {(s.ediSentCount > 0 || s.ediFailedCount > 0) && <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", padding: "12px 14px", background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 8, marginBottom: 16 }}>
-              <div style={{ fontSize: 12.5, color: "#1E3A8A" }}>{s.ediSentCount > 0 ? (s.ediSentCount + " PO" + (s.ediSentCount === 1 ? "" : "s") + " sent to TrueCommerce EDI.") : "EDI send was attempted."} Open the portal to confirm the transmission.</div>
-              <a href="https://foundry.truecommerce.com/core/Default.html" target="_blank" rel="noopener noreferrer" style={{ textDecoration: "none", background: "#2563EB", color: "#fff", padding: "8px 14px", borderRadius: 8, fontSize: 12.5, fontWeight: 600, whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 6 }}>Open TrueCommerce EDI {"\u2197"}</a>
-            </div>}
             <div style={{ border: "1px solid #E5E7EB", borderRadius: 8, overflow: "auto", maxHeight: "55vh" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                 <thead><tr style={{ background: "#F9FAFB", position: "sticky", top: 0 }}><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>PO #</th><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>Vendor Ref</th><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>Channel</th><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>Result</th></tr></thead>
@@ -1415,6 +1411,10 @@ function WHT(props) {
                 })}</tbody>
               </table>
             </div>
+            {(s.ediSentCount > 0 || s.ediFailedCount > 0) && <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", padding: "12px 14px", background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 8, marginTop: 16 }}>
+              <div style={{ fontSize: 12.5, color: "#1E3A8A" }}>{s.ediSentCount > 0 ? (s.ediSentCount + " PO" + (s.ediSentCount === 1 ? "" : "s") + " sent to TrueCommerce EDI.") : "EDI send was attempted."} Open the portal to confirm the transmission.</div>
+              <a href="https://foundry.truecommerce.com/core/Default.html" target="_blank" rel="noopener noreferrer" style={{ textDecoration: "none", background: "#2563EB", color: "#fff", padding: "8px 14px", borderRadius: 8, fontSize: 12.5, fontWeight: 600, whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 6 }}>Open TrueCommerce EDI {"\u2197"}</a>
+            </div>}
             <div style={{ marginTop: 16, textAlign: "right" }}>
               <button onClick={function() { setAcuProcResult(null); }} style={S.btn()}>Close</button>
             </div>
@@ -6027,6 +6027,69 @@ function OOSTracker(props) {
   var _permNotes = useState({}), permNotes = _permNotes[0], setPermNotes = _permNotes[1];
   var _missCount = useState({}), missCount = _missCount[0], setMissCount = _missCount[1];
   var _prevItems = useState({}), prevItems = _prevItems[0], setPrevItems = _prevItems[1];
+  var _snapBusy = useState(false), snapBusy = _snapBusy[0], setSnapBusy = _snapBusy[1];
+  var snapDoneRef = useRef(false);
+
+  // Build one flat dated row per warehouse-manufacturer OOS record, with its note attached.
+  function buildSnapshotRows() {
+    var d = new Date();
+    var dateStr = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+    var out = [];
+    (allWhseData || []).forEach(function(r) {
+      var vendor = String(r._vendor == null ? "" : r._vendor);
+      var tabKey = null;
+      ["fuzerx", "gogomeds", "cgp"].forEach(function(t) { if (!tabKey && vendorMatch([vendor], t)) tabKey = t; });
+      var note = tabKey ? (permNotes[tabKey + ":" + r.MANUFACTURER_NO] || "") : "";
+      var vendorLabel = tabKey ? (TAB_VENDOR_LABEL[tabKey] || vendor) : vendor;
+      out.push([
+        dateStr,
+        String(r._wh || r.WAREHOUSE_SLUG || ""),
+        vendorLabel,
+        String(r.MANUFACTURER_NO == null ? "" : r.MANUFACTURER_NO),
+        String(r.MANUFACTURER_NAME == null ? "" : r.MANUFACTURER_NAME),
+        String(r.PRODUCT_LINE_NAME == null ? "" : r.PRODUCT_LINE_NAME),
+        String(r.SUPPLY_STATUS == null ? "" : r.SUPPLY_STATUS),
+        String(note)
+      ]);
+    });
+    return out;
+  }
+
+  async function snapshotToHistory(isAuto) {
+    var g = getGmailToken();
+    if (!g || !g.token) { if (!isAuto) toast("Connect Google first (Gmail button) so the sheet can be written.", "error"); return; }
+    var rows = buildSnapshotRows();
+    if (!rows.length) { if (!isAuto) toast("No OOS rows to snapshot yet.", "error"); return; }
+    if (!isAuto) setSnapBusy(true);
+    try {
+      var resp = await fetch("/api/oos-history-append", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rows: rows, refreshToken: g.token }) });
+      var data = await resp.json();
+      if (data && data.ok) {
+        var today = new Date().toISOString().slice(0, 10);
+        kvPost("oos-history-last", { date: today }).catch(function() {});
+        if (!isAuto) toast("Saved " + (data.appended || rows.length) + " rows to OOS history.");
+      } else if (!isAuto) {
+        toast("History save failed: " + ((data && data.error) || "unknown"), "error");
+      }
+    } catch (e) {
+      if (!isAuto) toast("History save failed: " + (e && e.message ? e.message : e), "error");
+    } finally {
+      if (!isAuto) setSnapBusy(false);
+    }
+  }
+
+  // Auto-snapshot once per calendar day, the first time the tracker has data loaded.
+  useEffect(function() {
+    if (snapDoneRef.current) return;
+    if (!allWhseData || !allWhseData.length) return;
+    var g = getGmailToken(); if (!g || !g.token) return;
+    snapDoneRef.current = true;
+    kvGet("oos-history-last").then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+      var last = d && d.data && d.data.date ? d.data.date : null;
+      var today = new Date().toISOString().slice(0, 10);
+      if (last !== today) snapshotToHistory(true);
+    }).catch(function() {});
+  }, [allWhseData]);
 
   function getDailyReset() {
     var now = new Date();
@@ -6655,6 +6718,7 @@ function OOSTracker(props) {
       <button onClick={function() { setTab("cgp"); setWhFilter("all"); setSearch(""); setAllWhseSearch(""); }} style={S.pill(tab === "cgp", "#10B981")}>Central Garden &amp; Pet{cgpData.length > 0 && <span style={{ fontSize: 10, background: tab === "cgp" ? "rgba(255,255,255,0.2)" : "rgba(100,116,139,0.2)", padding: "1px 6px", borderRadius: 4, marginLeft: 6 }}>{cgpData.length}</span>}</button>
       <div style={{ flex: 1 }} />
       {lastPull && lastPull.at && <div style={{ fontSize: 11, color: "#9CA3AF", alignSelf: "center", marginRight: 4, whiteSpace: "nowrap" }}>Last pull: {(function() { try { return new Date(lastPull.at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); } catch (e) { return ""; } })()}{lastPull.by ? " by " + lastPull.by : ""}</div>}
+      <button onClick={function() { snapshotToHistory(false); }} disabled={snapBusy} title="Save today's OOS snapshot (rows + notes) to the history sheet" style={Object.assign({}, S.btn("ghost"), { padding: "8px 14px", fontSize: 12, opacity: snapBusy ? 0.6 : 1, cursor: snapBusy ? "default" : "pointer" })}>{snapBusy ? "Saving\u2026" : "\u2913 Snapshot to history"}</button>
       <button onClick={loadFromSnowflake} disabled={sfLoading} style={Object.assign({}, S.btn("ghost"), { background: "#EF4444", color: "#fff", border: "none", padding: "8px 14px", fontSize: 12, opacity: sfLoading ? 0.6 : 1, cursor: sfLoading ? "default" : "pointer" })}>{sfLoading ? "Fetching\u2026" : "\u2601 Fetch from Snowflake"}</button>
     </div>
     {(fuzeData.length === 0 && ggmData.length === 0 && cgpData.length === 0 && allWhseData.length === 0)
