@@ -136,7 +136,7 @@ export async function GET(request) {
         });
         if (poResp.ok) {
           var poData = await poResp.json();
-          var poRows = (poData && (poData.rows || poData.value)) || [];
+          var poRows = (poData && poData.data) || [];
           poRows.forEach(function (p) {
             var id = String(p.InventoryID == null ? "" : p.InventoryID).trim();
             if (!id) return;
