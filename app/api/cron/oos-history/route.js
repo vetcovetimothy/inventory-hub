@@ -23,7 +23,7 @@ const SITE_URL = process.env.SITE_URL || "https://inventory-hub-two.vercel.app";
 const KV_URL = process.env.KV_REST_API_URL;
 const KV_TOKEN = process.env.KV_REST_API_TOKEN;
 const SHEET_ID = process.env.OOS_HISTORY_SHEET_ID || "1HJu5kVC-kM59ZGuBtjOGc9MBpBGgZdsdvIfZ8MLNsJs";
-const HEADER = ["Snapshot Date", "Warehouse", "Vendor", "Mfr No", "Manufacturer", "Product", "Supply Status", "Note"];
+const HEADER = ["Snapshot Date", "Warehouse", "Vendor", "Mfr No", "Manufacturer", "Product", "Supply Status", "Note", "SD", "BO", "Order Status"];
 
 const WH_MAP = { "TRUEPILL_BROOKLYN": "Brooklyn", "TRUEPILL_OHIO": "Ohio", "TRUEPILL_HAYWARD": "Hayward", "GOGOMEDS_KY": "Kentucky", "GOGOMEDS_AZ": "Arizona", "GOGOMEDS_KENTUCKY": "Kentucky", "GOGOMEDS_ARIZONA": "Arizona", "HILLS_CGP_WAREHOUSE_CA": "Hills CA", "HILLS_CGP_WAREHOUSE_NJ": "Hills NJ", "HILLS_CGP_WAREHOUSE_FL": "Hills FL", "HILLS_CGP_WAREHOUSE_TX": "Hills TX" };
 const TAB_VENDORS = { fuzerx: ["fuzerx", "fuze"], gogomeds: ["gogomeds", "gogo"], cgp: ["central garden", "cgp"] };
@@ -113,8 +113,53 @@ export async function GET(request) {
     var oosData = await oosResp.json();
     var rows = (oosData && oosData.rows) || [];
 
-    // 3. Notes (shared permanent bucket), keyed by "<tab>:<MANUFACTURER_NO>".
+    // 3. Notes: text (permanent bucket) and flags (shared bucket), keyed by "<tab>:<MANUFACTURER_NO>".
     var notes = (await kvGetRaw("oos-notes-permanent")) || {};
+    var noteFlags = (await kvGetRaw("oos-notes-shared")) || {};
+    // Auto SD/BO lists (Inventory IDs), stored as { data: [ {InventoryID}, ... ] }.
+    var sdStored = await kvGetRaw("tracker-shared-short-dating");
+    var boStored = await kvGetRaw("tracker-shared-backorder");
+    var sdSet = {}, boSet = {};
+    ((sdStored && sdStored.data) || []).forEach(function (x) { if (x && x.InventoryID) sdSet[String(x.InventoryID)] = true; });
+    ((boStored && boStored.data) || []).forEach(function (x) { if (x && x.InventoryID) boSet[String(x.InventoryID)] = true; });
+
+    // Order Status: open PO lines from Acumatica (normalized by the app's own endpoint),
+    // matched to OOS items by Inventory ID. Simplified vs. the tracker (no ETA enrichment).
+    var orderMap = {};
+    try {
+      var acuUser = process.env.ACUMATICA_CRON_USERNAME, acuPass = process.env.ACUMATICA_CRON_PASSWORD;
+      if (acuUser && acuPass) {
+        var poResp = await fetch(SITE_URL + "/api/acumatica", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "open-po-lines", username: acuUser, password: acuPass }),
+        });
+        if (poResp.ok) {
+          var poData = await poResp.json();
+          var poRows = (poData && (poData.rows || poData.value)) || [];
+          poRows.forEach(function (p) {
+            var id = String(p.InventoryID == null ? "" : p.InventoryID).trim();
+            if (!id) return;
+            var open = (parseFloat(p.OrderQty) || 0) - (parseFloat(p.QtyOnReceipts) || 0);
+            if (open <= 0) return;
+            if (!orderMap[id]) orderMap[id] = [];
+            orderMap[id].push({ po: String(p.OrderNbr || ""), date: String(p.OrderDate || "") });
+          });
+        }
+      }
+    } catch (e) { /* order status stays blank on any failure */ }
+
+    function orderStatusFor(mfrNo) {
+      var list = orderMap[String(mfrNo)];
+      if (!list || !list.length) return "";
+      if (list.length === 1) return "On Order: " + list[0].po + (list[0].date ? " (" + list[0].date + ")" : "");
+      return "On Order (" + list.length + "): " + list.map(function (x) { return x.po; }).join(", ");
+    }
+    function effectiveFlag(tab, mfrNo, field, autoSet) {
+      var f = tab ? noteFlags[tab + ":" + mfrNo] : null;
+      var v = (f && f[field] !== undefined) ? f[field] : autoSet[String(mfrNo)];
+      return v ? "Yes" : "";
+    }
 
     // 4. Build one flat dated row per OOS record.
     var values = rows.map(function (r) {
@@ -131,6 +176,9 @@ export async function GET(request) {
         String(r.PRODUCT_LINE_NAME == null ? "" : r.PRODUCT_LINE_NAME),
         String(r.SUPPLY_STATUS == null ? "" : r.SUPPLY_STATUS),
         String(note),
+        effectiveFlag(tab, r.MANUFACTURER_NO, "sd", sdSet),
+        effectiveFlag(tab, r.MANUFACTURER_NO, "bo", boSet),
+        orderStatusFor(r.MANUFACTURER_NO),
       ];
     });
     if (!values.length) return json({ ok: true, appended: 0, note: "no OOS rows to snapshot", date: dateStr });
