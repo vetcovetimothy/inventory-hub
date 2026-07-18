@@ -6028,68 +6028,19 @@ function OOSTracker(props) {
   var _missCount = useState({}), missCount = _missCount[0], setMissCount = _missCount[1];
   var _prevItems = useState({}), prevItems = _prevItems[0], setPrevItems = _prevItems[1];
   var _snapBusy = useState(false), snapBusy = _snapBusy[0], setSnapBusy = _snapBusy[1];
-  var snapDoneRef = useRef(false);
 
-  // Build one flat dated row per warehouse-manufacturer OOS record, with its note attached.
-  function buildSnapshotRows() {
-    var d = new Date();
-    var dateStr = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
-    var out = [];
-    (allWhseData || []).forEach(function(r) {
-      var vendor = String(r._vendor == null ? "" : r._vendor);
-      var tabKey = null;
-      ["fuzerx", "gogomeds", "cgp"].forEach(function(t) { if (!tabKey && vendorMatch([vendor], t)) tabKey = t; });
-      var note = tabKey ? (permNotes[tabKey + ":" + r.MANUFACTURER_NO] || "") : "";
-      var vendorLabel = tabKey ? (TAB_VENDOR_LABEL[tabKey] || vendor) : vendor;
-      out.push([
-        dateStr,
-        String(r._wh || r.WAREHOUSE_SLUG || ""),
-        vendorLabel,
-        String(r.MANUFACTURER_NO == null ? "" : r.MANUFACTURER_NO),
-        String(r.MANUFACTURER_NAME == null ? "" : r.MANUFACTURER_NAME),
-        String(r.PRODUCT_LINE_NAME == null ? "" : r.PRODUCT_LINE_NAME),
-        String(r.SUPPLY_STATUS == null ? "" : r.SUPPLY_STATUS),
-        String(note)
-      ]);
-    });
-    return out;
-  }
-
-  async function snapshotToHistory(isAuto) {
-    var g = getGmailToken();
-    if (!g || !g.token) { if (!isAuto) toast("Connect Google first (Gmail button) so the sheet can be written.", "error"); return; }
-    var rows = buildSnapshotRows();
-    if (!rows.length) { if (!isAuto) toast("No OOS rows to snapshot yet.", "error"); return; }
-    if (!isAuto) setSnapBusy(true);
+  // Manually trigger the daily OOS-history snapshot. It runs entirely server-side
+  // via the service-account cron; ?force=1 bypasses the once-a-day guard.
+  async function snapshotToHistory() {
+    setSnapBusy(true);
     try {
-      var resp = await fetch("/api/oos-history-append", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rows: rows, refreshToken: g.token }) });
+      var resp = await fetch("/api/cron/oos-history?force=1", { cache: "no-store" });
       var data = await resp.json();
-      if (data && data.ok) {
-        var today = new Date().toISOString().slice(0, 10);
-        kvPost("oos-history-last", { date: today }).catch(function() {});
-        if (!isAuto) toast("Saved " + (data.appended || rows.length) + " rows to OOS history.");
-      } else if (!isAuto) {
-        toast("History save failed: " + ((data && data.error) || "unknown"), "error");
-      }
-    } catch (e) {
-      if (!isAuto) toast("History save failed: " + (e && e.message ? e.message : e), "error");
-    } finally {
-      if (!isAuto) setSnapBusy(false);
-    }
+      if (data && data.ok) { toast("Saved " + (data.appended != null ? data.appended : 0) + " rows to OOS history."); }
+      else { toast("History save failed: " + ((data && data.error) || "unknown"), "error"); }
+    } catch (e) { toast("History save failed: " + (e && e.message ? e.message : e), "error"); }
+    finally { setSnapBusy(false); }
   }
-
-  // Auto-snapshot once per calendar day, the first time the tracker has data loaded.
-  useEffect(function() {
-    if (snapDoneRef.current) return;
-    if (!allWhseData || !allWhseData.length) return;
-    var g = getGmailToken(); if (!g || !g.token) return;
-    snapDoneRef.current = true;
-    kvGet("oos-history-last").then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
-      var last = d && d.data && d.data.date ? d.data.date : null;
-      var today = new Date().toISOString().slice(0, 10);
-      if (last !== today) snapshotToHistory(true);
-    }).catch(function() {});
-  }, [allWhseData]);
 
   function getDailyReset() {
     var now = new Date();
@@ -6718,7 +6669,7 @@ function OOSTracker(props) {
       <button onClick={function() { setTab("cgp"); setWhFilter("all"); setSearch(""); setAllWhseSearch(""); }} style={S.pill(tab === "cgp", "#10B981")}>Central Garden &amp; Pet{cgpData.length > 0 && <span style={{ fontSize: 10, background: tab === "cgp" ? "rgba(255,255,255,0.2)" : "rgba(100,116,139,0.2)", padding: "1px 6px", borderRadius: 4, marginLeft: 6 }}>{cgpData.length}</span>}</button>
       <div style={{ flex: 1 }} />
       {lastPull && lastPull.at && <div style={{ fontSize: 11, color: "#9CA3AF", alignSelf: "center", marginRight: 4, whiteSpace: "nowrap" }}>Last pull: {(function() { try { return new Date(lastPull.at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); } catch (e) { return ""; } })()}{lastPull.by ? " by " + lastPull.by : ""}</div>}
-      <button onClick={function() { snapshotToHistory(false); }} disabled={snapBusy} title="Save today's OOS snapshot (rows + notes) to the history sheet" style={Object.assign({}, S.btn("ghost"), { padding: "8px 14px", fontSize: 12, opacity: snapBusy ? 0.6 : 1, cursor: snapBusy ? "default" : "pointer" })}>{snapBusy ? "Saving\u2026" : "\u2913 Snapshot to history"}</button>
+      <button onClick={function() { snapshotToHistory(); }} disabled={snapBusy} title="Save today's OOS snapshot (rows + notes) to the history sheet" style={Object.assign({}, S.btn("ghost"), { padding: "8px 14px", fontSize: 12, opacity: snapBusy ? 0.6 : 1, cursor: snapBusy ? "default" : "pointer" })}>{snapBusy ? "Saving\u2026" : "\u2913 Snapshot to history"}</button>
       <button onClick={loadFromSnowflake} disabled={sfLoading} style={Object.assign({}, S.btn("ghost"), { background: "#EF4444", color: "#fff", border: "none", padding: "8px 14px", fontSize: 12, opacity: sfLoading ? 0.6 : 1, cursor: sfLoading ? "default" : "pointer" })}>{sfLoading ? "Fetching\u2026" : "\u2601 Fetch from Snowflake"}</button>
     </div>
     {(fuzeData.length === 0 && ggmData.length === 0 && cgpData.length === 0 && allWhseData.length === 0)
