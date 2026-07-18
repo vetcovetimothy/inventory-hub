@@ -23,7 +23,7 @@ const SITE_URL = process.env.SITE_URL || "https://inventory-hub-two.vercel.app";
 const KV_URL = process.env.KV_REST_API_URL;
 const KV_TOKEN = process.env.KV_REST_API_TOKEN;
 const SHEET_ID = process.env.OOS_HISTORY_SHEET_ID || "1HJu5kVC-kM59ZGuBtjOGc9MBpBGgZdsdvIfZ8MLNsJs";
-const SHEET_RANGE = process.env.OOS_HISTORY_SHEET_RANGE || "Sheet1";
+const HEADER = ["Snapshot Date", "Warehouse", "Vendor", "Mfr No", "Manufacturer", "Product", "Supply Status", "Note"];
 
 const WH_MAP = { "TRUEPILL_BROOKLYN": "Brooklyn", "TRUEPILL_OHIO": "Ohio", "TRUEPILL_HAYWARD": "Hayward", "GOGOMEDS_KY": "Kentucky", "GOGOMEDS_AZ": "Arizona", "GOGOMEDS_KENTUCKY": "Kentucky", "GOGOMEDS_ARIZONA": "Arizona", "HILLS_CGP_WAREHOUSE_CA": "Hills CA", "HILLS_CGP_WAREHOUSE_NJ": "Hills NJ", "HILLS_CGP_WAREHOUSE_FL": "Hills FL", "HILLS_CGP_WAREHOUSE_TX": "Hills TX" };
 const TAB_VENDORS = { fuzerx: ["fuzerx", "fuze"], gogomeds: ["gogomeds", "gogo"], cgp: ["central garden", "cgp"] };
@@ -135,20 +135,31 @@ export async function GET(request) {
     });
     if (!values.length) return json({ ok: true, appended: 0, note: "no OOS rows to snapshot", date: dateStr });
 
-    // 5. Append to the sheet as the service account.
+    // 5. Append to the current-year tab (auto-created with a header row the first time).
     var token = await getServiceAccountToken();
-    var url = "https://sheets.googleapis.com/v4/spreadsheets/" + SHEET_ID +
-      "/values/" + encodeURIComponent(SHEET_RANGE) +
-      ":append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS";
-    var appendResp = await fetch(url, {
+    var base = "https://sheets.googleapis.com/v4/spreadsheets/" + SHEET_ID;
+    var authHeaders = { Authorization: "Bearer " + token, "Content-Type": "application/json" };
+    var year = String(d.getFullYear());
+
+    var metaResp = await fetch(base + "?fields=sheets.properties.title", { headers: authHeaders });
+    if (!metaResp.ok) return json({ ok: false, stage: "sheet-meta", error: await metaResp.text() }, 502);
+    var meta = await metaResp.json();
+    var titles = (meta.sheets || []).map(function (s) { return s.properties.title; });
+    if (titles.indexOf(year) === -1) {
+      var addResp = await fetch(base + ":batchUpdate", { method: "POST", headers: authHeaders, body: JSON.stringify({ requests: [{ addSheet: { properties: { title: year } } }] }) });
+      if (!addResp.ok) return json({ ok: false, stage: "add-year-tab", error: await addResp.text() }, 502);
+      await fetch(base + "/values/" + encodeURIComponent(year + "!A1") + ":append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS", { method: "POST", headers: authHeaders, body: JSON.stringify({ values: [HEADER] }) });
+    }
+
+    var appendResp = await fetch(base + "/values/" + encodeURIComponent(year) + ":append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS", {
       method: "POST",
-      headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+      headers: authHeaders,
       body: JSON.stringify({ values: values }),
     });
     if (!appendResp.ok) return json({ ok: false, stage: "append", error: await appendResp.text() }, 502);
 
     await kvSetRaw("oos-history-last", { date: dateStr });
-    return json({ ok: true, appended: values.length, date: dateStr });
+    return json({ ok: true, appended: values.length, date: dateStr, tab: year });
   } catch (e) {
     return json({ ok: false, error: String((e && e.message) || e) }, 500);
   }
