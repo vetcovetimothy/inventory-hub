@@ -6669,9 +6669,7 @@ function OOSTracker(props) {
       <button onClick={function() { setTab("cgp"); setWhFilter("all"); setSearch(""); setAllWhseSearch(""); }} style={S.pill(tab === "cgp", "#10B981")}>Central Garden &amp; Pet{cgpData.length > 0 && <span style={{ fontSize: 10, background: tab === "cgp" ? "rgba(255,255,255,0.2)" : "rgba(100,116,139,0.2)", padding: "1px 6px", borderRadius: 4, marginLeft: 6 }}>{cgpData.length}</span>}</button>
       <div style={{ flex: 1 }} />
       {lastPull && lastPull.at && <div style={{ fontSize: 11, color: "#9CA3AF", alignSelf: "center", marginRight: 4, whiteSpace: "nowrap" }}>Last pull: {(function() { try { return new Date(lastPull.at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); } catch (e) { return ""; } })()}{lastPull.by ? " by " + lastPull.by : ""}</div>}
-      <button onClick={function() { snapshotToHistory(); }} disabled={snapBusy} title="Save today's OOS snapshot (rows + notes) to the history sheet" style={Object.assign({}, S.btn("ghost"), { padding: "8px 14px", fontSize: 12, opacity: snapBusy ? 0.6 : 1, cursor: snapBusy ? "default" : "pointer" })}>{snapBusy ? "Saving\u2026" : "\u2913 Snapshot to history"}</button>
-      <a href="https://docs.google.com/spreadsheets/d/1HJu5kVC-kM59ZGuBtjOGc9MBpBGgZdsdvIfZ8MLNsJs/edit" target="_blank" rel="noopener noreferrer" title="Open the OOS History sheet" style={{ fontSize: 11, color: "#9CA3AF", textDecoration: "none", alignSelf: "center" }}>history sheet {"\u2197"}</a>
-      <button onClick={loadFromSnowflake} disabled={sfLoading} style={Object.assign({}, S.btn("ghost"), { background: "#EF4444", color: "#fff", border: "none", padding: "8px 14px", fontSize: 12, opacity: sfLoading ? 0.6 : 1, cursor: sfLoading ? "default" : "pointer" })}>{sfLoading ? "Fetching\u2026" : "\u2601 Fetch from Snowflake"}</button>
+      <button onClick={function() { loadFromSnowflake(); }} disabled={sfLoading} style={Object.assign({}, S.btn("ghost"), { background: "#EF4444", color: "#fff", border: "none", padding: "8px 14px", fontSize: 12, opacity: sfLoading ? 0.6 : 1, cursor: sfLoading ? "default" : "pointer" })}>{sfLoading ? "Fetching\u2026" : "\u2601 Fetch from Snowflake"}</button>
     </div>
     {(fuzeData.length === 0 && ggmData.length === 0 && cgpData.length === 0 && allWhseData.length === 0)
       ? uploadZone()
@@ -6679,6 +6677,10 @@ function OOSTracker(props) {
           {(fuzeData.length > 0 || ggmData.length > 0 || cgpData.length > 0) ? dataTable() : null}
           {allWhseData.length > 0 ? allWhseTable() : null}
         </div>}
+    {(fuzeData.length > 0 || ggmData.length > 0 || cgpData.length > 0 || allWhseData.length > 0) && <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 14, marginTop: 28, paddingTop: 12, borderTop: "1px solid #F3F4F6" }}>
+      <a href="https://docs.google.com/spreadsheets/d/1HJu5kVC-kM59ZGuBtjOGc9MBpBGgZdsdvIfZ8MLNsJs/edit" target="_blank" rel="noopener noreferrer" title="Open the OOS History sheet" style={{ fontSize: 11, color: "#9CA3AF", textDecoration: "none" }}>history sheet {"\u2197"}</a>
+      <button onClick={function() { snapshotToHistory(); }} disabled={snapBusy} title="Save today's OOS snapshot (rows + notes) to the history sheet" style={{ border: "1px solid #E5E7EB", background: "#fff", color: "#9CA3AF", padding: "6px 12px", borderRadius: 8, fontSize: 11, fontWeight: 500, cursor: snapBusy ? "default" : "pointer", opacity: snapBusy ? 0.6 : 1 }}>{snapBusy ? "Saving\u2026" : "\u2913 Snapshot to history"}</button>
+    </div>}
   </div>;
 }
 
