@@ -41,6 +41,11 @@ function parseGgmCrossoverText(text) {
   var warehouse = "GGM-KY";
   if (/\bAZ\s+\d{5}\b/.test(fullText)) warehouse = "GGM-AZ";
 
+  // Create/PO date (e.g., "DATE:\n7/16/2026")
+  var createDate = "";
+  var ggmDateMatch = fullText.match(/\bDATE:\s*\n?\s*(\d{1,2}\/\d{1,2}\/\d{2,4})/i);
+  if (ggmDateMatch) createDate = ggmDateMatch[1];
+
   // Stated total ("TOTAL $9,486.87")
   var statedAmount = null;
   var totalMatch = fullText.match(/TOTAL\s*\$?([\d,]+\.\d{2})/i);
@@ -129,12 +134,13 @@ function parseGgmCrossoverText(text) {
       vendorItemId: "",
       poNumber: poNumber,
       storeName: "",
+      createDate: createDate,
     });
 
     i = endIdx;
   }
 
-  return { items: items, warehouse: warehouse, vendorSource: "GoGoMeds Crossover", poNumber: poNumber, storeName: "", statedAmount: statedAmount };
+  return { items: items, warehouse: warehouse, vendorSource: "GoGoMeds Crossover", poNumber: poNumber, storeName: "", statedAmount: statedAmount, createDate: createDate };
 }
 
 function parsePdfText(text) {
@@ -146,6 +152,8 @@ function parsePdfText(text) {
   var vendorSource = detectVendor(headerText);
   var poMatch = headerText.match(/PO#:\s*(\d+)/);
   var poNumber = poMatch ? poMatch[1] : "";
+  var dateMatch = headerText.match(/Create Date:\s*(\d{1,2}\/\d{1,2}\/\d{2,4})/i);
+  var createDate = dateMatch ? dateMatch[1] : "";
   var storeMatch = headerText.match(/Store Name:\s*(.*?)(?=Original|$)/i);
   var storeName = storeMatch ? storeMatch[1].trim() : "";
 
@@ -222,11 +230,12 @@ function parsePdfText(text) {
         vendorItemId: vendorItemId,
         poNumber: poNumber,
         storeName: storeName,
+        createDate: createDate,
       });
     }
   }
 
-  return { items: items, warehouse: warehouse, vendorSource: vendorSource, poNumber: poNumber, storeName: storeName, statedAmount: statedAmount };
+  return { items: items, warehouse: warehouse, vendorSource: vendorSource, poNumber: poNumber, storeName: storeName, statedAmount: statedAmount, createDate: createDate };
 }
 
 export async function POST(req) {
