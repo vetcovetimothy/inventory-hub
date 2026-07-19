@@ -2526,6 +2526,64 @@ function POImportTool(props) {
   var _acuCreateLoading = useState(false), acuCreateLoading = _acuCreateLoading[0], setAcuCreateLoading = _acuCreateLoading[1];
   var _acuCreateConfirm = useState(null), acuCreateConfirm = _acuCreateConfirm[0], setAcuCreateConfirm = _acuCreateConfirm[1];
   var _acuCreateResult = useState(null), acuCreateResult = _acuCreateResult[0], setAcuCreateResult = _acuCreateResult[1];
+  var _trackerPreview = useState(null), trackerPreview = _trackerPreview[0], setTrackerPreview = _trackerPreview[1];
+  var _trackerBusy = useState(false), trackerBusy = _trackerBusy[0], setTrackerBusy = _trackerBusy[1];
+
+  // Warehouse -> receiving tracker sheet + tab.
+  var TRACKER_MAP = {
+    "TP-NY": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - BROOKLYN" },
+    "TP-OH": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - SEVEN HILLS" },
+    "TP-CA": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - HAYWARD" },
+    "GGM-KY": { sheetId: "1dMZ_8VC6zaqLLWXQHFfuTXgxMfm0T4ip7To1CbXLfMk", tab: "RECEIVING - KY" },
+    "GGM-AZ": { sheetId: "1dMZ_8VC6zaqLLWXQHFfuTXgxMfm0T4ip7To1CbXLfMk", tab: "RECEIVING - AZ" },
+  };
+  function uomToPkgSize(uom) { var m = String(uom == null ? "" : uom).match(/(\d+)\s*$/); return m ? Number(m[1]) : 1; }
+  function buildTrackerTargets() {
+    var byTab = {};
+    (results || []).forEach(function(r) {
+      var wh = String(r.warehouse || "").trim();
+      var dest = TRACKER_MAP[wh];
+      if (!dest) return;
+      var supplier = vendor === "ggm-crossovers" ? "Bloodworth" : (r.vendorSource || "");
+      var row = [
+        supplier,
+        r.ndc || "",
+        r.acumaticaDesc || r.drugName || "",
+        uomToPkgSize(r.uom),
+        r.qty != null ? r.qty : "",
+        "=INDEX(D:D,ROW())*INDEX(E:E,ROW())",
+        r.poNumber || "",
+        r.orderDate || "",
+      ];
+      var key = dest.sheetId + "||" + dest.tab;
+      if (!byTab[key]) byTab[key] = { sheetId: dest.sheetId, tab: dest.tab, warehouse: wh, rows: [] };
+      byTab[key].rows.push(row);
+    });
+    return Object.keys(byTab).map(function(k) { return byTab[k]; });
+  }
+  function openTrackerPreview() {
+    var targets = buildTrackerTargets();
+    var unmapped = (results || []).filter(function(r) { return !TRACKER_MAP[String(r.warehouse || "").trim()]; }).length;
+    if (!targets.length) { toast("No lines map to a tracker tab (check the warehouse).", "error"); return; }
+    setTrackerPreview({ targets: targets, unmapped: unmapped });
+  }
+  async function confirmTrackerAppend() {
+    if (!trackerPreview) return;
+    setTrackerBusy(true);
+    var okCount = 0, failMsg = "";
+    try {
+      for (var i = 0; i < trackerPreview.targets.length; i++) {
+        var t = trackerPreview.targets[i];
+        var resp = await fetch("/api/tracker-append", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sheetId: t.sheetId, tab: t.tab, rows: t.rows }) });
+        var data = await resp.json();
+        if (data && data.ok) okCount += (data.appended || t.rows.length);
+        else { failMsg = t.tab + ": " + ((data && data.error) || "failed"); break; }
+      }
+      if (failMsg) toast("Tracker add failed \u2014 " + failMsg, "error");
+      else { toast("Added " + okCount + " row" + (okCount === 1 ? "" : "s") + " to the tracker."); setTrackerPreview(null); }
+    } catch (e) { toast("Tracker add failed: " + (e && e.message ? e.message : e), "error"); }
+    finally { setTrackerBusy(false); }
+  }
   var _dummyDelete = useState(null), dummyDelete = _dummyDelete[0], setDummyDelete = _dummyDelete[1];
   useEffect(function() {
     var mt = true;
@@ -2904,6 +2962,7 @@ function POImportTool(props) {
           vendorItemNum: item.vendorItemNum,
           poNumber: item.poNumber,
           sourceFile: item.sourceFile,
+          orderDate: item.createDate || "",
           inventoryId: invId,
           acumaticaDesc: match ? match.description : null,
           uom: match ? match.uom : null,
@@ -3657,11 +3716,38 @@ function POImportTool(props) {
             </div>}
 
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              {allOk && <button onClick={openTrackerPreview} style={Object.assign({}, S.btn("ghost"), { padding: "8px 16px" })}>{"\u2192"} Add to tracker</button>}
               <button onClick={function() { setAcuCreateResult(null); setDummyDelete(null); }} style={Object.assign({}, S.btn(), { padding: "8px 16px" })}>Close</button>
             </div>
           </div>
         </div>;
       })()}
+
+      {trackerPreview && <div onClick={function() { if (!trackerBusy) setTrackerPreview(null); }} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100 }}>
+        <div onClick={function(e) { e.stopPropagation(); }} style={{ background: "#FFFFFF", borderRadius: 8, padding: 24, width: "min(860px, 94vw)", maxHeight: "85vh", overflow: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.2)" }}>
+          <div style={{ fontSize: 18, fontWeight: 700, color: "#1F2937", marginBottom: 4 }}>Add to tracker</div>
+          <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 16 }}>Review the rows, then confirm to append them to the bottom of each tab. Nothing existing is overwritten, and it lands correctly even if the sheet is filtered.{trackerPreview.unmapped ? "  \u00B7  " + trackerPreview.unmapped + " line(s) skipped \u2014 warehouse not mapped to a tracker tab." : ""}</div>
+          {trackerPreview.targets.map(function(t, ti) {
+            return <div key={ti} style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6 }}>{t.tab} <span style={{ color: "#9CA3AF", fontWeight: 400 }}>{"\u00B7 " + t.rows.length + " row" + (t.rows.length === 1 ? "" : "s")}</span></div>
+              <div style={{ border: "1px solid #E5E7EB", borderRadius: 6, overflow: "auto", maxHeight: 240 }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+                  <thead><tr style={{ background: "#F9FAFB" }}>{["Supplier", "NDC", "Product Description", "Pkg Size", "Pkg Qty", "Expected BOH", "PO No.", "Order Date"].map(function(h) { return <th key={h} style={{ padding: "5px 8px", textAlign: "left", color: "#6B7280", fontWeight: 600, whiteSpace: "nowrap", position: "sticky", top: 0, background: "#F9FAFB" }}>{h}</th>; })}</tr></thead>
+                  <tbody>{t.rows.map(function(row, ri) {
+                    return <tr key={ri} style={{ borderTop: "1px solid #F3F4F6" }}>{row.map(function(cell, ci) {
+                      return <td key={ci} style={{ padding: "5px 8px", color: "#374151", whiteSpace: "nowrap", maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", fontStyle: ci === 5 ? "italic" : "normal", color: ci === 5 ? "#9CA3AF" : "#374151" }}>{ci === 5 ? "= Pkg Size \u00D7 Pkg Qty" : String(cell)}</td>;
+                    })}</tr>;
+                  })}</tbody>
+                </table>
+              </div>
+            </div>;
+          })}
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
+            <button onClick={function() { if (!trackerBusy) setTrackerPreview(null); }} disabled={trackerBusy} style={Object.assign({}, S.btn("ghost"), { padding: "8px 16px" })}>Cancel</button>
+            <button onClick={confirmTrackerAppend} disabled={trackerBusy} style={Object.assign({}, S.btn(), { padding: "8px 16px", opacity: trackerBusy ? 0.7 : 1, cursor: trackerBusy ? "default" : "pointer" })}>{trackerBusy ? "Adding\u2026" : "Confirm & append"}</button>
+          </div>
+        </div>
+      </div>}
     </div>
   );
 }
