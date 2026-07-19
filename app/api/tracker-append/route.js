@@ -69,13 +69,26 @@ export async function POST(request) {
     var titles = (meta.sheets || []).map(function (s) { return s.properties.title; });
     if (titles.indexOf(tab) === -1) return json({ ok: false, stage: "tab-check", error: "Tab '" + tab + "' not found. Available: " + titles.join(", ") }, 400);
 
+    // Find the last row that has an actual NDC (column B), then write to the row
+    // right after it. Bare append (even scoped to A:H) treats pre-formatted empty
+    // rows as part of the table and drops new rows into the blank gap below the
+    // real data. Reading VALUES in column B ignores formatting entirely.
+    var colResp = await fetch(base + "/values/" + encodeURIComponent(tab + "!B:B"), { headers: authHeaders });
+    if (!colResp.ok) return json({ ok: false, stage: "read-column", error: await colResp.text() }, 502);
+    var colData = await colResp.json();
+    var col = colData.values || [];
+    var lastData = 0;
+    for (var i = 0; i < col.length; i++) {
+      var cell = col[i] && col[i][0] != null ? String(col[i][0]).trim() : "";
+      if (cell) lastData = i + 1; // 1-based row number of the last non-empty NDC
+    }
+    var nextRow = (lastData || 1) + 1;
+
     // USER_ENTERED so the BOH formula and dates are interpreted, not stored as text.
-    var url = base + "/values/" + encodeURIComponent(tab) + ":append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS";
-    var appendResp = await fetch(url, { method: "POST", headers: authHeaders, body: JSON.stringify({ values: rows }) });
-    if (!appendResp.ok) return json({ ok: false, stage: "append", error: await appendResp.text() }, 502);
-    var data = await appendResp.json();
-    var appended = (data.updates && data.updates.updatedRows) || rows.length;
-    return json({ ok: true, appended: appended, tab: tab });
+    var url = base + "/values/" + encodeURIComponent(tab + "!A" + nextRow) + "?valueInputOption=USER_ENTERED";
+    var writeResp = await fetch(url, { method: "PUT", headers: authHeaders, body: JSON.stringify({ values: rows }) });
+    if (!writeResp.ok) return json({ ok: false, stage: "write", error: await writeResp.text() }, 502);
+    return json({ ok: true, appended: rows.length, tab: tab, startRow: nextRow });
   } catch (e) {
     return json({ ok: false, error: String((e && e.message) || e) }, 500);
   }
