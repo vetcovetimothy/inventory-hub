@@ -2529,6 +2529,45 @@ function POImportTool(props) {
   var _trackerPreview = useState(null), trackerPreview = _trackerPreview[0], setTrackerPreview = _trackerPreview[1];
   var _trackerBusy = useState(false), trackerBusy = _trackerBusy[0], setTrackerBusy = _trackerBusy[1];
 
+  // ── Sub-tabs: the PO Translator vs. a one-off Price Check tool ──
+  var _subTab = useState("translator"), subTab = _subTab[0], setSubTab = _subTab[1];
+  var _pcMode = useState("ndc"), pcMode = _pcMode[0], setPcMode = _pcMode[1];   // "ndc" | "mfr"
+  var _pcQuery = useState(""), pcQuery = _pcQuery[0], setPcQuery = _pcQuery[1];
+  var _pcBusy = useState(false), pcBusy = _pcBusy[0], setPcBusy = _pcBusy[1];
+  var _pcErr = useState(""), pcErr = _pcErr[0], setPcErr = _pcErr[1];
+  var _pcResult = useState(null), pcResult = _pcResult[0], setPcResult = _pcResult[1];
+  var _pcPrice = useState(""), pcPrice = _pcPrice[0], setPcPrice = _pcPrice[1];   // your quoted price per unit
+
+  async function pcLookup() {
+    var q = (pcQuery || "").trim();
+    if (!q) return;
+    if (!ok) { lp(); return; }
+    setPcBusy(true); setPcErr(""); setPcResult(null);
+    try {
+      var maps = await Promise.all([fetchNdcMap(), fetchAvgCostMap(), fetchUomConversionMap(), fetchPerWarehouseCostMap()]);
+      var map = maps[0], avgMap = maps[1] || {}, uomMap = maps[2] || {}, perWh = maps[3] || {};
+      if (!map) throw new Error("Could not fetch NDC data from Acumatica. Check your login.");
+      var entry = null, invId = null, shownNdc = "";
+      if (pcMode === "ndc") {
+        entry = lookupNdc(q, map);
+        if (entry) { invId = entry.inventoryId; shownNdc = q; }
+      } else {
+        var target = q.toUpperCase();
+        for (var k in map) {
+          if (map[k] && String(map[k].inventoryId || "").toUpperCase() === target) { entry = map[k]; invId = map[k].inventoryId; shownNdc = k; break; }
+        }
+      }
+      if (!entry || !invId) throw new Error("No match for \"" + q + "\" " + (pcMode === "ndc" ? "(NDC)" : "(Mfr No)") + " in the Generic NDCs map.");
+      var uom = (entry.uom || "").toUpperCase();
+      var conv = (invId && uom && uomMap[invId] && uomMap[invId][uom]) ? uomMap[invId][uom] : null;
+      var convFactor = conv ? (conv.op === "Divide" ? (1 / conv.factor) : conv.factor) : null;
+      var pricing = avgMap[invId] || null;
+      var avgCost = pricing && pricing.avgCost != null ? pricing.avgCost : null;
+      setPcResult({ inventoryId: invId, ndc: shownNdc, description: entry.description || "", uom: entry.uom || "", avgCost: avgCost, convFactor: convFactor, whCosts: perWh[invId] || {} });
+    } catch (e) { setPcErr(e && e.message ? e.message : String(e)); }
+    finally { setPcBusy(false); }
+  }
+
   // Warehouse -> receiving tracker sheet + tab.
   var TRACKER_MAP = {
     "TP-NY": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - BROOKLYN" },
@@ -3394,6 +3433,60 @@ function POImportTool(props) {
 
   return (
     <div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+        {[["translator", "PO Translator"], ["check", "Price Check"]].map(function(t) { var on = subTab === t[0]; return <button key={t[0]} onClick={function() { setSubTab(t[0]); }} style={{ padding: "8px 18px", borderRadius: 8, border: "1px solid " + (on ? TOOL_COLOR : "#E5E7EB"), background: on ? TOOL_COLOR : "#fff", color: on ? "#fff" : "#6B7280", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>{t[1]}</button>; })}
+      </div>
+
+      {subTab === "check" && <div>
+        <p style={{ color: "#6B7280", fontSize: 13, marginBottom: 20 }}>Look up a single generic by NDC or Mfr No (GEN- Inventory ID), see our average cost, and compare a quoted price per unit.</p>
+        <div style={S.card}>
+          <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, marginBottom: 8 }}>Search by</div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+            {[["ndc", "NDC"], ["mfr", "Mfr No (GEN-)"]].map(function(m) { var on = pcMode === m[0]; return <button key={m[0]} onClick={function() { setPcMode(m[0]); }} style={{ padding: "6px 14px", borderRadius: 8, border: "1px solid " + (on ? TOOL_COLOR : "#E5E7EB"), background: on ? "rgba(6,182,212,0.08)" : "#fff", color: on ? TOOL_COLOR : "#6B7280", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>{m[1]}</button>; })}
+          </div>
+          <div style={{ display: "flex", gap: 10 }}>
+            <input value={pcQuery} onChange={function(e) { setPcQuery(e.target.value); }} onKeyDown={function(e) { if (e.key === "Enter") pcLookup(); }} placeholder={pcMode === "ndc" ? "e.g. 27808-0266-01" : "e.g. GEN-10192"} style={Object.assign({}, S.inp, { flex: "1 1 320px", maxWidth: 420, padding: "10px 12px" })} />
+            <button onClick={pcLookup} disabled={pcBusy} style={Object.assign({}, S.btn(), { padding: "10px 20px", opacity: pcBusy ? 0.7 : 1 })}>{pcBusy ? "Looking up\u2026" : "Look up"}</button>
+          </div>
+          {pcErr && <div style={{ marginTop: 12, fontSize: 13, color: "#DC2626" }}>{pcErr}</div>}
+        </div>
+
+        {pcResult && <div style={S.card}>
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 18, fontWeight: 700, color: TOOL_COLOR }}>{pcResult.inventoryId}</div>
+            <div style={{ fontSize: 14, color: "#1F2937", marginTop: 2 }}>{pcResult.description || "\u2014"}</div>
+            <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 2 }}>{"NDC " + pcResult.ndc + "  \u00B7  UOM " + (pcResult.uom || "\u2014") + (pcResult.convFactor ? "  \u00B7  " + pcResult.convFactor + " per pkg" : "")}</div>
+          </div>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
+            <div style={{ flex: 1, minWidth: 180, background: "#F8F9FB", borderRadius: 8, padding: "12px 16px" }}>
+              <div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Our avg cost / unit</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: "#1F2937", marginTop: 4 }}>{pcResult.avgCost != null ? "$" + pcResult.avgCost.toFixed(4) : "\u2014"}</div>
+            </div>
+            {pcResult.avgCost != null && pcResult.convFactor && <div style={{ flex: 1, minWidth: 180, background: "#F8F9FB", borderRadius: 8, padding: "12px 16px" }}>
+              <div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>{"Our avg cost / " + (pcResult.uom || "pkg")}</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: "#1F2937", marginTop: 4 }}>{"$" + (pcResult.avgCost * pcResult.convFactor).toFixed(2)}</div>
+            </div>}
+          </div>
+          <div style={{ borderTop: "1px solid #F3F4F6", paddingTop: 16 }}>
+            <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, marginBottom: 6 }}>Your price per unit (tablet)</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+              <input type="number" step="0.0001" value={pcPrice} onChange={function(e) { setPcPrice(e.target.value); }} placeholder="0.0000" style={Object.assign({}, S.inp, { width: 160, padding: "10px 12px" })} />
+              {(function() {
+                var yp = parseFloat(pcPrice);
+                if (!(yp > 0) || pcResult.avgCost == null || pcResult.avgCost <= 0) return null;
+                var pct = ((yp - pcResult.avgCost) / pcResult.avgCost) * 100;
+                var diff = yp - pcResult.avgCost;
+                var same = Math.abs(pct) < 0.05;
+                var color = same ? "#6B7280" : (pct > 0 ? "#DC2626" : "#059669");
+                var label = same ? "same as our cost" : (pct > 0 ? "more expensive" : "cheaper");
+                return <div style={{ fontSize: 14, color: color, fontWeight: 600 }}>{(pct > 0 ? "+" : "") + pct.toFixed(1) + "% " + label}<span style={{ color: "#9CA3AF", fontWeight: 400 }}>{"  (" + (diff >= 0 ? "+" : "") + "$" + diff.toFixed(4) + "/unit)"}</span></div>;
+              })()}
+            </div>
+          </div>
+        </div>}
+      </div>}
+
+      {subTab === "translator" && <>
       <p style={{ color: "#6B7280", fontSize: 13, marginBottom: 20 }}>Upload vendor PO PDFs to extract NDCs, then validate against Acumatica <strong>Generic Current NDCs</strong> OData to find GEN- Inventory IDs.</p>
 
       <div style={S.card}>
@@ -3748,6 +3841,7 @@ function POImportTool(props) {
           </div>
         </div>
       </div>}
+      </>}
     </div>
   );
 }
