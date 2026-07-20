@@ -206,16 +206,20 @@ function parsePdfText(text) {
       // Parse numbers after NDC: qty, totalPrice, unitPrice
       var afterClean = afterNdc.replace(/Vetcove\s*-.*$/i, "").trim();
       var nums = afterClean.match(/[\d.]+/g) || [];
-      // Narrow-column exports wrap qty/total/unit onto their own lines below the
-      // NDC. If they aren't on the NDC line, collect the numeric lines that follow.
+      // Narrow-column exports wrap qty/total/unit below the NDC. Depending on the
+      // extractor they land either each on their own line, or together on one line
+      // that also carries the vendor name ("12 80.28 0.67 Vetcove - ..."), so strip
+      // the vendor tail first, then take the leading numbers.
       if (nums.length < 2) {
         for (var g = i + 1; g < Math.min(lines.length, i + 6) && nums.length < 3; g++) {
           var gl = lines[g].trim();
           if (!gl) continue;
-          if (/vetcove/i.test(gl)) break;
-          if (/\d{4,5}-\d{3,4}-\d{1,2}/.test(gl)) break;
-          if (/^[\d,]+\.?\d*$/.test(gl)) nums.push(gl.replace(/,/g, ""));
-          else break;
+          if (/\d{4,5}-\d{3,4}-\d{1,2}/.test(gl)) break; // reached the next line item
+          var glClean = gl.replace(/Vetcove\s*-.*$/i, "").trim();
+          var gnums = glClean.match(/[\d.]+/g);
+          if (gnums) { for (var gi = 0; gi < gnums.length && nums.length < 3; gi++) nums.push(gnums[gi]); }
+          if (/vetcove/i.test(gl)) break; // vendor tail marks the end of this item's numbers
+          if (!gnums) break;              // a non-numeric, non-vendor line ends the item
         }
       }
 
