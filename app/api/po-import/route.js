@@ -144,6 +144,10 @@ function parseGgmCrossoverText(text) {
 }
 
 function parsePdfText(text) {
+  // Some Keysource exports (with an extra "Actual PO" column) wrap the NDC across
+  // two lines, e.g. "50228-0113-" then "10". Stitch a dangling NDC back together
+  // before splitting into lines. Harmless for the normal single-line format.
+  text = String(text || "").replace(/(\d{4,5}-\d{3,4}-)\s*\n\s*(\d{1,2})(?!\d)/g, "$1$2");
   var lines = text.split("\n");
 
   // Detect header info from first ~10 lines
@@ -187,7 +191,7 @@ function parsePdfText(text) {
         var prevParts = [];
         for (var j = i - 1; j >= Math.max(0, i - 3); j--) {
           var prev = lines[j].trim();
-          if (!prev || prev === "Non EDI)" || /^\d+\s+\d+$/.test(prev)) break;
+          if (!prev || prev === "Non EDI)" || /^\d+\s+\d+$/.test(prev) || /^\d+$/.test(prev) || prev.toLowerCase() === "item #") break;
           if (prev.toLowerCase().includes("vetcove")) break;
           if (prev.toLowerCase().includes("drug name")) break;
           prevParts.unshift(prev);
@@ -201,7 +205,19 @@ function parsePdfText(text) {
 
       // Parse numbers after NDC: qty, totalPrice, unitPrice
       var afterClean = afterNdc.replace(/Vetcove\s*-.*$/i, "").trim();
-      var nums = afterClean.match(/[\d.]+/g);
+      var nums = afterClean.match(/[\d.]+/g) || [];
+      // Narrow-column exports wrap qty/total/unit onto their own lines below the
+      // NDC. If they aren't on the NDC line, collect the numeric lines that follow.
+      if (nums.length < 2) {
+        for (var g = i + 1; g < Math.min(lines.length, i + 6) && nums.length < 3; g++) {
+          var gl = lines[g].trim();
+          if (!gl) continue;
+          if (/vetcove/i.test(gl)) break;
+          if (/\d{4,5}-\d{3,4}-\d{1,2}/.test(gl)) break;
+          if (/^[\d,]+\.?\d*$/.test(gl)) nums.push(gl.replace(/,/g, ""));
+          else break;
+        }
+      }
 
       var qty = nums && nums.length >= 1 ? parseInt(nums[0]) : null;
       var totalPrice = nums && nums.length >= 2 ? Math.round(parseFloat(nums[1]) * 100) / 100 : null;
