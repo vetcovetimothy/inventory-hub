@@ -3809,8 +3809,8 @@ function POImportTool(props) {
             </div>}
 
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-              {allOk && <button onClick={openTrackerPreview} style={Object.assign({}, S.btn("ghost"), { padding: "8px 16px" })}>{"\u2192"} Add to tracker</button>}
               <button onClick={function() { setAcuCreateResult(null); setDummyDelete(null); }} style={Object.assign({}, S.btn(), { padding: "8px 16px" })}>Close</button>
+              {allOk && <button onClick={openTrackerPreview} style={Object.assign({}, S.btn(), { padding: "8px 16px", background: "#8B5CF6", border: "1px solid #8B5CF6", color: "#fff" })}>{"\u2192"} Add to tracker</button>}
             </div>
           </div>
         </div>;
