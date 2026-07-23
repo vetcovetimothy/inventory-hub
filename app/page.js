@@ -183,11 +183,11 @@ function getVendorLabel(v) { return VENDOR_LABELS[v] || null; }
 const BKO_SKIP = ["Bloodworth Wholesale Drugs", "Elanco US Inc."];
 const WH = {
   "TP-NY": { label: "Brooklyn", full: "Brooklyn, NY", color: "#3B82F6", emailTo: "nigel.white@fuzehealth.com, anna.wilson@fuzehealth.com, trudie.selby@fuzehealth.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Brooklyn " + d; } },
-  "TP-OH": { label: "Ohio", full: "Ohio", color: "#059669", emailTo: "nigel.white@fuzehealth.com, anna.wilson@fuzehealth.com, trudie.selby@fuzehealth.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Ohio " + d; } },
+  "TP-OH": { label: "Seven Hills", full: "Seven Hills, Ohio", color: "#059669", emailTo: "nigel.white@fuzehealth.com, anna.wilson@fuzehealth.com, trudie.selby@fuzehealth.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Ohio " + d; } },
   "TP-CA": { label: "Hayward", full: "Hayward, CA", color: "#D97706", emailTo: "nigel.white@fuzehealth.com, anna.wilson@fuzehealth.com, trudie.selby@fuzehealth.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Hayward " + d; } },
   "TP-TX": { label: "Dallas", full: "Dallas, TX", color: "#0891B2", emailTo: "nigel.white@fuzehealth.com, anna.wilson@fuzehealth.com, trudie.selby@fuzehealth.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Dallas " + d; } },
-  "GGM-KY": { label: "GoGoMeds", full: "GoGoMeds, KY", color: "#8B5CF6", emailTo: "p.pocsatko@gogomeds.com, m.shull@gogomeds.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Weekly Replenishment Orders " + d; } },
-  "GGM-AZ": { label: "GoGoMeds AZ", full: "GoGoMeds, AZ", color: "#EC4899", emailTo: "r.aldrich@gogomeds.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Weekly Replenishment Orders " + d; } },
+  "GGM-KY": { label: "[GGM] Southgate", full: "[GGM] Southgate, Kentucky", color: "#8B5CF6", emailTo: "p.pocsatko@gogomeds.com, m.shull@gogomeds.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Weekly Replenishment Orders " + d; } },
+  "GGM-AZ": { label: "[GGM] Scottsdale", full: "[GGM] Scottsdale, Arizona", color: "#EC4899", emailTo: "r.aldrich@gogomeds.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Weekly Replenishment Orders " + d; } },
 };
 
 /* ═══════ VENDOR CONTACTS ═══════ */
