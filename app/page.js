@@ -1133,7 +1133,7 @@ function WHT(props) {
             uomToPkgSize(ln.UOM),
             ln.OrderQty != null ? ln.OrderQty : "",
             "=INDEX(D:D,ROW())*INDEX(E:E,ROW())",
-            ln.OrderNbr || "",
+            p.vendorRef || ln.OrderNbr || "",
             fmtTrackerDate(ln.OrderDate),
           ]);
           trackerArrival.push(fmtTrackerDate(ln.PromisedDate));
