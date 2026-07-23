@@ -633,6 +633,23 @@ function WHT(props) {
   var updateVendorChannels = props.updateVendorChannels;
   var vendorContacts = props.vendorContacts || {};
   var isGGM = whKey.indexOf("GGM") === 0;
+
+  // Receiving tracker destinations by warehouse (same sheets/tabs as the PO Translator).
+  var TRACKER_MAP = {
+    "TP-NY": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - BROOKLYN" },
+    "TP-OH": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - SEVEN HILLS" },
+    "TP-CA": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - HAYWARD" },
+    "GGM-KY": { sheetId: "1dMZ_8VC6zaqLLWXQHFfuTXgxMfm0T4ip7To1CbXLfMk", tab: "RECEIVING - KY" },
+    "GGM-AZ": { sheetId: "1dMZ_8VC6zaqLLWXQHFfuTXgxMfm0T4ip7To1CbXLfMk", tab: "RECEIVING - AZ" },
+  };
+  function uomToPkgSize(uom) { var m = String(uom == null ? "" : uom).match(/(\d+)\s*$/); return m ? Number(m[1]) : 1; }
+  function fmtTrackerDate(v) {
+    if (!v) return "";
+    var s = String(v).trim();
+    var m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return Number(m[2]) + "/" + Number(m[3]) + "/" + m[1];
+    return s.slice(0, 10);
+  }
   var _sp = useState("overview"), subPage = _sp[0], setSubPage = _sp[1];
   var _d = useState([]), data = _d[0], setData = _d[1];
   var _ld = useState(false), loading = _ld[0], setLoading = _ld[1];
@@ -1096,6 +1113,54 @@ function WHT(props) {
           changed = true;
         }
       });
+
+      // ─── Add successfully-processed POs to the receiving tracker ───
+      // Build 8-col rows (+ Expected Arrival by header) for each PO that just
+      // processed OK and hasn't already been added. addedToTracker guards against
+      // re-adding if the same PO is processed again later.
+      var trackerRows = [], trackerArrival = [], addedKeys = [];
+      resp.results.forEach(function(r, i) {
+        if (!r.ok) return;
+        var p = processable[i];
+        if (!p || !p.key) return;
+        if ((updatedNotes[p.key] || {}).addedToTracker) return;
+        var lines = vendorGroups[p.key] || [];
+        lines.forEach(function(ln) {
+          trackerRows.push([
+            ln.VendorName || "",
+            ln.SKUNDC || "",
+            ln.Description || "",
+            uomToPkgSize(ln.UOM),
+            ln.OrderQty != null ? ln.OrderQty : "",
+            "=INDEX(D:D,ROW())*INDEX(E:E,ROW())",
+            ln.OrderNbr || "",
+            fmtTrackerDate(ln.OrderDate),
+          ]);
+          trackerArrival.push(fmtTrackerDate(ln.PromisedDate));
+        });
+        addedKeys.push(p.key);
+      });
+      if (trackerRows.length) {
+        var dest = TRACKER_MAP[whKey];
+        if (dest) {
+          try {
+            var tResp = await fetch("/api/tracker-append", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ sheetId: dest.sheetId, tab: dest.tab, rows: trackerRows, extraColumn: { header: "Expected Arrival", values: trackerArrival } }),
+            });
+            var tData = await tResp.json();
+            if (tData && tData.ok) {
+              toast("Added " + tData.appended + " row" + (tData.appended === 1 ? "" : "s") + " to " + dest.tab, "success");
+              addedKeys.forEach(function(k) { updatedNotes[k] = Object.assign({}, updatedNotes[k] || {}, { addedToTracker: true }); });
+              changed = true;
+            } else {
+              toast("Tracker add failed: " + ((tData && tData.error) || "unknown"), "error");
+            }
+          } catch (e) { toast("Tracker add error: " + (e && e.message ? e.message : e), "error"); }
+        }
+      }
+
       if (changed) {
         setShipNotes(updatedNotes);
         try { persist(data, emailSent, runBy, runTime, updatedNotes); } catch (e) {}
