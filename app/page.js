@@ -185,6 +185,7 @@ const WH = {
   "TP-NY": { label: "Brooklyn", full: "Brooklyn, NY", color: "#3B82F6", emailTo: "nigel.white@fuzehealth.com, anna.wilson@fuzehealth.com, trudie.selby@fuzehealth.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Brooklyn " + d; } },
   "TP-OH": { label: "Ohio", full: "Ohio", color: "#059669", emailTo: "nigel.white@fuzehealth.com, anna.wilson@fuzehealth.com, trudie.selby@fuzehealth.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Ohio " + d; } },
   "TP-CA": { label: "Hayward", full: "Hayward, CA", color: "#D97706", emailTo: "nigel.white@fuzehealth.com, anna.wilson@fuzehealth.com, trudie.selby@fuzehealth.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Hayward " + d; } },
+  "TP-TX": { label: "Dallas", full: "Dallas, TX", color: "#0891B2", emailTo: "nigel.white@fuzehealth.com, anna.wilson@fuzehealth.com, trudie.selby@fuzehealth.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Dallas " + d; } },
   "GGM-KY": { label: "GoGoMeds", full: "GoGoMeds, KY", color: "#8B5CF6", emailTo: "p.pocsatko@gogomeds.com, m.shull@gogomeds.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Weekly Replenishment Orders " + d; } },
   "GGM-AZ": { label: "GoGoMeds AZ", full: "GoGoMeds, AZ", color: "#EC4899", emailTo: "r.aldrich@gogomeds.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Weekly Replenishment Orders " + d; } },
 };
@@ -2880,6 +2881,7 @@ function POImportTool(props) {
         "TP-NY":  "TPNYAvgCost",
         "TP-OH":  "TPOHAvgCost",
         "TP-CA":  "TPCAAvgCost",
+        "TP-TX":  "TPTXAvgCost",
         "GGM":    "GGMAvgCost",
         "GGM-KY": "GGMKYAvgCost",
         "GGM-AZ": "GGMAZAvgCost",
@@ -4288,7 +4290,7 @@ function FuzeTracker(props) {
     return { total: total, received: received, landed: landed, pending: pending };
   }, [data]);
 
-  var whTabs = [{ id: "TP-NY", label: "Brooklyn" }, { id: "TP-OH", label: "Seven Hills" }, { id: "TP-CA", label: "Hayward" }];
+  var whTabs = [{ id: "TP-NY", label: "Brooklyn" }, { id: "TP-OH", label: "Seven Hills" }, { id: "TP-CA", label: "Hayward" }, { id: "TP-TX", label: "Dallas" }];
 
   return <div>
     {/* Warehouse tabs */}
@@ -6770,7 +6772,7 @@ function OOSTracker(props) {
               <td style={S.td}><div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>{(r._whs || []).map(function(w, wi) { var st = whStyle(w); return <span key={wi} style={{ fontSize: 11, padding: "2px 8px", borderRadius: 6, fontWeight: 500, background: st.bg, color: st.color }}>{w}</span>; })}</div></td>
               <td style={S.td}>{(function() {
                 // Map OOS row's display warehouse to Acumatica warehouse codes
-                var OOS_TO_ACU = { "Brooklyn": ["TP-NY"], "Ohio": ["TP-OH"], "Hayward": ["TP-CA"], "Kentucky": ["GGM-KY"], "Arizona": ["GGM-AZ"], "Hills CA": ["HILL-CP-CA"], "Hills NJ": ["HILL-CP-NJ"], "Hills FL": ["HILL-CP-FL"], "Hills TX": ["HILL-CP-TX"] };
+                var OOS_TO_ACU = { "Brooklyn": ["TP-NY"], "Ohio": ["TP-OH"], "Hayward": ["TP-CA"], "Dallas": ["TP-TX"], "Kentucky": ["GGM-KY"], "Arizona": ["GGM-AZ"], "Hills CA": ["HILL-CP-CA"], "Hills NJ": ["HILL-CP-NJ"], "Hills FL": ["HILL-CP-FL"], "Hills TX": ["HILL-CP-TX"] };
                 var allowed = []; (r._whs || []).forEach(function(dn) { (OOS_TO_ACU[dn] || []).forEach(function(c) { if (allowed.indexOf(c) < 0) allowed.push(c); }); }); if (allowed.length === 0) allowed = null;
                 var allMatches = orderMap[String(r.MANUFACTURER_NO)] || [];
                 var matches = allowed ? allMatches.filter(function(m) { return allowed.indexOf((m.wh || "").trim().toUpperCase()) >= 0; }) : allMatches;
