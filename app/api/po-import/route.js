@@ -9,7 +9,7 @@
 
 export const maxDuration = 60;
 
-const WAREHOUSE_MAP = { hayward: "TP-CA", brooklyn: "TP-NY", "seven hills": "TP-OH", ohio: "TP-OH" };
+const WAREHOUSE_MAP = { hayward: "TP-CA", brooklyn: "TP-NY", "seven hills": "TP-OH", ohio: "TP-OH", dallas: "TP-TX" };
 const NDC_INLINE = /(\d{4,5}-\d{3,4}-\d{1,2})/g;
 
 function detectWarehouse(text) {
