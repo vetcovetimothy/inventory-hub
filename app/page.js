@@ -8714,6 +8714,7 @@ function PoReconPage(props) {
   var _busy = useState(false), busy = _busy[0], setBusy = _busy[1];
   var _log = useState([]), log = _log[0], setLog = _log[1];
   var _summary = useState(null), summary = _summary[0], setSummary = _summary[1];
+  var S = useMemo(function() { return makeStyles("#6366F1"); }, []);
 
   var TRACKER_MAP = {
     "TP-NY": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - BROOKLYN" },
