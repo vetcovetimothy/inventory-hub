@@ -348,13 +348,28 @@ export async function POST(request) {
 
     // Call Acumatica
     const authHeader = "Basic " + Buffer.from(authUser + ":" + authPass).toString("base64");
-    const resp = await fetch(url, {
-      method: "GET",
-      headers: {
-        "Authorization": authHeader,
-        "Accept": "application/json",
-      },
-    });
+
+    // The HD PO Tracker GIs may use a plain hyphen, en-dash, or em-dash in their
+    // title. Try each until one resolves (a 404 means "wrong title"), so a stray
+    // en-dash in the inquiry name doesn't break the pull.
+    let urlsToTry = [url];
+    if (type === "recon-tp" || type === "recon-ggm") {
+      const qIdx = url.indexOf("?");
+      const suffix = qIdx >= 0 ? url.slice(qIdx) : "";
+      const site = type === "recon-tp" ? "TP" : "GGM";
+      urlsToTry = ["-", "%E2%80%93", "%E2%80%94"].map(function(dash) {
+        return `${BASE}${PREFIX}/HD%20PO%20Tracker%20${dash}%20${site}${suffix}`;
+      });
+    }
+
+    let resp;
+    for (let ui = 0; ui < urlsToTry.length; ui++) {
+      resp = await fetch(urlsToTry[ui], {
+        method: "GET",
+        headers: { "Authorization": authHeader, "Accept": "application/json" },
+      });
+      if (resp.ok || resp.status !== 404) break; // success, or a real (non-title) error
+    }
 
     if (!resp.ok) {
       const text = await resp.text();
