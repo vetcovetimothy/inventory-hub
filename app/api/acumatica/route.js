@@ -27,6 +27,8 @@ const ENDPOINTS = {
   "uom-conversions": "Stock%20Item%20UOM%20Conversions",
   "stock-cross-ref": "FORMULARY%20-%20Stock%20Item%20Cross%20Ref",
   "open-po-lines": "Open%20PO%20Lines",
+  "recon-tp":      "HD%20PO%20Tracker%20-%20TP",
+  "recon-ggm":     "HD%20PO%20Tracker%20-%20GGM",
 };
 
 // Which columns to extract for each type (keyGroup = possible OData field names)
@@ -182,6 +184,36 @@ const COLUMN_MAP = {
     { label: "VendorName",    keys: ["VendorName", "Vendor Name", "Vendor"] },
     { label: "Warehouse",     keys: ["Warehouse", "WarehouseID", "SiteID"] },
   ],
+  // Reconciliation GIs (HD PO Tracker – TP / GGM): richer feed used to catch
+  // manually-created Acumatica POs missing from the receiving trackers.
+  "recon-tp": [
+    { label: "VendorName",   keys: ["Vendor Name", "VendorName"] },
+    { label: "SKUNDC",       keys: ["SKU NDC", "SKUNDC"] },
+    { label: "Description",  keys: ["Description", "InventoryID_Description"] },
+    { label: "BOHPackSize",  keys: ["BOH Pack Size", "BOHPackSize", "BOHPKSIZE", "BOHPKSIZE_Attributes"] },
+    { label: "OrderQty",     keys: ["Order Qty.", "OrderQty"] },
+    { label: "VendorRef",    keys: ["Vendor Ref.", "VendorRef", "VendorRefNbr"] },
+    { label: "OrderDate",    keys: ["POLine_orderDate", "POLineorderDate", "OrderDate", "Date"] },
+    { label: "PromisedDate", keys: ["Promised", "PromisedDate"] },
+    { label: "InventoryID",  keys: ["Inventory ID", "InventoryID"] },
+    { label: "OrderNbr",     keys: ["Order Nbr.", "OrderNbr"] },
+    { label: "Warehouse",    keys: ["Warehouse", "SiteID"] },
+    { label: "UOM",          keys: ["UOM", "Unit"] },
+  ],
+  "recon-ggm": [
+    { label: "VendorName",   keys: ["Vendor Name", "VendorName"] },
+    { label: "SKUNDC",       keys: ["SKU NDC", "SKUNDC"] },
+    { label: "Description",  keys: ["Description", "InventoryID_Description"] },
+    { label: "BOHPackSize",  keys: ["BOH Pack Size", "BOHPackSize", "BOHPKSIZE", "BOHPKSIZE_Attributes"] },
+    { label: "OrderQty",     keys: ["Order Qty.", "OrderQty"] },
+    { label: "VendorRef",    keys: ["Vendor Ref.", "VendorRef", "VendorRefNbr"] },
+    { label: "OrderDate",    keys: ["POLine_orderDate", "POLineorderDate", "OrderDate", "Date"] },
+    { label: "PromisedDate", keys: ["Promised", "PromisedDate"] },
+    { label: "InventoryID",  keys: ["Inventory ID", "InventoryID"] },
+    { label: "OrderNbr",     keys: ["Order Nbr.", "OrderNbr"] },
+    { label: "Warehouse",    keys: ["Warehouse", "SiteID"] },
+    { label: "UOM",          keys: ["UOM", "Unit"] },
+  ],
 };
 
 // === Cache TTLs (ms) ===
@@ -305,6 +337,12 @@ export async function POST(request) {
     // For open PO lines, fetch all (a specific PO's lines can be anywhere in the
     // set; without a cap the GI truncates and recent/scattered POs go missing).
     if (type === "open-po-lines") {
+      url += `?$top=100000`;
+    }
+
+    // Reconciliation GIs: pull everything (all warehouses); the hub applies the
+    // 6-day window and warehouse routing client-side.
+    if (type === "recon-tp" || type === "recon-ggm") {
       url += `?$top=100000`;
     }
 
