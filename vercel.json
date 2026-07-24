@@ -11,6 +11,10 @@
     {
       "path": "/api/cron/oos-history",
       "schedule": "30 23 * * *"
+    },
+    {
+      "path": "/api/cron/po-recon",
+      "schedule": "0 4 * * *"
     }
   ]
 }
