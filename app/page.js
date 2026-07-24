@@ -8709,6 +8709,121 @@ function ForecastingTool(props) {
 }
 
 
+function PoReconPage(props) {
+  var cred = props.cred, ok = props.ok, lp = props.lp, toast = props.toast;
+  var _busy = useState(false), busy = _busy[0], setBusy = _busy[1];
+  var _log = useState([]), log = _log[0], setLog = _log[1];
+  var _summary = useState(null), summary = _summary[0], setSummary = _summary[1];
+
+  var TRACKER_MAP = {
+    "TP-NY": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - BROOKLYN" },
+    "TP-OH": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - SEVEN HILLS" },
+    "TP-CA": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - HAYWARD" },
+    "TP-TX": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - DALLAS" },
+    "GGM-KY": { sheetId: "1dMZ_8VC6zaqLLWXQHFfuTXgxMfm0T4ip7To1CbXLfMk", tab: "RECEIVING - KY" },
+    "GGM-AZ": { sheetId: "1dMZ_8VC6zaqLLWXQHFfuTXgxMfm0T4ip7To1CbXLfMk", tab: "RECEIVING - AZ" },
+  };
+  function uomToPkgSize(u) { var m = String(u == null ? "" : u).match(/(\d+)\s*$/); return m ? Number(m[1]) : 1; }
+  function fmtDate(v) { if (!v) return ""; var s = String(v).trim(); var m = s.match(/^(\d{4})-(\d{2})-(\d{2})/); if (m) return Number(m[2]) + "/" + Number(m[3]) + "/" + m[1]; return s.slice(0, 10); }
+  function parseDate(v) { var s = String(v || "").trim(); var m = s.match(/^(\d{4})-(\d{2})-(\d{2})/); if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])); var m2 = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/); if (m2) return new Date(Number(m2[3]), Number(m2[1]) - 1, Number(m2[2])); return null; }
+  function addLog(msg, kind) { setLog(function (p) { return p.concat([{ msg: msg, kind: kind || "info" }]); }); }
+
+  async function readRefs(dest) {
+    var resp = await fetch("/api/tracker-read", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sheetId: dest.sheetId, tab: dest.tab }) });
+    var data = await resp.json();
+    if (!data || !data.ok) throw new Error(dest.tab + ": " + ((data && data.error) || "read failed"));
+    var set = {}; (data.refs || []).forEach(function (r) { set[String(r).trim()] = 1; }); return set;
+  }
+
+  async function runRecon() {
+    if (!cred || !cred.username || !cred.password) { toast("Acumatica login required", "error"); lp && lp(); return; }
+    setBusy(true); setLog([]); setSummary(null);
+    try {
+      addLog("Pulling reconciliation feeds from Acumatica\u2026");
+      var tp = await fetchAcumatica("recon-tp", null, cred.username, cred.password);
+      var ggm = await fetchAcumatica("recon-ggm", null, cred.username, cred.password);
+      var rows = (tp || []).concat(ggm || []);
+      addLog("Pulled " + rows.length + " PO lines (TP " + (tp || []).length + ", GGM " + (ggm || []).length + ").");
+
+      var cutoff = new Date(); cutoff.setHours(0, 0, 0, 0); cutoff.setDate(cutoff.getDate() - 6);
+      var recent = rows.filter(function (r) { var d = parseDate(r.OrderDate); return d && d >= cutoff; });
+      addLog("Within last 6 days: " + recent.length + " lines.");
+
+      var groups = {};
+      recent.forEach(function (r) {
+        var wh = String(r.Warehouse || "").trim(), ref = String(r.VendorRef || "").trim();
+        if (!wh || !ref || !TRACKER_MAP[wh]) return;
+        var k = wh + "||" + ref; if (!groups[k]) groups[k] = { wh: wh, ref: ref, lines: [] }; groups[k].lines.push(r);
+      });
+      var whset = {}; Object.keys(groups).forEach(function (k) { whset[groups[k].wh] = 1; });
+      var whs = Object.keys(whset);
+      if (!whs.length) { addLog("No recent POs mapped to a tracker tab. Nothing to do.", "warn"); setBusy(false); return; }
+
+      var existing = {};
+      for (var wi = 0; wi < whs.length; wi++) {
+        var d0 = TRACKER_MAP[whs[wi]];
+        addLog("Reading existing POs in " + d0.tab + "\u2026");
+        existing[whs[wi]] = await readRefs(d0);
+      }
+
+      var perWh = {};
+      Object.keys(groups).forEach(function (k) {
+        var g = groups[k];
+        if (existing[g.wh][g.ref]) return;
+        if (!perWh[g.wh]) perWh[g.wh] = { rows: [], arrival: [], refs: [] };
+        g.lines.forEach(function (r) {
+          var ps = Number(r.BOHPackSize); if (!ps || isNaN(ps)) ps = uomToPkgSize(r.UOM);
+          perWh[g.wh].rows.push([r.VendorName || "", r.SKUNDC || "", r.Description || "", ps, r.OrderQty != null ? r.OrderQty : "", "=INDEX(D:D,ROW())*INDEX(E:E,ROW())", g.ref, fmtDate(r.OrderDate)]);
+          perWh[g.wh].arrival.push(fmtDate(r.PromisedDate));
+        });
+        perWh[g.wh].refs.push(g.ref);
+      });
+
+      var missingWhs = Object.keys(perWh);
+      var totalMissingPOs = 0, totalRows = 0;
+      missingWhs.forEach(function (w) { totalMissingPOs += perWh[w].refs.length; totalRows += perWh[w].rows.length; });
+      if (!totalMissingPOs) { addLog("\u2713 Everything is already on the trackers. Nothing to add.", "ok"); setSummary({ added: 0, pos: 0, verified: true }); setBusy(false); return; }
+      addLog("Found " + totalMissingPOs + " PO(s) missing across " + missingWhs.length + " tab(s) \u2014 " + totalRows + " line(s). Adding\u2026");
+
+      var addedTotal = 0;
+      for (var mi = 0; mi < missingWhs.length; mi++) {
+        var w = missingWhs[mi], dest = TRACKER_MAP[w], pw = perWh[w];
+        var aResp = await fetch("/api/tracker-append", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sheetId: dest.sheetId, tab: dest.tab, rows: pw.rows, extraColumn: { header: "Expected Arrival", values: pw.arrival } }) });
+        var aData = await aResp.json();
+        if (aData && aData.ok) { addedTotal += aData.appended; addLog("Added " + aData.appended + " line(s) to " + dest.tab + " \u2014 PO(s): " + pw.refs.join(", "), "ok"); }
+        else { addLog("Failed to add to " + dest.tab + ": " + ((aData && aData.error) || "unknown"), "error"); }
+      }
+
+      addLog("Verifying\u2026");
+      var stillMissing = [];
+      for (var vi = 0; vi < missingWhs.length; vi++) {
+        var w2 = missingWhs[vi], dest2 = TRACKER_MAP[w2];
+        var after = await readRefs(dest2);
+        perWh[w2].refs.forEach(function (ref) { if (!after[ref]) stillMissing.push(dest2.tab + " / " + ref); });
+      }
+      if (stillMissing.length) addLog("\u26A0 Verification: still not found \u2014 " + stillMissing.join(", "), "error");
+      else addLog("\u2713 Verified \u2014 all added POs are present on the trackers.", "ok");
+      setSummary({ added: addedTotal, pos: totalMissingPOs, verified: stillMissing.length === 0 });
+    } catch (e) { addLog("Error: " + (e && e.message ? e.message : e), "error"); toast("Reconciliation failed", "error"); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <div>
+      <p style={{ color: "#6B7280", fontSize: 13, marginBottom: 20 }}>Catches POs created directly in Acumatica (not through the hub) that are missing from the FuzeRX / GGM receiving trackers. Pulls the last 6 days of POs, compares Vendor Ref against what's already logged, and auto-adds anything missing \u2014 then re-checks to confirm it landed.</p>
+      <div style={S.card}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <button onClick={runRecon} disabled={busy} style={Object.assign({}, S.btn(), { padding: "10px 20px", opacity: busy ? 0.7 : 1 })}>{busy ? "Reconciling\u2026" : "Check & sync trackers"}</button>
+          {summary && <span style={{ fontSize: 13, color: summary.verified === false ? "#DC2626" : "#059669", fontWeight: 600 }}>{summary.pos === 0 ? "Already in sync" : ("Added " + summary.added + " line(s) across " + summary.pos + " PO(s)" + (summary.verified ? " \u2713" : ""))}</span>}
+        </div>
+      </div>
+      {log.length > 0 && <div style={Object.assign({}, S.card, { fontFamily: "monospace", fontSize: 12, lineHeight: 1.6 })}>
+        {log.map(function (l, i) { return <div key={i} style={{ color: l.kind === "error" ? "#DC2626" : l.kind === "ok" ? "#059669" : l.kind === "warn" ? "#D97706" : "#374151" }}>{l.msg}</div>; })}
+      </div>}
+    </div>
+  );
+}
+
 export default function Hub() {
   var _p = useState(function() {
     if (typeof window !== "undefined") {
@@ -8892,8 +9007,8 @@ export default function Hub() {
   );
 
   var isWH = page in WH;
-  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "backorder-resolver" ? "#14B8A6" : page === "po-import" ? "#06B6D4" : page === "cycle-count" ? "#14B8A6" : page === "fuze-tracker" ? "#F59E0B" : page === "ggm-tracker" ? "#8B5CF6" : page === "hills-pawtree" ? "#10B981" : page === "truckloader" ? "#D97706" : page === "oos-tracker" ? "#EF4444" : page === "vendor-settings" ? "#6366F1" : page === "forecasting" ? "#0EA5E9" : page === "how-to" ? "#6B7280" : "#3B82F6";
-  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "backorder-resolver" ? "Backorder Resolver" : page === "po-import" ? "Generic PO Translator" : page === "cycle-count" ? "Cycle Counting" : page === "fuze-tracker" ? "Fuze Tracker" : page === "ggm-tracker" ? "GGM Tracker" : page === "hills-pawtree" ? "Hills & Pawtree Tracker" : page === "truckloader" ? "Hills Truckloader" : page === "oos-tracker" ? "OOS Tracker" : page === "vendor-settings" ? "Vendor Settings" : page === "forecasting" ? "Forecasting" : page === "how-to" ? "How-To Guide" : showLogin ? "Login" : "Vendor Settings";
+  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "backorder-resolver" ? "#14B8A6" : page === "po-import" ? "#06B6D4" : page === "cycle-count" ? "#14B8A6" : page === "fuze-tracker" ? "#F59E0B" : page === "ggm-tracker" ? "#8B5CF6" : page === "hills-pawtree" ? "#10B981" : page === "truckloader" ? "#D97706" : page === "oos-tracker" ? "#EF4444" : page === "vendor-settings" ? "#6366F1" : page === "po-recon" ? "#6366F1" : page === "forecasting" ? "#0EA5E9" : page === "how-to" ? "#6B7280" : "#3B82F6";
+  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "backorder-resolver" ? "Backorder Resolver" : page === "po-import" ? "Generic PO Translator" : page === "cycle-count" ? "Cycle Counting" : page === "fuze-tracker" ? "Fuze Tracker" : page === "ggm-tracker" ? "GGM Tracker" : page === "hills-pawtree" ? "Hills & Pawtree Tracker" : page === "truckloader" ? "Hills Truckloader" : page === "oos-tracker" ? "OOS Tracker" : page === "vendor-settings" ? "Vendor Settings" : page === "po-recon" ? "PO Reconciliation" : page === "forecasting" ? "Forecasting" : page === "how-to" ? "How-To Guide" : showLogin ? "Login" : "Vendor Settings";
 
   function SideLink(p) {
     var active = page === p.id && !showLogin;
@@ -8936,6 +9051,7 @@ export default function Hub() {
         <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 8 }}>
           <div style={{ padding: "8px 20px" }}><span style={{ fontSize: 10, fontWeight: 500, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "1px" }}>Settings</span></div>
           <div onClick={function() { setPagePersist("vendor-settings"); setShowLogin(false); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", margin: "1px 12px", fontSize: 13, cursor: "pointer", fontWeight: page === "vendor-settings" && !showLogin ? 500 : 400, color: page === "vendor-settings" && !showLogin ? "#93bbfc" : "rgba(255,255,255,0.55)", background: page === "vendor-settings" && !showLogin ? "rgba(96,165,250,0.15)" : "transparent", borderRadius: 8 }}><IconMail /> Vendor Settings</div>
+          <div onClick={function() { setPagePersist("po-recon"); setShowLogin(false); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", margin: "1px 12px", fontSize: 13, cursor: "pointer", fontWeight: page === "po-recon" && !showLogin ? 500 : 400, color: page === "po-recon" && !showLogin ? "#93bbfc" : "rgba(255,255,255,0.55)", background: page === "po-recon" && !showLogin ? "rgba(96,165,250,0.15)" : "transparent", borderRadius: 8 }}><IconCSV /> PO Reconciliation</div>
           <div onClick={function() { setPagePersist("how-to"); setShowLogin(false); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", margin: "1px 12px", fontSize: 13, cursor: "pointer", fontWeight: page === "how-to" && !showLogin ? 500 : 400, color: page === "how-to" && !showLogin ? "#93bbfc" : "rgba(255,255,255,0.55)", background: page === "how-to" && !showLogin ? "rgba(96,165,250,0.15)" : "transparent", borderRadius: 8 }}><IconCSV /> How-To Guide</div>
         </div>
         <div style={{ flex: 1 }} />
@@ -8982,6 +9098,7 @@ export default function Hub() {
           {!showLogin && page === "backorder-resolver" && <BackorderResolver toast={showToast} cred={cred} />}
           {!showLogin && page === "forecasting" && <ForecastingTool toast={showToast} cred={cred} ok={ok} lp={promptLogin} />}
           {!showLogin && (page === "vendor-settings" || page === "vendor-contacts" || page === "rules") && <VendorSettingsPage contacts={vendorContacts} updateContacts={updateVendorContacts} channels={vendorChannels} updateChannels={updateVendorChannels} shipRules={shipRules} updateShipRules={updateShipRules} toast={showToast} />}
+          {!showLogin && page === "po-recon" && <PoReconPage cred={cred} ok={ok} lp={promptLogin} toast={showToast} />}
           {!showLogin && page === "how-to" && <HowToGuide toast={showToast} />}
         </div>
       </div>
