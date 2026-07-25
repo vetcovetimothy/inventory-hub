@@ -51,13 +51,6 @@ async function run() {
   var ggm = await pullGI("recon-ggm", user, pass);
   var rows = tp.concat(ggm);
 
-  // Fill blank generic NDCs from the Generic Current NDCs feed (by inventory ID).
-  var invToNdc = {};
-  try {
-    var ndcData = await pullGI("ndc-lookup", user, pass);
-    ndcData.forEach(function (row) { var inv = String(row.InventoryID || "").trim(); var ndc = String(row.AlternateID || "").trim(); if (inv && ndc && !invToNdc[inv]) invToNdc[inv] = ndc; });
-  } catch (e) { /* leave generic NDCs blank if the map can't load */ }
-
   var cutoff = new Date(); cutoff.setHours(0, 0, 0, 0); cutoff.setDate(cutoff.getDate() - 6);
   var recent = rows.filter(function (r) { var d = parseDate(r.OrderDate); return d && d >= cutoff; });
 
@@ -80,7 +73,7 @@ async function run() {
     if (!perWh[g.wh]) perWh[g.wh] = { rows: [], arrival: [], refs: [] };
     g.lines.forEach(function (r) {
       var ps = Number(r.BOHPackSize); if (!ps || isNaN(ps)) ps = uomToPkgSize(r.UOM);
-      var ndc = (r.SKUNDC && String(r.SKUNDC).trim()) ? String(r.SKUNDC).trim() : (invToNdc[String(r.InventoryID || "").trim()] || "");
+      var ndc = (r.SKUNDC && String(r.SKUNDC).trim()) ? String(r.SKUNDC).trim() : String(r.AltID || "").trim();
       var sup = String(r.VendorName || "").toLowerCase();
       var skipArrival = sup.indexOf("vetcove generics") >= 0 || sup.indexOf("bloodworth") >= 0;
       perWh[g.wh].rows.push([r.VendorName || "", ndc, r.Description || "", ps, r.OrderQty != null ? r.OrderQty : "", "=INDEX(D:D,ROW())*INDEX(E:E,ROW())", g.ref, fmtDate(r.OrderDate)]);
