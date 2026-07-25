@@ -8746,14 +8746,6 @@ function PoReconPage(props) {
       var rows = (tp || []).concat(ggm || []);
       addLog("Pulled " + rows.length + " PO lines (TP " + (tp || []).length + ", GGM " + (ggm || []).length + ").");
 
-      // Generics come through the GI with a blank SKU NDC (that column is a TP
-      // attribute). Fill them from the Generic Current NDCs feed by inventory ID.
-      var invToNdc = {};
-      try {
-        var ndcData = await fetchAcumatica("ndc-lookup", null, cred.username, cred.password);
-        (ndcData || []).forEach(function (row) { var inv = String(row.InventoryID || "").trim(); var ndc = String(row.AlternateID || "").trim(); if (inv && ndc && !invToNdc[inv]) invToNdc[inv] = ndc; });
-      } catch (e) { addLog("(Could not load NDC map; generic NDCs may be blank)", "warn"); }
-
       var cutoff = new Date(); cutoff.setHours(0, 0, 0, 0); cutoff.setDate(cutoff.getDate() - 6);
       var recent = rows.filter(function (r) { var d = parseDate(r.OrderDate); return d && d >= cutoff; });
       addLog("Within last 6 days: " + recent.length + " lines.");
@@ -8782,7 +8774,7 @@ function PoReconPage(props) {
         if (!perWh[g.wh]) perWh[g.wh] = { rows: [], arrival: [], refs: [] };
         g.lines.forEach(function (r) {
           var ps = Number(r.BOHPackSize); if (!ps || isNaN(ps)) ps = uomToPkgSize(r.UOM);
-          var ndc = (r.SKUNDC && String(r.SKUNDC).trim()) ? String(r.SKUNDC).trim() : (invToNdc[String(r.InventoryID || "").trim()] || "");
+          var ndc = (r.SKUNDC && String(r.SKUNDC).trim()) ? String(r.SKUNDC).trim() : String(r.AltID || "").trim();
           var sup = String(r.VendorName || "").toLowerCase();
           var skipArrival = sup.indexOf("vetcove generics") >= 0 || sup.indexOf("bloodworth") >= 0;
           perWh[g.wh].rows.push([r.VendorName || "", ndc, r.Description || "", ps, r.OrderQty != null ? r.OrderQty : "", "=INDEX(D:D,ROW())*INDEX(E:E,ROW())", g.ref, fmtDate(r.OrderDate)]);
