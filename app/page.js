@@ -8750,12 +8750,14 @@ function PoReconPage(props) {
       var recent = rows.filter(function (r) { var d = parseDate(r.OrderDate); return d && d >= cutoff; });
       addLog("Within last 6 days: " + recent.length + " lines.");
 
-      var groups = {};
+      var groups = {}, skippedNoRef = 0;
       recent.forEach(function (r) {
         var wh = String(r.Warehouse || "").trim(), ref = String(r.VendorRef || "").trim();
-        if (!wh || !ref || !TRACKER_MAP[wh]) return;
+        if (!wh || !TRACKER_MAP[wh]) return;
+        if (!ref) { skippedNoRef++; return; }
         var k = wh + "||" + ref; if (!groups[k]) groups[k] = { wh: wh, ref: ref, lines: [] }; groups[k].lines.push(r);
       });
+      if (skippedNoRef) addLog("Skipped " + skippedNoRef + " line(s) with a blank Vendor Ref \u2014 not added.", "warn");
       var whset = {}; Object.keys(groups).forEach(function (k) { whset[groups[k].wh] = 1; });
       var whs = Object.keys(whset);
       if (!whs.length) { addLog("No recent POs mapped to a tracker tab. Nothing to do.", "warn"); setBusy(false); return; }
