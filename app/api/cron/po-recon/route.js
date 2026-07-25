@@ -54,10 +54,11 @@ async function run() {
   var cutoff = new Date(); cutoff.setHours(0, 0, 0, 0); cutoff.setDate(cutoff.getDate() - 6);
   var recent = rows.filter(function (r) { var d = parseDate(r.OrderDate); return d && d >= cutoff; });
 
-  var groups = {};
+  var groups = {}, skippedNoRef = 0;
   recent.forEach(function (r) {
     var wh = String(r.Warehouse || "").trim(), ref = String(r.VendorRef || "").trim();
-    if (!wh || !ref || !TRACKER_MAP[wh]) return;
+    if (!wh || !TRACKER_MAP[wh]) return;
+    if (!ref) { skippedNoRef++; return; }
     var k = wh + "||" + ref; if (!groups[k]) groups[k] = { wh: wh, ref: ref, lines: [] }; groups[k].lines.push(r);
   });
 
@@ -91,7 +92,7 @@ async function run() {
     results.push({ tab: dest.tab, ok: !!(data && data.ok), added: (data && data.appended) || 0, pos: pw.refs, error: (data && data.error) || null });
   }
 
-  return { ok: true, date: new Date().toISOString().slice(0, 10), pulled: rows.length, recentWindow: recent.length, tabsUpdated: results };
+  return { ok: true, date: new Date().toISOString().slice(0, 10), pulled: rows.length, recentWindow: recent.length, skippedNoRef: skippedNoRef, tabsUpdated: results };
 }
 
 export async function GET() {
