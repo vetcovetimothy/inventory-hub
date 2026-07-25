@@ -199,6 +199,7 @@ const COLUMN_MAP = {
     { label: "OrderNbr",     keys: ["Order Nbr.", "OrderNbr"] },
     { label: "Warehouse",    keys: ["Warehouse", "SiteID"] },
     { label: "UOM",          keys: ["UOM", "Unit"] },
+    { label: "AltID",        keys: ["Alternate ID", "AlternateID", "Alt ID", "AltID", "POLineAlternateID", "AlternateNbr"] },
   ],
   "recon-ggm": [
     { label: "VendorName",   keys: ["Vendor Name", "VendorName"] },
@@ -213,6 +214,7 @@ const COLUMN_MAP = {
     { label: "OrderNbr",     keys: ["Order Nbr.", "OrderNbr"] },
     { label: "Warehouse",    keys: ["Warehouse", "SiteID"] },
     { label: "UOM",          keys: ["UOM", "Unit"] },
+    { label: "AltID",        keys: ["Alternate ID", "AlternateID", "Alt ID", "AltID", "POLineAlternateID", "AlternateNbr"] },
   ],
 };
 
