@@ -3123,13 +3123,18 @@ function POImportTool(props) {
           }
         });
 
-        // Override unit prices with McKesson CSV Est. Net Price
+        // McKesson: price comes ONLY from the CSV Est. Net Price. If a line is in
+        // the PDF but not in the CSV, leave its price blank rather than falling back
+        // to the PDF price.
         if (Object.keys(mckPortalPrices).length > 0) {
           matched.forEach(function(r) {
             var ndcNorm = normalizeNdcForCompare(r.ndc);
             if (mckPortalPrices[ndcNorm] != null) {
               r.unitPrice = Math.round(mckPortalPrices[ndcNorm] * 100) / 100;
               r.totalPrice = r.qty ? +(r.qty * r.unitPrice).toFixed(2) : r.totalPrice;
+            } else {
+              r.unitPrice = null;
+              r.totalPrice = null;
             }
           });
         }
