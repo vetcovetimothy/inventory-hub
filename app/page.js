@@ -4998,7 +4998,7 @@ function TruckloaderTool(props) {
         var onPO = parseFloat(r.OnPO) || 0;
         var poPrepared = parseFloat(r.POPrepared) || 0;
         var reorder = parseFloat(r.ReorderPoint) || 0;
-        return (avail + onPO + poPrepared) < reorder && reorder > 0;
+        return (avail + onPO + poPrepared) <= reorder && reorder > 0;
       });
       // Build order items with Hills Master lookup
       var items = filtered.map(function(r) {
