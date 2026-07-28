@@ -4703,23 +4703,31 @@ function HowToGuide(props) {
   return <div>
     <p style={{ fontSize: 14, color: "var(--color-text-secondary)", marginBottom: 20, lineHeight: 1.6 }}>Click any section below to see how it works. All tools require an Acumatica login unless noted otherwise.</p>
 
-    <Section id="po" title="PO tools (Brooklyn, Ohio, Hayward, GoGoMeds)" color="#3B82F6">
+    <Section id="po" title="PO tools (Brooklyn, Seven Hills, Hayward, Dallas, GoGoMeds)" color="#3B82F6">
       <p style={{ marginBottom: 12 }}>Each warehouse tab shows today's purchase orders from Acumatica, grouped by vendor. This is your daily ordering dashboard.</p>
-      <Step n="1" color="#3B82F6">Click a warehouse in the sidebar (e.g. Brooklyn, Ohio). The tool fetches today's POs from Acumatica via OData.</Step>
+      <Step n="1" color="#3B82F6">Click a warehouse in the sidebar (Brooklyn, Seven Hills, Hayward, Dallas, or a GoGoMeds site). The tool fetches today's POs from Acumatica via OData.</Step>
       <Step n="2" color="#3B82F6">Review the order table. Items are grouped by vendor with shipping cost status shown. Short-dating items are flagged red, sell-off items orange. Flagged items sort to the top.</Step>
       <Step n="3" color="#3B82F6">Add shipping notes per vendor if needed. These are saved and shared with your team via KV storage.</Step>
       <Step n="4" color="#3B82F6">Click "Generate Email Drafts" to create one Gmail draft per vendor with the order details as an attached spreadsheet. Drafts appear in your Gmail ready to review and send.</Step>
+      <Step n="5" color="#3B82F6">When you run "Process All POs", the created lines are automatically appended to that warehouse's receiving tracker (the FuzeRX or GGM Google Sheet) — supplier, NDC, description, pack size, qty, PO number, order date, and Expected Arrival (Promise Date). Already-added POs aren't duplicated.</Step>
       <Note>Data syncs across devices. If someone else fetches POs, your view updates within 8 seconds. Shipping rules (free shipping thresholds, fee calculations) are configurable under Settings {">"} Vendor Settings.</Note>
-      <Note>For TP warehouses (Brooklyn, Ohio, Hayward), email is blocked when flagged items are present to prevent accidentally ordering short-dated product. GoGoMeds is exempt from this rule.</Note>
+      <Note>For TP warehouses (Brooklyn, Seven Hills, Hayward, Dallas), email is blocked when flagged items are present to prevent accidentally ordering short-dated product. GoGoMeds is exempt from this rule.</Note>
     </Section>
 
-    <Section id="ndc" title="PO NDC validator" color="#06B6D4">
-      <p style={{ marginBottom: 12 }}>Validates purchase orders from vendor confirmations (PDFs or McKesson portal data) against Acumatica's NDC cross-reference to catch mismatches before importing.</p>
-      <Step n="1" color="#06B6D4">Select vendor type: "Other Vendors" for PDF confirmations, or "McKesson" for portal copy-paste.</Step>
-      <Step n="2" color="#06B6D4">For PDFs: drag and drop one or more vendor confirmation PDFs. The tool parses them server-side to extract NDCs and quantities. For McKesson: paste the order data from the portal or upload the confirmation file.</Step>
-      <Step n="3" color="#06B6D4">The tool cross-references each NDC against Acumatica's item cross-reference table. It shows matches, mismatches, and items not found in your system.</Step>
-      <Step n="4" color="#06B6D4">Review results, edit prices or quantities if needed, then download the validated CSV ready for Acumatica import.</Step>
-      <Note>The NDC lookup data is fetched from Acumatica each time. Upload a Stock Items export to also pull the correct Sales Unit (UoM) for each item.</Note>
+    <Section id="ndc" title="Generic PO Translator" color="#06B6D4">
+      <p style={{ marginBottom: 12 }}>Turns vendor PO PDFs (or a McKesson export) into validated Acumatica POs. It extracts NDCs, matches them to GEN- inventory IDs via the Generic Current NDCs OData, and lets you create the POs in Acumatica. Two tabs at the top: <span style={{ fontWeight: 500, color: "var(--color-text-primary)" }}>PO Translator</span> and <span style={{ fontWeight: 500, color: "var(--color-text-primary)" }}>Price Check</span>.</p>
+
+      <div style={{ fontWeight: 500, color: "var(--color-text-primary)", marginTop: 8, marginBottom: 6, fontSize: 13 }}>PO Translator tab</div>
+      <Step n="1" color="#06B6D4">Pick the vendor type: Keysource / Anda / Bloodworth / TopRX (PDF), McKesson (PDF + Export CSV), or GoGoMeds Crossovers (PDF).</Step>
+      <Step n="2" color="#06B6D4">Drop the PO PDF(s). The parser pulls NDC, quantity, description, PO number, and order date. It handles the wrapped-column Keysource/McKesson exports where the NDC and numbers spill onto separate lines.</Step>
+      <Step n="3" color="#06B6D4">Review the grid: OData match status, GEN- ID, UOM, qty, unit cost, and Δ% vs our average cost (red if the PO price is higher). Fix qty/price inline if needed.</Step>
+      <Step n="4" color="#06B6D4">Download CSV, or "Add to tracker" to append the lines to the receiving tracker, or "Create POs in Acumatica". After a successful create you can also Add to tracker from the results modal.</Step>
+      <Note>McKesson pricing comes only from the Export CSV's "Est. Net Price". If a line is in the PDF but not in the CSV, its price is left blank (it won't fall back to the PDF price) and it's flagged in MCK Warnings — fill it in manually before creating.</Note>
+      <Note>"Add to tracker" writes to the correct FuzeRX/GGM Google Sheet tab by warehouse. Expected BOH is a live formula (Pack Size {"\u00D7"} Pkg Qty); it appends to the true last row and is filter-proof.</Note>
+
+      <div style={{ fontWeight: 500, color: "var(--color-text-primary)", marginTop: 16, marginBottom: 6, fontSize: 13 }}>Price Check tab</div>
+      <Step n="1" color="#06B6D4">Search one item by NDC or by Mfr No (GEN- inventory ID).</Step>
+      <Step n="2" color="#06B6D4">It shows the item, our average cost per unit and per package, then you type a quoted price per unit to see how much more (red) or less (green) expensive it is vs our cost.</Step>
     </Section>
 
     <Section id="cycle" title="Cycle counting" color="#14B8A6">
@@ -4785,6 +4793,16 @@ function HowToGuide(props) {
     <Section id="rules" title="Shipping rules" color="#6B7280">
       <p style={{ marginBottom: 12 }}>Configure vendor-specific shipping cost rules used by the PO tools. Rules are saved in your browser.</p>
       <Note>Rule format examples: "message:Free Shipping" for always-free vendors, "min:5000; message:Free Shipping; else:Not Free Shipping" for minimum order thresholds, "range:0-99.99=15%; range:100-1499.99=8%; min:1500; message:Free Shipping" for tiered percentage-based fees. Rules can be added, edited, or removed per vendor.</Note>
+    </Section>
+
+    <Section id="po-recon" title="PO Reconciliation (Settings)" color="#6366F1">
+      <p style={{ marginBottom: 12 }}>The safety net for POs created directly in Acumatica (not through the hub), so they still land on the FuzeRX / GGM receiving trackers. Also catches POs you ran through the Translator but forgot to Add to Tracker. Found under Settings {">"} PO Reconciliation.</p>
+      <Step n="1" color="#6366F1">Click "Check &amp; sync trackers" (or let the nightly job run — see below).</Step>
+      <Step n="2" color="#6366F1">It pulls the HD PO Tracker GIs (TP + GGM), keeps the last 6 days, and routes each warehouse to its receiving tab (Brooklyn / Seven Hills / Hayward / Dallas / KY / AZ).</Step>
+      <Step n="3" color="#6366F1">It reads each tab's existing PO refs live, then adds any PO whose Vendor Ref isn't already there. POs already present are skipped; lines with a blank Vendor Ref are skipped and reported.</Step>
+      <Step n="4" color="#6366F1">It re-reads each tab to verify the additions landed, and shows a running log the whole time.</Step>
+      <Note>Runs automatically every night at 8 PM. Generics are included (with NDC from the PO line's Alternate ID); Expected Arrival is left blank for Vetcove Generics and Bloodworth. Match key is Vendor Ref, so manual POs must have one.</Note>
+      <Note>To confirm the nightly job is healthy, open /api/cron/po-recon — a good response is {"{ \"ok\": true, ... }"}. If it says the Acumatica cron credentials are missing, set them in Vercel.</Note>
     </Section>
   </div>;
 }
