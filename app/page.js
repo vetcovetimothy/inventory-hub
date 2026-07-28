@@ -2595,6 +2595,7 @@ function POImportTool(props) {
   var _acuCreateResult = useState(null), acuCreateResult = _acuCreateResult[0], setAcuCreateResult = _acuCreateResult[1];
   var _trackerPreview = useState(null), trackerPreview = _trackerPreview[0], setTrackerPreview = _trackerPreview[1];
   var _trackerBusy = useState(false), trackerBusy = _trackerBusy[0], setTrackerBusy = _trackerBusy[1];
+  var _trackerAdded = useState(null), trackerAdded = _trackerAdded[0], setTrackerAdded = _trackerAdded[1];
 
   // ── Sub-tabs: the PO Translator vs. a one-off Price Check tool ──
   var _subTab = useState("translator"), subTab = _subTab[0], setSubTab = _subTab[1];
@@ -2687,7 +2688,14 @@ function POImportTool(props) {
         else { failMsg = t.tab + ": " + ((data && data.error) || "failed"); break; }
       }
       if (failMsg) toast("Tracker add failed \u2014 " + failMsg, "error");
-      else { toast("Added " + okCount + " row" + (okCount === 1 ? "" : "s") + " to the tracker."); setTrackerPreview(null); }
+      else {
+        var tabNames = trackerPreview.targets.map(function(t) { return t.tab; }).join(", ");
+        toast("Added " + okCount + " row" + (okCount === 1 ? "" : "s") + " to the tracker.");
+        setTrackerAdded({ count: okCount, tabs: tabNames, at: Date.now() });
+        setTrackerPreview(null);
+        setAcuCreateResult(null);
+        setDummyDelete(null);
+      }
     } catch (e) { toast("Tracker add failed: " + (e && e.message ? e.message : e), "error"); }
     finally { setTrackerBusy(false); }
   }
@@ -3007,7 +3015,7 @@ function POImportTool(props) {
   async function handleValidate() {
     if (pdfs.length === 0) { toast("Upload at least one PDF", "error"); return; }
     if (!ok) { lp(); return; }
-    setLoading(true); setError(null); setResults([]); setMckWarnings([]);
+    setLoading(true); setError(null); setResults([]); setMckWarnings([]); setTrackerAdded(null);
     try {
       // Step 1: Parse each PDF separately to avoid text extraction state issues
       var pdfItems = [];
@@ -3191,7 +3199,7 @@ function POImportTool(props) {
   }
 
   function reset() {
-    setPdfs([]); setMckPaste(""); setMckParsed(null); setMckFile(null); setMckPortalPrices({}); setScreenshotQtys({}); setEditedPrices({}); setResults([]); setMckWarnings([]); setError(null); setActiveFileTab(null); setStatedAmounts({});
+    setPdfs([]); setMckPaste(""); setMckParsed(null); setMckFile(null); setMckPortalPrices({}); setScreenshotQtys({}); setEditedPrices({}); setResults([]); setMckWarnings([]); setError(null); setActiveFileTab(null); setStatedAmounts({}); setTrackerAdded(null);
   }
 
   // ── Acumatica auto-create: group results into POs, then validate each ─────
@@ -3653,6 +3661,11 @@ function POImportTool(props) {
           {vendor === "mckesson" && <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Qty Edited</div><div style={{ fontSize: 24, fontWeight: 700, color: qtyMismatchCount > 0 ? "#D97706" : "#059669", marginTop: 4 }}>{qtyMismatchCount}</div></div>}
           {mckWarnings.length > 0 && <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>MCK Warnings</div><div style={{ fontSize: 24, fontWeight: 700, color: "#D97706", marginTop: 4 }}>{mckWarnings.length}</div></div>}
         </div>
+
+        {trackerAdded && <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#ECFDF5", border: "1px solid #A7F3D0", borderRadius: 8, padding: "10px 16px", marginBottom: 16 }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: "#047857" }}>{"\u2713 Added " + trackerAdded.count + " row" + (trackerAdded.count === 1 ? "" : "s") + " to " + trackerAdded.tabs}</span>
+          <button onClick={function() { setTrackerAdded(null); }} style={{ background: "transparent", border: "none", color: "#047857", fontSize: 16, cursor: "pointer", lineHeight: 1 }}>{"\u00D7"}</button>
+        </div>}
 
         <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto" })}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", borderBottom: "1px solid #E5E7EB" }}>
