@@ -2930,6 +2930,22 @@ function POImportTool(props) {
         }
         return "";
       }
+      try {
+        var dbgRows = data.filter(function(r) {
+          var iv = String(pick(r, ["InventoryID", "Inventory ID", "InventoryCD", "InventoryId"])).trim();
+          return iv === "GEN-10114";
+        });
+        console.log("[raw-10114] count:", dbgRows.length, "keys:", dbgRows[0] ? Object.keys(dbgRows[0]) : null);
+        dbgRows.forEach(function(r, i) {
+          console.log("[raw-10114 row " + i + "]", {
+            ToUnit: pick(r, ["ToUnit", "To Unit", "ToUOM"]),
+            FromUnit: pick(r, ["FromUnit", "From Unit", "FromUOM"]),
+            Factor: pick(r, ["ConversionFactor", "Conversion Factor", "ConvFactor"]),
+            MD: pick(r, ["MultiplyDivide", "Multiply/Divide", "MultDiv"]),
+            full: r
+          });
+        });
+      } catch (e) { console.log("[raw-10114] debug error", e); }
       // Build nested map: { invId: { TO_UOM: { factor, op, fromUnit, baseUnit } } }
       var map = {};
       var kept = 0, dropped = 0;
