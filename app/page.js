@@ -2923,20 +2923,31 @@ function POImportTool(props) {
       var json = await resp.json();
       if (!resp.ok) return null;
       var data = json.data || [];
+      function pick(row, keys) {
+        for (var i = 0; i < keys.length; i++) {
+          var v = row[keys[i]];
+          if (v != null && v !== "") return v;
+        }
+        return "";
+      }
       // Build nested map: { invId: { TO_UOM: { factor, op, fromUnit, baseUnit } } }
       var map = {};
+      var kept = 0, dropped = 0;
       data.forEach(function(row) {
-        var invId = (row.InventoryID || "").trim();
-        if (!invId) return;
-        var toUnit = (row.ToUnit || "").trim().toUpperCase();
-        var fromUnit = (row.FromUnit || "").trim().toUpperCase();
-        var baseUnit = (row.BaseUnit || "").trim().toUpperCase();
-        var factor = parseFloat(row.ConversionFactor);
-        if (!toUnit || isNaN(factor) || factor <= 0) return;
-        var op = (row.MultiplyDivide || "Multiply").toLowerCase().indexOf("div") >= 0 ? "Divide" : "Multiply";
+        var invId = String(pick(row, ["InventoryID", "Inventory ID", "InventoryCD", "InventoryId"])).trim();
+        if (!invId) { dropped++; return; }
+        var toUnit   = String(pick(row, ["ToUnit", "To Unit", "ToUOM"])).trim().toUpperCase();
+        var fromUnit = String(pick(row, ["FromUnit", "From Unit", "FromUOM"])).trim().toUpperCase();
+        var baseUnit = String(pick(row, ["BaseUnit", "Base Unit", "BaseUOM"])).trim().toUpperCase();
+        var factor   = parseFloat(pick(row, ["ConversionFactor", "Conversion Factor", "ConvFactor"]));
+        if (!toUnit || isNaN(factor) || factor <= 0) { dropped++; return; }
+        var mdRaw = String(pick(row, ["MultiplyDivide", "Multiply/Divide", "MultDiv"]) || "Multiply");
+        var op = mdRaw.toLowerCase().indexOf("div") >= 0 ? "Divide" : "Multiply";
         if (!map[invId]) map[invId] = {};
         map[invId][toUnit] = { factor: factor, op: op, fromUnit: fromUnit, baseUnit: baseUnit };
+        kept++;
       });
+      console.log("[uom-conversions] rows kept:", kept, "dropped:", dropped, "items:", Object.keys(map).length);
       return map;
     } catch (err) { return null; }
   }, [cred]);
