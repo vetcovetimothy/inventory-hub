@@ -3067,6 +3067,7 @@ function POImportTool(props) {
         if (conv) {
           convFactor = conv.op === "Divide" ? (1 / conv.factor) : conv.factor;
         }
+        console.log("[conv-debug]", { ndc: item.ndc, invId: invId, matchUom: match && match.uom, uomKey: uom, hasItemInMap: !!(invId && uomMap[invId]), mapKeysForItem: invId && uomMap[invId] ? Object.keys(uomMap[invId]) : null, conv: conv, convFactor: convFactor });
         // Resolve avg cost: prefer per-warehouse from 3PRx GI, else fall back to general avg cost
         var resolvedAvgCost = null;
         var avgCostSource = null;
