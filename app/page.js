@@ -1,107 +1,9162 @@
-/**
- * GET /api/cron/po-recon
- *
- * Daily reconciliation: pulls the HD PO Tracker GIs (TP + GGM), keeps the last
- * 6 days, and adds any PO whose Vendor Ref isn't already in its receiving tab.
- * Server-side twin of the Settings > PO Reconciliation tool, for the Vercel cron.
- *
- * Acumatica: ACUMATICA_CRON_USERNAME / ACUMATICA_CRON_PASSWORD (same as backorder-check).
- * Trackers:  read/append via the service account (no creds needed here).
- * ?force=1 has no special meaning; the job is safe to re-run (dedupes by Vendor Ref).
- */
+"use client";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+/* ═══════ STORAGE (localStorage) ═══════ */
+function sGet(k) {
+  try {
+    const raw = localStorage.getItem("vh-" + k);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+function sSet(k, v) {
+  try { localStorage.setItem("vh-" + k, JSON.stringify(v)); } catch {}
+}
+function sDel(k) {
+  try { localStorage.removeItem("vh-" + k); } catch {}
+}
 
-const SITE_URL = process.env.SITE_URL || "https://inventory-hub-two.vercel.app";
+/* ═══════ INDEXEDDB (large per-browser values that exceed the localStorage quota,
+   e.g. a parsed Vendor Inventory CSV). Same per-browser scope as localStorage. ═══════ */
+function idbOpen() {
+  return new Promise(function(resolve, reject) {
+    try {
+      var req = indexedDB.open("vh-store", 1);
+      req.onupgradeneeded = function() { req.result.createObjectStore("kv"); };
+      req.onsuccess = function() { resolve(req.result); };
+      req.onerror = function() { reject(req.error); };
+    } catch (e) { reject(e); }
+  });
+}
+function idbSet(key, value) {
+  return idbOpen().then(function(db) {
+    return new Promise(function(resolve, reject) {
+      var tx = db.transaction("kv", "readwrite");
+      tx.objectStore("kv").put(value, key);
+      tx.oncomplete = function() { resolve(true); };
+      tx.onerror = function() { reject(tx.error); };
+    });
+  }).catch(function() { return false; });
+}
+function idbGet(key) {
+  return idbOpen().then(function(db) {
+    return new Promise(function(resolve, reject) {
+      var tx = db.transaction("kv", "readonly");
+      var r = tx.objectStore("kv").get(key);
+      r.onsuccess = function() { resolve(r.result != null ? r.result : null); };
+      r.onerror = function() { reject(r.error); };
+    });
+  }).catch(function() { return null; });
+}
+function idbDel(key) {
+  return idbOpen().then(function(db) {
+    return new Promise(function(resolve) {
+      var tx = db.transaction("kv", "readwrite");
+      tx.objectStore("kv").delete(key);
+      tx.oncomplete = function() { resolve(true); };
+      tx.onerror = function() { resolve(false); };
+    });
+  }).catch(function() { return false; });
+}
 
-const TRACKER_MAP = {
-  "TP-NY": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - BROOKLYN" },
-  "TP-OH": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - SEVEN HILLS" },
-  "TP-CA": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - HAYWARD" },
-  "TP-TX": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - DALLAS" },
-  "GGM-KY": { sheetId: "1dMZ_8VC6zaqLLWXQHFfuTXgxMfm0T4ip7To1CbXLfMk", tab: "RECEIVING - KY" },
-  "GGM-AZ": { sheetId: "1dMZ_8VC6zaqLLWXQHFfuTXgxMfm0T4ip7To1CbXLfMk", tab: "RECEIVING - AZ" },
+/* ═══════ KV HELPERS ═══════ */
+var KV_SECRET = typeof process !== "undefined" && process.env && process.env.NEXT_PUBLIC_KV_SECRET || "";
+function kvHeaders(extra) {
+  var h = Object.assign({ "x-kv-secret": KV_SECRET }, extra || {});
+  return h;
+}
+function kvGet(key) {
+  return fetch("/api/kv?key=" + encodeURIComponent(key) + "&_t=" + Date.now(), { cache: "no-store", headers: kvHeaders() });
+}
+function kvPost(key, value) {
+  return fetch("/api/kv", { method: "POST", headers: kvHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ key: key, value: value }) });
+}
+
+/* ═══════ API HELPERS ═══════ */
+async function fetchAcumatica(type, warehouse, username, password) {
+  const resp = await fetch("/api/acumatica", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type, warehouse, username, password }),
+  });
+  const json = await resp.json();
+  if (!resp.ok) throw new Error(json.error || "Acumatica request failed");
+  return json.data || [];
+}
+
+async function postGmailDrafts(drafts, refreshToken) {
+  const resp = await fetch("/api/gmail-drafts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ drafts, refreshToken: refreshToken || undefined }),
+  });
+  const json = await resp.json();
+  if (!resp.ok) throw new Error(json.error || "Gmail draft creation failed");
+  return json;
+}
+
+function getGmailToken() {
+  try {
+    var g = localStorage.getItem("vh-gmail");
+    return g ? JSON.parse(g) : null;
+  } catch { return null; }
+}
+
+function setGmailToken(token, email) {
+  try { localStorage.setItem("vh-gmail", JSON.stringify({ token: token, email: email })); } catch {}
+}
+
+function clearGmailToken() {
+  try { localStorage.removeItem("vh-gmail"); } catch {}
+}
+
+/* ═══════ SHIPPING RULES ═══════ */
+const DEFAULT_SHIP_RULES = {
+  "American Regent Animal Health": "message:Free Shipping",
+  "Boehringer Ingelheim Animal Health": "message:Free Shipping",
+  "Ceva Animal Health": "message:Free Shipping",
+  "Clipper Distributing Co., LLC": "min:10000; message:Free Shipping; else:Not Free Shipping",
+  "Creative Science": "message:Free Shipping",
+  "Elanco US Inc.": "message:Free Shipping",
+  "Hill's": "message:Free Shipping",
+  "Merck Animal Health": "min:5000; message:Free Shipping; else:Not Free Shipping",
+  "Neogen Corporation": "range:0-99.99=15%; range:100-1499.99=8%; min:1500; message:Free Shipping",
+  "Nipro Medical Corporation": "message:Free Shipping",
+  "Nextmune US LLC": "message:Free Shipping",
+  "Pet Honesty": "min:1500; message:Free Shipping; else:Will not ship",
+  "Phibro": "message:Free Shipping",
+  "RX Vitamins": "min:300; message:Free Shipping; else:Not Free Shipping",
+  "Trudell": "message:Free Shipping",
+  "UltiMed, Inc.": "min:2500; message:Free Shipping; else:Not Free Shipping",
+  "Vet Brands International, Inc.": "min:1500; message:Free Shipping; else:Not Free Shipping",
+  "Vetoquinol USA": "message:Free Shipping",
+  "Vetnique": "min:500; message:Free Shipping; else:Not Free Shipping",
+  "Food Science LLC": "message:Free Shipping",
+  "VetriScience": "message:Free Shipping",
+  "VetriMax": "min:2200; message:Free Shipping; else:Not Free Shipping",
+  "Virbac Corporation": "min:10000; message:Free Shipping; else:Not Free Shipping",
+  "Zoetis US LLC": "min:400; message:Free Shipping; else: $12 Shipping Fee",
 };
 
-function json(p, s) { return new Response(JSON.stringify(p), { status: s || 200, headers: { "Content-Type": "application/json" } }); }
-function uomToPkgSize(u) { var m = String(u == null ? "" : u).match(/(\d+)\s*$/); return m ? Number(m[1]) : 1; }
-function fmtDate(v) { if (!v) return ""; var s = String(v).trim(); var m = s.match(/^(\d{4})-(\d{2})-(\d{2})/); if (m) return Number(m[2]) + "/" + Number(m[3]) + "/" + m[1]; return s.slice(0, 10); }
-function parseDate(v) { var s = String(v || "").trim(); var m = s.match(/^(\d{4})-(\d{2})-(\d{2})/); if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])); var m2 = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/); if (m2) return new Date(Number(m2[3]), Number(m2[1]) - 1, Number(m2[2])); return null; }
-
-async function pullGI(type, user, pass) {
-  var resp = await fetch(SITE_URL + "/api/acumatica", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: type, username: user, password: pass }), cache: "no-store" });
-  var data = await resp.json();
-  if (!resp.ok) throw new Error(type + ": " + (data.error || resp.status));
-  return data.data || [];
+function evalShip(rule, total) {
+  if (!rule || !rule.trim()) return "Free Shipping";
+  const parts = rule.split(";").map(p => p.trim());
+  let result = "", meetsMin = true, matchedRange = false, fb = "Free Shipping", minVal = null;
+  for (const p of parts) {
+    if (p.startsWith("min:")) {
+      minVal = parseFloat(p.replace("min:", ""));
+      if (total < minVal) meetsMin = false;
+    } else if (p.startsWith("range:")) {
+      const [rp, cp] = p.replace("range:", "").split("=");
+      const [mn, mx] = rp.split("-").map(x => parseFloat(x));
+      if (total >= mn && total <= mx) {
+        result = cp.includes("%") ? "$" + ((parseFloat(cp) * total) / 100).toFixed(2) + " Shipping Fee" : cp;
+        matchedRange = true;
+      }
+    } else if (p.startsWith("message:")) {
+      fb = p.replace("message:", "").trim();
+    } else if (p.startsWith("else:")) {
+      if (!meetsMin && !matchedRange && !result) result = p.replace("else:", "").trim();
+    }
+  }
+  var status = result || (meetsMin ? fb : "Will not ship");
+  if (status !== "Free Shipping" && minVal != null) {
+    var minStr = "$" + minVal.toLocaleString();
+    if (status === "Will not ship" || status.toLowerCase().includes("not ship")) return "Not Shipping: " + minStr + " minimum";
+    if (status === "Not Free Shipping" || status.toLowerCase().includes("not free")) return "Not Free Shipping: " + minStr + " minimum";
+    return status + ": " + minStr + " minimum";
+  }
+  return status;
 }
-async function readRefs(dest) {
-  var resp = await fetch(SITE_URL + "/api/tracker-read", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sheetId: dest.sheetId, tab: dest.tab }), cache: "no-store" });
-  var data = await resp.json();
-  if (!data || !data.ok) throw new Error(dest.tab + ": " + ((data && data.error) || "read failed"));
-  var set = {}; (data.refs || []).forEach(function (r) { set[String(r).trim()] = 1; }); return set;
+
+/* ═══════ CONSTANTS ═══════ */
+const EXCLUDED = ["truepill", "vetcove generics", "bloodworth"];
+const VENDOR_LABELS = {
+  "Boehringer Ingelheim Animal Health": "Truecommerce",
+  "Ceva Animal Health": "Truecommerce",
+  "Clipper Distributing Co., LLC": "Truecommerce",
+  "Elanco US Inc.": "Truecommerce",
+  "Zoetis US LLC": "Truecommerce",
+  "ExeGi Pharma LLC": "Website Ordering",
+  "Patterson Veterinary": "Website Ordering",
+};
+function getVendorLabel(v) { return VENDOR_LABELS[v] || null; }
+const BKO_SKIP = ["Bloodworth Wholesale Drugs", "Elanco US Inc."];
+const WH = {
+  "TP-NY": { label: "Brooklyn", full: "Brooklyn, NY", color: "#3B82F6", emailTo: "nigel.white@fuzehealth.com, anna.wilson@fuzehealth.com, trudie.selby@fuzehealth.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Brooklyn " + d; } },
+  "TP-OH": { label: "Seven Hills", full: "Seven Hills, Ohio", color: "#059669", emailTo: "nigel.white@fuzehealth.com, anna.wilson@fuzehealth.com, trudie.selby@fuzehealth.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Ohio " + d; } },
+  "TP-CA": { label: "Hayward", full: "Hayward, CA", color: "#D97706", emailTo: "nigel.white@fuzehealth.com, anna.wilson@fuzehealth.com, trudie.selby@fuzehealth.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Hayward " + d; } },
+  "TP-TX": { label: "Dallas", full: "Dallas, TX", color: "#0891B2", emailTo: "nigel.white@fuzehealth.com, anna.wilson@fuzehealth.com, trudie.selby@fuzehealth.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Dallas " + d; } },
+  "GGM-KY": { label: "[GGM] Southgate", full: "[GGM] Southgate, KY", color: "#8B5CF6", emailTo: "p.pocsatko@gogomeds.com, m.shull@gogomeds.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Weekly Replenishment Orders " + d; } },
+  "GGM-AZ": { label: "[GGM] Scottsdale", full: "[GGM] Scottsdale, AZ", color: "#EC4899", emailTo: "r.aldrich@gogomeds.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Weekly Replenishment Orders " + d; } },
+};
+
+/* ═══════ VENDOR CONTACTS ═══════ */
+const CONTACTS = {
+  "American Regent Animal Health": "cs@americanregent.com, BTumolo@americanregent.com",
+  "Boehringer Ingelheim Animal Health": "CustomerCare@Boehringer-Ingelheim.com",
+  "Ceva Animal Health": "codie.zwicky@ceva.com",
+  "Clipper Distributing Co., LLC": "customerservice@clipperdist.net",
+  "Creative Science": "khauf@creativesciencellc.com",
+  "Comfurt Collar LLC": "brittany@comfurtcollar.com",
+  "Elanco US Inc.": "KARA.HIATT@elancoah.com, ElancoCustServ@elancoah.com",
+  "Merck Animal Health": "distributorsupport@merck.com, distpoultrycs@merck.com",
+  "Neogen Corporation": "EPerez2@neogen.com",
+  "Nextmune US LLC": "derm@nextmune.com",
+  "Pet Honesty": "amanda@pethonesty.com, eliza@pethonesty.com",
+  "RX Vitamins": "info@rxvitamins.com, msyku@rxvitamins.com",
+  "UltiMed, Inc.": "customerservice@ultimedinc.com",
+  "Vet Brands International, Inc.": "jennifer@vetbrands.com",
+  "Vetoquinol USA": "customerserviceusa@vetoquinol.com, heather.larson@vetoquinol.com, johnny.soto@vetoquinol.com",
+  "Vetnique": "Orders@Vetnique.com, lsteadman@vetnique.com, aidan.campbell@yumove.com",
+  "Food Science LLC": "ksturtevant@foodsciencecorp.com",
+  "VetriMax": "patrick@vetrimaxproducts.com",
+  "Virbac Corporation": "purchaseordersonly@virbacus.com, pamela.mouser@virbacus.com, crissy.powell@virbacus.com",
+  "Zoetis US LLC": "majoraccountsgroup@zoetis.com",
+  "Nipro Medical Corporation": "USNiproRMA@nipromed.com",
+  "ExeGi Pharma LLC": "info@visbiomevet.com",
+};
+
+/* ═══════ DEMO DATA ═══════ */
+const PO_DEMO = {
+  "TP-NY": [
+    { SKUNDC: "10017-1990-01", Description: "Zylkene Capsules: [225mg] Bottle of 30", OrderQty: 48, VendorName: "Vetoquinol USA", OrderNbr: "PO007171", Warehouse: "TP-NY", ReorderPoint: 11, MaxQty: 36, LeadTime: 7, MinOrderQty: 12, QtyAvailable: -3, Price: 38.04, MovementClass: "" },
+    { SKUNDC: "50383-0286-04", Description: "Adequan Canine Injectable: [100mg/mL] 5mL Vial", OrderQty: 24, VendorName: "American Regent Animal Health", OrderNbr: "PO007165", Warehouse: "TP-NY", ReorderPoint: 8, MaxQty: 24, LeadTime: 5, MinOrderQty: 6, QtyAvailable: 2, Price: 65.50, MovementClass: "" },
+    { SKUNDC: "00061-4110-01", Description: "Heartgard Plus Chewable: [Brown 51-100lbs] 6ct", OrderQty: 36, VendorName: "Boehringer Ingelheim Animal Health", OrderNbr: "PO007168", Warehouse: "TP-NY", ReorderPoint: 15, MaxQty: 48, LeadTime: 3, MinOrderQty: 12, QtyAvailable: 5, Price: 32.99, MovementClass: "" },
+    { SKUNDC: "10668-1000-01", Description: "Galliprant Tablets: [20mg] 30ct Bottle", OrderQty: 12, VendorName: "Elanco US Inc.", OrderNbr: "PO007170", Warehouse: "TP-NY", ReorderPoint: 5, MaxQty: 18, LeadTime: 4, MinOrderQty: 6, QtyAvailable: 0, Price: 78.40, MovementClass: "" },
+    { SKUNDC: "54771-2320-01", Description: "Apoquel Tablets: [16mg] 100ct Bottle", OrderQty: 6, VendorName: "Zoetis US LLC", OrderNbr: "PO007172", Warehouse: "TP-NY", ReorderPoint: 3, MaxQty: 10, LeadTime: 5, MinOrderQty: 2, QtyAvailable: 1, Price: 245.00, MovementClass: "" },
+    { SKUNDC: "54771-6355-01", Description: "Simparica Trio Chewable: [Gold 44.1-88lbs] 6ct", OrderQty: 12, VendorName: "Zoetis US LLC", OrderNbr: "PO007172", Warehouse: "TP-NY", ReorderPoint: 5, MaxQty: 16, LeadTime: 5, MinOrderQty: 6, QtyAvailable: 2, Price: 135.50, MovementClass: "" },
+    { SKUNDC: "54771-2318-01", Description: "Apoquel Tablets: [3.6mg] 100ct Bottle", OrderQty: 4, VendorName: "Zoetis US LLC", OrderNbr: "PO007201", Warehouse: "TP-NY", ReorderPoint: 2, MaxQty: 6, LeadTime: 5, MinOrderQty: 2, QtyAvailable: 0, Price: 185.00, MovementClass: "" },
+  ],
+  "TP-OH": [
+    { SKUNDC: "00061-4110-01", Description: "Heartgard Plus Chewable: [Brown 51-100lbs] 6ct", OrderQty: 48, VendorName: "Boehringer Ingelheim Animal Health", OrderNbr: "PO007200", Warehouse: "TP-OH", ReorderPoint: 20, MaxQty: 60, LeadTime: 3, MinOrderQty: 12, QtyAvailable: 8, Price: 32.99, MovementClass: "" },
+    { SKUNDC: "54771-2320-01", Description: "Apoquel Tablets: [16mg] 100ct Bottle", OrderQty: 12, VendorName: "Zoetis US LLC", OrderNbr: "PO007201", Warehouse: "TP-OH", ReorderPoint: 5, MaxQty: 18, LeadTime: 5, MinOrderQty: 2, QtyAvailable: 0, Price: 245.00, MovementClass: "" },
+    { SKUNDC: "10668-1000-01", Description: "Galliprant Tablets: [20mg] 30ct Bottle", OrderQty: 18, VendorName: "Elanco US Inc.", OrderNbr: "PO007202", Warehouse: "TP-OH", ReorderPoint: 6, MaxQty: 24, LeadTime: 4, MinOrderQty: 6, QtyAvailable: 2, Price: 78.40, MovementClass: "" },
+    { SKUNDC: "86078-0110-02", Description: "Bravecto Chewable: [1000mg] 44-88lbs 1ct", OrderQty: 30, VendorName: "Merck Animal Health", OrderNbr: "PO007203", Warehouse: "TP-OH", ReorderPoint: 10, MaxQty: 36, LeadTime: 6, MinOrderQty: 10, QtyAvailable: 4, Price: 52.75, MovementClass: "" },
+    { SKUNDC: "10017-1990-01", Description: "Zylkene Capsules: [225mg] Bottle of 30", OrderQty: 36, VendorName: "Vetoquinol USA", OrderNbr: "PO007204", Warehouse: "TP-OH", ReorderPoint: 8, MaxQty: 30, LeadTime: 7, MinOrderQty: 12, QtyAvailable: -2, Price: 38.04, MovementClass: "" },
+  ],
+  "TP-CA": [
+    { SKUNDC: "54771-2320-01", Description: "Apoquel Tablets: [16mg] 100ct Bottle", OrderQty: 8, VendorName: "Zoetis US LLC", OrderNbr: "PO007210", Warehouse: "TP-CA", ReorderPoint: 4, MaxQty: 12, LeadTime: 5, MinOrderQty: 2, QtyAvailable: 1, Price: 245.00, MovementClass: "" },
+    { SKUNDC: "00061-4110-01", Description: "Heartgard Plus Chewable: [Brown 51-100lbs] 6ct", OrderQty: 24, VendorName: "Boehringer Ingelheim Animal Health", OrderNbr: "PO007211", Warehouse: "TP-CA", ReorderPoint: 10, MaxQty: 36, LeadTime: 3, MinOrderQty: 12, QtyAvailable: 4, Price: 32.99, MovementClass: "" },
+    { SKUNDC: "10668-1001-01", Description: "Galliprant Tablets: [60mg] 30ct Bottle", OrderQty: 6, VendorName: "Elanco US Inc.", OrderNbr: "PO007212", Warehouse: "TP-CA", ReorderPoint: 3, MaxQty: 10, LeadTime: 4, MinOrderQty: 6, QtyAvailable: 0, Price: 115.20, MovementClass: "" },
+    { SKUNDC: "50383-0286-04", Description: "Adequan Canine Injectable: [100mg/mL] 5mL Vial", OrderQty: 12, VendorName: "American Regent Animal Health", OrderNbr: "PO007213", Warehouse: "TP-CA", ReorderPoint: 4, MaxQty: 12, LeadTime: 5, MinOrderQty: 6, QtyAvailable: -1, Price: 65.50, MovementClass: "sell-off item" },
+  ],
+  "GGM-KY": [
+    { SKUNDC: "54771-2320-01", Description: "Apoquel Tablets: [16mg] 100ct Bottle", OrderQty: 10, VendorName: "Zoetis US LLC", OrderNbr: "PO007220", Warehouse: "GGM-KY", ReorderPoint: 4, MaxQty: 14, LeadTime: 5, MinOrderQty: 2, QtyAvailable: 2, Price: 245.00, MovementClass: "" },
+    { SKUNDC: "00061-4110-01", Description: "Heartgard Plus Chewable: [Brown 51-100lbs] 6ct", OrderQty: 18, VendorName: "Boehringer Ingelheim Animal Health", OrderNbr: "PO007221", Warehouse: "GGM-KY", ReorderPoint: 8, MaxQty: 24, LeadTime: 3, MinOrderQty: 6, QtyAvailable: 3, Price: 32.99, MovementClass: "" },
+    { SKUNDC: "86078-0110-02", Description: "Bravecto Chewable: [1000mg] 44-88lbs 1ct", OrderQty: 20, VendorName: "Merck Animal Health", OrderNbr: "PO007222", Warehouse: "GGM-KY", ReorderPoint: 8, MaxQty: 24, LeadTime: 6, MinOrderQty: 10, QtyAvailable: 5, Price: 52.75, MovementClass: "" },
+  ],
+  "GGM-AZ": [
+    { SKUNDC: "54771-2320-01", Description: "Apoquel Tablets: [16mg] 100ct Bottle", OrderQty: 6, VendorName: "Zoetis US LLC", OrderNbr: "PO007230", Warehouse: "GGM-AZ", ReorderPoint: 3, MaxQty: 10, LeadTime: 5, MinOrderQty: 2, QtyAvailable: 1, Price: 245.00, MovementClass: "" },
+    { SKUNDC: "00061-4110-01", Description: "Heartgard Plus Chewable: [Brown 51-100lbs] 6ct", OrderQty: 12, VendorName: "Boehringer Ingelheim Animal Health", OrderNbr: "PO007231", Warehouse: "GGM-AZ", ReorderPoint: 5, MaxQty: 16, LeadTime: 3, MinOrderQty: 6, QtyAvailable: 2, Price: 32.99, MovementClass: "" },
+  ],
+};
+
+const SD_DEMO = [
+  { ItemStatus: "Active", MovementClass: "Short-Dating", Description: "Healthy Gut & Digestion Capsule: Bottle of 120", VendorName: "Food Science LLC", InventoryID: "900374.12", SKUNDC: "26664-0137-41", BestKnownDating: "7/31/2026", NoteText: "", QtyOnHand: 0, BaseUnit: "BOTTLE", OpenQty: 0 },
+  { ItemStatus: "Active", MovementClass: "Short-Dating", Description: "GastroGard Oral Paste for Horses: [6.15g] 72pk", VendorName: "Boehringer Ingelheim Animal Health", InventoryID: "126631", SKUNDC: "00010-3704-02", BestKnownDating: "7/31/2026", NoteText: "going to order this item", QtyOnHand: 72, BaseUnit: "SYRING", OpenQty: 0 },
+  { ItemStatus: "Active", MovementClass: "Short-Dating", Description: "Marquis Oral Paste for Horses: [127g] Syringe", VendorName: "Boehringer Ingelheim Animal Health", InventoryID: "126672", SKUNDC: "00010-7314-02", BestKnownDating: "9/30/2026", NoteText: "", QtyOnHand: 21, BaseUnit: "SYRING", OpenQty: 0 },
+  { ItemStatus: "Active", MovementClass: "Short-Dating", Description: "Previcox Chewable Tablets: [57mg] 60ct", VendorName: "Boehringer Ingelheim Animal Health", InventoryID: "126898", SKUNDC: "00010-9150-03", BestKnownDating: "9/30/2026", NoteText: "", QtyOnHand: 60, BaseUnit: "TABLET", OpenQty: 0 },
+  { ItemStatus: "Active", MovementClass: "Short-Dating", Description: "Interceptor Plus Chewable: [Blue 2-8lbs] 6ct", VendorName: "Elanco US Inc.", InventoryID: "127049", SKUNDC: "58198-7648-01", BestKnownDating: "11/30/2026", NoteText: "", QtyOnHand: 18, BaseUnit: "PKG", OpenQty: 0 },
+  { ItemStatus: "Active", MovementClass: "Short-Dating", Description: "Bravecto Chewable: [1000mg] 44-88lbs 1ct", VendorName: "Merck Animal Health", InventoryID: "127003", SKUNDC: "86078-0110-02", BestKnownDating: "2/28/2027", NoteText: "", QtyOnHand: 60, BaseUnit: "TABLET", OpenQty: 0 },
+  { ItemStatus: "Active", MovementClass: "Short-Dating", Description: "Pet Honesty Allergy Support Chew: Duck [90ct]", VendorName: "Pet Honesty", InventoryID: "900288", SKUNDC: "85270-9008-03", BestKnownDating: "11/30/2026", NoteText: "", QtyOnHand: 7, BaseUnit: "PKG", OpenQty: 0 },
+  { ItemStatus: "Active", MovementClass: "Short-Dating", Description: "VetriScience Composure Calming Chews Cats: [30ct]", VendorName: "Vet Brands International, Inc.", InventoryID: "900093", SKUNDC: "20726-0021-05", BestKnownDating: "1/31/2027", NoteText: "", QtyOnHand: 12, BaseUnit: "PKG", OpenQty: 0 },
+  { ItemStatus: "Active", MovementClass: "Short-Dating", Description: "Vet-Kem Siphotrol Plus II Spray: [16oz]", VendorName: "Clipper Distributing Co., LLC", InventoryID: "126963", SKUNDC: "93486-0002-16", BestKnownDating: "6/30/2027", NoteText: "", QtyOnHand: 3, BaseUnit: "CAN", OpenQty: 0 },
+];
+
+const BKO_DEMO = [
+  { ItemStatus: "Active", MovementClass: "Manufacturer Backorder", Description: "Metacam Oral Suspension: [0.5mg/mL] 15mL", VendorName: "Boehringer Ingelheim Animal Health", InventoryID: "138776", SKUNDC: "00010-6014-01", BaseUnit: "BOTTLE", QtyOnHand: 0, OpenQty: 57, RecoveryDate: "Mid March" },
+  { ItemStatus: "Active", MovementClass: "Manufacturer Backorder", Description: "Metacam Oral Suspension: [1.5mg/mL] 100mL", VendorName: "Boehringer Ingelheim Animal Health", InventoryID: "140354", SKUNDC: "00010-6015-03", BaseUnit: "BOTTLE", QtyOnHand: 0, OpenQty: 0, RecoveryDate: "late February" },
+  { ItemStatus: "Active", MovementClass: "Long-Term Backorder", Description: "Equidone Gel for Horses: [25mL] Syringe", VendorName: "Clipper Distributing Co., LLC", InventoryID: "EQU-025S", SKUNDC: "17033-0326-01", BaseUnit: "SYRING", QtyOnHand: 0, OpenQty: 0, RecoveryDate: "no eta" },
+  { ItemStatus: "Active", MovementClass: "Manufacturer Backorder", Description: "Vetradent Toothpaste: [2.3oz] Tube", VendorName: "Clipper Distributing Co., LLC", InventoryID: "533-65", SKUNDC: "10007-6710-99", BaseUnit: "TUBE", QtyOnHand: 0, OpenQty: 12, RecoveryDate: "2/16/2026" },
+  { ItemStatus: "Active", MovementClass: "Manufacturer Backorder", Description: "Advantage II for Dogs: [Purple XL 55+lbs] 6pk", VendorName: "Elanco US Inc.", InventoryID: "86336669", SKUNDC: "24089-0203-21", BaseUnit: "PACK", QtyOnHand: 0, OpenQty: 0, RecoveryDate: "late Feb" },
+  { ItemStatus: "Active", MovementClass: "Manufacturer Backorder", Description: "Advantage Multi for Cats: [Turquoise 2-5lbs] 3pk", VendorName: "Elanco US Inc.", InventoryID: "90209680", SKUNDC: "00859-2344-01", BaseUnit: "TUBE", QtyOnHand: 0, OpenQty: 12, RecoveryDate: "Week of 3/2" },
+  { ItemStatus: "Active", MovementClass: "Manufacturer Backorder", Description: "VetriScience Canine Plus Senior Multivitamin: [30ct]", VendorName: "Vet Brands International, Inc.", InventoryID: "900084", SKUNDC: "20726-0000-03", BaseUnit: "PKG", QtyOnHand: 0, OpenQty: 0, RecoveryDate: "March" },
+  { ItemStatus: "Active", MovementClass: "Manufacturer Backorder", Description: "VetriScience Composure Pro Calming Chews: [60ct]", VendorName: "Vet Brands International, Inc.", InventoryID: "900092", SKUNDC: "20726-0021-04", BaseUnit: "PKG", QtyOnHand: 0, OpenQty: 12, RecoveryDate: "Mid March" },
+  { ItemStatus: "Active", MovementClass: "Long-Term Backorder", Description: "Healthy Gut & Digestion Capsule: Bottle of 60", VendorName: "Food Science LLC", InventoryID: "900374.6", SKUNDC: "26664-0137-31", BaseUnit: "BOTTLE", QtyOnHand: 0, OpenQty: 0, RecoveryDate: "no eta" },
+  { ItemStatus: "Active", MovementClass: "Manufacturer Backorder", Description: "Apoquel Tablets: [3.6mg] 100ct Bottle", VendorName: "Zoetis US LLC", InventoryID: "127035", SKUNDC: "54771-2318-01", BaseUnit: "TABLET", QtyOnHand: 0, OpenQty: 18, RecoveryDate: "Mid March" },
+  { ItemStatus: "Active", MovementClass: "Manufacturer Backorder", Description: "Revolution Plus Topical Cats: [Gold 11.1-22lbs] 6ct", VendorName: "Zoetis US LLC", InventoryID: "127098", SKUNDC: "10086-0627-06", BaseUnit: "PKG", QtyOnHand: 0, OpenQty: 24, RecoveryDate: "Week of 3/9" },
+  { ItemStatus: "Active", MovementClass: "Manufacturer Backorder", Description: "Knockout Area Treatment Spray: [16oz]", VendorName: "Virbac Corporation", InventoryID: "126967", SKUNDC: "10043-0917-16", BaseUnit: "CAN", QtyOnHand: 12, OpenQty: 0, RecoveryDate: "March" },
+];
+
+/* ═══════ ICONS ═══════ */
+function IconWH() { return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 21V8l9-5 9 5v13"/><path d="M9 21V12h6v9"/></svg>; }
+function IconTruck() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="1" y="3" width="15" height="13"/><path d="M16 8h4l3 3v5h-7V8z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>; }
+function IconMail() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 7l-10 7L2 7"/></svg>; }
+function IconAlert() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>; }
+function IconCheck() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>; }
+function IconDL() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>; }
+function IconFilter() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>; }
+function IconKey() { return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 11-7.778 7.778 5.5 5.5 0 017.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>; }
+function IconRefresh() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>; }
+function IconTrash() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>; }
+function IconLock() { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>; }
+function IconClock() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>; }
+function IconGmail() { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 4L12 13 2 4"/></svg>; }
+function IconBox() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 16V8l-9-5-9 5v8l9 5 9-5z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>; }
+function IconUpload() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0018 9h-1.26A8 8 0 103 16.3"/></svg>; }
+function IconCSV() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>; }
+function Dot({ color }) { return <div style={{ width: 8, height: 8, borderRadius: "50%", background: color, flexShrink: 0 }} />; }
+function Spinner({ color, size }) { return <span style={{ width: size || 14, height: size || 14, border: "2px solid rgba(255,255,255,0.3)", borderTop: "2px solid " + (color || "#fff"), borderRadius: "50%", animation: "spin 0.8s linear infinite", display: "inline-block" }} />; }
+
+function InfoTip({ text }) {
+  var _show = useState(false), show = _show[0], setShow = _show[1];
+  return <span style={{ position: "relative", display: "inline-flex" }} onMouseEnter={function() { setShow(true); }} onMouseLeave={function() { setShow(false); }}>
+    <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 18, height: 18, borderRadius: "50%", border: "1.5px solid #9CA3AF", color: "#9CA3AF", fontSize: 11, fontWeight: 700, cursor: "help", flexShrink: 0, lineHeight: 1 }}>i</span>
+    {show && <span style={{ position: "absolute", bottom: "calc(100% + 8px)", left: "50%", transform: "translateX(-50%)", background: "#1F2937", color: "#fff", fontSize: 12, lineHeight: 1.4, padding: "8px 12px", borderRadius: 8, whiteSpace: "normal", width: 240, zIndex: 100, boxShadow: "0 4px 12px rgba(0,0,0,0.15)", pointerEvents: "none" }}>{text}<span style={{ position: "absolute", top: "100%", left: "50%", transform: "translateX(-50%)", borderLeft: "6px solid transparent", borderRight: "6px solid transparent", borderTop: "6px solid #1F2937" }} /></span>}
+  </span>;
 }
 
-async function run(windowDays) {
-  var user = process.env.ACUMATICA_CRON_USERNAME, pass = process.env.ACUMATICA_CRON_PASSWORD;
-  if (!user || !pass) throw new Error("Missing ACUMATICA_CRON_USERNAME / ACUMATICA_CRON_PASSWORD");
+/* ═══════ CACHE STATUS HELPERS ═══════ */
+function formatRelativeTime(ms) {
+  if (!ms) return null;
+  var sec = Math.floor((Date.now() - ms) / 1000);
+  if (sec < 5) return "just now";
+  if (sec < 60) return sec + "s ago";
+  var min = Math.floor(sec / 60);
+  if (min < 60) return min + " min ago";
+  var hr = Math.floor(min / 60);
+  if (hr < 24) return hr + "h ago";
+  var day = Math.floor(hr / 24);
+  return day + "d ago";
+}
+function CacheStatus(props) {
+  var lastFetchedAt = props.lastFetchedAt, cacheHit = props.cacheHit, onRefresh = props.onRefresh, refreshing = props.refreshing, color = props.color || "#6B7280";
+  var _tick = useState(0), tick = _tick[0], setTick = _tick[1];
+  useEffect(function() { var id = setInterval(function() { setTick(function(t) { return t + 1; }); }, 30000); return function() { clearInterval(id); }; }, []);
+  if (!lastFetchedAt && !refreshing) return null;
+  var label = refreshing ? "Refreshing\u2026" : (cacheHit === true ? "Cached " : "Updated ") + (formatRelativeTime(lastFetchedAt) || "");
+  return <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, color: "#9CA3AF" }} title={lastFetchedAt ? new Date(lastFetchedAt).toLocaleString() : ""}>
+    <span>{label}</span>
+    {onRefresh && <button onClick={onRefresh} disabled={refreshing} title="Force fresh data" style={{ background: "transparent", border: "0.5px solid #E5E7EB", borderRadius: 6, padding: "2px 8px", cursor: refreshing ? "not-allowed" : "pointer", fontSize: 11, color: color, fontFamily: "'Varela Round', sans-serif", display: "inline-flex", alignItems: "center", gap: 4 }}>{refreshing ? "\u21BB" : "\u21BB Refresh"}</button>}
+  </span>;
+}
 
-  var tp = await pullGI("recon-tp", user, pass);
-  var ggm = await pullGI("recon-ggm", user, pass);
-  var rows = tp.concat(ggm);
+/* ═══════ STYLES ═══════ */
+function makeStyles(accent) {
+  return {
+    card: { background: "#FFFFFF", border: "0.5px solid #E5E7EB", borderRadius: 14, padding: 24, marginBottom: 20 },
+    statCard: { borderRadius: 14, padding: "20px 24px", flex: 1, minWidth: 160, position: "relative", overflow: "hidden" },
+    btn: function(v) {
+      var base = { display: "inline-flex", alignItems: "center", gap: 6, padding: "10px 18px", borderRadius: 10, border: "none", fontSize: 13, fontWeight: 600, cursor: "pointer", transition: "all 0.15s" };
+      if (v === "danger") return Object.assign({}, base, { background: "#DC2626", color: "#fff" });
+      if (v === "ghost") return Object.assign({}, base, { background: "transparent", color: "#6B7280", border: "1px solid #E5E7EB" });
+      return Object.assign({}, base, { background: accent, color: "#fff" });
+    },
+    inp: { background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 8, padding: "9px 14px", color: "#1F2937", fontSize: 13, outline: "none", width: "100%" },
+    sel: { background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 8, padding: "9px 14px", color: "#1F2937", fontSize: 13, outline: "none" },
+    th: { padding: "10px 16px", textAlign: "left", background: "#F9FAFB", color: "#9CA3AF", fontWeight: 500, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: "1px solid #E5E7EB", position: "sticky", top: 0, zIndex: 2 },
+    td: { padding: "14px 16px", borderBottom: "1px solid #F3F4F6", color: "#374151", fontSize: 13 },
+    badge: function(t) {
+      var base = { display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 20, fontSize: 12, fontWeight: 500 };
+      var colors = { success: ["#ECFDF5", "#059669"], danger: ["#FEF2F2", "#DC2626"], warning: ["#FFFBEB", "#D97706"], purple: ["#F5F3FF", "#7C3AED"], blue: ["#EFF6FF", "#2563EB"] };
+      var c = colors[t] || ["#F3F4F6", "#6B7280"];
+      return Object.assign({}, base, { background: c[0], color: c[1] });
+    },
+    pill: function(active, col) {
+      return { padding: "8px 18px", borderRadius: 8, fontSize: 13, fontWeight: 500, border: "none", cursor: "pointer", transition: "all 0.15s", display: "flex", alignItems: "center", gap: 6, background: active ? (col || accent) : "transparent", color: active ? "#fff" : "#9CA3AF" };
+    },
+  };
+}
 
-  var lookback = (typeof windowDays === "number" && windowDays > 0) ? windowDays : 6;
-  var cutoff = new Date(); cutoff.setHours(0, 0, 0, 0); cutoff.setDate(cutoff.getDate() - lookback);
-  var recent = rows.filter(function (r) { var d = parseDate(r.OrderDate); return d && d >= cutoff; });
+function Gate({ ok, prompt, children, style, onClick, disabled }) {
+  if (ok) return <button style={style} onClick={onClick} disabled={disabled}>{children}</button>;
+  return <button style={Object.assign({}, style, { opacity: 0.6 })} onClick={prompt}><IconLock /> Login Required</button>;
+}
 
-  var groups = {}, skippedNoRef = 0;
-  recent.forEach(function (r) {
-    var wh = String(r.Warehouse || "").trim(), ref = String(r.VendorRef || "").trim();
-    if (!wh || !TRACKER_MAP[wh]) return;
-    if (!ref) { skippedNoRef++; return; }
-    var k = wh + "||" + ref; if (!groups[k]) groups[k] = { wh: wh, ref: ref, lines: [] }; groups[k].lines.push(r);
-  });
+function CopyCell({ text, toast, color, accentColor }) {
+  var _copied = useState(false), copied = _copied[0], setCopied = _copied[1];
+  return (
+    <div title={"Click to copy: " + text} onClick={function() { navigator.clipboard.writeText(text); setCopied(true); toast("Copied: " + text.slice(0, 40)); setTimeout(function() { setCopied(false); }, 1500); }}
+      style={{ cursor: "pointer", padding: "6px 10px", borderRadius: 8, wordBreak: "break-word", lineHeight: 1.4, color: color || "#374151", display: "flex", alignItems: "flex-start", gap: 6, background: copied ? "#ECFDF5" : "#F9FAFB", border: "1px solid " + (copied ? "#059669" : "#E5E7EB"), transition: "all 0.2s" }}>
+      <span style={{ flex: 1, fontSize: 12 }}>{text}</span>
+      <span style={{ flexShrink: 0, marginTop: 2, color: copied ? "#059669" : "#B5AEA5", transition: "all 0.2s" }}>{copied ? <IconCheck /> : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>}</span>
+    </div>
+  );
+}
 
-  var whset = {}; Object.keys(groups).forEach(function (k) { whset[groups[k].wh] = 1; });
-  var whs = Object.keys(whset);
-  var existing = {};
-  for (var i = 0; i < whs.length; i++) existing[whs[i]] = await readRefs(TRACKER_MAP[whs[i]]);
+/* ═══════ TRACKER TOOL (Short-Dating + Backorder) ═══════ */
+function TrackerTool(props) {
+  var toolKey = props.toolKey, toolLabel = props.toolLabel, toolColor = props.toolColor;
+  var demoData = props.demoData, columns = props.columns, emailConfig = props.emailConfig;
+  var skipVendors = props.skipVendors || [];
+  var toast = props.toast, ok = props.ok, lp = props.lp, cred = props.cred, gmail = props.gmail;
+  var contacts = props.contacts || CONTACTS;
 
-  var perWh = {};
-  Object.keys(groups).forEach(function (k) {
-    var g = groups[k];
-    if (existing[g.wh][g.ref]) return;
-    if (!perWh[g.wh]) perWh[g.wh] = { rows: [], arrival: [], refs: [] };
-    g.lines.forEach(function (r) {
-      var ps = Number(r.BOHPackSize); if (!ps || isNaN(ps)) ps = uomToPkgSize(r.UOM);
-      var ndc = (r.SKUNDC && String(r.SKUNDC).trim()) ? String(r.SKUNDC).trim() : String(r.AltID || "").trim();
-      var sup = String(r.VendorName || "").toLowerCase();
-      var skipArrival = sup.indexOf("vetcove generics") >= 0 || sup.indexOf("bloodworth") >= 0;
-      perWh[g.wh].rows.push([r.VendorName || "", ndc, r.Description || "", ps, r.OrderQty != null ? r.OrderQty : "", "=INDEX(D:D,ROW())*INDEX(E:E,ROW())", g.ref, fmtDate(r.OrderDate)]);
-      perWh[g.wh].arrival.push(skipArrival ? "" : fmtDate(r.PromisedDate));
+  var _sp = useState("data"), subPage = _sp[0], setSubPage = _sp[1];
+  var _d = useState([]), data = _d[0], setData = _d[1];
+  var _ld = useState(false), loading = _ld[0], setLoading = _ld[1];
+  var _q = useState(""), search = _q[0], setSearch = _q[1];
+  var _vf = useState("all"), vendorFilter = _vf[0], setVendorFilter = _vf[1];
+  var _il = useState(true), initLoading = _il[0], setInitLoading = _il[1];
+  var _rb = useState(null), runBy = _rb[0], setRunBy = _rb[1];
+  var _rt = useState(null), runTime = _rt[0], setRunTime = _rt[1];
+  var _dr = useState(0), drafts = _dr[0], setDrafts = _dr[1];
+  var _cc = useState(false), confirmClear = _cc[0], setConfirmClear = _cc[1];
+
+  var S = useMemo(function() { return makeStyles(toolColor); }, [toolColor]);
+  var storageKey = "tracker-" + toolKey;
+  var kvTrackerKey = "tracker-shared-" + toolKey;
+
+  useEffect(function() {
+    var mounted = true;
+    (async function() {
+      // Try KV first (shared with team)
+      try {
+        var resp = await kvGet(kvTrackerKey);
+        var json = await resp.json();
+        if (mounted && json.data && json.data.data && json.data.data.length > 0) {
+          var shared = json.data;
+          setData(shared.data); setRunBy(shared.runBy || null); setRunTime(shared.runTime || null); setDrafts(shared.drafts || 0);
+          sSet(storageKey, shared);
+          // Auto-fetch if stale (older than today)
+          if (cred && cred.username && cred.password && shared.fetchedAt) {
+            var today = new Date().toISOString().slice(0, 10);
+            var fetchedDay = new Date(shared.fetchedAt).toISOString().slice(0, 10);
+            if (fetchedDay < today) {
+              // Stale - auto-refresh in background
+              try {
+                var rows = await fetchAcumatica(toolKey, null, cred.username, cred.password);
+                var now = new Date().toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+                if (mounted) { setData(rows); setRunBy("Auto"); setRunTime(now); setDrafts(0); }
+                var payload = { data: rows, runBy: "Auto", runTime: now, drafts: 0, fetchedAt: Date.now() };
+                sSet(storageKey, payload); kvPost(kvTrackerKey, payload);
+              } catch (e) { /* keep stale data */ }
+            }
+          }
+          if (mounted) setInitLoading(false);
+          return;
+        }
+      } catch (e) { /* fall through to localStorage */ }
+      // Fallback to localStorage
+      var saved = sGet(storageKey);
+      if (mounted && saved && saved.data && saved.data.length > 0) {
+        setData(saved.data); setRunBy(saved.runBy || null); setRunTime(saved.runTime || null); setDrafts(saved.drafts || 0);
+      }
+      if (mounted) setInitLoading(false);
+    })();
+    return function() { mounted = false; };
+  }, [storageKey]);
+
+  var persist = useCallback(async function(d, by, time, dr) {
+    var payload = { data: d, runBy: by, runTime: time, drafts: dr, fetchedAt: Date.now() };
+    sSet(storageKey, payload);
+    kvPost(kvTrackerKey, payload).catch(function() {});
+  }, [storageKey, kvTrackerKey]);
+
+  var syncData = useCallback(async function() {
+    setLoading(true);
+    try {
+      var rows;
+      if (cred && cred.username && cred.password) {
+        rows = await fetchAcumatica(toolKey, null, cred.username, cred.password);
+      } else {
+        // Fallback to demo data when no credentials (dev mode)
+        rows = demoData.filter(function(r) { return r.SKUNDC && (r.ItemStatus || "").toLowerCase() !== "inactive"; });
+      }
+      var now = new Date().toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+      setData(rows); setRunBy("You"); setRunTime(now); setDrafts(0);
+      persist(rows, "You", now, 0);
+      toast(toolLabel + ": Synced " + rows.length + " items");
+    } catch (err) {
+      toast("Error: " + err.message, "error");
+    } finally {
+      setLoading(false);
+    }
+  }, [cred, toast, persist, demoData, toolLabel, toolKey]);
+
+  var clearAll = useCallback(async function() {
+    setData([]); setRunBy(null); setRunTime(null); setDrafts(0); setConfirmClear(false); setSubPage("data");
+    sDel(storageKey);
+    kvPost(kvTrackerKey, {}).catch(function() {});
+    toast(toolLabel + ": Cleared");
+  }, [toast, storageKey, kvTrackerKey, toolLabel]);
+
+  var vendorGroups = useMemo(function() {
+    var g = {};
+    data.forEach(function(r) { var v = r.VendorName || "Unknown"; if (!g[v]) g[v] = []; g[v].push(r); });
+    return g;
+  }, [data]);
+
+  var uniqueVendors = useMemo(function() { return Array.from(new Set(data.map(function(r) { return r.VendorName; }))).sort(); }, [data]);
+
+  var filtered = useMemo(function() {
+    var d = data.slice();
+    if (search) {
+      var s = search.toLowerCase();
+      d = d.filter(function(r) {
+        return columns.some(function(c) { return String(r[c.key] || "").toLowerCase().indexOf(s) >= 0; });
+      });
+    }
+    if (vendorFilter !== "all") d = d.filter(function(r) { return r.VendorName === vendorFilter; });
+    return d;
+  }, [data, search, vendorFilter, columns]);
+
+  var emailVendors = useMemo(function() {
+    return Object.entries(vendorGroups).filter(function(e) { return skipVendors.indexOf(e[0]) < 0; }).sort(function(a, b) { return a[0].localeCompare(b[0]); });
+  }, [vendorGroups, skipVendors]);
+
+  var genDrafts = useCallback(async function() {
+    if (!ok) { lp(); return; }
+    if (!gmail || !gmail.token) { toast("Please connect your Gmail account first (bottom-left)", "error"); return; }
+    try {
+      var draftPayloads = emailVendors.map(function(entry) {
+        var vendor = entry[0], items = entry[1];
+        var vendorEmail = contacts[vendor] || "";
+        var toLine = emailConfig.buildTo(vendorEmail);
+        if (!toLine) return null;
+        var tableRows = items.map(function(r, i) {
+          return "<tr>" + emailConfig.tableCols.map(function(c) {
+            return "<td style=\"padding:6px;border:1px solid #ddd;\">" + (c.key === "#" ? (i+1) : String(r[c.key] != null ? r[c.key] : "")) + "</td>";
+          }).join("") + "</tr>";
+        }).join("");
+        var tableHead = "<tr style=\"background:#e6e6fa;font-weight:bold;\">" + emailConfig.tableCols.map(function(c) {
+          return "<th style=\"padding:6px;border:1px solid #ddd;\">" + c.label + "</th>";
+        }).join("") + "</tr>";
+        var htmlBody = emailConfig.buildHtmlBody ? emailConfig.buildHtmlBody(items) :
+          "<p>Hi,</p><p>Could you please provide an update on the items listed below?</p>" +
+          "<table border=\"1\" cellpadding=\"6\" cellspacing=\"0\" style=\"border-collapse:collapse;\">" +
+          "<thead>" + tableHead + "</thead><tbody>" + tableRows + "</tbody></table>" +
+          "<p>Thank you!</p>";
+        return { to: toLine, cc: "hd-purchaseorders@vetcove.com", subject: emailConfig.subjectPrefix + new Date().toLocaleDateString("en-US"), htmlBody: htmlBody };
+      }).filter(Boolean);
+      var result = await postGmailDrafts(draftPayloads, gmail.token);
+      if (result.failed > 0) {
+        toast(toolLabel + ": " + result.created + " created, " + result.failed + " failed", "error");
+      } else {
+        toast(toolLabel + ": " + result.created + " email drafts created in Gmail");
+      }
+      var count = result.created || 0;
+      setDrafts(count);
+      persist(data, runBy, runTime, count);
+    } catch (err) {
+      toast("Gmail error: " + err.message, "error");
+    }
+  }, [ok, lp, gmail, emailVendors, emailConfig, toast, data, runBy, runTime, persist, toolLabel, contacts]);
+
+  if (initLoading) return <div style={Object.assign({}, S.card, { textAlign: "center", padding: 48, color: "#6B7280" })}><Spinner color={toolColor} size={20} /></div>;
+
+  var ToolIcon = toolKey === "backorder" ? IconBox : IconClock;
+  var dataLabel = toolKey === "backorder" ? "Backorder Data" : "Short Data";
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 4, background: "#F8F9FB", borderRadius: 10, padding: 3 }}>
+          <button onClick={function() { setSubPage("data"); }} style={S.pill(subPage === "data", toolColor)}>{dataLabel}{data.length > 0 && <span style={{ fontSize: 10, background: subPage === "data" ? "rgba(255,255,255,0.2)" : "rgba(100,116,139,0.2)", padding: "1px 6px", borderRadius: 4 }}>{data.length}</span>}</button>
+          <button onClick={function() { if (!ok) { lp(); return; } setSubPage("emails"); }} style={Object.assign({}, S.pill(subPage === "emails", toolColor), !ok ? { opacity: 0.5 } : {})}>{!ok && <IconLock />} Email Drafts</button>
+          <button onClick={function() { if (!ok) { lp(); return; } setSubPage("contacts"); }} style={Object.assign({}, S.pill(subPage === "contacts", toolColor), !ok ? { opacity: 0.5 } : {})}>{!ok && <IconLock />} Vendor Contacts</button>
+        </div>
+        <div style={{ flex: 1 }} />
+        {runTime && <span style={{ fontSize: 11, color: "#9CA3AF" }}>Last: {runTime}{runBy ? " by " + runBy : ""}</span>}
+        {data.length > 0 && <span style={S.badge(drafts > 0 ? "success" : "default")}>{drafts > 0 ? <><IconCheck /> {drafts} drafts</> : data.length + " items"}</span>}
+        {data.length > 0 && (confirmClear
+          ? <div style={{ display: "flex", gap: 8, alignItems: "center" }}><span style={{ fontSize: 12, color: "#DC2626" }}>Clear?</span><button onClick={clearAll} style={Object.assign({}, S.btn("danger"), { padding: "6px 14px", fontSize: 12 })}>Yes</button><button onClick={function() { setConfirmClear(false); }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}>No</button></div>
+          : <button onClick={function() { setConfirmClear(true); }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12, color: "#6B7280" })}><IconTrash /> Clear</button>
+        )}
+      </div>
+
+      {subPage === "data" && <div>
+        <div style={Object.assign({}, S.card, { display: "flex", alignItems: "center", gap: 16, padding: "16px 24px" })}>
+          <div style={{ width: 40, height: 40, borderRadius: 10, background: toolColor + "20", display: "flex", alignItems: "center", justifyContent: "center", color: toolColor }}><ToolIcon /></div>
+          <div style={{ flex: 1 }}><div style={{ fontSize: 16, fontWeight: 700, color: "#1F2937" }}>{toolLabel}</div><div style={{ fontSize: 12, color: "#6B7280" }}>{data.length > 0 ? data.length + " items across " + uniqueVendors.length + " vendors" : "No data synced"}</div></div>
+          <button style={Object.assign({}, S.btn(), { padding: "10px 24px" })} onClick={syncData} disabled={loading}>{loading ? <><Spinner /> Syncing...</> : <><IconRefresh /> {data.length > 0 ? "Re-sync" : "Sync Data"}</>}</button>
+        </div>
+        {data.length > 0 && <>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+            <input style={Object.assign({}, S.inp, { maxWidth: 260 })} placeholder="Search..." value={search} onChange={function(e) { setSearch(e.target.value); }} />
+            <select style={S.sel} value={vendorFilter} onChange={function(e) { setVendorFilter(e.target.value); }}><option value="all">All Vendors</option>{uniqueVendors.map(function(v) { return <option key={v} value={v}>{v}</option>; })}</select>
+            <div style={{ flex: 1 }} /><span style={{ fontSize: 12, color: "#6B7280" }}>{filtered.length}/{data.length}</span>
+          </div>
+          <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto" })}>
+            <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
+              <thead><tr>{columns.map(function(c) { return <th key={c.key} style={Object.assign({}, S.th, c.align === "right" ? { textAlign: "right" } : {})}>{c.label}</th>; })}</tr></thead>
+              <tbody>{filtered.map(function(row, idx) {
+                var mc = (row.MovementClass || "").toLowerCase();
+                var isLT = mc.indexOf("long-term") >= 0;
+                return <tr key={idx} style={{ background: isLT ? "rgba(239,68,68,0.04)" : "transparent" }}>{columns.map(function(col) {
+                  var val = row[col.key] != null ? row[col.key] : "";
+                  var vs = String(val);
+                  if (col.copyable) return <td key={col.key} style={Object.assign({}, S.td, { maxWidth: 280 })}><CopyCell text={vs} toast={toast} accentColor={toolColor} /></td>;
+                  if (col.badgeFn) return <td key={col.key} style={S.td}><span style={S.badge(col.badgeFn(vs))}>{vs}</span></td>;
+                  return <td key={col.key} style={Object.assign({}, S.td, col.align === "right" ? { textAlign: "right" } : {}, col.highlightColor ? { color: col.highlightColor } : {})}>{vs}</td>;
+                })}</tr>;
+              })}</tbody>
+            </table>
+          </div>
+        </>}
+        {data.length === 0 && !loading && <div style={Object.assign({}, S.card, { textAlign: "center", padding: 60, color: "#9CA3AF" })}><ToolIcon /><p style={{ marginTop: 12, fontSize: 14 }}>Click <strong>Sync Data</strong> to pull {toolLabel.toLowerCase()} from Acumatica.</p></div>}
+      </div>}
+
+      {subPage === "emails" && <div>
+        <h3 style={{ fontSize: 16, fontWeight: 700, color: "#1F2937", margin: "0 0 4px" }}>{emailConfig.title}</h3>
+        <p style={{ color: "#6B7280", fontSize: 12, margin: "0 0 16px" }}>{emailConfig.subtitle}</p>
+        {skipVendors.length > 0 && <div style={{ background: "rgba(100,116,139,0.06)", border: "1px solid #E5E7EB", borderRadius: 8, padding: "10px 16px", marginBottom: 16, fontSize: 12, color: "#6B7280" }}>Skipped: {skipVendors.join(", ")}</div>}
+        {drafts > 0 && <div style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.3)", borderRadius: 10, padding: "14px 20px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}><IconCheck /><span style={{ fontSize: 13, color: "#059669" }}><strong>{drafts} draft(s) created!</strong></span></div>}
+        {data.length > 0 ? <>
+          {emailVendors.map(function(entry) {
+            var vendor = entry[0], items = entry[1];
+            var email = contacts[vendor] || "";
+            var toLine = emailConfig.buildTo(email);
+            return <div key={vendor} style={S.card}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+                <div><div style={{ fontSize: 14, fontWeight: 600, color: "#1F2937" }}>{vendor}</div><div style={{ fontSize: 11, color: "#6B7280", marginTop: 2 }}>{items.length} items &middot; To: {toLine || "No email on file"}</div></div>
+                <span style={S.badge("purple")}>{items.length}</span>
+              </div>
+              <div style={{ overflow: "auto", maxHeight: 200 }}>
+                <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 11 }}>
+                  <thead><tr>{emailConfig.tableCols.map(function(c) { return <th key={c.key} style={Object.assign({}, S.th, { fontSize: 10 })}>{c.label}</th>; })}</tr></thead>
+                  <tbody>{items.map(function(r, i) { return <tr key={i}>{emailConfig.tableCols.map(function(c) { return <td key={c.key} style={Object.assign({}, S.td, c.highlightColor ? { color: c.highlightColor, fontWeight: 600 } : {}, { maxWidth: 240, wordBreak: "break-word" })}>{c.key === "#" ? i + 1 : String(r[c.key] != null ? r[c.key] : "")}</td>; })}</tr>; })}</tbody>
+                </table>
+              </div>
+            </div>;
+          })}
+          <Gate ok={ok} prompt={lp} style={Object.assign({}, S.btn(), { padding: "10px 24px", opacity: drafts > 0 ? 0.5 : 1 })} onClick={genDrafts} disabled={drafts > 0}><IconMail /> {drafts > 0 ? drafts + " Drafts Created" : "Generate " + emailVendors.length + " Email Drafts"}</Gate>
+        </> : <div style={Object.assign({}, S.card, { textAlign: "center", padding: 48, color: "#9CA3AF" })}>Sync data first.</div>}
+      </div>}
+
+      {subPage === "contacts" && <div>
+        <h3 style={{ fontSize: 16, fontWeight: 700, color: "#1F2937", margin: "0 0 16px" }}>Vendor Contacts</h3>
+        <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto" })}>
+          <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
+            <thead><tr><th style={S.th}>Vendor</th><th style={S.th}>Email(s)</th></tr></thead>
+            <tbody>{Object.entries(contacts).filter(function(e) { return e[1]; }).sort(function(a, b) { return a[0].localeCompare(b[0]); }).map(function(e) { return <tr key={e[0]}><td style={Object.assign({}, S.td, { fontWeight: 500, color: "#374151" })}>{e[0]}</td><td style={Object.assign({}, S.td, { fontSize: 14, color: "#6B7280" })}>{e[1]}</td></tr>; })}</tbody>
+          </table>
+        </div>
+      </div>}
+    </div>
+  );
+}
+
+/* ═══════ PO WAREHOUSE TOOL ═══════ */
+function WHT(props) {
+  var whKey = props.whKey, cfg = props.cfg, toast = props.toast, ok = props.ok, lp = props.lp, cred = props.cred, gmail = props.gmail, SHIP_RULES = props.shipRules || {};
+  var vendorChannels = props.vendorChannels || {};
+  var updateVendorChannels = props.updateVendorChannels;
+  var vendorContacts = props.vendorContacts || {};
+  var isGGM = whKey.indexOf("GGM") === 0;
+
+  // Receiving tracker destinations by warehouse (same sheets/tabs as the PO Translator).
+  var TRACKER_MAP = {
+    "TP-NY": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - BROOKLYN" },
+    "TP-OH": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - SEVEN HILLS" },
+    "TP-CA": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - HAYWARD" },
+    "TP-TX": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - DALLAS" },
+    "GGM-KY": { sheetId: "1dMZ_8VC6zaqLLWXQHFfuTXgxMfm0T4ip7To1CbXLfMk", tab: "RECEIVING - KY" },
+    "GGM-AZ": { sheetId: "1dMZ_8VC6zaqLLWXQHFfuTXgxMfm0T4ip7To1CbXLfMk", tab: "RECEIVING - AZ" },
+  };
+  function uomToPkgSize(uom) { var m = String(uom == null ? "" : uom).match(/(\d+)\s*$/); return m ? Number(m[1]) : 1; }
+  function fmtTrackerDate(v) {
+    if (!v) return "";
+    var s = String(v).trim();
+    var m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return Number(m[2]) + "/" + Number(m[3]) + "/" + m[1];
+    return s.slice(0, 10);
+  }
+  var _sp = useState("overview"), subPage = _sp[0], setSubPage = _sp[1];
+  var _d = useState([]), data = _d[0], setData = _d[1];
+  var _ld = useState(false), loading = _ld[0], setLoading = _ld[1];
+  var _q = useState(""), search = _q[0], setSearch = _q[1];
+  var _vf = useState("all"), vendorFilter = _vf[0], setVendorFilter = _vf[1];
+  var _fo = useState(false), flagsOnly = _fo[0], setFlagsOnly = _fo[1];
+  var _cc = useState(false), confirmClear = _cc[0], setConfirmClear = _cc[1];
+  var _es = useState(false), emailSent = _es[0], setEmailSent = _es[1];
+  var _el = useState(false), emailLoading = _el[0], setEmailLoading = _el[1];
+  var _sn = useState({}), shipNotes = _sn[0], setShipNotes = _sn[1];
+  var _rb = useState(null), runBy = _rb[0], setRunBy = _rb[1];
+  var _rt = useState(null), runTime = _rt[0], setRunTime = _rt[1];
+  var _pck = useState(null), priceCheckKey = _pck[0], setPriceCheckKey = _pck[1];
+  var _pcc = useState({}), priceChecked = _pcc[0], setPriceChecked = _pcc[1];
+  var _dismissed = useState({}), dismissed = _dismissed[0], setDismissed = _dismissed[1];
+  var sdExemptGroup = isGGM ? "ggm" : "fuze";
+  var sdExempt = props.sdExempt || {}; // lifted to parent (Hub) so all warehouse views stay in sync instantly
+  var _showExempt = useState(false), showExempt = _showExempt[0], setShowExempt = _showExempt[1];
+  var _poSort = useState({ col: null, dir: "asc" }), poSort = _poSort[0], setPoSort = _poSort[1];
+  var _shipSort = useState({ col: null, dir: "asc" }), shipSort = _shipSort[0], setShipSort = _shipSort[1];
+  var _pcr = useState({}), pcReported = _pcr[0], setPcReported = _pcr[1];
+  var _pcs = useState(null), pcSort = _pcs[0], setPcSort = _pcs[1];
+  var _esel = useState(null), emailSelected = _esel[0], setEmailSelected = _esel[1];
+  var _il = useState(true), initLoading = _il[0], setInitLoading = _il[1];
+  var _emailTo = useState(cfg.emailTo), emailTo = _emailTo[0], setEmailTo = _emailTo[1];
+  var _emailCc = useState(""), emailCc = _emailCc[0], setEmailCc = _emailCc[1];
+  var _emailSubject = useState(""), emailSubject = _emailSubject[0], setEmailSubject = _emailSubject[1];
+  var DEFAULT_BODY = "Good morning,\n\nAttached are today's POs.\n\nThanks in advance,";
+  var _emailBody = useState(DEFAULT_BODY), emailBody = _emailBody[0], setEmailBody = _emailBody[1];
+  var EMAIL_OVERRIDE_KEY = "po-email-overrides:" + whKey;
+  var _editingField = useState(null), editingField = _editingField[0], setEditingField = _editingField[1];
+  useEffect(function() {
+    var m = true;
+    kvGet(EMAIL_OVERRIDE_KEY).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+      if (!m || !d || !d.data) return;
+      var ov = typeof d.data === "string" ? JSON.parse(d.data) : d.data;
+      if (ov.to != null) setEmailTo(ov.to);
+      if (ov.cc != null) setEmailCc(ov.cc);
+      if (ov.subject != null) setEmailSubject(ov.subject);
+      if (ov.body != null) setEmailBody(ov.body);
+    }).catch(function() {});
+    return function() { m = false; };
+  }, [whKey]);
+  function persistEmailOverride(patch) {
+    var current = { to: emailTo, cc: emailCc, subject: emailSubject, body: emailBody };
+    var merged = Object.assign({}, current, patch);
+    kvPost(EMAIL_OVERRIDE_KEY, merged).catch(function() {});
+  }
+  // Exempt an Inventory ID from short-dating for this vendor group (Fuze or GGM).
+  // State lives in the parent (Hub) so every warehouse view updates instantly.
+  function toggleSdExempt(invId, meta) {
+    invId = String(invId || "").trim();
+    if (!invId) { toast("No Inventory ID on this line, can't exempt", "error"); return; }
+    props.onToggleExempt(sdExemptGroup, invId, meta);
+  }
+  var S = useMemo(function() { return makeStyles(cfg.color); }, [cfg.color]);
+  var kvKey = "po:" + whKey;
+
+  // Load from KV on mount, fall back to localStorage
+  useEffect(function() {
+    var m = true;
+    (async function() {
+      var loaded = false;
+      // Try KV first
+      try {
+        var resp = await kvGet(kvKey);
+        var json = await resp.json();
+        if (m && json.data && json.data.data && json.data.data.length > 0) {
+          setData(json.data.data); setEmailSent(json.data.emailSent || false); setRunBy(json.data.runBy || null); setRunTime(json.data.runTime || null); setSubPage("data");
+          // Load shipNotes: prefer separate storage, fall back to KV bundled notes
+          var savedNotes = sGet("ship-notes-" + whKey);
+          setShipNotes(savedNotes || json.data.shipNotes || {});
+          if (m) setKvStatus("loaded-kv:" + json.data.data.length);
+          loaded = true;
+        } else {
+          // Show what KV returned for debugging
+          var dbg = json.data === null ? "null" : json.data === undefined ? "undef" : typeof json.data === "object" ? (json.data.data ? "data:" + (json.data.data.length || 0) : "no-data-key") : typeof json.data;
+          if (m) setKvStatus("kv-empty(" + dbg + ")");
+        }
+      } catch (e) { if (m) setKvStatus("kv-error:" + e.message); }
+      // Fall back to localStorage if KV had nothing
+      if (!loaded && m) {
+        var s = sGet("wh-data-" + whKey);
+        if (s && s.data && s.data.length > 0) {
+          setData(s.data); setEmailSent(s.emailSent || false); setRunBy(s.runBy || null); setRunTime(s.runTime || null); setSubPage("data");
+          var savedNotes = sGet("ship-notes-" + whKey);
+          setShipNotes(savedNotes || s.shipNotes || {});
+          if (m) setKvStatus("loaded-ls:" + s.data.length);
+        } else {
+          if (m) setKvStatus("no-data");
+        }
+      }
+      if (m) setInitLoading(false);
+    })();
+    return function() { m = false; };
+  }, [kvKey]);
+
+  // Poll KV every 8 seconds for changes from other users
+  useEffect(function() {
+    var m = true;
+    var poll = setInterval(async function() {
+      try {
+        var resp = await kvGet(kvKey);
+        var json = await resp.json();
+        if (!m || !json.data) return;
+        var remote = json.data;
+        // Only update if remote is newer (different runTime)
+        if (remote.runTime && remote.runTime !== runTime) {
+          setData(remote.data || []); setEmailSent(remote.emailSent || false); setRunBy(remote.runBy || null); setRunTime(remote.runTime || null); setShipNotes(remote.shipNotes || {});
+        } else if (remote.shipNotes && JSON.stringify(remote.shipNotes) !== JSON.stringify(shipNotes)) {
+          setShipNotes(remote.shipNotes);
+        } else if (remote.emailSent !== emailSent) {
+          setEmailSent(remote.emailSent || false);
+        }
+      } catch (e) {}
+    }, 8000);
+    return function() { m = false; clearInterval(poll); };
+  }, [kvKey, runTime, shipNotes, emailSent]);
+
+  var _kvSt = useState(""), kvStatus = _kvSt[0], setKvStatus = _kvSt[1];
+
+  var persist = useCallback(async function(d, es, by, time, sn) {
+    var payload = { data: d, emailSent: es, runBy: by, runTime: time, shipNotes: sn || {} };
+    // Save shipNotes separately so they survive re-fetch
+    sSet("ship-notes-" + whKey, sn || {});
+    // Save to localStorage as cache
+    sSet("wh-data-" + whKey, payload);
+    // Save to KV for sharing with other users
+    try {
+      var sizeKB = Math.round(JSON.stringify(payload).length / 1024);
+      var resp = await kvPost(kvKey, payload);
+      var json = await resp.json();
+      if (!resp.ok || json.error) { setKvStatus("save-fail:" + sizeKB + "KB " + (json.error || resp.status)); return; }
+      // Verify: read it back immediately
+      var vResp = await kvGet(kvKey);
+      var vJson = await vResp.json();
+      if (vJson.data && vJson.data.data && vJson.data.data.length > 0) {
+        setKvStatus("verified:" + sizeKB + "KB," + vJson.data.data.length + "rows");
+      } else {
+        setKvStatus("save-lost:" + sizeKB + "KB,readback-empty");
+      }
+    } catch (e) { setKvStatus("save-error:" + e.message); }
+  }, [kvKey, whKey]);
+  var fetchData = useCallback(function() {
+    if (!ok) { lp(); return; } setLoading(true); setEmailSent(false); setConfirmClear(false);
+    (async function() {
+      try {
+        var raw;
+        if (cred && cred.username && cred.password) {
+          raw = await fetchAcumatica(isGGM ? "po-ggm" : "po", whKey, cred.username, cred.password);
+        } else {
+          raw = PO_DEMO[whKey] || [];
+        }
+        var excluded = isGGM ? EXCLUDED.filter(function(ex) { return ex !== "vetcove generics"; }) : EXCLUDED;
+        var rows = raw.filter(function(r) { return r.SKUNDC && (r.Warehouse || "").trim() === whKey && !excluded.some(function(ex) { return (r.VendorName || "").toLowerCase().indexOf(ex) >= 0; }); }).map(function(r) { return Object.assign({}, r, { Price: Number(r.Price) || 0, OrderQty: Number(r.OrderQty) || 0, TotalPrice: +((Number(r.Price) || 0) * (Number(r.OrderQty) || 0)).toFixed(2) }); });
+
+        // Fetch default prices from cross reference for items with $0 price
+        var zeroRows = rows.filter(function(r) { return !r.Price || r.Price === 0; });
+        if (zeroRows.length > 0 && cred && cred.username && cred.password) {
+          try {
+            var xref = await fetchAcumatica("item-xref", null, cred.username, cred.password);
+            var priceMap = {};
+            xref.forEach(function(x) {
+              var id = String(x.InventoryID || "").trim();
+              var price = parseFloat(x.DefaultPrice);
+              if (id && !isNaN(price) && price > 0) priceMap[id] = price;
+            });
+            rows = rows.map(function(r) {
+              if ((!r.Price || r.Price === 0) && priceMap[r.SKUNDC]) {
+                var p = priceMap[r.SKUNDC];
+                return Object.assign({}, r, { Price: p, TotalPrice: +(p * (r.OrderQty || 0)).toFixed(2) });
+              }
+              return r;
+            });
+          } catch (xrefErr) {
+            console.warn("Cross reference fetch failed:", xrefErr.message);
+          }
+        }
+
+        var now = new Date().toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+        var who = cred && cred.username ? cred.username : "You";
+        // Carry over existing shipNotes to new data — EXACT MATCH ONLY.
+        // We used to fall back to vendor-name matching when the PO number had
+        // changed, but that caused yesterday's vendor refs to get carried onto
+        // today's brand-new POs. A vendor ref is PO-specific — never inherit
+        // one across PO numbers. If the user re-enters a vendor ref tomorrow,
+        // that's a feature, not a bug.
+        var prevNotes = Object.assign({}, sGet("ship-notes-" + whKey) || {}, shipNotes);
+        var newGroups = {};
+        rows.forEach(function(r) { var k = r.VendorName + " || " + (r.OrderNbr || ""); newGroups[k] = 1; });
+        var carried = {};
+        Object.keys(newGroups).forEach(function(newKey) {
+          if (prevNotes[newKey]) { carried[newKey] = prevNotes[newKey]; }
+        });
+        setData(rows); setRunBy(who); setRunTime(now); setLoading(false); setSubPage("data"); setShipNotes(carried); setDismissed({}); persist(rows, false, who, now, carried); toast(cfg.label + ": Fetched " + rows.length + " lines");
+      } catch (err) {
+        setLoading(false);
+        toast("Error: " + err.message, "error");
+      }
+    })();
+  }, [whKey, cred, cfg.label, toast, ok, lp, persist]);
+  var clearAll = useCallback(async function() { if (!ok) { lp(); return; } setData([]); setSearch(""); setVendorFilter("all"); setFlagsOnly(false); setEmailSent(false); setConfirmClear(false); setRunBy(null); setRunTime(null); setSubPage("overview"); setShipNotes({}); sDel("wh-data-" + whKey); sDel("ship-notes-" + whKey); try { await kvPost(kvKey, {}); } catch (e) {} toast(cfg.label + ": Cleared"); }, [cfg.label, toast, ok, lp, kvKey, whKey]);
+
+  // ─── Acumatica: remove flagged lines from existing POs ───
+  var _acuRemove = useState(false), acuRemoveLoading = _acuRemove[0], setAcuRemoveLoading = _acuRemove[1];
+  async function removeFromAcumatica(pairs) {
+    if (!pairs || pairs.length === 0) return;
+    if (!cred || !cred.username || !cred.password) { toast("Acumatica credentials required", "error"); lp && lp(); return; }
+    var validPairs = pairs.filter(function(p) { return p && p.orderNbr && p.inventoryID; });
+    var missingCount = pairs.length - validPairs.length;
+    if (validPairs.length === 0) {
+      toast(missingCount > 0 ? "No Inventory IDs available for the selected lines \u2014 try Re-fetch" : "Nothing to remove", "error");
+      return;
+    }
+    var byPO = {};
+    validPairs.forEach(function(p) {
+      if (!byPO[p.orderNbr]) byPO[p.orderNbr] = [];
+      if (byPO[p.orderNbr].indexOf(p.inventoryID) < 0) byPO[p.orderNbr].push(p.inventoryID);
     });
-    perWh[g.wh].refs.push(g.ref);
-  });
+    var removals = Object.keys(byPO).map(function(po) { return { orderNbr: po, skus: byPO[po] }; });
+    setAcuRemoveLoading(true);
+    try {
+      var res = await fetch("/api/acumatica-remove-po-lines", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: cred.username, password: cred.password, removals: removals })
+      });
+      var resp = await res.json();
+      if (!resp || !Array.isArray(resp.results)) { toast("Unexpected response from Acumatica", "error"); return; }
+      var removedKeys = new Set();
+      var deletedPOs = new Set();
+      var removedCount = 0;
+      var failedSummaries = [];
+      resp.results.forEach(function(r) {
+        if (r.ok && r.deletedEntirePO) {
+          deletedPOs.add(r.orderNbr);
+        } else if (r.ok && Array.isArray(r.removedLines)) {
+          r.removedLines.forEach(function(rl) {
+            removedCount++;
+            if (rl.inventoryID) removedKeys.add(r.orderNbr + "::" + String(rl.inventoryID).trim().toUpperCase());
+          });
+        } else if (!r.ok) {
+          var why = r.stage === "status-check" ? r.orderNbr + " (status: " + (r.currentStatus || "unknown") + ", must be On Hold)" : r.orderNbr + " (" + (r.error || r.stage) + ")";
+          failedSummaries.push(why);
+        }
+      });
+      if (removedKeys.size > 0 || deletedPOs.size > 0) {
+        var nextData = data.filter(function(row) {
+          if (deletedPOs.has(row.OrderNbr || "")) return false;
+          var inv = String(row.InventoryID || "").trim().toUpperCase();
+          if (!inv) return true;
+          var k = (row.OrderNbr || "") + "::" + inv;
+          return !removedKeys.has(k);
+        });
+        setData(nextData);
+        try { persist(nextData, emailSent, runBy, runTime, shipNotes); } catch (e) {}
+      }
+      var okParts = [];
+      if (removedCount > 0) okParts.push("Removed " + removedCount + " line" + (removedCount > 1 ? "s" : ""));
+      if (deletedPOs.size > 0) okParts.push("deleted " + deletedPOs.size + " empty PO" + (deletedPOs.size > 1 ? "s" : "") + " (" + Array.from(deletedPOs).join(", ") + ")");
+      if (okParts.length > 0 && failedSummaries.length === 0) {
+        toast(okParts.join(", "), "success");
+      } else if (okParts.length > 0 && failedSummaries.length > 0) {
+        toast(okParts.join(", ") + ". Skipped: " + failedSummaries.join("; "), "error");
+      } else if (failedSummaries.length > 0) {
+        toast("No changes. " + failedSummaries.join("; "), "error");
+      } else {
+        toast("No matching lines found to remove", "error");
+      }
+    } catch (err) {
+      toast("Network error: " + err.message, "error");
+    } finally {
+      setAcuRemoveLoading(false);
+    }
+  }
 
-  var results = [];
-  var toAdd = Object.keys(perWh);
-  for (var j = 0; j < toAdd.length; j++) {
-    var w = toAdd[j], dest = TRACKER_MAP[w], pw = perWh[w];
-    var resp = await fetch(SITE_URL + "/api/tracker-append", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sheetId: dest.sheetId, tab: dest.tab, rows: pw.rows, extraColumn: { header: "Expected Arrival", values: pw.arrival } }), cache: "no-store" });
+  // ─── Acumatica: Process All POs ───
+  var _acuProc = useState(false), acuProcLoading = _acuProc[0], setAcuProcLoading = _acuProc[1];
+  var _acuProcConfirm = useState(false), acuProcConfirm = _acuProcConfirm[0], setAcuProcConfirm = _acuProcConfirm[1];
+  var _acuSkipConfirm = useState(null), acuSkipConfirm = _acuSkipConfirm[0], setAcuSkipConfirm = _acuSkipConfirm[1];
+  var _acuProcResult = useState(null), acuProcResult = _acuProcResult[0], setAcuProcResult = _acuProcResult[1];
+  // For categorize modal: { unlabeledVendors: [...], pendingChannels: { vendor: "Email"|... } }
+  var _acuCat = useState(null), acuCategorize = _acuCat[0], setAcuCategorize = _acuCat[1];
+
+  // Resolve a vendor's channel from vendorChannels first, then fall back to legacy VENDOR_LABELS.
+  // Legacy labels: "Truecommerce" -> "TrueCommerce EDI"; "Website Ordering" -> "Website Ordering".
+  // Returns "Email" | "TrueCommerce EDI" | "Website Ordering" | null (unset).
+  function getEffectiveChannel(vendorName) {
+    var c = vendorChannels[vendorName];
+    if (c === "Email" || c === "TrueCommerce EDI" || c === "Website Ordering") return c;
+    var legacy = getVendorLabel(vendorName);
+    if (legacy === "Truecommerce") return "TrueCommerce EDI";
+    if (legacy === "Website Ordering") return "Website Ordering";
+    return null;
+  }
+
+  // Build the list of POs ready to be processed. Reports:
+  //   processable:    ready to fire (all info present)
+  //   missingRef:     vendor exists, channel set, but no Vendor Ref entered
+  //   missingVendor:  vendor not in Vendor Contacts at all
+  //   unlabeled:      vendor in Vendor Contacts but no channel set
+  function buildProcessablePOs() {
+    var processable = [];
+    var missingRef = [];
+    var missingVendor = [];
+    var unlabeledSet = {};
+    Object.keys(vendorGroups).forEach(function(key) {
+      var parts = key.split(" || ");
+      var vendorName = parts[0], orderNbr = parts[1] || "";
+      var sn = shipNotes[key] || {};
+      if (sn.done) return;
+      if (!orderNbr) return;
+      var vendorRef = (sn.notes || "").trim();
+      // Check vendor existence in Vendor Contacts
+      var inContacts = vendorContacts.hasOwnProperty(vendorName);
+      if (!inContacts) {
+        missingVendor.push({ key: key, vendorName: vendorName, orderNbr: orderNbr });
+        return;
+      }
+      var channel = getEffectiveChannel(vendorName);
+      if (!channel) {
+        unlabeledSet[vendorName] = true;
+        // Still record so we know which keys are blocked
+        return;
+      }
+      if (!vendorRef) {
+        missingRef.push({ key: key, vendorName: vendorName, orderNbr: orderNbr });
+        return;
+      }
+      processable.push({
+        key: key,
+        vendorName: vendorName,
+        orderNbr: orderNbr,
+        vendorRef: vendorRef,
+        channel: channel
+      });
+    });
+    return { processable: processable, missingRef: missingRef, missingVendor: missingVendor, unlabeledVendors: Object.keys(unlabeledSet) };
+  }
+
+  function onProcessAllPOsClick() {
+    if (!cred || !cred.username || !cred.password) { toast("Acumatica credentials required", "error"); lp && lp(); return; }
+    var built = buildProcessablePOs();
+    // (1) Vendors missing from Vendor Contacts entirely
+    if (built.missingVendor.length > 0) {
+      var miss = built.missingVendor.slice(0, 3).map(function(m) { return m.vendorName; });
+      var unique = Array.from(new Set(miss));
+      var more = built.missingVendor.length > 3 ? " (+" + (built.missingVendor.length - 3) + " more)" : "";
+      toast("Add these vendors first in Settings > Vendor Settings: " + unique.join(", ") + more, "error");
+      return;
+    }
+    // (2) Vendors that exist but have no channel set → open categorize modal
+    if (built.unlabeledVendors.length > 0) {
+      var pending = {};
+      built.unlabeledVendors.forEach(function(v) { pending[v] = ""; });
+      setAcuCategorize({ vendors: built.unlabeledVendors, pending: pending });
+      return;
+    }
+    // (3) Missing Vendor Ref on some rows — confirm-and-skip instead of blocking the whole batch
+    if (built.missingRef.length > 0) {
+      if (built.processable.length === 0) {
+        // No rows ready at all — there's nothing to confirm. Just toast.
+        toast("Enter at least one Vendor Ref before processing", "error");
+        return;
+      }
+      // Some rows ready, some missing VR. Ask the user to confirm we should process the ready ones
+      // and skip the missing-VR rows (so they can fill them in later and re-run).
+      setAcuSkipConfirm({ processable: built.processable, missingRef: built.missingRef });
+      return;
+    }
+    if (built.processable.length === 0) {
+      toast("Nothing to process \u2014 all rows are done or missing data", "error");
+      return;
+    }
+    if (built.processable.length >= 5) {
+      setAcuProcConfirm(true);
+    } else {
+      processAllPOs(built.processable);
+    }
+  }
+
+  // Called when user confirms the categorize modal.
+  // Saves the picked channels to KV, then auto-continues the Process All POs flow.
+  function onCategorizeConfirm() {
+    if (!acuCategorize) return;
+    var pending = acuCategorize.pending || {};
+    // Validate: every unlabeled vendor must have a non-empty channel pick
+    var unfilled = acuCategorize.vendors.filter(function(v) { return !pending[v]; });
+    if (unfilled.length > 0) {
+      toast("Pick a channel for: " + unfilled.slice(0, 3).join(", ") + (unfilled.length > 3 ? "..." : ""), "error");
+      return;
+    }
+    // Save all picks at once
+    var newChannels = Object.assign({}, vendorChannels);
+    acuCategorize.vendors.forEach(function(v) { newChannels[v] = pending[v]; });
+    updateVendorChannels && updateVendorChannels(newChannels);
+    setAcuCategorize(null);
+    // Auto-continue: re-trigger the Process All POs flow.
+    // The dropdown writes update synchronously to React state; small timeout
+    // ensures the next render sees vendorChannels updated.
+    setTimeout(function() {
+      // Build a fresh list using the new channels. Since vendorChannels prop
+      // may not have updated by the time this runs, we re-derive locally.
+      onProcessAllPOsClick();
+    }, 0);
+  }
+
+  // Called when user cancels the categorize modal.
+  // Saves whatever they DID pick (partial), then aborts without continuing.
+  function onCategorizeCancel() {
+    if (!acuCategorize) { setAcuCategorize(null); return; }
+    var pending = acuCategorize.pending || {};
+    var newChannels = Object.assign({}, vendorChannels);
+    var saved = 0;
+    acuCategorize.vendors.forEach(function(v) { if (pending[v]) { newChannels[v] = pending[v]; saved++; } });
+    if (saved > 0) {
+      updateVendorChannels && updateVendorChannels(newChannels);
+      toast("Saved " + saved + " channel" + (saved > 1 ? "s" : "") + ". Click Process All POs again to continue.", "success");
+    }
+    setAcuCategorize(null);
+  }
+
+  async function processAllPOs(processable) {
+    setAcuProcConfirm(false);
+    if (!processable) {
+      var built = buildProcessablePOs();
+      if (built.processable.length === 0) { toast("Nothing to process", "error"); return; }
+      processable = built.processable;
+    }
+    setAcuProcLoading(true);
+    setAcuProcResult(null);
+    try {
+      var posPayload = processable.map(function(p) {
+        return { orderNbr: p.orderNbr, vendorRef: p.vendorRef, channel: p.channel };
+      });
+      var res = await fetch("/api/acumatica-process-pos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: cred.username, password: cred.password, pos: posPayload })
+      });
+      var resp = await res.json();
+      setAcuProcResult({ resp: resp, requested: processable });
+      if (!resp || !Array.isArray(resp.results)) {
+        toast("Unexpected response from Acumatica", "error");
+        return;
+      }
+      var updatedNotes = Object.assign({}, shipNotes);
+      var changed = false;
+      resp.results.forEach(function(r, i) {
+        if (!r.ok) return;
+        var p = processable[i];
+        if (!p || !p.key) return;
+        // Auto-checkmark Email channel POs (email sent) AND TrueCommerce EDI POs whose
+        // EDI send succeeded. Website Ordering POs still need a manual follow-up (vendor
+        // website submission), so leave them unchecked.
+        if (p.channel === "Email") {
+          updatedNotes[p.key] = Object.assign({}, updatedNotes[p.key] || {}, { done: true });
+          changed = true;
+        } else if (p.channel === "TrueCommerce EDI" && r.ediSent) {
+          updatedNotes[p.key] = Object.assign({}, updatedNotes[p.key] || {}, { done: true });
+          changed = true;
+        }
+      });
+
+      // ─── Add successfully-processed POs to the receiving tracker ───
+      // Build 8-col rows (+ Expected Arrival by header) for each PO that just
+      // processed OK and hasn't already been added. addedToTracker guards against
+      // re-adding if the same PO is processed again later.
+      var trackerRows = [], trackerArrival = [], addedKeys = [];
+      resp.results.forEach(function(r, i) {
+        if (!r.ok) return;
+        var p = processable[i];
+        if (!p || !p.key) return;
+        if ((updatedNotes[p.key] || {}).addedToTracker) return;
+        var lines = vendorGroups[p.key] || [];
+        lines.forEach(function(ln) {
+          trackerRows.push([
+            ln.VendorName || "",
+            ln.SKUNDC || "",
+            ln.Description || "",
+            uomToPkgSize(ln.UOM),
+            ln.OrderQty != null ? ln.OrderQty : "",
+            "=INDEX(D:D,ROW())*INDEX(E:E,ROW())",
+            p.vendorRef || ln.OrderNbr || "",
+            fmtTrackerDate(ln.OrderDate),
+          ]);
+          trackerArrival.push(fmtTrackerDate(ln.PromisedDate));
+        });
+        addedKeys.push(p.key);
+      });
+      if (trackerRows.length) {
+        var dest = TRACKER_MAP[whKey];
+        if (dest) {
+          try {
+            var tResp = await fetch("/api/tracker-append", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ sheetId: dest.sheetId, tab: dest.tab, rows: trackerRows, extraColumn: { header: "Expected Arrival", values: trackerArrival } }),
+            });
+            var tData = await tResp.json();
+            if (tData && tData.ok) {
+              toast("Added " + tData.appended + " row" + (tData.appended === 1 ? "" : "s") + " to " + dest.tab, "success");
+              addedKeys.forEach(function(k) { updatedNotes[k] = Object.assign({}, updatedNotes[k] || {}, { addedToTracker: true }); });
+              changed = true;
+            } else {
+              toast("Tracker add failed: " + ((tData && tData.error) || "unknown"), "error");
+            }
+          } catch (e) { toast("Tracker add error: " + (e && e.message ? e.message : e), "error"); }
+        }
+      }
+
+      if (changed) {
+        setShipNotes(updatedNotes);
+        try { persist(data, emailSent, runBy, runTime, updatedNotes); } catch (e) {}
+      }
+      var s = resp.summary || {};
+      if (resp.ok) {
+        var bits = [];
+        if (s.emailedCount) bits.push(s.emailedCount + " emailed");
+        if (s.ediSentCount) bits.push(s.ediSentCount + " sent to EDI");
+        if (s.vendorRefOnlyCount) bits.push(s.vendorRefOnlyCount + " vendor-ref only");
+        toast("Processed " + s.successCount + " POs: " + (bits.join(", ") || "all done"), "success");
+      } else {
+        var failBits = [];
+        if (s.failedCount) failBits.push(s.failedCount + " failed");
+        if (s.ediFailedCount) failBits.push(s.ediFailedCount + " EDI failed");
+        toast(s.successCount + " succeeded, " + failBits.join(", ") + " \u2014 see results", "error");
+      }
+    } catch (err) {
+      toast("Network error: " + err.message, "error");
+    } finally {
+      setAcuProcLoading(false);
+    }
+  }
+
+
+  var vendorGroups = useMemo(function() { var g = {}; data.forEach(function(r) { var key = r.VendorName + " || " + (r.OrderNbr || ""); if (!g[key]) g[key] = []; g[key].push(r); }); return g; }, [data]);
+  var vendorTotals = useMemo(function() { var t = {}; Object.entries(vendorGroups).forEach(function(e) { t[e[0]] = e[1].reduce(function(s, r) { return s + r.TotalPrice; }, 0); }); return t; }, [vendorGroups]);
+  var uniqueVendors = useMemo(function() { return Array.from(new Set(data.map(function(r) { return r.VendorName; }))).sort(); }, [data]);
+  var totalVal = useMemo(function() { return data.reduce(function(s, r) { return s + r.TotalPrice; }, 0); }, [data]);
+  var flags = useMemo(function() { var f = { s: [], so: [] }; data.forEach(function(r, i) { var mc = (r.MovementClass || "").toLowerCase().trim(); if (mc === "short-dating" && !sdExempt[String(r.InventoryID || "").trim()]) f.s.push(i); if (mc === "sell-off item") f.so.push(i); }); return f; }, [data, sdExempt]);
+  var flagCount = flags.s.length + flags.so.length;
+  // Build the full exempt-items list for this group (visible even when not on a PO).
+  var sdExemptDescByInv = {};
+  data.forEach(function(r) { var id = String(r.InventoryID || "").trim(); if (id && !sdExemptDescByInv[id]) sdExemptDescByInv[id] = r.Description; });
+  var sdExemptEntries = Object.keys(sdExempt).map(function(id) { var v = sdExempt[id]; var desc = (v && typeof v === "object" && v.desc) ? v.desc : (sdExemptDescByInv[id] || ""); return { invId: id, desc: desc, onPO: !!sdExemptDescByInv[id] }; }).sort(function(a, b) { return a.invId.localeCompare(b.invId); });
+  var emailBlocked = !isGGM && (flags.s.length > 0 || flags.so.length > 0);
+  var getFlag = function(r) { var mc = (r.MovementClass || "").toLowerCase().trim(); if (mc === "short-dating") return sdExempt[String(r.InventoryID || "").trim()] ? null : "short"; if (mc === "sell-off item") return "selloff"; return null; };
+  // Auto-reset exempt items that are no longer short-dated, and backfill missing
+  // descriptions for exempt items once we can see them on a PO (so off-PO views
+  // in the same group can display them too).
+  useEffect(function() {
+    var present = {}, shortSet = {}, descByInv = {};
+    data.forEach(function(r) {
+      var invId = String(r.InventoryID || "").trim();
+      if (!invId) return;
+      present[invId] = true;
+      if (r.Description && !descByInv[invId]) descByInv[invId] = r.Description;
+      if ((r.MovementClass || "").toLowerCase().trim() === "short-dating") shortSet[invId] = true;
+    });
+    if (props.onClearExempt) {
+      var toClear = Object.keys(sdExempt).filter(function(invId) { return present[invId] && !shortSet[invId]; });
+      if (toClear.length > 0) props.onClearExempt(sdExemptGroup, toClear);
+    }
+    if (props.onBackfillExempt) {
+      var metaByInv = {};
+      Object.keys(sdExempt).forEach(function(invId) {
+        var v = sdExempt[invId];
+        var hasDesc = v && typeof v === "object" && v.desc;
+        if (!hasDesc && shortSet[invId] && descByInv[invId]) metaByInv[invId] = { desc: descByInv[invId] };
+      });
+      if (Object.keys(metaByInv).length > 0) props.onBackfillExempt(sdExemptGroup, metaByInv);
+    }
+  }, [data, sdExempt]);
+  var filtered = useMemo(function() { var d = data.slice(); if (search) { var s = search.toLowerCase(); d = d.filter(function(r) { return r.SKUNDC.toLowerCase().indexOf(s) >= 0 || (r.InventoryID || "").toLowerCase().indexOf(s) >= 0 || r.Description.toLowerCase().indexOf(s) >= 0 || r.VendorName.toLowerCase().indexOf(s) >= 0; }); } if (vendorFilter !== "all") d = d.filter(function(r) { return r.VendorName === vendorFilter; }); if (flagsOnly) { var fi = new Set(flags.s.concat(flags.so)); d = d.filter(function(r) { return fi.has(data.indexOf(r)); }); } if (poSort.col) { var col = poSort.col; var dir = poSort.dir; d.sort(function(a, b) { var va, vb; if (col === "Qty") { va = parseFloat(a.OrderQty) || 0; vb = parseFloat(b.OrderQty) || 0; } else if (col === "Vendor") { va = a.VendorName || ""; vb = b.VendorName || ""; return dir === "desc" ? vb.localeCompare(va) : va.localeCompare(vb); } else if (col === "PO #") { va = a.OrderNbr || ""; vb = b.OrderNbr || ""; return dir === "desc" ? vb.localeCompare(va) : va.localeCompare(vb); } else if (col === "SKU") { va = a.SKUNDC || ""; vb = b.SKUNDC || ""; return dir === "desc" ? vb.localeCompare(va) : va.localeCompare(vb); } else if (col === "InventoryID") { va = a.InventoryID || ""; vb = b.InventoryID || ""; return dir === "desc" ? vb.localeCompare(va) : va.localeCompare(vb); } else if (col === "Description") { va = a.Description || ""; vb = b.Description || ""; return dir === "desc" ? vb.localeCompare(va) : va.localeCompare(vb); } else if (col === "Reorder") { va = parseFloat(a.ReorderPoint) || 0; vb = parseFloat(b.ReorderPoint) || 0; } else if (col === "Max") { va = parseFloat(a.MaxQty) || 0; vb = parseFloat(b.MaxQty) || 0; } else if (col === "Lead") { va = parseFloat(a.LeadTime) || 0; vb = parseFloat(b.LeadTime) || 0; } else if (col === "Min") { va = parseFloat(a.MinOrderQty) || 0; vb = parseFloat(b.MinOrderQty) || 0; } else if (col === "Avail") { va = parseFloat(a.QtyAvailable) || 0; vb = parseFloat(b.QtyAvailable) || 0; } else if (col === "Price") { va = a.Price || 0; vb = b.Price || 0; } else if (col === "Total") { va = a.TotalPrice || 0; vb = b.TotalPrice || 0; } else if (col === "Flag") { va = getFlag(a) ? 0 : 1; vb = getFlag(b) ? 0 : 1; } else { return 0; } return dir === "desc" ? vb - va : va - vb; }); } else { d.sort(function(a, b) { var fa = getFlag(a) ? 0 : 1; var fb = getFlag(b) ? 0 : 1; return fa - fb; }); } return d; }, [data, search, vendorFilter, flagsOnly, flags, poSort]);
+  var todayStr = new Date().toLocaleDateString("en-US", { month: "numeric", day: "numeric" });
+  function fillTemplate(text) {
+    if (!text) return text;
+    var now = new Date();
+    var weekday = now.toLocaleDateString("en-US", { weekday: "long" });
+    var fullDate = now.toLocaleDateString("en-US", { month: "numeric", day: "numeric", year: "numeric" });
+    return text
+      .replace(/\{date\}/gi, todayStr)
+      .replace(/\{fulldate\}/gi, fullDate)
+      .replace(/\{weekday\}/gi, weekday);
+  }
+
+  if (initLoading) return <div style={Object.assign({}, S.card, { textAlign: "center", padding: 48, color: "#6B7280" })}><Spinner color={cfg.color} size={20} /></div>;
+
+  return (<div>
+    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: 4, background: "#F8F9FB", borderRadius: 10, padding: 3 }}>
+        {[{ id: "overview", lb: "Overview" }, { id: "data", lb: "PO Data", ct: data.length || null }, { id: "shipping", lb: "Shipping" }, { id: "email", lb: "Email" }].map(function(n) { return <button key={n.id} onClick={function() { setSubPage(n.id); }} style={S.pill(subPage === n.id, cfg.color)}>{n.lb}{n.ct ? <span style={{ fontSize: 10, background: subPage === n.id ? "rgba(255,255,255,0.2)" : "rgba(100,116,139,0.2)", padding: "1px 6px", borderRadius: 4 }}>{n.ct}</span> : null}</button>; })}
+      </div>
+      <div style={{ flex: 1 }} />
+      {runTime && <span style={{ fontSize: 11, color: "#9CA3AF" }}>Last: {runTime}{runBy ? " by " + runBy : ""}</span>}
+      {kvStatus && <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 4, background: kvStatus.startsWith("verified") || kvStatus.startsWith("loaded-kv") ? "rgba(5,150,105,0.1)" : kvStatus.startsWith("loaded-ls") ? "rgba(245,158,11,0.1)" : "rgba(239,68,68,0.1)", color: kvStatus.startsWith("verified") || kvStatus.startsWith("loaded-kv") ? "#059669" : kvStatus.startsWith("loaded-ls") ? "#D97706" : "#DC2626" }}>{kvStatus}</span>}
+      {data.length > 0 && <span style={S.badge(emailSent ? "success" : "default")}>{emailSent ? <><IconCheck /> Sent</> : data.length + " lines"}</span>}
+      {data.length > 0 && (confirmClear ? <div style={{ display: "flex", gap: 8, alignItems: "center" }}><span style={{ fontSize: 12, color: "#DC2626" }}>Clear?</span><button onClick={clearAll} style={Object.assign({}, S.btn("danger"), { padding: "6px 14px", fontSize: 12 })}>Yes</button><button onClick={function() { setConfirmClear(false); }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}>No</button></div> : <Gate ok={ok} prompt={lp} onClick={function() { setConfirmClear(true); }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12, color: "#6B7280" })}><IconTrash /> Clear</Gate>)}
+    </div>
+
+    {subPage === "overview" && <div>
+      <div style={Object.assign({}, S.card, { display: "flex", alignItems: "center", gap: 16, padding: "16px 24px" })}>
+        <div style={{ width: 40, height: 40, borderRadius: 10, background: cfg.color + "20", display: "flex", alignItems: "center", justifyContent: "center", color: cfg.color }}><IconWH /></div>
+        <div style={{ flex: 1 }}><div style={{ fontSize: 16, fontWeight: 700, color: "#1F2937" }}>{cfg.full}</div><div style={{ fontSize: 12, color: "#6B7280" }}>{data.length > 0 ? data.length + " lines · " + uniqueVendors.length + " vendors · $" + totalVal.toLocaleString(undefined, { minimumFractionDigits: 2 }) : "No data loaded"}</div></div>
+        <Gate ok={ok} prompt={lp} style={Object.assign({}, S.btn(), { padding: "10px 24px" })} onClick={fetchData} disabled={loading}>{loading ? <><Spinner /> Fetching...</> : <><IconRefresh /> {data.length > 0 ? "Re-fetch" : "Run PO Fetch"}</>}</Gate>
+      </div>
+      {data.length > 0 && <>
+        <div style={{ display: "flex", gap: 16, marginBottom: 20, flexWrap: "wrap" }}>
+          {[{ l: "Lines", v: data.length, c: cfg.color, bg: "#EEF4FF", lc: "#6B8ABF" }, { l: "Vendors", v: uniqueVendors.length, c: "#059669", bg: "#ECFDF5", lc: "#6B9E8A" }, { l: "Value", v: "$" + totalVal.toLocaleString(undefined, { minimumFractionDigits: 2 }), c: "#D97706", bg: "#FEF7EC", lc: "#B08A4A" }, { l: "Flags", v: flagCount || "Clear", c: flagCount ? "#DC2626" : "#059669", bg: flagCount ? "#FEF2F2" : "#ECFDF5", lc: flagCount ? "#C47070" : "#6B9E8A" }].map(function(s) { return <div key={s.l} style={Object.assign({}, S.statCard, { background: s.bg })}><div style={{ fontSize: 11, color: s.lc, fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>{s.l}</div><div style={{ fontSize: 28, fontWeight: 500, color: s.c, marginTop: 6 }}>{s.v}</div></div>; })}
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(280px,1fr))", gap: 12 }}>
+          {Object.entries(vendorGroups).sort(function(a, b) { return a[0].localeCompare(b[0]); }).map(function(e) { var key = e[0], rs = e[1], parts = key.split(" || "), v = parts[0], po = parts[1] || "", t = vendorTotals[key], rl = SHIP_RULES[v], st = rl ? evalShip(rl, t) : "No Rule", isFree = st === "Free Shipping", vl = getVendorLabel(v); return <div key={key} style={Object.assign({}, S.card, { padding: "16px 20px", marginBottom: 0 })}><div style={{ display: "flex", justifyContent: "space-between" }}><div><div style={{ display: "flex", alignItems: "center", gap: 8 }}><div style={{ fontSize: 13, fontWeight: 600, color: "#1F2937" }}>{v}</div>{vl && <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 10, background: vl === "Truecommerce" ? "#EFF6FF" : "#FFF7ED", color: vl === "Truecommerce" ? "#2563EB" : "#C2410C", fontWeight: 600 }}>{vl}</span>}</div><div style={{ fontSize: 11, color: "#6B7280", marginTop: 2 }}>{rs.length} lines · {po}</div></div><div style={{ fontSize: 15, fontWeight: 700, color: "#1F2937" }}>${t.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div></div><div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 6 }}><IconTruck /><span style={S.badge(isFree ? "success" : "danger")}>{isFree ? <IconCheck /> : <IconAlert />}{st}</span></div></div>; })}
+        </div>
+      </>}
+      {data.length === 0 && !loading && <div style={Object.assign({}, S.card, { textAlign: "center", padding: 60, color: "#9CA3AF" })}><IconWH /><p style={{ marginTop: 12, fontSize: 14 }}>Click <strong>Run PO Fetch</strong> to load data for {cfg.full}.</p></div>}
+    </div>}
+
+    {subPage === "data" && <div>
+      {flagCount > 0 && <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 10, padding: "14px 20px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}><IconAlert /><span style={{ fontSize: 13, color: "#DC2626", flex: 1 }}><strong>Flagged:</strong>{flags.s.length > 0 && " " + flags.s.length + " Short-Dating"}{flags.so.length > 0 && " " + flags.so.length + " Sell-Off"}</span>{flags.s.length > 0 && <button disabled={!ok || acuRemoveLoading} onClick={function() { var shortPairs = flags.s.map(function(idx) { var r = data[idx]; return { orderNbr: r.OrderNbr, inventoryID: String(r.InventoryID || "").trim(), skuNDC: r.SKUNDC }; }); removeFromAcumatica(shortPairs); }} title={!ok ? "Acumatica credentials required" : "Remove all short-dating lines from their POs in Acumatica. POs must be On Hold."} style={Object.assign({}, S.btn(), { padding: "6px 12px", fontSize: 12, background: (!ok || acuRemoveLoading) ? "#9CA3AF" : "#DC2626", borderColor: (!ok || acuRemoveLoading) ? "#9CA3AF" : "#DC2626", opacity: (!ok || acuRemoveLoading) ? 0.7 : 1, cursor: (!ok || acuRemoveLoading) ? "not-allowed" : "pointer" })}>{acuRemoveLoading ? <><Spinner /> Removing...</> : "Remove All Short-Dating from POs"}</button>}</div>}
+      {sdExemptEntries.length > 0 && <div style={{ background: "rgba(99,102,241,0.06)", border: "1px solid rgba(99,102,241,0.25)", borderRadius: 10, padding: "10px 16px", marginBottom: 16 }}>
+        <div onClick={function() { setShowExempt(!showExempt); }} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, color: "#4F46E5", fontWeight: 600 }}><span>{showExempt ? "\u25BE" : "\u25B8"}</span><span>Short-dating exemptions {"\u00B7"} {isGGM ? "GoGoMeds" : "Fuze"} ({sdExemptEntries.length})</span></div>
+        {showExempt && <div style={{ marginTop: 8 }}>{sdExemptEntries.map(function(it) { return <div key={it.invId} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12, padding: "5px 0", borderTop: "1px solid rgba(99,102,241,0.12)" }}><span style={{ fontFamily: "monospace", minWidth: 90, color: "#4F46E5" }}>{it.invId}</span><span style={{ flex: 1, color: "#374151" }}>{it.desc || "\u2014"}</span>{!it.onPO && <span style={{ fontSize: 10, color: "#9CA3AF", fontStyle: "italic" }}>not on a current PO</span>}<button onClick={function() { toggleSdExempt(it.invId); }} title="Remove this exemption" style={{ background: "transparent", border: "1px solid #D1D5DB", color: "#6B7280", borderRadius: 4, padding: "2px 8px", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Remove</button></div>; })}</div>}
+      </div>}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+        <input style={Object.assign({}, S.inp, { maxWidth: 260 })} placeholder="Search..." value={search} onChange={function(e) { setSearch(e.target.value); }} />
+        <select style={S.sel} value={vendorFilter} onChange={function(e) { setVendorFilter(e.target.value); }}><option value="all">All Vendors</option>{uniqueVendors.map(function(v) { return <option key={v} value={v}>{v}</option>; })}</select>
+        <button style={S.btn(flagsOnly ? "danger" : "ghost")} onClick={function() { setFlagsOnly(!flagsOnly); }}><IconFilter /> {flagsOnly ? "Flags" : "Filter Flags"}</button>
+        <div style={{ flex: 1 }} /><Gate ok={ok} prompt={lp} style={Object.assign({}, S.btn(), { padding: "8px 16px", fontSize: 12 })} onClick={fetchData} disabled={loading}>{loading ? <><Spinner /> Fetching...</> : <><IconRefresh /> Re-fetch</>}</Gate><span style={{ fontSize: 12, color: "#6B7280" }}>{filtered.length}/{data.length}</span>
+      </div>
+      {data.length > 0 ? <div>
+        {Object.keys(dismissed).length > 0 && <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, padding: "8px 14px", background: "rgba(100,116,139,0.06)", borderRadius: 8 }}>
+          <span style={{ fontSize: 12, color: "#6B7280" }}>{Object.keys(dismissed).length} item{Object.keys(dismissed).length > 1 ? "s" : ""} handled</span>
+          <button onClick={function() { setDismissed({}); }} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "#3B82F6", fontWeight: 500 }}>Clear all</button>
+        </div>}
+        <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto", maxHeight: "calc(100vh - 260px)" })}>
+        <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
+          <thead><tr><th style={Object.assign({}, S.th, { width: 32 })}></th>{["InventoryID", "SKU", "Description", "Qty", "Vendor", "PO #"].concat(!isGGM ? ["Reorder", "Max", "Lead", "Min", "Avail"] : []).concat(["Price", "Total", "Flag"]).map(function(h) { var isSorted = poSort.col === h; return <th key={h} onClick={function() { setPoSort(isSorted ? { col: h, dir: poSort.dir === "asc" ? "desc" : "asc" } : { col: h, dir: h === "Qty" || h === "Price" || h === "Total" || h === "Avail" || h === "Reorder" || h === "Max" || h === "Lead" || h === "Min" ? "desc" : "asc" }); }} style={Object.assign({}, S.th, { cursor: "pointer", userSelect: "none" })}>{h === "InventoryID" ? "Inv ID" : h}{isSorted ? (poSort.dir === "desc" ? " \u25BE" : " \u25B4") : ""}</th>; })}<th style={Object.assign({}, S.th, { width: 175 })}></th></tr></thead>
+          <tbody>{filtered.map(function(r, i) { var f = getFlag(r); var isShortRaw = (r.MovementClass || "").toLowerCase().trim() === "short-dating"; var invId = String(r.InventoryID || "").trim(); var isExempt = isShortRaw && !!sdExempt[invId]; var bg = f === "short" ? "rgba(220,38,38,0.04)" : f === "selloff" ? "rgba(217,119,6,0.04)" : "transparent"; var tc = f === "short" ? "#DC2626" : f === "selloff" ? "#D97706" : "#374151"; var fmt = function(v) { var n = parseFloat(v); if (isNaN(n)) return v; return n % 1 === 0 ? String(Math.round(n)) : n.toFixed(2); }; var dismissKey = r.SKUNDC + ":" + r.OrderNbr; var isDone = dismissed[dismissKey]; return <tr key={i} style={{ background: bg, opacity: isDone ? 0.4 : 1, transition: "opacity 0.15s" }}><td style={Object.assign({}, S.td, { textAlign: "center", padding: "8px 4px" })}>{f ? <button onClick={function() { var u = Object.assign({}, dismissed); if (isDone) { delete u[dismissKey]; } else { u[dismissKey] = true; } setDismissed(u); }} style={{ width: 20, height: 20, borderRadius: 4, border: isDone ? "2px solid #059669" : "2px solid #D1D5DB", background: isDone ? "#059669" : "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", transition: "all 0.15s", flexShrink: 0 }}>{isDone && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}</button> : null}</td><td style={Object.assign({}, S.td, { color: tc, minWidth: 90, whiteSpace: "nowrap", fontFamily: "monospace", fontSize: 11 })}>{r.InventoryID || "\u2014"}</td><td style={Object.assign({}, S.td, { color: tc, minWidth: 120, whiteSpace: "nowrap" })}>{r.SKUNDC}</td><td style={Object.assign({}, S.td, { color: tc, minWidth: 180, maxWidth: 350 })}><CopyCell text={r.Description} toast={toast} color={tc} accentColor={cfg.color} /></td><td style={Object.assign({}, S.td, { color: tc })}>{fmt(r.OrderQty)}</td><td style={Object.assign({}, S.td, { color: tc })}>{r.VendorName}</td><td style={Object.assign({}, S.td, { color: tc })}>{r.OrderNbr}</td>{!isGGM && <><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.ReorderPoint)}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.MaxQty)}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.LeadTime)}d</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.MinOrderQty)}</td><td style={Object.assign({}, S.td, { color: r.QtyAvailable < 0 ? "#DC2626" : tc, textAlign: "right" })}>{fmt(r.QtyAvailable)}</td></>}<td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>${r.Price.toFixed(2)}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>${r.TotalPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td><td style={S.td}>{isExempt ? <span style={S.badge("exempt")}>Exempt</span> : f ? <span style={S.badge(f === "short" ? "danger" : "warning")}>{f === "short" ? "Short" : "Sell-Off"}</span> : "\u2014"}</td><td style={Object.assign({}, S.td, { textAlign: "center", padding: "8px 4px" })}><div style={{ display: "flex", gap: 6, justifyContent: "center", alignItems: "center" }}>{isShortRaw ? <button onClick={function() { toggleSdExempt(invId, { desc: r.Description, sku: r.SKUNDC }); }} title={isExempt ? ("Remove short-dating exemption for " + invId + " (" + (isGGM ? "GGM" : "Fuze") + ")") : ("Exempt " + invId + " from short-dating across all " + (isGGM ? "GGM" : "Fuze") + " warehouses")} style={{ background: isExempt ? "#6366F1" : "transparent", border: "1px solid " + (isExempt ? "#6366F1" : "#D1D5DB"), color: isExempt ? "#FFFFFF" : "#6B7280", padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>{isExempt ? "SD Exempt \u2713" : "SD Exempt"}</button> : null}{f ? <button disabled={!ok || acuRemoveLoading || !r.InventoryID} onClick={function() { removeFromAcumatica([{ orderNbr: r.OrderNbr, inventoryID: String(r.InventoryID || "").trim(), skuNDC: r.SKUNDC }]); }} title={!ok ? "Acumatica credentials required" : !r.InventoryID ? "No Inventory ID for this line \u2014 try Re-fetch" : "Remove this line from " + r.OrderNbr + " in Acumatica (PO must be On Hold)"} style={{ background: "transparent", border: "1px solid " + ((!ok || acuRemoveLoading || !r.InventoryID) ? "#D1D5DB" : "#DC2626"), color: (!ok || acuRemoveLoading || !r.InventoryID) ? "#9CA3AF" : "#DC2626", padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: (!ok || acuRemoveLoading || !r.InventoryID) ? "not-allowed" : "pointer" }}>Remove</button> : null}</div></td></tr>; })}</tbody>
+        </table>
+      </div></div> : <div style={Object.assign({}, S.card, { textAlign: "center", padding: 48, color: "#9CA3AF" })}>Run fetch first.</div>}
+    </div>}
+
+    {subPage === "shipping" && <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <div style={{ fontSize: 12, color: "#6B7280" }}>{(function() { var keys = Object.keys(vendorGroups); var doneCount = keys.filter(function(k) { return (shipNotes[k] || {}).done; }).length; return doneCount > 0 ? <span style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ color: "#059669", fontWeight: 600 }}>{doneCount}/{keys.length} completed</span><span style={{ color: "#D1D5DB" }}>{"\u00B7"}</span><span>{keys.length - doneCount} remaining</span></span> : keys.length + " vendors"; })()}</div>
+        <Gate ok={ok} prompt={lp} title="Re-fetch" style={Object.assign({}, S.btn(), { padding: 0, width: 36, height: 36, minWidth: 36, display: "inline-flex", alignItems: "center", justifyContent: "center" })} onClick={fetchData} disabled={loading}>{loading ? <Spinner /> : <IconRefresh />}</Gate>
+      </div>
+      {data.length > 0 && (function() {
+        var built = buildProcessablePOs();
+        var p = built.processable || [];
+        var emailCount = p.filter(function(x) { return x.channel === "Email"; }).length;
+        var ediCount = p.filter(function(x) { return x.channel === "TrueCommerce EDI"; }).length;
+        var webCount = p.filter(function(x) { return x.channel === "Website Ordering"; }).length;
+        var blockedMsgs = [];
+        if (built.missingVendor && built.missingVendor.length > 0) blockedMsgs.push(built.missingVendor.length + " missing from Vendor Settings");
+        if (built.unlabeledVendors && built.unlabeledVendors.length > 0) blockedMsgs.push(built.unlabeledVendors.length + " unlabeled");
+        if (built.missingRef && built.missingRef.length > 0) blockedMsgs.push(built.missingRef.length + " missing Vendor Ref");
+        var hasReady = p.length > 0;
+        var title = hasReady
+          ? "Ready to process " + p.length + " PO" + (p.length === 1 ? "" : "s")
+          : (blockedMsgs.length > 0 ? "Nothing ready to process" : "All done");
+        var subBits = [];
+        if (emailCount > 0) subBits.push(emailCount + " Email");
+        if (ediCount > 0) subBits.push(ediCount + " TrueCommerce EDI");
+        if (webCount > 0) subBits.push(webCount + " Website Ordering");
+        var sub = subBits.join(" \u00B7 ");
+        if (!sub && blockedMsgs.length > 0) sub = blockedMsgs.join(" \u00B7 ");
+        else if (sub && blockedMsgs.length > 0) sub = sub + " \u00B7 " + blockedMsgs.join(" \u00B7 ");
+        var btnDisabled = !ok || acuProcLoading || !hasReady;
+        return <div style={{ background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 12, padding: "16px 20px", marginBottom: 16, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 20, flexWrap: "wrap" }}>
+          <div style={{ flex: 1, minWidth: 200 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: "#1F2937", marginBottom: 4 }}>{title}</div>
+            {sub && <div style={{ fontSize: 12, color: "#6B7280" }}>{sub}</div>}
+          </div>
+          <button disabled={btnDisabled} onClick={onProcessAllPOsClick} title={!ok ? "Acumatica credentials required" : !hasReady ? "Nothing ready to process" : "Per PO: write Vendor Ref, then for Email vendors release Hold + email; for TrueCommerce EDI / Website Ordering vendors leave on Hold."} style={{ background: btnDisabled ? "#D1D5DB" : "#047857", color: "#FFFFFF", border: "none", padding: "10px 18px", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: btnDisabled ? "not-allowed" : "pointer", whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 6 }}>{acuProcLoading ? <><Spinner /> Processing...</> : <>{"\u2192"} Process All POs</>}</button>
+        </div>;
+      })()}
+      {data.length > 0 ? <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto" })}>
+        <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
+          <thead><tr><th style={Object.assign({}, S.th, { width: 40 })}></th>{[{ k: "vendor", l: "Vendor" }, { k: "po", l: "PO #" }, { k: "total", l: "Total", right: true }, { k: "shipping", l: "Shipping" }, { k: null, l: "Vendor Reference", w: 200 }, { k: null, l: "Price Check", w: 100 }].map(function(h) { var isSorted = shipSort.col === h.k; return <th key={h.l} onClick={h.k ? function() { setShipSort(isSorted ? { col: h.k, dir: shipSort.dir === "asc" ? "desc" : "asc" } : { col: h.k, dir: h.k === "total" ? "desc" : "asc" }); } : undefined} style={Object.assign({}, S.th, h.right ? { textAlign: "right" } : {}, h.w ? { width: h.w } : {}, h.k ? { cursor: "pointer", userSelect: "none" } : {})}>{h.l}{isSorted ? (shipSort.dir === "desc" ? " \u25BE" : " \u25B4") : ""}</th>; })}</tr></thead>
+          <tbody>{Object.keys(vendorGroups).sort(function(a, b) { var aDone = (shipNotes[a] || {}).done ? 1 : 0; var bDone = (shipNotes[b] || {}).done ? 1 : 0; if (aDone !== bDone) return aDone - bDone; if (shipSort.col) { var pa = a.split(" || "), pb = b.split(" || "); var va, vb; if (shipSort.col === "vendor") { va = pa[0] || ""; vb = pb[0] || ""; return shipSort.dir === "desc" ? vb.localeCompare(va) : va.localeCompare(vb); } else if (shipSort.col === "po") { va = pa[1] || ""; vb = pb[1] || ""; return shipSort.dir === "desc" ? vb.localeCompare(va) : va.localeCompare(vb); } else if (shipSort.col === "total") { va = vendorTotals[a] || 0; vb = vendorTotals[b] || 0; return shipSort.dir === "desc" ? vb - va : va - vb; } else if (shipSort.col === "shipping") { var ra = SHIP_RULES[pa[0]] || ""; var rb = SHIP_RULES[pb[0]] || ""; var sa = ra ? (evalShip(ra, vendorTotals[a]) === "Free Shipping" ? 1 : 0) : -1; var sb = rb ? (evalShip(rb, vendorTotals[b]) === "Free Shipping" ? 1 : 0) : -1; return shipSort.dir === "desc" ? sb - sa : sa - sb; } } return a.localeCompare(b); }).map(function(key) { var parts = key.split(" || "), v = parts[0], po = parts[1] || ""; var t = vendorTotals[key], rl = SHIP_RULES[v] || "", st = rl ? evalShip(rl, t) : "No Rule", isFree = st === "Free Shipping"; var sn = shipNotes[key] || {}; var vl = getVendorLabel(v); var rows = vendorGroups[key] || []; var checkedCount = rows.filter(function(r) { return priceChecked[key + ":" + r.SKUNDC]; }).length; var isDone = sn.done; return <tr key={key} style={{ opacity: isDone ? 0.45 : 1, transition: "opacity 0.2s" }}><td style={Object.assign({}, S.td, { textAlign: "center", padding: "8px 4px" })}><button onClick={function() { var updated = Object.assign({}, shipNotes); updated[key] = Object.assign({}, sn, { done: !isDone }); setShipNotes(updated); persist(data, emailSent, runBy, runTime, updated); }} style={{ width: 24, height: 24, borderRadius: 6, border: isDone ? "2px solid #059669" : "2px solid #D1D5DB", background: isDone ? "#059669" : "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", transition: "all 0.15s", flexShrink: 0 }}>{isDone && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}</button></td><td style={Object.assign({}, S.td, { color: "#1F2937", textDecoration: isDone ? "line-through" : "none" })}><div>{v}</div>{vl && <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 10, background: vl === "Truecommerce" ? "#EFF6FF" : "#FFF7ED", color: vl === "Truecommerce" ? "#2563EB" : "#C2410C", fontWeight: 600, display: "inline-block", marginTop: 4 }}>{vl}</span>}</td><td style={Object.assign({}, S.td, { color: "#374151" })}>{po || <input style={Object.assign({}, S.inp, { padding: "6px 10px" })} placeholder="Paste PO #" value={sn.po || ""} onChange={function(e) { var updated = Object.assign({}, shipNotes); updated[key] = Object.assign({}, sn, { po: e.target.value }); setShipNotes(updated); persist(data, emailSent, runBy, runTime, updated); }} />}</td><td style={Object.assign({}, S.td, { textAlign: "right" })}>${t.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td><td style={S.td}><span style={S.badge(isFree ? "success" : "danger")}>{isFree ? <IconCheck /> : <IconAlert />}{st}</span></td><td style={S.td}><input style={Object.assign({}, S.inp, { padding: "6px 10px" })} placeholder="Paste PO #..." value={sn.notes || ""} onChange={function(e) { var updated = Object.assign({}, shipNotes); updated[key] = Object.assign({}, sn, { notes: e.target.value }); setShipNotes(updated); persist(data, emailSent, runBy, runTime, updated); }} /></td><td style={Object.assign({}, S.td, { textAlign: "center" })}><button onClick={function() { setPriceCheckKey(key); }} style={Object.assign({}, S.btn("ghost"), { padding: "4px 10px", fontSize: 11 })}>{checkedCount === rows.length && rows.length > 0 ? <><IconCheck /> All</> : checkedCount > 0 ? checkedCount + "/" + rows.length : "Review"}</button></td></tr>; })}</tbody>
+        </table>
+      </div> : <div style={Object.assign({}, S.card, { textAlign: "center", padding: 48, color: "#9CA3AF" })}>Run fetch first.</div>}
+      <a href="https://docs.google.com/spreadsheets/d/1jZ6DLCpinlhUlNEnPkKTO65PQt_33G7hLqbiaI3LXKw/edit?gid=1331205333#gid=1331205333" target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", gap: 12, padding: "16px 24px", marginTop: 16, background: "#EEF4FF", border: "1px solid rgba(59,130,246,0.15)", borderRadius: 12, textDecoration: "none", transition: "all 0.15s", cursor: "pointer" }}>
+        <div style={{ width: 36, height: 36, borderRadius: 10, background: "rgba(59,130,246,0.12)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#3B82F6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /><polyline points="10 9 9 9 8 9" /></svg>
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: "#1E40AF" }}>SFTP EDI PO Export Tool</div>
+          <div style={{ fontSize: 12, color: "#6B8ABF", marginTop: 1 }}>Open in Google Sheets</div>
+        </div>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#93BBFC" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></svg>
+      </a>
+
+      {/* Categorize Vendors Modal — shown when some vendors have no channel set */}
+      {acuCategorize && <div onClick={onCategorizeCancel} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+        <div onClick={function(e) { e.stopPropagation(); }} style={{ background: "#FFFFFF", borderRadius: 12, padding: 24, maxWidth: 620, width: "92%", maxHeight: "80vh", overflow: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+          <div style={{ fontSize: 18, fontWeight: 700, color: "#1F2937", marginBottom: 8 }}>Set Channel for {acuCategorize.vendors.length} Vendor{acuCategorize.vendors.length > 1 ? "s" : ""}</div>
+          <div style={{ fontSize: 13, color: "#374151", marginBottom: 16, lineHeight: 1.5 }}>
+            These vendors don't have a channel set yet. Pick how Acumatica should handle their POs. Your choices save to Vendor Contacts and will be remembered for future runs.
+          </div>
+          <div style={{ border: "1px solid #E5E7EB", borderRadius: 8, overflow: "auto", maxHeight: 360, marginBottom: 16 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead><tr style={{ background: "#F9FAFB", position: "sticky", top: 0 }}><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>Vendor</th><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600, width: 220 }}>Channel</th></tr></thead>
+              <tbody>{acuCategorize.vendors.map(function(vname) {
+                return <tr key={vname} style={{ borderBottom: "1px solid #F3F4F6" }}>
+                  <td style={{ padding: "8px 12px", color: "#1F2937" }}>{vname}</td>
+                  <td style={{ padding: "8px 12px" }}>
+                    <select value={acuCategorize.pending[vname] || ""} onChange={function(ev) { var p = Object.assign({}, acuCategorize.pending); p[vname] = ev.target.value; setAcuCategorize(Object.assign({}, acuCategorize, { pending: p })); }} style={{ padding: "5px 8px", fontSize: 12, width: "100%", borderRadius: 6, border: "1px solid #D1D5DB" }}>
+                      <option value="">— select —</option>
+                      <option value="Email">Email</option>
+                      <option value="TrueCommerce EDI">TrueCommerce EDI</option>
+                      <option value="Website Ordering">Website Ordering</option>
+                    </select>
+                  </td>
+                </tr>;
+              })}</tbody>
+            </table>
+          </div>
+          <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
+            <button onClick={onCategorizeCancel} style={S.btn("ghost")}>Cancel</button>
+            <button onClick={onCategorizeConfirm} style={Object.assign({}, S.btn(), { background: "#047857", borderColor: "#047857" })}>Save &amp; Continue</button>
+          </div>
+        </div>
+      </div>}
+
+      {/* Process All POs — Skip Missing-VR Confirmation Modal */}
+      {acuSkipConfirm && (function() {
+        var ready = acuSkipConfirm.processable || [];
+        var missing = acuSkipConfirm.missingRef || [];
+        var missPreview = missing.slice(0, 5).map(function(m) { return m.vendorName + " (" + m.orderNbr + ")"; });
+        var missMore = missing.length > 5 ? missing.length - 5 : 0;
+        return <div onClick={function() { setAcuSkipConfirm(null); }} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div onClick={function(e) { e.stopPropagation(); }} style={{ background: "#FFFFFF", borderRadius: 12, padding: 24, maxWidth: 520, width: "94%", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ fontSize: 18, fontWeight: 700, color: "#1F2937", marginBottom: 12 }}>Process {ready.length} of {ready.length + missing.length} POs?</div>
+            <div style={{ fontSize: 13, color: "#374151", marginBottom: 16, lineHeight: 1.55 }}>
+              <strong style={{ color: "#047857" }}>{ready.length}</strong> {ready.length === 1 ? "PO has" : "POs have"} a Vendor Ref and will be processed now.
+              <br /><strong style={{ color: "#6B7280" }}>{missing.length}</strong> {missing.length === 1 ? "PO is" : "POs are"} missing a Vendor Ref and will be skipped {"\u2014"} you can fill them in and re-run later.
+            </div>
+            <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 16, padding: "8px 12px", background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 6 }}>
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>Skipping:</div>
+              {missPreview.map(function(s, i) { return <div key={i} style={{ fontFamily: "monospace" }}>{"\u00B7 " + s}</div>; })}
+              {missMore > 0 && <div style={{ marginTop: 4, fontStyle: "italic" }}>+ {missMore} more</div>}
+            </div>
+            <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
+              <button onClick={function() { setAcuSkipConfirm(null); }} style={S.btn("ghost")}>Cancel</button>
+              <button onClick={function() {
+                var p = ready;
+                setAcuSkipConfirm(null);
+                if (p.length >= 5) setAcuProcConfirm(true);
+                else processAllPOs(p);
+              }} style={Object.assign({}, S.btn(), { background: "#047857", borderColor: "#047857" })}>Process {ready.length} {ready.length === 1 ? "PO" : "POs"}</button>
+            </div>
+          </div>
+        </div>;
+      })()}
+
+      {/* Process All POs — Confirmation Modal (only shown for 5+ POs) */}
+      {acuProcConfirm && (function() {
+        var built = buildProcessablePOs();
+        var p = built.processable;
+        var emailCount = p.filter(function(x) { return x.channel === "Email"; }).length;
+        var holdCount = p.length - emailCount;
+        return <div onClick={function() { setAcuProcConfirm(false); }} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div onClick={function(e) { e.stopPropagation(); }} style={{ background: "#FFFFFF", borderRadius: 12, padding: 24, maxWidth: 720, width: "94%", maxHeight: "80vh", overflow: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ fontSize: 18, fontWeight: 700, color: "#1F2937", marginBottom: 8 }}>Confirm Process All POs</div>
+            <div style={{ fontSize: 13, color: "#374151", marginBottom: 16, lineHeight: 1.5 }}>
+              About to process <strong>{p.length} POs</strong>: {emailCount} will be released and emailed; {holdCount} will get Vendor Ref written but stay On Hold (TrueCommerce EDI / Website Ordering). <strong>Email is irreversible</strong> — sent emails cannot be unsent.
+            </div>
+            <div style={{ border: "1px solid #E5E7EB", borderRadius: 8, maxHeight: 320, overflow: "auto", marginBottom: 16 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <thead><tr style={{ background: "#F9FAFB", position: "sticky", top: 0 }}><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>Vendor</th><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>PO #</th><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>Vendor Ref</th><th style={{ padding: "8px 12px", textAlign: "center", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>Channel</th><th style={{ padding: "8px 12px", textAlign: "center", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>Action</th></tr></thead>
+                <tbody>{p.map(function(row, i) {
+                  var actionText, actionColor;
+                  if (row.channel === "Email") { actionText = "Release + Email"; actionColor = "#059669"; }
+                  else if (row.channel === "TrueCommerce EDI") { actionText = "Release + Send to EDI"; actionColor = "#2563EB"; }
+                  else { actionText = "Vendor Ref only"; actionColor = "#C2410C"; }
+                  return <tr key={i} style={{ borderBottom: "1px solid #F3F4F6" }}><td style={{ padding: "6px 12px", color: "#1F2937" }}>{row.vendorName}</td><td style={{ padding: "6px 12px", color: "#374151", fontFamily: "monospace" }}>{row.orderNbr}</td><td style={{ padding: "6px 12px", color: "#374151", fontFamily: "monospace" }}>{row.vendorRef}</td><td style={{ padding: "6px 12px", textAlign: "center", color: "#6B7280", fontSize: 11 }}>{row.channel}</td><td style={{ padding: "6px 12px", textAlign: "center", color: actionColor, fontWeight: 600 }}>{actionText}</td></tr>;
+                })}</tbody>
+              </table>
+            </div>
+            <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
+              <button onClick={function() { setAcuProcConfirm(false); }} style={S.btn("ghost")}>Cancel</button>
+              <button onClick={function() { processAllPOs(p); }} style={Object.assign({}, S.btn(), { background: "#047857", borderColor: "#047857" })}>Yes, Process {p.length} POs</button>
+            </div>
+          </div>
+        </div>;
+      })()}
+
+      {/* Process All POs — Results Modal */}
+      {acuProcResult && (function() {
+        var r = acuProcResult.resp || {};
+        var s = r.summary || {};
+        var rs = Array.isArray(r.results) ? r.results : [];
+        return <div onClick={function() { setAcuProcResult(null); }} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div onClick={function(e) { e.stopPropagation(); }} style={{ background: "#FFFFFF", borderRadius: 12, padding: 24, maxWidth: 760, width: "94%", maxHeight: "85vh", overflow: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <div style={{ fontSize: 18, fontWeight: 700, color: "#1F2937" }}>Process Results</div>
+              <button onClick={function() { setAcuProcResult(null); }} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#6B7280" }}>{"\u00D7"}</button>
+            </div>
+            <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+              <div style={{ padding: "8px 14px", background: "#ECFDF5", color: "#059669", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>{s.successCount || 0} succeeded</div>
+              {s.emailedCount > 0 && <div style={{ padding: "8px 14px", background: "#EFF6FF", color: "#2563EB", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>{s.emailedCount} emailed</div>}
+              {s.ediSentCount > 0 && <div style={{ padding: "8px 14px", background: "#EFF6FF", color: "#2563EB", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>{s.ediSentCount} sent to EDI</div>}
+              {s.vendorRefOnlyCount > 0 && <div style={{ padding: "8px 14px", background: "#FFF7ED", color: "#C2410C", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>{s.vendorRefOnlyCount} vendor-ref only</div>}
+              {s.ediFailedCount > 0 && <div style={{ padding: "8px 14px", background: "#FEF2F2", color: "#DC2626", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>{s.ediFailedCount} EDI failed</div>}
+              {s.failedCount > 0 && <div style={{ padding: "8px 14px", background: "#FEF2F2", color: "#DC2626", borderRadius: 8, fontSize: 12, fontWeight: 600 }}>{s.failedCount} failed</div>}
+            </div>
+            <div style={{ border: "1px solid #E5E7EB", borderRadius: 8, overflow: "auto", maxHeight: "55vh" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <thead><tr style={{ background: "#F9FAFB", position: "sticky", top: 0 }}><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>PO #</th><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>Vendor Ref</th><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>Channel</th><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>Result</th></tr></thead>
+                <tbody>{rs.map(function(row, i) {
+                  var resultText, resultColor;
+                  if (row.ok && row.emailed) { resultText = "\u2713 Released + Emailed"; resultColor = "#059669"; }
+                  else if (row.ok && row.ediSent) { resultText = "\u2713 Released + Sent to EDI"; resultColor = "#059669"; }
+                  else if (row.ok && row.pendingEdiSend && !row.ediSent) { resultText = "\u26A0 Released but EDI failed: " + (row.ediError || "unknown"); resultColor = "#DC2626"; }
+                  else if (row.ok && row.emailSkipped && row.channel === "Website Ordering") { resultText = "\u2713 Vendor Ref written (still On Hold)"; resultColor = "#059669"; }
+                  else if (row.ok && row.emailError) { resultText = "\u26A0 Released but email failed"; resultColor = "#D97706"; }
+                  else if (row.stage === "status-check") { resultText = "\u2717 Skipped: " + (row.currentStatus || "not on hold"); resultColor = "#DC2626"; }
+                  else if (row.stage === "read-po") { resultText = "\u2717 PO not found"; resultColor = "#DC2626"; }
+                  else { resultText = "\u2717 " + (row.error || row.stage || "unknown error"); resultColor = "#DC2626"; }
+                  return <tr key={i} style={{ borderBottom: "1px solid #F3F4F6" }}><td style={{ padding: "6px 12px", color: "#1F2937", fontFamily: "monospace" }}>{row.orderNbr}</td><td style={{ padding: "6px 12px", color: "#374151", fontFamily: "monospace" }}>{row.requestedVendorRef || ""}</td><td style={{ padding: "6px 12px", color: "#6B7280", fontSize: 11 }}>{row.channel || ""}</td><td style={{ padding: "6px 12px", color: resultColor, fontWeight: 600 }}>{resultText}{row.emailError && row.emailError.errorDetails ? <div style={{ fontSize: 10, color: "#9CA3AF", fontWeight: 400, marginTop: 2 }}>{row.emailError.errorDetails.map(function(e) { return e.message; }).join("; ")}</div> : null}</td></tr>;
+                })}</tbody>
+              </table>
+            </div>
+            {(s.ediSentCount > 0 || s.ediFailedCount > 0) && <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", padding: "12px 14px", background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 8, marginTop: 16 }}>
+              <div style={{ fontSize: 12.5, color: "#1E3A8A" }}>{s.ediSentCount > 0 ? (s.ediSentCount + " PO" + (s.ediSentCount === 1 ? "" : "s") + " sent to TrueCommerce EDI.") : "EDI send was attempted."} Open the portal to confirm the transmission.</div>
+              <a href="https://foundry.truecommerce.com/core/Default.html" target="_blank" rel="noopener noreferrer" style={{ textDecoration: "none", background: "#2563EB", color: "#fff", padding: "8px 14px", borderRadius: 8, fontSize: 12.5, fontWeight: 600, whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 6 }}>Open TrueCommerce EDI {"\u2197"}</a>
+            </div>}
+            <div style={{ marginTop: 16, textAlign: "right" }}>
+              <button onClick={function() { setAcuProcResult(null); }} style={S.btn()}>Close</button>
+            </div>
+          </div>
+        </div>;
+      })()}
+    </div>}
+
+    {/* Price Check Modal */}
+    {priceCheckKey && (function() {
+      var parts = priceCheckKey.split(" || ");
+      var vendorName = parts[0], poNum = parts[1] || "";
+      var rows = vendorGroups[priceCheckKey] || [];
+      var sortedRows = rows;
+      if (pcSort) {
+        var withIdx = rows.map(function(r, i) { return { r: r, i: i }; });
+        withIdx.sort(function(a, b) {
+          var ra = a.r, rb = b.r;
+          var av, bv;
+          if (pcSort.col === "sku") { av = String(ra.SKUNDC || ""); bv = String(rb.SKUNDC || ""); return pcSort.dir === "desc" ? bv.localeCompare(av) : av.localeCompare(bv); }
+          if (pcSort.col === "desc") { av = String(ra.Description || ""); bv = String(rb.Description || ""); return pcSort.dir === "desc" ? bv.localeCompare(av) : av.localeCompare(bv); }
+          if (pcSort.col === "qty") { av = ra.OrderQty || 0; bv = rb.OrderQty || 0; return pcSort.dir === "desc" ? bv - av : av - bv; }
+          if (pcSort.col === "unit") { av = ra.Price || 0; bv = rb.Price || 0; return pcSort.dir === "desc" ? bv - av : av - bv; }
+          if (pcSort.col === "total") { av = ra.TotalPrice || 0; bv = rb.TotalPrice || 0; return pcSort.dir === "desc" ? bv - av : av - bv; }
+          if (pcSort.col === "reported") {
+            var ka = priceCheckKey + ":" + ra.SKUNDC, kb = priceCheckKey + ":" + rb.SKUNDC;
+            av = parseFloat(String(pcReported[ka] || "").replace(/[$,]/g, "")); bv = parseFloat(String(pcReported[kb] || "").replace(/[$,]/g, ""));
+            if (isNaN(av) && isNaN(bv)) return a.i - b.i;
+            if (isNaN(av)) return 1;
+            if (isNaN(bv)) return -1;
+            return pcSort.dir === "desc" ? bv - av : av - bv;
+          }
+          if (pcSort.col === "reportedUnit") {
+            var ka2 = priceCheckKey + ":" + ra.SKUNDC, kb2 = priceCheckKey + ":" + rb.SKUNDC;
+            var rn_a = parseFloat(String(pcReported[ka2] || "").replace(/[$,]/g, "")), rn_b = parseFloat(String(pcReported[kb2] || "").replace(/[$,]/g, ""));
+            av = !isNaN(rn_a) && ra.OrderQty > 0 ? rn_a / ra.OrderQty : null;
+            bv = !isNaN(rn_b) && rb.OrderQty > 0 ? rn_b / rb.OrderQty : null;
+            if (av == null && bv == null) return a.i - b.i;
+            if (av == null) return 1;
+            if (bv == null) return -1;
+            return pcSort.dir === "desc" ? bv - av : av - bv;
+          }
+          return a.i - b.i;
+        });
+        sortedRows = withIdx.map(function(x) { return x.r; });
+      }
+      var total = rows.reduce(function(s, r) { return s + (r.TotalPrice || 0); }, 0);
+      var allChecked = rows.length > 0 && rows.every(function(r) { return priceChecked[priceCheckKey + ":" + r.SKUNDC]; });
+      var checkedCount = rows.filter(function(r) { return priceChecked[priceCheckKey + ":" + r.SKUNDC]; }).length;
+      var uncheckedItems = rows.filter(function(r) { return !priceChecked[priceCheckKey + ":" + r.SKUNDC]; });
+      return <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.35)", zIndex: 999, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }} onClick={function(e) { if (e.target === e.currentTarget) setPriceCheckKey(null); }}>
+        <div style={{ background: "#FFFFFF", borderRadius: 20, maxWidth: 1100, width: "100%", maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 25px 60px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.04)" }}>
+          {/* Header */}
+          <div style={{ padding: "24px 32px 20px", borderBottom: "1px solid #F3F4F6" }}>
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
+              <div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: "#1F2937", letterSpacing: "-0.01em" }}>Price Check</div>
+                <div style={{ fontSize: 14, color: "#4B5563", marginTop: 4 }}>{vendorName}{poNum && <span style={{ color: "#9CA3AF" }}> · {poNum}</span>}</div>
+              </div>
+              <button onClick={function() { setPriceCheckKey(null); }} style={{ background: "#F9FAFB", border: "none", cursor: "pointer", fontSize: 16, color: "#6B7280", width: 32, height: 32, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center" }}>{"\u00D7"}</button>
+            </div>
+            <div style={{ display: "flex", gap: 16, marginTop: 16, alignItems: "center" }}>
+              <div style={{ display: "flex", gap: 24, fontSize: 13 }}>
+                <div><span style={{ color: "#6B7280" }}>Items</span> <span style={{ fontWeight: 600, color: "#1F2937" }}>{rows.length}</span></div>
+                <div><span style={{ color: "#6B7280" }}>Total</span> <span style={{ fontWeight: 600, color: "#1F2937" }}>${total.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></div>
+                <div><span style={{ color: "#6B7280" }}>Verified</span> <span style={{ fontWeight: 600, color: allChecked ? "#059669" : checkedCount > 0 ? "#D97706" : "#6B7280" }}>{checkedCount}/{rows.length}</span></div>
+              </div>
+              <div style={{ flex: 1 }} />
+              <button onClick={function() { var updated = Object.assign({}, priceChecked); rows.forEach(function(r) { updated[priceCheckKey + ":" + r.SKUNDC] = !allChecked; }); setPriceChecked(updated); }} style={Object.assign({}, S.btn(allChecked ? "ghost" : "default"), { padding: "8px 16px", fontSize: 12 })}>{allChecked ? "Uncheck All" : "Check All"}</button>
+            </div>
+            {/* Progress bar */}
+            <div style={{ marginTop: 12, height: 3, background: "#F3F4F6", borderRadius: 2, overflow: "hidden" }}>
+              <div style={{ height: "100%", width: rows.length > 0 ? (checkedCount / rows.length * 100) + "%" : "0%", background: allChecked ? "#059669" : "#D97706", borderRadius: 2, transition: "width 0.3s ease" }} />
+            </div>
+          </div>
+          {/* Column headers */}
+          {(function() {
+            function hdr(col, label, opts) {
+              opts = opts || {};
+              var isSorted = pcSort && pcSort.col === col;
+              var arrow = isSorted ? (pcSort.dir === "desc" ? " \u25BE" : " \u25B4") : "";
+              return <div onClick={function() { setPcSort(isSorted ? (pcSort.dir === "desc" ? { col: col, dir: "asc" } : null) : { col: col, dir: "desc" }); }} style={Object.assign({ cursor: "pointer", userSelect: "none", color: isSorted ? "#374151" : "#9CA3AF" }, opts)}>{label}{arrow}</div>;
+            }
+            return <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "10px 32px", background: "#F9FAFB", borderBottom: "1px solid #F3F4F6", fontSize: 10, fontWeight: 500, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+              <div style={{ width: 22 }}></div>
+              {hdr("sku", "SKU", { minWidth: 110 })}
+              {hdr("desc", "Description", { flex: 1 })}
+              {hdr("qty", "Qty", { textAlign: "right", minWidth: 40 })}
+              {hdr("unit", "Unit Price", { textAlign: "right", minWidth: 75 })}
+              {hdr("total", "Total", { textAlign: "right", minWidth: 95 })}
+              <div style={{ width: 1, height: 14, background: "#E5E7EB", margin: "0 4px" }}></div>
+              {hdr("reported", "Reported", { textAlign: "right", minWidth: 90 })}
+              {hdr("reportedUnit", "Unit Cost", { textAlign: "right", minWidth: 75 })}
+            </div>;
+          })()}
+          {/* Item list */}
+          <div style={{ overflow: "auto", flex: 1, padding: "4px 16px" }}>
+            {sortedRows.map(function(r, i) {
+              var ck = priceChecked[priceCheckKey + ":" + r.SKUNDC] || false;
+              var rKey = priceCheckKey + ":" + r.SKUNDC;
+              var reported = pcReported[rKey] || "";
+              var reportedNum = parseFloat(String(reported).replace(/[$,]/g, ""));
+              var reportedUnit = !isNaN(reportedNum) && r.OrderQty > 0 ? reportedNum / r.OrderQty : null;
+              return <div key={i} style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 16px", margin: "2px 0", borderRadius: 10, cursor: "pointer", transition: "all 0.15s", background: ck ? "rgba(5,150,105,0.04)" : "transparent", border: ck ? "1px solid rgba(5,150,105,0.12)" : "1px solid transparent" }}>
+                <div onClick={function() { var updated = Object.assign({}, priceChecked); updated[rKey] = !ck; setPriceChecked(updated); }} style={{ width: 22, height: 22, borderRadius: 6, border: ck ? "2px solid #059669" : "2px solid #D1D5DB", background: ck ? "#059669" : "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, transition: "all 0.15s", cursor: "pointer" }}>
+                  {ck && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}
+                </div>
+                <div style={{ minWidth: 110, fontFamily: "monospace", fontSize: 12, color: ck ? "#059669" : "#374151", fontWeight: 500 }}>{r.SKUNDC}</div>
+                <div onClick={function() { var updated = Object.assign({}, priceChecked); updated[rKey] = !ck; setPriceChecked(updated); }} style={{ flex: 1, fontSize: 13, color: ck ? "#059669" : "#374151", lineHeight: 1.4, cursor: "pointer" }}>{r.Description}</div>
+                <div style={{ textAlign: "right", minWidth: 40, fontSize: 13, color: ck ? "#059669" : "#6B7280" }}>{r.OrderQty}</div>
+                <div style={{ textAlign: "right", minWidth: 75, fontSize: 13, color: ck ? "#059669" : "#374151" }}>${r.Price.toFixed(2)}</div>
+                <div style={{ textAlign: "right", minWidth: 95, fontSize: 13, fontWeight: 600, color: ck ? "#059669" : "#1F2937" }}>${r.TotalPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+                <div style={{ width: 1, height: 28, background: "#F3F4F6", margin: "0 4px", flexShrink: 0 }}></div>
+                <div style={{ minWidth: 90 }} onClick={function(e) { e.stopPropagation(); }}>
+                  <input value={reported} onChange={function(e) { var u = Object.assign({}, pcReported); u[rKey] = e.target.value; setPcReported(u); }} placeholder="$0.00" style={{ width: 85, padding: "5px 8px", borderRadius: 6, border: "1px solid #E5E7EB", fontSize: 12, textAlign: "right", outline: "none", background: reported ? "#FFFFFF" : "#F9FAFB", color: "#374151" }} />
+                </div>
+                <div style={{ textAlign: "right", minWidth: 85, fontSize: 12, fontWeight: 600, color: reportedUnit !== null ? (Math.abs(reportedUnit - r.Price) < 0.01 ? "#059669" : "#DC2626") : "#9CA3AF", display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 4 }}>
+                  {reportedUnit !== null ? <>{Math.abs(reportedUnit - r.Price) < 0.01 ? <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg> : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#DC2626" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>}{"$" + reportedUnit.toFixed(4)}</> : "\u2014"}
+                </div>
+              </div>;
+            })}
+          </div>
+          {/* Footer */}
+          {uncheckedItems.length > 0 && uncheckedItems.length < rows.length && <div style={{ padding: "14px 32px", borderTop: "1px solid #F3F4F6", background: "rgba(245,158,11,0.04)", fontSize: 12, color: "#D97706", lineHeight: 1.5 }}>
+            <strong>{uncheckedItems.length} item{uncheckedItems.length > 1 ? "s" : ""} remaining:</strong> {uncheckedItems.map(function(r) { return r.SKUNDC; }).join(", ")}
+          </div>}
+          {allChecked && <div style={{ padding: "16px 32px", borderTop: "1px solid #F3F4F6", background: "rgba(5,150,105,0.04)", fontSize: 14, color: "#059669", fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
+            <IconCheck /> All prices verified
+          </div>}
+        </div>
+      </div>;
+    })()}
+
+    {subPage === "email" && <div>
+      {emailBlocked && <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 10, padding: "14px 20px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}><IconAlert /><span style={{ fontSize: 13, color: "#DC2626" }}><strong>{flagCount} flagged item{flagCount > 1 ? "s" : ""}</strong>{flags.s.length > 0 ? " (" + flags.s.length + " short-dating)" : ""}{flags.so.length > 0 ? " (" + flags.so.length + " sell-off)" : ""} must be removed from the PO before sending.</span></div>}
+      {emailSent && <div style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.3)", borderRadius: 10, padding: "14px 20px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}><IconCheck /><span style={{ fontSize: 13, color: "#059669" }}><strong>Draft created!</strong></span></div>}
+      <div style={S.card}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+            <span style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, width: 60, paddingTop: 8 }}>To:</span>
+            {editingField === "to" ? <>
+              <input value={emailTo} onChange={function(e) { setEmailTo(e.target.value); }} autoFocus onBlur={function() { persistEmailOverride({ to: emailTo }); setEditingField(null); }} onKeyDown={function(e) { if (e.key === "Enter") { persistEmailOverride({ to: emailTo }); setEditingField(null); } if (e.key === "Escape") setEditingField(null); }} placeholder="recipient@example.com, recipient2@example.com" style={Object.assign({}, S.inp, { padding: "6px 10px", fontSize: 13, flex: 1 })} />
+            </> : <>
+              <span style={{ fontSize: 13, color: "#374151", flex: 1, paddingTop: 7, wordBreak: "break-all" }}>{emailTo || <span style={{ color: "#9CA3AF" }}>No recipients set</span>}</span>
+              <button onClick={function() { setEditingField("to"); }} title="Edit recipients" style={{ background: "transparent", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 14, padding: 4, alignSelf: "center" }}>{"\u270E"}</button>
+            </>}
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+            <span style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, width: 60, paddingTop: 8 }}>Cc:</span>
+            {editingField === "cc" ? <>
+              <input value={emailCc} onChange={function(e) { setEmailCc(e.target.value); }} autoFocus onBlur={function() { persistEmailOverride({ cc: emailCc }); setEditingField(null); }} onKeyDown={function(e) { if (e.key === "Enter") { persistEmailOverride({ cc: emailCc }); setEditingField(null); } if (e.key === "Escape") setEditingField(null); }} placeholder="cc@example.com, cc2@example.com" style={Object.assign({}, S.inp, { padding: "6px 10px", fontSize: 13, flex: 1 })} />
+            </> : <>
+              <span style={{ fontSize: 13, color: "#374151", flex: 1, paddingTop: 7, wordBreak: "break-all" }}>{emailCc || <span style={{ color: "#9CA3AF" }}>No Cc</span>}</span>
+              <button onClick={function() { setEditingField("cc"); }} title="Edit Cc" style={{ background: "transparent", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 14, padding: 4, alignSelf: "center" }}>{"\u270E"}</button>
+            </>}
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+            <span style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, width: 60, paddingTop: 8 }}>Subject:</span>
+            {editingField === "subject" ? <>
+              <input value={emailSubject || cfg.subjectFn(todayStr)} onChange={function(e) { setEmailSubject(e.target.value); }} autoFocus onBlur={function() { persistEmailOverride({ subject: emailSubject }); setEditingField(null); }} onKeyDown={function(e) { if (e.key === "Enter") { persistEmailOverride({ subject: emailSubject }); setEditingField(null); } if (e.key === "Escape") setEditingField(null); }} placeholder={cfg.subjectFn(todayStr)} style={Object.assign({}, S.inp, { padding: "6px 10px", fontSize: 13, flex: 1, fontWeight: 600 })} />
+            </> : <>
+              <span style={{ fontSize: 13, color: "#1F2937", fontWeight: 600, flex: 1, paddingTop: 7 }}>{fillTemplate(emailSubject) || cfg.subjectFn(todayStr)}</span>
+              <button onClick={function() { setEditingField("subject"); }} title="Edit subject" style={{ background: "transparent", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 14, padding: 4, alignSelf: "center" }}>{"\u270E"}</button>
+            </>}
+          </div>
+          <div style={{ borderTop: "1px solid #E5E7EB", paddingTop: 16, marginTop: 4 }}>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
+              {editingField === "body" ? <button onClick={function() { persistEmailOverride({ body: emailBody }); setEditingField(null); }} style={Object.assign({}, S.btn(), { padding: "4px 12px", fontSize: 11 })}>Save</button> : <button onClick={function() { setEditingField("body"); }} title="Edit body" style={{ background: "transparent", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 14, padding: 4 }}>{"\u270E"}</button>}
+            </div>
+            {editingField === "body" ? <textarea value={emailBody} onChange={function(e) { setEmailBody(e.target.value); }} autoFocus rows={6} style={Object.assign({}, S.inp, { padding: "10px 12px", fontSize: 13, lineHeight: 1.6, color: "#374151", width: "100%", resize: "vertical", fontFamily: "'Varela Round', sans-serif" })} /> : <div style={{ fontSize: 13, color: "#374151", lineHeight: 1.7, whiteSpace: "pre-wrap", padding: "8px 0" }}>{fillTemplate(emailBody)}</div>}
+            <div style={{ color: "#9CA3AF", fontSize: 11, fontStyle: "italic", marginTop: 6 }}>{"Your Vetcove Gmail signature will be appended automatically \u00B7 Use {date}, {weekday}, or {fulldate} as placeholders"}</div>
+          </div>
+        </div>
+        <div style={{ marginTop: 20, borderTop: "1px solid #E5E7EB", paddingTop: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+            <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, textTransform: "uppercase" }}>Attachments ({(function() { var sel = emailSelected || {}; var count = uniqueVendors.filter(function(v) { return emailSelected === null || sel[v] !== false; }).length; return count; })()}/{uniqueVendors.length})</div>
+            <button onClick={function() { var allSelected = emailSelected === null || uniqueVendors.every(function(v) { return emailSelected[v] !== false; }); var updated = {}; uniqueVendors.forEach(function(v) { updated[v] = allSelected ? false : true; }); setEmailSelected(allSelected ? updated : null); }} style={Object.assign({}, S.btn("ghost"), { padding: "4px 12px", fontSize: 11 })}>{emailSelected === null || uniqueVendors.every(function(v) { return emailSelected[v] !== false; }) ? "Deselect All" : "Select All"}</button>
+          </div>
+          {uniqueVendors.map(function(v) { var count = data.filter(function(r) { return r.VendorName === v; }).length; var isChecked = emailSelected === null || emailSelected[v] !== false; return <div key={v} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: isChecked ? "#F8F9FB" : "transparent", borderRadius: 8, marginBottom: 4, border: isChecked ? "1px solid #E5E7EB" : "1px solid transparent", transition: "all 0.15s", opacity: isChecked ? 1 : 0.5 }}>
+            <div onClick={function() { var updated = Object.assign({}, emailSelected || {}); if (emailSelected === null) { uniqueVendors.forEach(function(uv) { updated[uv] = true; }); } updated[v] = !isChecked; setEmailSelected(updated); }} style={{ width: 18, height: 18, borderRadius: 4, border: isChecked ? "2px solid " + cfg.color : "2px solid #D1D5DB", background: isChecked ? cfg.color : "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, transition: "all 0.15s", cursor: "pointer" }}>
+              {isChecked && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}
+            </div>
+            <span onClick={function(e) { e.stopPropagation(); try { var XLSX = require("xlsx"); var xlsCols = isGGM ? ["SKU", "Description", "Qty", "Vendor", "Price", "Total"] : ["SKU", "Description", "Qty", "Vendor", "PO #", "Reorder", "Max", "Lead", "Min", "Avail", "Price", "Total"]; var rows = data.filter(function(r) { return r.VendorName === v; }).map(function(r) { return isGGM ? [r.SKUNDC, r.Description, r.OrderQty, r.VendorName, r.Price, r.TotalPrice] : [r.SKUNDC, r.Description, r.OrderQty, r.VendorName, r.OrderNbr, r.ReorderPoint, r.MaxQty, r.LeadTime, r.MinOrderQty, r.QtyAvailable, r.Price, r.TotalPrice]; }); var ws = XLSX.utils.aoa_to_sheet([xlsCols].concat(rows)); var wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "PO Data"); XLSX.writeFile(wb, v + " PO Data - " + whKey + ".xlsx"); toast("Downloaded " + v + " (" + rows.length + " rows)"); } catch (err) { toast("Download error: " + err.message, "error"); } }} style={{ cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color: "#3B82F6", background: "rgba(59,130,246,0.1)", borderRadius: 6, padding: 4 }} title="Download this file"><IconDL /></span><span onClick={function() { var updated = Object.assign({}, emailSelected || {}); if (emailSelected === null) { uniqueVendors.forEach(function(uv) { updated[uv] = true; }); } updated[v] = !isChecked; setEmailSelected(updated); }} style={{ fontSize: 12, color: isChecked ? "#4B5563" : "#9CA3AF", cursor: "pointer", flex: 1 }}>{v} PO Data - {whKey}.xlsx</span>
+            <span style={{ fontSize: 11, color: "#9CA3AF", minWidth: 50, textAlign: "right" }}>{count} rows</span>
+          </div>; })}
+        </div>
+        <div style={{ marginTop: 20, display: "flex", gap: 10 }}>
+          <div title={emailBlocked ? "Short-dated/Sell-Off Items Detected" : undefined}>
+          <Gate ok={ok} prompt={lp} style={Object.assign({}, S.btn(), { padding: "10px 24px", opacity: (emailSent || emailLoading || emailBlocked) ? 0.5 : 1, cursor: emailBlocked ? "not-allowed" : undefined })} onClick={async function() {
+            if (emailBlocked) { toast("Remove all flagged items (short-dating / sell-off) before sending email", "error"); return; }
+            if (!gmail || !gmail.token) { toast("Please connect your Gmail account first (bottom-left)", "error"); return; }
+            var selectedVendors = uniqueVendors.filter(function(v) { return emailSelected === null || emailSelected[v] !== false; });
+            if (selectedVendors.length === 0) { toast("Select at least one vendor attachment", "error"); return; }
+            setEmailLoading(true);
+            try {
+              var toLine = emailTo;
+              var subject = fillTemplate(emailSubject) || cfg.subjectFn(todayStr);
+              var safeBody = fillTemplate(emailBody || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+              var htmlBody = "<p>" + safeBody.replace(/\n\n+/g, "</p><p>").replace(/\n/g, "<br>") + "</p>";
+              var xlsCols = ["SKU", "Description", "Qty", "Vendor", "PO #", "Reorder", "Max", "Lead", "Min", "Avail", "Price", "Total"];
+              var attachments = selectedVendors.map(function(v) {
+                var rows = data.filter(function(r) { return r.VendorName === v; }).map(function(r) {
+                  return [r.SKUNDC, r.Description, r.OrderQty, r.VendorName, r.OrderNbr, r.ReorderPoint, r.MaxQty, r.LeadTime, r.MinOrderQty, r.QtyAvailable, r.Price, r.TotalPrice];
+                });
+                return { filename: v + " PO Data - " + whKey + ".xlsx", columns: xlsCols, rows: rows };
+              });
+              var draftPayloads = [{ to: toLine, cc: emailCc, subject: subject, htmlBody: htmlBody, attachments: attachments }];
+              var result = await postGmailDrafts(draftPayloads, gmail.token);
+              if (result.failed > 0) throw new Error("Some drafts failed to create");
+              setEmailSent(true); persist(data, true, runBy, runTime, shipNotes); toast(cfg.label + ": Draft created with " + selectedVendors.length + " attachment" + (selectedVendors.length > 1 ? "s" : ""));
+            } catch (err) {
+              toast("Gmail error: " + err.message, "error");
+            } finally { setEmailLoading(false); }
+          }} disabled={emailSent || emailLoading || emailBlocked || data.length === 0}>{emailBlocked ? <span style={{ display: "flex", alignItems: "center", gap: 6, color: "#9CA3AF" }}><IconLock /> Create Gmail Draft</span> : emailLoading ? <><Spinner /> Creating...</> : emailSent ? "Draft Created" : <><IconMail /> Create Gmail Draft</>}</Gate>
+          </div>
+          {emailSent && <Gate ok={ok} prompt={lp} style={Object.assign({}, S.btn("danger"), { marginLeft: "auto" })} onClick={clearAll}><IconTrash /> Clear</Gate>}
+        </div>
+      </div>
+    </div>}
+  </div>);
+}
+
+/* ═══════ PO IMPORT TOOL ═══════ */
+function normalizeNdc(ndc) {
+  var parts = (ndc || "").replace(/[^0-9-]/g, "").split("-");
+  if (parts.length !== 3) return ndc;
+  return parts[0].padStart(5, "0") + "-" + parts[1].padStart(4, "0") + "-" + parts[2].padStart(2, "0");
+}
+function ndcVariants(ndc) {
+  var parts = (ndc || "").split("-");
+  if (parts.length !== 3) return [ndc];
+  var a = parts[0], b = parts[1], c = parts[2], v = {};
+  v[ndc] = 1;
+  v[a.padStart(5, "0") + "-" + b.padStart(4, "0") + "-" + c.padStart(2, "0")] = 1;
+  v[(a.replace(/^0+/, "") || "0") + "-" + (b.replace(/^0+/, "") || "0") + "-" + (c.replace(/^0+/, "") || "0")] = 1;
+  return Object.keys(v);
+}
+
+/* ═══════ DROP ZONE COMPONENT ═══════ */
+function DropZone(props) {
+  var onFiles = props.onFiles, accept = props.accept, multiple = props.multiple, label = props.label, sublabel = props.sublabel, icon = props.icon, disabled = props.disabled, color = props.color;
+  var _drag = useState(false), dragging = _drag[0], setDragging = _drag[1];
+  var inputRef = useRef(null);
+  var accent = color || "#14B8A6";
+
+  function handleDrop(e) {
+    e.preventDefault(); e.stopPropagation(); setDragging(false);
+    if (disabled) return;
+    var files = Array.from(e.dataTransfer.files);
+    if (accept) {
+      var exts = accept.split(",").map(function(a) { return a.trim().toLowerCase(); });
+      files = files.filter(function(f) {
+        var name = f.name.toLowerCase();
+        var type = f.type.toLowerCase();
+        return exts.some(function(ext) { return ext.startsWith(".") ? name.endsWith(ext) : type.match(ext.replace("*", ".*")); });
+      });
+    }
+    if (files.length > 0) onFiles(multiple ? files : [files[0]]);
+  }
+  function handleDragOver(e) { e.preventDefault(); e.stopPropagation(); if (!disabled) setDragging(true); }
+  function handleDragLeave(e) { e.preventDefault(); e.stopPropagation(); setDragging(false); }
+  function handleClick() { if (!disabled && inputRef.current) inputRef.current.click(); }
+  function handleInput(e) { var files = Array.from(e.target.files || []); if (files.length > 0) onFiles(files); e.target.value = ""; }
+
+  var boxStyle = {
+    border: "2px dashed " + (dragging ? accent : "#D5D0C8"),
+    borderRadius: 12,
+    padding: "20px 16px",
+    textAlign: "center",
+    cursor: disabled ? "default" : "pointer",
+    background: dragging ? accent + "08" : "transparent",
+    transition: "all 0.15s ease",
+    opacity: disabled ? 0.5 : 1,
+  };
+
+  var iconSvg = icon === "pdf" ?
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={dragging ? accent : "#9CA3AF"} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+    : icon === "image" ?
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={dragging ? accent : "#9CA3AF"} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+    : icon === "spreadsheet" ?
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={dragging ? accent : "#9CA3AF"} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/><line x1="12" y1="9" x2="12" y2="21"/></svg>
+    :
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={dragging ? accent : "#9CA3AF"} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>;
+
+  return <div style={boxStyle} onDrop={handleDrop} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onClick={handleClick}>
+    <input ref={inputRef} type="file" accept={accept || ""} multiple={!!multiple} onChange={handleInput} style={{ display: "none" }} />
+    <div style={{ marginBottom: 6 }}>{iconSvg}</div>
+    <div style={{ fontSize: 13, color: "#374151", fontWeight: 600 }}>{label || "Drop file here"}</div>
+    {sublabel && <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>{sublabel}</div>}
+  </div>;
+}
+
+/* ═══════ CYCLE COUNTING TOOL ═══════ */
+function CycleCountTool(props) {
+  var toast = props.toast;
+  var cred = props.cred;
+  var TOOL_COLOR = props.toolColor || "#14B8A6";
+  var isSftp = props.sftp || false;
+  var _ndcText = useState(function() { return sGet("cc-ndc-text") || ""; }), ndcText = _ndcText[0], setNdcText = _ndcText[1];
+  var _vendorFile = useState(null), vendorFile = _vendorFile[0], setVendorFile = _vendorFile[1];
+  var _vendorRows = useState(null), vendorRows = _vendorRows[0], setVendorRows = _vendorRows[1];
+  var _csvWarehouses = useState(function() { return sGet("cc-vendor-warehouses") || []; }), csvWarehouses = _csvWarehouses[0], setCsvWarehouses = _csvWarehouses[1];
+  var _csvWhSelected = useState(function() { return sGet("cc-vendor-wh-selected") || ""; }), csvWhSelected = _csvWhSelected[0], setCsvWhSelected = _csvWhSelected[1];
+  var _csvWhCounts = useState(function() { return sGet("cc-vendor-wh-counts") || {}; }), csvWhCounts = _csvWhCounts[0], setCsvWhCounts = _csvWhCounts[1];
+  var _vendorName = useState(function() { return sGet("cc-vendor-name") || ""; }), vendorName = _vendorName[0], setVendorName = _vendorName[1];
+  var _stockFile = useState(null), stockFile = _stockFile[0], setStockFile = _stockFile[1];
+  var _sftpFile = useState(null), sftpFile = _sftpFile[0], setSftpFile = _sftpFile[1];
+  var _sftpRows = useState(null), sftpRows = _sftpRows[0], setSftpRows = _sftpRows[1];
+  var _stockRows = useState(null), stockRows = _stockRows[0], setStockRows = _stockRows[1];
+  var _stockMeta = useState(null), stockMeta = _stockMeta[0], setStockMeta = _stockMeta[1];
+  var _stockLoading = useState(false), stockLoading = _stockLoading[0], setStockLoading = _stockLoading[1];
+  var _dohFile = useState(null), dohFile = _dohFile[0], setDohFile = _dohFile[1];
+  var _dohRows = useState(null), dohRows = _dohRows[0], setDohRows = _dohRows[1];
+  var _dohMeta = useState(null), dohMeta = _dohMeta[0], setDohMeta = _dohMeta[1];
+  var _dohLoading = useState(false), dohLoading = _dohLoading[0], setDohLoading = _dohLoading[1];
+  var _uomMap = useState(null), uomMap = _uomMap[0], setUomMap = _uomMap[1];
+  var _uomMapStatus = useState("idle"), uomMapStatus = _uomMapStatus[0], setUomMapStatus = _uomMapStatus[1];
+  var _warehouse = useState(function() { return sGet("cc-warehouse") || ""; }), warehouse = _warehouse[0], setWarehouse = _warehouse[1];
+  var _results = useState(function() { return sGet("cc-results") || []; }), results = _results[0], setResults = _results[1];
+  var _errors = useState(function() { return sGet("cc-errors") || []; }), errors = _errors[0], setErrors = _errors[1];
+  var _loading = useState(false), loading = _loading[0], setLoading = _loading[1];
+  // approvals: { inventoryId: true } — flagged rows the user has approved for CC upload.
+  // Persisted so checked-off rows survive navigation; reset on regenerate / Clear.
+  var _approvals = useState(function() { return sGet("cc-approvals") || {}; }), approvals = _approvals[0], setApprovals = _approvals[1];
+  useEffect(function() { sSet("cc-approvals", approvals); }, [approvals]);
+  // Key approvals by Inventory ID + NDC so generic items that share an Inventory ID
+  // but differ by NDC are tracked as separate check rows (checking one won't check both).
+  function ccApprKey(r) { return String(r.inventoryId) + "|" + String(r.ndc || ""); }
+  // Vendor Inventory rows are large, so they live in IndexedDB (localStorage's ~5MB cap
+  // is shared with the results, and an oversized vendor file was silently pushing the
+  // results save out). Load them on mount, and purge any legacy localStorage copy that
+  // an earlier build wrote, so it stops eating the quota.
+  useEffect(function() {
+    var mt = true;
+    sDel("cc-vendor-rows");
+    idbGet("cc-vendor-rows").then(function(rows) {
+      if (mt && Array.isArray(rows) && rows.length > 0) setVendorRows(rows);
+    });
+    return function() { mt = false; };
+  }, []);
+
+  // Load cached stock items from localStorage on mount
+  useEffect(function() {
+    try {
+      var saved = localStorage.getItem("stock-items-cache");
+      if (saved) {
+        var parsed = JSON.parse(saved);
+        if (parsed && parsed.rows && parsed.rows.length > 0) {
+          setStockRows(parsed.rows);
+          setStockMeta({ date: parsed.date || "unknown", count: parsed.rows.length, name: parsed.name || "Stock Items" });
+        }
+      }
+    } catch (e) { /* localStorage unavailable, ignore */ }
+  }, []);
+
+  // Upload and cache stock items to localStorage
+  function handleStockUpload(file) {
+    if (!file) return;
+    setStockFile(file);
+    setStockLoading(true);
+    var formData = new FormData();
+    formData.append("file", file);
+    fetch("/api/parse-xlsx", { method: "POST", body: formData }).then(function(resp) {
+      return resp.json();
+    }).then(function(json) {
+      if (json.error) { toast("Stock Items parse error: " + json.error, "error"); setStockLoading(false); return; }
+      // Only keep the two columns we need to minimize storage
+      var trimmed = json.rows.map(function(r) { return { "Inventory ID": r["Inventory ID"] || "", "Sales Unit": r["Sales Unit"] || "", "Base Unit": r["Base Unit"] || "" }; }).filter(function(r) { return r["Inventory ID"]; });
+      setStockRows(trimmed);
+      var meta = { date: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }), count: trimmed.length, name: file.name };
+      setStockMeta(meta);
+      // Save to localStorage
+      try {
+        localStorage.setItem("stock-items-cache", JSON.stringify({ rows: trimmed, date: meta.date, name: meta.name }));
+        toast("Stock Items saved (" + trimmed.length + " items)", "success");
+      } catch (e) {
+        toast("Stock Items loaded but failed to cache locally", "error");
+      }
+      setStockLoading(false);
+      setStockFile(null);
+    }).catch(function(err) {
+      toast("Failed to parse Stock Items: " + err.message, "error");
+      setStockLoading(false);
+    });
+  }
+  // Load TP-DOH from localStorage on mount, but only if saved date == today.
+  // Cache key bumped to v2 in May 2026 when we switched from On Hand → Final FC units
+  // for the DRR calculation. Old v1 caches are cleared automatically.
+  useEffect(function() {
+    try {
+      // Drop any legacy v1 cache once, no matter what
+      localStorage.removeItem("tpdoh-cache");
+      var saved = localStorage.getItem("tpdoh-cache-v2");
+      if (saved) {
+        var parsed = JSON.parse(saved);
+        var today = new Date().toLocaleDateString();
+        if (parsed && parsed.savedDate === today && parsed.rows && parsed.rows.length > 0) {
+          setDohRows(parsed.rows);
+          setDohMeta({ date: parsed.savedDate, count: parsed.rows.length, name: parsed.name || "TP-DOH" });
+        } else {
+          localStorage.removeItem("tpdoh-cache-v2");
+        }
+      }
+    } catch (e) { /* localStorage unavailable, ignore */ }
+  }, []);
+
+  // Fetch UOM conversion map eagerly when cred is available. Forces server-side
+  // refresh on first load to bypass the 24h KV cache (which may be stale).
+  useEffect(function() {
+    if (!cred || !cred.username || !cred.password) return;
+    if (uomMap) return;
+    var cancelled = false;
+    setUomMapStatus("loading");
+    fetch("/api/acumatica", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "uom-conversions", username: cred.username, password: cred.password, refresh: true }),
+    }).then(function(r) { return r.ok ? r.json() : null; }).then(function(json) {
+      if (cancelled) return;
+      if (!json || !json.data) { setUomMapStatus("failed"); return; }
+      // Build nested map: { invId: { TO_UOM: { factor, op, fromUnit, baseUnit } } }
+      var map = {};
+      json.data.forEach(function(row) {
+        var invId = (row.InventoryID || "").trim();
+        if (!invId) return;
+        var toUnit = (row.ToUnit || "").trim().toUpperCase();
+        var fromUnit = (row.FromUnit || "").trim().toUpperCase();
+        var baseUnit = (row.BaseUnit || "").trim().toUpperCase();
+        var factor = parseFloat(row.ConversionFactor);
+        if (!toUnit || isNaN(factor) || factor <= 0) return;
+        var op = (row.MultiplyDivide || "Multiply").toLowerCase().indexOf("div") >= 0 ? "Divide" : "Multiply";
+        if (!map[invId]) map[invId] = {};
+        map[invId][toUnit] = { factor: factor, op: op, fromUnit: fromUnit, baseUnit: baseUnit };
+      });
+      setUomMap(map);
+      setUomMapStatus("loaded:" + Object.keys(map).length);
+    }).catch(function() { if (!cancelled) setUomMapStatus("failed"); });
+    return function() { cancelled = true; };
+  }, [cred]);
+
+  function handleDohUpload(file) {
+    if (!file) return;
+    setDohFile(file);
+    setDohLoading(true);
+    var formData = new FormData();
+    formData.append("file", file);
+    fetch("/api/parse-xlsx", { method: "POST", body: formData }).then(function(resp) {
+      return resp.json();
+    }).then(function(json) {
+      if (json.error) { toast("TP-DOH parse error: " + json.error, "error"); setDohLoading(false); setDohFile(null); return; }
+      // Keep only the columns we need — strip Meta data tab values if they leaked in.
+      // "Final FC units" header includes the current month (e.g. "Final FC units May 2026"),
+      // so we match by prefix instead of exact name so the parser keeps working when the month rolls over.
+      var rawRows = json.rows || [];
+      var finalFcKey = null;
+      if (rawRows.length > 0) {
+        var keys = Object.keys(rawRows[0]);
+        for (var ki = 0; ki < keys.length; ki++) {
+          if (keys[ki].toLowerCase().indexOf("final fc units") === 0) { finalFcKey = keys[ki]; break; }
+        }
+      }
+      var trimmed = rawRows.map(function(r) {
+        return {
+          productCode: String(r["Product code"] || "").trim(),
+          description: String(r["Product description"] || "").trim(),
+          locationCode: String(r["Location code"] || "").trim(),
+          mainUom: String(r["Main unit of measure"] || "").trim(),
+          finalFcUnits: finalFcKey ? (parseFloat(r[finalFcKey]) || 0) : 0,
+          daysOnHand: parseFloat(r["Days on hand"]) || 0,
+        };
+      }).filter(function(r) { return r.productCode; });
+      if (trimmed.length === 0) {
+        toast("TP-DOH file has no valid rows \u2014 make sure 'Report data' is the first sheet", "error");
+        setDohLoading(false); setDohFile(null); return;
+      }
+      if (!finalFcKey) {
+        toast("TP-DOH parsed but no 'Final FC units' column found \u2014 Daily Run Rate will be 0", "error");
+      }
+      setDohRows(trimmed);
+      var today = new Date().toLocaleDateString();
+      var meta = { date: today, count: trimmed.length, name: file.name };
+      setDohMeta(meta);
+      try {
+        localStorage.setItem("tpdoh-cache-v2", JSON.stringify({ rows: trimmed, savedDate: today, name: file.name }));
+        toast("TP-DOH loaded \u2014 " + trimmed.length + " items (today only)", "success");
+      } catch (e) {
+        toast("TP-DOH loaded but failed to cache locally", "error");
+      }
+      setDohLoading(false);
+      setDohFile(null);
+    }).catch(function(err) {
+      toast("Failed to parse TP-DOH: " + err.message, "error");
+      setDohLoading(false); setDohFile(null);
+    });
+  }
+  // SFTP BOH report handler
+  function handleSftpUpload(file) {
+    if (!file) return;
+    setSftpFile(file);
+    var reader = new FileReader();
+    reader.onload = function(e) {
+      var text = e.target.result;
+      var lines = text.split("\n").map(function(l) { return l.trim(); }).filter(function(l) { return l.length > 0; });
+      if (lines.length < 2) { toast("SFTP file appears empty", "error"); return; }
+      var headers = lines[0].split(",").map(function(h) { return h.trim(); });
+      var rows = [];
+      for (var i = 1; i < lines.length; i++) {
+        var vals = lines[i].split(",");
+        var obj = {};
+        headers.forEach(function(h, idx) { obj[h] = (vals[idx] || "").trim(); });
+        rows.push(obj);
+      }
+      setSftpRows(rows);
+      toast("SFTP BOH loaded: " + rows.length + " items", "success");
+    };
+    reader.readAsText(file);
+  }
+  var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
+
+  function parseCSV(text) {
+    var lines = text.split("\n").map(function(l) { return l.trim(); }).filter(function(l) { return l.length > 0; });
+    if (lines.length === 0) return [];
+    var headers = lines[0].split(",").map(function(h) { return h.replace(/"/g, "").trim(); });
+    return lines.slice(1).map(function(line) {
+      var vals = [];
+      var inQuote = false, cur = "";
+      for (var i = 0; i < line.length; i++) {
+        if (line[i] === '"') { inQuote = !inQuote; }
+        else if (line[i] === ',' && !inQuote) { vals.push(cur.trim()); cur = ""; }
+        else { cur += line[i]; }
+      }
+      vals.push(cur.trim());
+      var obj = {};
+      headers.forEach(function(h, idx) { obj[h] = vals[idx] || ""; });
+      return obj;
+    });
+  }
+
+  function readFileAsText(file) {
+    return new Promise(function(resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function() { resolve(reader.result); };
+      reader.onerror = function() { reject(new Error("Failed to read file")); };
+      reader.readAsText(file);
+    });
+  }
+
+  function handleVendorUpload(file) {
+    if (!file) return;
+    setVendorFile(file);
+    setVendorName(file.name);
+    sSet("cc-vendor-name", file.name);
+    readFileAsText(file).then(function(text) {
+      var rows = parseCSV(text);
+      setVendorRows(rows);
+      idbSet("cc-vendor-rows", rows);
+      // Detect unique warehouse names and count rows per warehouse
+      var whCounts = {};
+      rows.forEach(function(r) { var w = (r.Warehouse || "").trim(); if (w) { whCounts[w] = (whCounts[w] || 0) + 1; } });
+      var whList = Object.keys(whCounts).sort();
+      setCsvWarehouses(whList);
+      setCsvWhCounts(whCounts);
+      sSet("cc-vendor-warehouses", whList);
+      sSet("cc-vendor-wh-counts", whCounts);
+      // Auto-select if only one warehouse
+      if (whList.length === 1) { setCsvWhSelected(whList[0]); sSet("cc-vendor-wh-selected", whList[0]); }
+      else { setCsvWhSelected(""); sSet("cc-vendor-wh-selected", ""); }
+    }).catch(function() { toast("Failed to read CSV", "error"); });
+  }
+
+  function readXlsxFile(file) {
+    return new Promise(function(resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function() {
+        try {
+          // Send to server for parsing since CDN may be blocked
+          var formData = new FormData();
+          formData.append("file", file);
+          fetch("/api/parse-xlsx", { method: "POST", body: formData }).then(function(resp) {
+            return resp.json();
+          }).then(function(json) {
+            if (json.error) reject(new Error(json.error));
+            else resolve(json.rows);
+          }).catch(reject);
+        } catch (err) { reject(err); }
+      };
+      reader.onerror = function() { reject(new Error("Failed to read file")); };
+      reader.readAsArrayBuffer(file);
+    });
+  }
+
+  async function processData() {
+    if (!ndcText.trim()) { toast("Paste the NDC list first", "error"); return; }
+    if (!vendorRows || vendorRows.length === 0) { toast("Upload the Vendor Inventory CSV", "error"); return; }
+    if (!csvWhSelected) { toast("Select a warehouse from the CSV", "error"); return; }
+    if (isSftp && (!sftpRows || sftpRows.length === 0)) { toast("Upload the SFTP BOH Report CSV", "error"); return; }
+    if (!stockRows || stockRows.length === 0) { toast("Upload the Stock Items XLSX first", "error"); return; }
+    if (!warehouse.trim()) { toast("Enter a warehouse code for output", "error"); return; }
+
+    setLoading(true); setResults([]); setErrors([]); setApprovals({});
+    try {
+      // Parse NDCs from pasted text — extract NDCs with dashes, skip blanks
+      var ndcLines = ndcText.split("\n").map(function(l) { return l.trim(); }).filter(function(l) { return l.length > 0 && /\d/.test(l); });
+      var ndcs = [];
+      ndcLines.forEach(function(line) {
+        // Try dashed format first (5-4-2 or 4-4-2)
+        var match = line.match(/(\d{4,5}-\d{3,4}-\d{1,2})/);
+        if (match) { ndcs.push(match[1]); return; }
+        // Try 11-digit no-dash format
+        var m2 = line.match(/(\d{11})/);
+        if (m2) { ndcs.push(m2[1]); return; }
+        // Fallback: clean and use whatever digits+dashes are there
+        var cleaned = line.replace(/[^\d-]/g, "").trim();
+        if (cleaned.length >= 8) ndcs.push(cleaned);
+      });
+
+      // Deduplicate NDCs
+      var seen = {};
+      ndcs = ndcs.filter(function(ndc) { if (seen[ndc]) return false; seen[ndc] = true; return true; });
+
+      // Filter pre-parsed vendor rows by selected CSV warehouse
+      var filteredVendor = vendorRows.filter(function(r) {
+        return (r.Warehouse || "").trim() === csvWhSelected;
+      });
+
+      // Build SKU → vendor row map (SKU = NDC without dashes)
+      var skuMap = {};
+      filteredVendor.forEach(function(r) {
+        var sku = (r.SKU || "").trim();
+        if (sku) skuMap[sku] = r;
+      });
+
+      // Build SFTP NDC → reported qty map (if SFTP mode)
+      var sftpMap = {};
+      if (isSftp && sftpRows) {
+        var sftpWhMap = { "TP-CA": "CA01", "TP-NY": "NY01", "TP-OH": "OH01", "TP-TX": "TX01", "TRUEPILL_BROOKLYN": "NY01", "TRUEPILL_SEVEN_HILLS": "OH01", "TRUEPILL_HAYWARD": "CA01" };
+        var sftpWhCode = sftpWhMap[csvWhSelected] || sftpWhMap[wh] || "";
+        if (!sftpWhCode) {
+          // Try partial match
+          var csvLower = (csvWhSelected || "").toLowerCase();
+          if (csvLower.indexOf("brooklyn") >= 0 || csvLower.indexOf("ny") >= 0) sftpWhCode = "NY01";
+          else if (csvLower.indexOf("seven") >= 0 || csvLower.indexOf("oh") >= 0) sftpWhCode = "OH01";
+          else if (csvLower.indexOf("hayward") >= 0 || csvLower.indexOf("ca") >= 0) sftpWhCode = "CA01";
+        }
+        sftpRows.forEach(function(r) {
+          // Filter by warehouse if we have a mapping
+          if (sftpWhCode && (r["Warehouse Code"] || "").trim() !== sftpWhCode) return;
+          var ndc = (r["NDC_SKU"] || "").replace(/-/g, "").trim();
+          if (ndc) {
+            var initialQty = parseFloat(r["Initial Sales Quantity On Hand"]) || 0;
+            var holdQty = parseFloat(r["Sales Quantity On Hold"]) || 0;
+            sftpMap[ndc] = Math.round((initialQty - holdQty) * 10) / 10;
+          }
+        });
+      }
+
+      // Build Inventory ID → Sales Unit + Base Unit maps from cached stock items
+      var salesUnitMap = {};
+      var baseUnitMap = {};
+      stockRows.forEach(function(r) {
+        var invId = String(r["Inventory ID"] || "").trim();
+        var salesUnit = String(r["Sales Unit"] || "").trim();
+        var baseUnit = String(r["Base Unit"] || "").trim();
+        if (invId) {
+          salesUnitMap[invId] = salesUnit;
+          baseUnitMap[invId] = baseUnit;
+        }
+      });
+
+      // Process each NDC
+      var output = [];
+      var errs = [];
+      var wh = warehouse.trim();
+
+      ndcs.forEach(function(ndc) {
+        var ndcClean = ndc.replace(/-/g, "");
+        var vendorRow = skuMap[ndcClean];
+
+        if (!vendorRow) {
+          errs.push("NDC " + ndc + " (" + ndcClean + ") not found in Vendor Inventory for " + csvWhSelected);
+          return;
+        }
+
+        var invId = (vendorRow["Manufacturer Number"] || "").trim();
+        var reportedQty = Math.round((isSftp && sftpMap.hasOwnProperty(ndcClean) ? sftpMap[ndcClean] : (parseFloat(vendorRow["Reported Qty"]) || 0)) * 10) / 10;
+        var stockQty = Math.round((parseFloat(vendorRow["Stock Qty"]) || 0) * 10) / 10;
+        var quantity = Math.round((reportedQty - stockQty) * 10) / 10;
+        var pkgSize = parseFloat(vendorRow["Package Size"]) || 0;
+
+        // Location: GEN- or UNV- items use NDC without dashes, others use warehouse code
+        var location = (invId.startsWith("GEN-") || invId.startsWith("UNV-")) ? ndcClean : wh;
+
+        // UOM from stock items
+        var uom = salesUnitMap[invId] || "";
+        if (!uom) {
+          errs.push("Inventory ID " + invId + " (NDC " + ndc + ") not found in Stock Items for UOM");
+        }
+
+        output.push({
+          inventoryId: invId,
+          warehouse: wh,
+          location: location,
+          quantity: quantity,
+          uom: uom,
+          ndc: ndc,
+          ndcClean: ndcClean,
+          reportedQty: reportedQty,
+          stockQty: stockQty,
+          pkgSize: pkgSize,
+        });
+      });
+
+      // If TP-DOH file is loaded, enrich each result with Daily Run Rate.
+      // Recipe (changed June 2026: divisor is now days in the current month, not Days on Hand):
+      //   1. drrInBase = TP-DOH Final FC units ÷ days in the CURRENT calendar month
+      //      (dynamic: 28/29/30/31), expressed in TP-DOH's Main Unit of Measure
+      //   2. Get TP-DOH's Main UOM for the item (from the TP-DOH row)
+      //   3. Get Sales Unit for the item (from Stock Items)
+      //   4. In Stock Item UOM Conversions GI, find the row where
+      //      InventoryID matches AND FromUnit == TP-DOH Main UOM AND ToUnit == Sales Unit
+      //   5. Multiply DRR by that row's Conversion Factor (factor is 1 for same-unit rows
+      //      like PACK→PACK, which still applies as a no-op)
+      // Days of Supply = Adjustment ÷ Converted DRR
+      if (dohRows && dohRows.length > 0) {
+        var dohMap = {};
+        dohRows.forEach(function(r) {
+          if (r.productCode && r.locationCode) {
+            dohMap[r.productCode + "|" + r.locationCode] = r;
+          }
+        });
+        // Days in the CURRENT calendar month (dynamic): 30 for June, 31 for July,
+        // 28/29 for February. The 0th day of next month = last day of this month.
+        var _now = new Date();
+        var daysInCurrentMonth = new Date(_now.getFullYear(), _now.getMonth() + 1, 0).getDate();
+        output.forEach(function(row) {
+          var dohRow = dohMap[row.inventoryId + "|" + wh];
+          if (!dohRow) { row.dailyRunRate = null; row.convertedDailyRunRate = null; return; }
+          row.dohDescription = dohRow.description;
+          row.dohFinalFcUnits = dohRow.finalFcUnits;
+          row.dohDaysOnHand = dohRow.daysOnHand;
+          // Divide Final FC units by the number of days in the current month
+          // (dynamic), rather than Days on Hand.
+          var finalFc = dohRow.finalFcUnits;
+          if (finalFc == null || isNaN(finalFc) || daysInCurrentMonth <= 0) { row.dailyRunRate = null; row.convertedDailyRunRate = null; return; }
+
+          // Step 1: DRR in TP-DOH's native unit = Final FC units ÷ days in current month
+          var drrInBase = finalFc / daysInCurrentMonth;
+
+          // Step 2 & 3: get the FROM unit (TP-DOH Main UOM) and TO unit (Stock Items Sales Unit)
+          var mainUom = (dohRow.mainUom || "").toUpperCase();
+          var salesUnit = (row.uom || "").toUpperCase();
+
+          // Step 4: find GI row matching FromUnit=mainUom AND ToUnit=salesUnit
+          var drrInSales = drrInBase;
+          var convSource = "none";
+          var conv = (salesUnit && uomMap && uomMap[row.inventoryId]) ? uomMap[row.inventoryId][salesUnit] : null;
+          if (conv && conv.factor) {
+            // Match FromUnit to TP-DOH's Main UOM when available; if Main UOM is missing
+            // from the TP-DOH file (older cache), trust the GI's FromUnit (which is the
+            // base unit by Acumatica convention).
+            if (!mainUom || conv.fromUnit === mainUom) {
+              // Step 5: multiply DRR by the GI's Conversion Factor (1 for same-unit, N otherwise)
+              drrInSales = drrInBase * conv.factor;
+              convSource = mainUom ? "gi" : "gi-no-mainUom";
+            } else {
+              convSource = "gi-uom-mismatch:" + conv.fromUnit + "≠" + mainUom;
+            }
+          } else if (salesUnit && row.pkgSize > 0) {
+            // Fallback: Package Size from vendor CSV when GI has no matching row.
+            // Only apply if Stock Items confirms Base ≠ Sales.
+            var baseUnitFromStock = (baseUnitMap[row.inventoryId] || "").toUpperCase();
+            if (baseUnitFromStock && baseUnitFromStock !== salesUnit) {
+              drrInSales = drrInBase * row.pkgSize;
+              convSource = "pkg";
+            }
+          }
+
+          row.dailyRunRate = Math.round(drrInBase * 100) / 100;
+          row.convertedDailyRunRate = Math.round(drrInSales * 100) / 100;
+          row.drrConvSource = convSource;
+        });
+
+        // Compute Days of Supply change + flag status for each row.
+        // Rules:
+        //   - DoS = Adjustment / Converted DRR (positive = supply added, negative = supply removed)
+        //   - Flag when |DoS| > 14 days
+        //   - Also flag when Adjustment is non-zero but DRR is missing/zero (impact unknown — needs approval)
+        //   - Adjustment of 0 is never flagged (no supply change either way)
+        output.forEach(function(row) {
+          var adj = row.quantity;
+          var crr = row.convertedDailyRunRate;
+          if (adj === 0) {
+            row.daysOfSupply = 0;
+            row.isFlagged = false;
+            row.flagReason = "";
+          } else if (crr == null || crr <= 0) {
+            row.daysOfSupply = null;
+            row.isFlagged = true;
+            row.flagReason = "no DRR";
+          } else {
+            row.daysOfSupply = Math.round((adj / crr) * 10) / 10;
+            if (Math.abs(row.daysOfSupply) > 14) {
+              row.isFlagged = true;
+              row.flagReason = "|DoS| > 14";
+            } else {
+              row.isFlagged = false;
+              row.flagReason = "";
+            }
+          }
+        });
+      } else {
+        // No DOH file → no flags at all
+        output.forEach(function(row) {
+          row.daysOfSupply = null;
+          row.isFlagged = false;
+          row.flagReason = "";
+        });
+      }
+
+      setResults(output);
+      setErrors(errs);
+      sSet("cc-results", output);
+      sSet("cc-errors", errs);
+      toast("Processed " + output.length + " items" + (errs.length > 0 ? ", " + errs.length + " warnings" : ""));
+    } catch (err) {
+      toast("Error: " + err.message, "error");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // CC upload routing:
+  //   - If no DOH file: include everything (today's behavior, no flag UI shown)
+  //   - If DOH file loaded: include unflagged rows + flagged rows that have been approved
+  function getUploadRows() {
+    var hasDoh = dohRows && dohRows.length > 0;
+    if (!hasDoh) return results;
+    return results.filter(function(r) {
+      if (!r.isFlagged) return true;
+      return !!approvals[ccApprKey(r)];
+    });
+  }
+
+  // CC check routing: flagged rows that have NOT been approved (only meaningful when DOH is loaded)
+  function getCheckRows() {
+    return results.filter(function(r) { return r.isFlagged && !approvals[ccApprKey(r)]; });
+  }
+
+  function downloadCSV() {
+    var rows = getUploadRows();
+    var header = "Inventory ID,Warehouse,Location,Quantity,UOM\r\n";
+    var lines = rows.map(function(r) {
+      return [r.inventoryId, r.warehouse, r.location, r.quantity, r.uom]
+        .map(function(v) { return "\"" + String(v == null ? "" : v).replace(/"/g, '""') + "\""; }).join(",");
+    });
+    var csv = header + lines.join("\r\n");
+    var blob = new Blob([csv], { type: "text/csv" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url; a.download = "CC_" + warehouse.trim() + "_" + new Date().toISOString().slice(5, 10).replace("-", "_") + ".csv"; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function downloadDrrCSV() {
+    var rows = getCheckRows();
+    var header = "Inventory ID,NDC,Location Code,Description,Fuze's Counts,Our Counts,Adjustment,Daily Run Rate,Converted Daily Run Rate,Days of Supply\r\n";
+    var lines = rows.map(function(r) {
+      var daysOfSupply = r.daysOfSupply != null ? r.daysOfSupply : "";
+      return [
+        r.inventoryId,
+        r.ndc,
+        r.warehouse,
+        r.dohDescription || "",
+        r.reportedQty,
+        r.stockQty,
+        r.quantity,
+        r.dailyRunRate != null ? r.dailyRunRate : "",
+        r.convertedDailyRunRate != null ? r.convertedDailyRunRate : "",
+        daysOfSupply,
+      ].map(function(v) { return "\"" + String(v == null ? "" : v).replace(/"/g, '""') + "\""; }).join(",");
+    });
+    var csv = header + lines.join("\r\n");
+    var blob = new Blob([csv], { type: "text/csv" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url; a.download = "CC_Check_" + warehouse.trim() + "_" + new Date().toISOString().slice(5, 10).replace("-", "_") + ".csv"; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  return <div>
+    <p style={{ color: "#6B7280", fontSize: 14, marginBottom: 20 }}>Generate cycle count adjustment CSVs from Pharm Admin data and Stock Items.</p>
+
+    <div style={S.card}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+        <div>
+          <div style={{ fontSize: 14, color: "#374151", fontWeight: 600, marginBottom: 8 }}>1. Paste NDC List</div>
+          <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 6 }}>Copy the NDC column from your Google Sheet and paste below</div>
+          <textarea value={ndcText} onChange={function(e) { setNdcText(e.target.value); sSet("cc-ndc-text", e.target.value); }} placeholder={"68462-0128-01\n68462-0129-01\n43547-0336-10\n..."} rows={8} style={Object.assign({}, S.inp, { resize: "vertical", fontFamily: "monospace", fontSize: 12 })} />
+          {ndcText.trim() && (function() { var lines = ndcText.trim().split("\n").filter(function(l) { return l.trim(); }); var u = {}; lines.forEach(function(l) { u[l.trim()] = 1; }); var total = lines.length, unique = Object.keys(u).length; return <p style={{ color: "#059669", fontSize: 12, marginTop: 6 }}>{"\u2713"} {unique} NDCs pasted{total > unique ? " (" + (total - unique) + " duplicate" + (total - unique > 1 ? "s" : "") + " removed)" : ""}</p>; })()}
+        </div>
+        <div>
+          <div style={{ fontSize: 14, color: "#374151", fontWeight: 600, marginBottom: 8 }}>2. Warehouse Code</div>
+          <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 6 }}>Type the warehouse code for the output (e.g. TP-NY, TP-OH)</div>
+          <input value={warehouse} onChange={function(e) { setWarehouse(e.target.value); sSet("cc-warehouse", e.target.value); }} placeholder="TP-NY" style={Object.assign({}, S.inp, { maxWidth: 200 })} />
+
+          <div style={{ fontSize: 14, color: "#374151", fontWeight: 600, marginBottom: 8, marginTop: 20 }}>3. Vendor Inventory CSV</div>
+          <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 6 }}>Export from Pharm Admin (contains SKU, Manufacturer Number, Reported Qty, Stock Qty)</div>
+          {(vendorFile || vendorRows) ? <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(5,150,105,0.06)", border: "1px solid rgba(5,150,105,0.2)", borderRadius: 10 }}>
+              <span style={{ color: "#059669", fontSize: 13 }}>{"\u2713"} {vendorFile ? vendorFile.name : (vendorName || "Vendor Inventory")} — {vendorRows ? vendorRows.length.toLocaleString() + " rows" : "parsing..."}</span>
+              <button onClick={function() { setVendorFile(null); setVendorRows(null); setCsvWarehouses([]); setCsvWhSelected(""); setCsvWhCounts({}); setVendorName(""); idbDel("cc-vendor-rows"); sDel("cc-vendor-warehouses"); sDel("cc-vendor-wh-selected"); sDel("cc-vendor-wh-counts"); sDel("cc-vendor-name"); }} style={{ background: "transparent", border: "none", color: "#9CA3AF", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 4px" }}>{"\u00D7"}</button>
+            </div>
+          </div> : <DropZone accept=".csv" label="Vendor Inventory CSV" sublabel="Drop CSV or click to browse" icon="spreadsheet" color={TOOL_COLOR} onFiles={function(files) { handleVendorUpload(files[0]); }} />}
+          {csvWarehouses.length > 1 && <div style={{ marginTop: 10 }}>
+            <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 4 }}>Select warehouse from CSV:</div>
+            <select value={csvWhSelected} onChange={function(e) { setCsvWhSelected(e.target.value); sSet("cc-vendor-wh-selected", e.target.value); }} style={Object.assign({}, S.inp, { maxWidth: 280, cursor: "pointer" })}>
+              <option value="">— Select —</option>
+              {csvWarehouses.map(function(w) { return <option key={w} value={w}>{w} ({(csvWhCounts[w] || 0).toLocaleString()} rows)</option>; })}
+            </select>
+            {csvWhSelected && <p style={{ color: TOOL_COLOR, fontSize: 12, marginTop: 4 }}>Filtering to {(csvWhCounts[csvWhSelected] || 0).toLocaleString()} rows from {csvWhSelected}</p>}
+          </div>}
+          {csvWarehouses.length === 1 && <p style={{ color: TOOL_COLOR, fontSize: 12, marginTop: 4 }}>Warehouse: {csvWhSelected} ({(csvWhCounts[csvWhSelected] || 0).toLocaleString()} rows)</p>}
+
+          {isSftp && <div>
+            <div style={{ fontSize: 14, color: "#374151", fontWeight: 600, marginBottom: 8, marginTop: 20 }}>4. SFTP BOH Report CSV</div>
+            <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 6 }}>Upload the Fuze SFTP BOH report. Reported Qty = Initial Sales Qty On Hand − Sales Qty On Hold</div>
+            {sftpFile && sftpRows ? <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(5,150,105,0.06)", border: "1px solid rgba(5,150,105,0.2)", borderRadius: 10 }}>
+                <span style={{ color: "#059669", fontSize: 13 }}>{"\u2713"} {sftpFile.name} — {sftpRows.length.toLocaleString()} items</span>
+                <button onClick={function() { setSftpFile(null); setSftpRows(null); }} style={{ background: "transparent", border: "none", color: "#9CA3AF", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 4px" }}>{"\u00D7"}</button>
+              </div>
+            </div> : <DropZone accept=".csv" label="SFTP BOH Report" sublabel="Drop CSV or click to browse" icon="spreadsheet" color={TOOL_COLOR} onFiles={function(files) { handleSftpUpload(files[0]); }} />}
+          </div>}
+
+          <div style={{ fontSize: 14, color: "#374151", fontWeight: 600, marginBottom: 8, marginTop: 20, display: "flex", alignItems: "center", gap: 6 }}>{isSftp ? "5" : "4"}. TP-DOH Netstock File <span style={{ fontSize: 11, fontWeight: 400, color: "#9CA3AF" }}>(optional, resets daily)</span></div>
+          <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 6 }}>Provides Daily Run Rate (Final FC units ÷ days in current month) for a second export. Reupload each day.</div>
+          {dohRows && dohMeta ? <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(20,184,166,0.08)", border: "1px solid rgba(20,184,166,0.25)", borderRadius: 10 }}>
+              <span style={{ color: TOOL_COLOR, fontSize: 13 }}>{"\u2713"} {dohMeta.name} — {dohMeta.count.toLocaleString()} items (loaded {dohMeta.date})</span>
+              <button onClick={function() { setDohRows(null); setDohMeta(null); try { localStorage.removeItem("tpdoh-cache-v2"); } catch (e) {} }} style={{ background: "transparent", border: "none", color: "#9CA3AF", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 4px", marginLeft: "auto" }}>{"\u00D7"}</button>
+            </div>
+            <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 6, paddingLeft: 4 }}>
+              UOM conversions: {
+                uomMapStatus === "idle" ? "not loaded (set Acumatica creds)" :
+                uomMapStatus === "loading" ? "loading..." :
+                uomMapStatus === "failed" ? "failed to load" :
+                uomMapStatus.indexOf("loaded:") === 0 ? (uomMapStatus.split(":")[1] + " items from Acumatica GI") :
+                uomMapStatus
+              }
+            </div>
+            <label style={{ display: "inline-block", marginTop: 8, fontSize: 12, color: TOOL_COLOR, cursor: "pointer", textDecoration: "underline" }}>
+              {dohLoading ? "Uploading..." : "Replace with new file"}
+              <input type="file" accept=".xlsx,.xls" onChange={function(e) { if (e.target.files[0]) handleDohUpload(e.target.files[0]); }} style={{ display: "none" }} disabled={dohLoading} />
+            </label>
+          </div> : <div>
+            <DropZone accept=".xlsx,.xls" label="TP-DOH Netstock File" sublabel="Drop XLSX or click to browse" icon="spreadsheet" color={TOOL_COLOR} disabled={dohLoading} onFiles={function(files) { handleDohUpload(files[0]); }} />
+            {dohLoading && <p style={{ color: TOOL_COLOR, fontSize: 12, marginTop: 6 }}>Parsing...</p>}
+          </div>}
+
+          <div style={{ fontSize: 14, color: "#374151", fontWeight: 600, marginBottom: 8, marginTop: 20, display: "flex", alignItems: "center", gap: 6 }}>{isSftp ? "6" : "5"}. Stock Items XLSX <InfoTip text="Before uploading, make sure to delete all tabs except the one labeled 'Data' in the Excel file." /></div>
+          <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 6 }}>Contains Inventory ID and Sales Unit for UOM lookup</div>
+          {stockRows && stockMeta ? <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(5,150,105,0.06)", border: "1px solid rgba(5,150,105,0.2)", borderRadius: 10 }}>
+              <span style={{ color: "#059669", fontSize: 13 }}>{"\u2713"} {stockMeta.name} — {stockMeta.count.toLocaleString()} items (saved {stockMeta.date})</span>
+            </div>
+            <label style={{ display: "inline-block", marginTop: 8, fontSize: 12, color: TOOL_COLOR, cursor: "pointer", textDecoration: "underline" }}>
+              {stockLoading ? "Uploading..." : "Replace with new file"}
+              <input type="file" accept=".xlsx,.xls" onChange={function(e) { if (e.target.files[0]) handleStockUpload(e.target.files[0]); }} style={{ display: "none" }} disabled={stockLoading} />
+            </label>
+          </div> : <div>
+            <DropZone accept=".xlsx,.xls" label="Stock Items XLSX" sublabel="Drop file or click to browse" icon="spreadsheet" color={TOOL_COLOR} disabled={stockLoading} onFiles={function(files) { handleStockUpload(files[0]); }} />
+            {stockLoading && <p style={{ color: TOOL_COLOR, fontSize: 12, marginTop: 6 }}>Parsing and saving...</p>}
+          </div>}
+        </div>
+      </div>
+
+      <div style={{ marginTop: 20, display: "flex", gap: 10, alignItems: "center" }}>
+        <button onClick={processData} disabled={loading} style={Object.assign({}, S.btn(), { padding: "10px 20px", opacity: loading ? 0.5 : 1 })}>
+          {loading ? "Processing..." : "Generate Cycle Count"}
+        </button>
+        {results.length > 0 && <button onClick={downloadCSV} style={Object.assign({}, S.btn("ghost"), { padding: "10px 16px" })}><IconDL /> CC upload{dohRows && dohRows.length > 0 ? " (" + getUploadRows().length + ")" : ""}</button>}
+        {results.length > 0 && dohRows && dohRows.length > 0 && getCheckRows().length > 0 && <button onClick={downloadDrrCSV} style={Object.assign({}, S.btn("ghost"), { padding: "10px 16px" })}><IconDL /> CC check ({getCheckRows().length})</button>}
+        {results.length > 0 && <span style={{ fontSize: 12, color: "#6B7280" }}>{results.length} items</span>}
+        {(ndcText.trim() || vendorFile || results.length > 0) && <button onClick={function() { setNdcText(""); setVendorFile(null); setVendorRows(null); setCsvWarehouses([]); setCsvWhSelected(""); setCsvWhCounts({}); setWarehouse(""); setResults([]); setErrors([]); setSftpFile(null); setSftpRows(null); setApprovals({}); setVendorName(""); sDel("cc-ndc-text"); sDel("cc-warehouse"); sDel("cc-results"); sDel("cc-errors"); sDel("cc-approvals"); idbDel("cc-vendor-rows"); sDel("cc-vendor-warehouses"); sDel("cc-vendor-wh-selected"); sDel("cc-vendor-wh-counts"); sDel("cc-vendor-name"); }} style={Object.assign({}, S.btn("ghost"), { padding: "10px 16px", marginLeft: "auto" })}><IconTrash /> Clear</button>}
+      </div>
+    </div>
+
+    {errors.length > 0 && <div style={{ marginBottom: 16 }}>
+      {errors.map(function(err, i) {
+        return <div key={i} style={{ background: "rgba(217,119,6,0.08)", border: "1px solid rgba(217,119,6,0.2)", borderRadius: 10, padding: "8px 14px", marginBottom: 6, fontSize: 13, color: "#D97706" }}>{"\u26A0"} {err}</div>;
+      })}
+    </div>}
+
+    {results.length > 0 && (function() {
+      var hasDoh = dohRows && dohRows.length > 0;
+      // Order: rows still "to be checked" (flagged AND not yet approved) float to the top.
+      // Everything else — unflagged rows AND flagged rows already checked off — drops below
+      // in the SAME order as the pasted NDC list / export, so a row you check off moves out
+      // of the top section and slots back into export order (where it stays highlighted).
+      var sortedResults = results.slice();
+      if (hasDoh) {
+        var withIdx = sortedResults.map(function(r, idx) { return { r: r, idx: idx }; });
+        withIdx.sort(function(a, b) {
+          var aNeeds = a.r.isFlagged && !approvals[ccApprKey(a.r)];
+          var bNeeds = b.r.isFlagged && !approvals[ccApprKey(b.r)];
+          if (aNeeds !== bNeeds) return aNeeds ? -1 : 1;
+          return a.idx - b.idx;
+        });
+        sortedResults = withIdx.map(function(x) { return x.r; });
+      }
+      var flaggedCount = sortedResults.filter(function(r) { return r.isFlagged; }).length;
+      function toggleApproval(invId) {
+        var u = Object.assign({}, approvals);
+        if (u[invId]) { delete u[invId]; } else { u[invId] = true; }
+        setApprovals(u);
+      }
+      // Header checkbox: if currently all flagged rows are approved → unapprove all;
+      // otherwise (none or some approved) → approve all. Mirrors standard inbox UX.
+      var flaggedRows = sortedResults.filter(function(r) { return r.isFlagged; });
+      var approvedFlaggedCount = flaggedRows.filter(function(r) { return !!approvals[ccApprKey(r)]; }).length;
+      var allApproved = flaggedRows.length > 0 && approvedFlaggedCount === flaggedRows.length;
+      var someApproved = approvedFlaggedCount > 0 && !allApproved;
+      function toggleApproveAll() {
+        var u = Object.assign({}, approvals);
+        if (allApproved) {
+          // Currently checked → uncheck → clear all flagged approvals
+          flaggedRows.forEach(function(r) { delete u[ccApprKey(r)]; });
+        } else {
+          // Unchecked or mixed → check → approve all flagged
+          flaggedRows.forEach(function(r) { u[ccApprKey(r)] = true; });
+        }
+        setApprovals(u);
+      }
+      return <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto", maxHeight: "calc(100vh - 300px)" })}>
+        {hasDoh && flaggedCount > 0 && <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", background: "rgba(220,38,38,0.04)", borderBottom: "1px solid rgba(220,38,38,0.15)", fontSize: 12, color: "#6B7280" }}>
+          <span style={{ color: "#DC2626", fontWeight: 600 }}>{"\u26A0"} {flaggedCount} flagged ({"|"}DoS{"|"} {">"} 14 days or unknown DRR)</span>
+          <span style={{ color: "#9CA3AF" }}>{"\u00B7"}</span>
+          <span>Check to approve for CC upload; leave unchecked to route to CC check.</span>
+        </div>}
+        <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
+          <thead><tr>
+            {hasDoh && <th style={Object.assign({}, S.th, { width: 60, textAlign: "center" })}>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                <span>Approve</span>
+                {flaggedRows.length > 0 && <input type="checkbox" checked={allApproved} ref={function(el) { if (el) el.indeterminate = someApproved; }} onChange={toggleApproveAll} title={allApproved ? "Uncheck all" : "Approve all flagged"} style={{ cursor: "pointer", width: 14, height: 14 }} />}
+              </div>
+            </th>}
+            {["Inventory ID", "Warehouse", "Location", "UOM", "NDC", "Reported Qty", "Stock Qty", "Adjustment Quantity"].map(function(h) { return <th key={h} style={S.th}>{h}</th>; })}
+            {hasDoh && <th style={S.th}>DRR</th>}
+            {hasDoh && <th style={S.th}>Days of Supply</th>}
+          </tr></thead>
+          <tbody>{sortedResults.map(function(r, i) {
+            var approved = !!approvals[ccApprKey(r)];
+            var needsCheck = r.isFlagged && !approved;
+            var rowBg, borderLeft;
+            if (needsCheck) { rowBg = "rgba(220,38,38,0.06)"; borderLeft = "3px solid #DC2626"; }
+            else if (r.isFlagged && approved) { rowBg = "rgba(5,150,105,0.10)"; borderLeft = "3px solid #059669"; }
+            else { rowBg = "transparent"; borderLeft = "3px solid transparent"; }
+            // Divider after the last "to be checked" (unapproved flagged) row, separating
+            // the to-check section from the rest (which is in pasted-NDC / export order).
+            var nextNeedsCheck = (i + 1 < sortedResults.length) && sortedResults[i + 1].isFlagged && !approvals[ccApprKey(sortedResults[i + 1])];
+            var isLastNeedsCheck = hasDoh && needsCheck && (i + 1 < sortedResults.length) && !nextNeedsCheck;
+            var borderBottom = isLastNeedsCheck ? "2px solid rgba(220,38,38,0.2)" : undefined;
+            var dosDisplay = r.daysOfSupply == null ? "—" : (r.daysOfSupply > 0 ? "+" : "") + r.daysOfSupply.toFixed(1);
+            var dosColor = r.daysOfSupply == null ? "#DC2626" : (Math.abs(r.daysOfSupply) > 14 ? "#DC2626" : "#374151");
+            return <tr key={i} style={{ background: rowBg, borderBottom: borderBottom, borderLeft: borderLeft }}>
+              {hasDoh && <td style={Object.assign({}, S.td, { textAlign: "center" })}>{r.isFlagged ? <input type="checkbox" checked={approved} onChange={function() { toggleApproval(ccApprKey(r)); }} style={{ cursor: "pointer", width: 16, height: 16 }} /> : <span style={{ color: "#D1D5DB" }}>{"\u2014"}</span>}</td>}
+              <td style={Object.assign({}, S.td, { color: r.inventoryId.startsWith("GEN-") ? "#059669" : r.inventoryId.startsWith("UNV-") ? "#2563EB" : "#374151" })}>{r.inventoryId}</td>
+              <td style={S.td}>{r.warehouse}</td>
+              <td style={S.td}>{r.location}</td>
+              <td style={S.td}>{r.uom}</td>
+              <td style={Object.assign({}, S.td, { color: "#6B7280" })}>{r.ndc}</td>
+              <td style={Object.assign({}, S.td, { color: "#6B7280" })}>{r.reportedQty.toFixed(1)}</td>
+              <td style={Object.assign({}, S.td, { color: "#6B7280" })}>{r.stockQty.toFixed(1)}</td>
+              <td style={Object.assign({}, S.td, { color: r.quantity < 0 ? "#DC2626" : "#374151" })}>{r.quantity.toFixed(1)}</td>
+              {hasDoh && <td style={Object.assign({}, S.td, { color: "#6B7280", fontSize: 12 })}>{r.convertedDailyRunRate != null ? r.convertedDailyRunRate : "—"}</td>}
+              {hasDoh && <td style={Object.assign({}, S.td, { color: dosColor, fontWeight: r.isFlagged ? 600 : 400, fontSize: 12 })}>{dosDisplay}{r.flagReason === "no DRR" ? " (no DRR)" : ""}</td>}
+            </tr>;
+          })}</tbody>
+        </table>
+      </div>;
+    })()}
+  </div>;
+}
+
+function POImportTool(props) {
+  var toast = props.toast, cred = props.cred, ok = props.ok, lp = props.lp;
+  var TOOL_COLOR = "#06B6D4";
+
+  var _vendor = useState("other"), vendor = _vendor[0], setVendor = _vendor[1];
+  var _pdfs = useState([]), pdfs = _pdfs[0], setPdfs = _pdfs[1];
+  var _mckPaste = useState(""), mckPaste = _mckPaste[0], setMckPaste = _mckPaste[1];
+  var _mckParsed = useState(null), mckParsed = _mckParsed[0], setMckParsed = _mckParsed[1];
+  var _mckFile = useState(null), mckFile = _mckFile[0], setMckFile = _mckFile[1];
+  var _mckFileLoading = useState(false), mckFileLoading = _mckFileLoading[0], setMckFileLoading = _mckFileLoading[1];
+  var _mckPortalPrices = useState({}), mckPortalPrices = _mckPortalPrices[0], setMckPortalPrices = _mckPortalPrices[1];
+  var _loading = useState(false), loading = _loading[0], setLoading = _loading[1];
+  var _results = useState([]), results = _results[0], setResults = _results[1];
+  var _screenshotQtys = useState({}), screenshotQtys = _screenshotQtys[0], setScreenshotQtys = _screenshotQtys[1];
+  var _editedPrices = useState({}), editedPrices = _editedPrices[0], setEditedPrices = _editedPrices[1];
+  var _mckWarnings = useState([]), mckWarnings = _mckWarnings[0], setMckWarnings = _mckWarnings[1];
+  var _error = useState(null), error = _error[0], setError = _error[1];
+  var _statedAmts = useState({}), statedAmounts = _statedAmts[0], setStatedAmounts = _statedAmts[1];
+  var _ndcMap = useState(null), ndcMap = _ndcMap[0], setNdcMap = _ndcMap[1];
+  var _ndcLoading = useState(false), ndcLoading = _ndcLoading[0], setNdcLoading = _ndcLoading[1];
+  var _activeFileTab = useState(null), activeFileTab = _activeFileTab[0], setActiveFileTab = _activeFileTab[1];
+  var _flagThreshold = useState(40), flagThreshold = _flagThreshold[0], setFlagThreshold = _flagThreshold[1];
+  // Acumatica auto-create state
+  var _acuCreateLoading = useState(false), acuCreateLoading = _acuCreateLoading[0], setAcuCreateLoading = _acuCreateLoading[1];
+  var _acuCreateConfirm = useState(null), acuCreateConfirm = _acuCreateConfirm[0], setAcuCreateConfirm = _acuCreateConfirm[1];
+  var _acuCreateResult = useState(null), acuCreateResult = _acuCreateResult[0], setAcuCreateResult = _acuCreateResult[1];
+  var _trackerPreview = useState(null), trackerPreview = _trackerPreview[0], setTrackerPreview = _trackerPreview[1];
+  var _trackerBusy = useState(false), trackerBusy = _trackerBusy[0], setTrackerBusy = _trackerBusy[1];
+  var _trackerAdded = useState(null), trackerAdded = _trackerAdded[0], setTrackerAdded = _trackerAdded[1];
+
+  // ── Sub-tabs: the PO Translator vs. a one-off Price Check tool ──
+  var _subTab = useState("translator"), subTab = _subTab[0], setSubTab = _subTab[1];
+  var _pcMode = useState("ndc"), pcMode = _pcMode[0], setPcMode = _pcMode[1];   // "ndc" | "mfr"
+  var _pcQuery = useState(""), pcQuery = _pcQuery[0], setPcQuery = _pcQuery[1];
+  var _pcBusy = useState(false), pcBusy = _pcBusy[0], setPcBusy = _pcBusy[1];
+  var _pcErr = useState(""), pcErr = _pcErr[0], setPcErr = _pcErr[1];
+  var _pcResult = useState(null), pcResult = _pcResult[0], setPcResult = _pcResult[1];
+  var _pcPrice = useState(""), pcPrice = _pcPrice[0], setPcPrice = _pcPrice[1];   // your quoted price per unit
+
+  async function pcLookup() {
+    var q = (pcQuery || "").trim();
+    if (!q) return;
+    if (!ok) { lp(); return; }
+    setPcBusy(true); setPcErr(""); setPcResult(null);
+    try {
+      var maps = await Promise.all([fetchNdcMap(), fetchAvgCostMap(), fetchUomConversionMap(), fetchPerWarehouseCostMap()]);
+      var map = maps[0], avgMap = maps[1] || {}, uomMap = maps[2] || {}, perWh = maps[3] || {};
+      if (!map) throw new Error("Could not fetch NDC data from Acumatica. Check your login.");
+      var entry = null, invId = null, shownNdc = "";
+      if (pcMode === "ndc") {
+        entry = lookupNdc(q, map);
+        if (entry) { invId = entry.inventoryId; shownNdc = q; }
+      } else {
+        var target = q.toUpperCase();
+        for (var k in map) {
+          if (map[k] && String(map[k].inventoryId || "").toUpperCase() === target) { entry = map[k]; invId = map[k].inventoryId; shownNdc = k; break; }
+        }
+      }
+      if (!entry || !invId) throw new Error("No match for \"" + q + "\" " + (pcMode === "ndc" ? "(NDC)" : "(Mfr No)") + " in the Generic NDCs map.");
+      var uom = (entry.uom || "").toUpperCase();
+      var conv = (invId && uom && uomMap[invId] && uomMap[invId][uom]) ? uomMap[invId][uom] : null;
+      var convFactor = conv ? (conv.op === "Divide" ? (1 / conv.factor) : conv.factor) : null;
+      var pricing = avgMap[invId] || null;
+      var avgCost = pricing && pricing.avgCost != null ? pricing.avgCost : null;
+      setPcResult({ inventoryId: invId, ndc: shownNdc, description: entry.description || "", uom: entry.uom || "", avgCost: avgCost, convFactor: convFactor, whCosts: perWh[invId] || {} });
+    } catch (e) { setPcErr(e && e.message ? e.message : String(e)); }
+    finally { setPcBusy(false); }
+  }
+
+  // Warehouse -> receiving tracker sheet + tab.
+  var TRACKER_MAP = {
+    "TP-NY": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - BROOKLYN" },
+    "TP-OH": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - SEVEN HILLS" },
+    "TP-CA": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - HAYWARD" },
+    "TP-TX": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - DALLAS" },
+    "GGM-KY": { sheetId: "1dMZ_8VC6zaqLLWXQHFfuTXgxMfm0T4ip7To1CbXLfMk", tab: "RECEIVING - KY" },
+    "GGM-AZ": { sheetId: "1dMZ_8VC6zaqLLWXQHFfuTXgxMfm0T4ip7To1CbXLfMk", tab: "RECEIVING - AZ" },
+  };
+  function uomToPkgSize(uom) { var m = String(uom == null ? "" : uom).match(/(\d+)\s*$/); return m ? Number(m[1]) : 1; }
+  function buildTrackerTargets() {
+    var byTab = {};
+    (results || []).forEach(function(r) {
+      var wh = String(r.warehouse || "").trim();
+      var dest = TRACKER_MAP[wh];
+      if (!dest) return;
+      var supplier = vendor === "ggm-crossovers" ? "Bloodworth" : (r.vendorSource || "");
+      var row = [
+        supplier,
+        r.ndc || "",
+        r.acumaticaDesc || r.drugName || "",
+        uomToPkgSize(r.uom),
+        r.qty != null ? r.qty : "",
+        "=INDEX(D:D,ROW())*INDEX(E:E,ROW())",
+        r.poNumber || "",
+        r.orderDate || "",
+      ];
+      var key = dest.sheetId + "||" + dest.tab;
+      if (!byTab[key]) byTab[key] = { sheetId: dest.sheetId, tab: dest.tab, warehouse: wh, rows: [] };
+      byTab[key].rows.push(row);
+    });
+    return Object.keys(byTab).map(function(k) { return byTab[k]; });
+  }
+  function openTrackerPreview() {
+    var targets = buildTrackerTargets();
+    var unmapped = (results || []).filter(function(r) { return !TRACKER_MAP[String(r.warehouse || "").trim()]; }).length;
+    if (!targets.length) { toast("No lines map to a tracker tab (check the warehouse).", "error"); return; }
+    setTrackerPreview({ targets: targets, unmapped: unmapped });
+  }
+  async function confirmTrackerAppend() {
+    if (!trackerPreview) return;
+    setTrackerBusy(true);
+    var okCount = 0, failMsg = "";
+    try {
+      for (var i = 0; i < trackerPreview.targets.length; i++) {
+        var t = trackerPreview.targets[i];
+        var resp = await fetch("/api/tracker-append", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sheetId: t.sheetId, tab: t.tab, rows: t.rows }) });
+        var data = await resp.json();
+        if (data && data.ok) okCount += (data.appended || t.rows.length);
+        else { failMsg = t.tab + ": " + ((data && data.error) || "failed"); break; }
+      }
+      if (failMsg) toast("Tracker add failed \u2014 " + failMsg, "error");
+      else {
+        var tabNames = trackerPreview.targets.map(function(t) { return t.tab; }).join(", ");
+        toast("Added " + okCount + " row" + (okCount === 1 ? "" : "s") + " to the tracker.");
+        setTrackerAdded({ count: okCount, tabs: tabNames, at: Date.now() });
+        setTrackerPreview(null);
+        setAcuCreateResult(null);
+        setDummyDelete(null);
+      }
+    } catch (e) { toast("Tracker add failed: " + (e && e.message ? e.message : e), "error"); }
+    finally { setTrackerBusy(false); }
+  }
+  var _dummyDelete = useState(null), dummyDelete = _dummyDelete[0], setDummyDelete = _dummyDelete[1];
+  useEffect(function() {
+    var mt = true;
+    kvGet("po-translator-flag-threshold").then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+      if (mt && d && d.data != null) {
+        var n = parseFloat(d.data);
+        if (!isNaN(n) && n > 0) setFlagThreshold(n);
+      }
+    }).catch(function() {});
+    return function() { mt = false; };
+  }, []);
+  function updateFlagThreshold(v) {
+    var n = parseFloat(v);
+    if (isNaN(n) || n <= 0) return;
+    setFlagThreshold(n);
+    kvPost("po-translator-flag-threshold", n).catch(function() {});
+  }
+  // Persist results separately per vendor type so switching doesn't lose data
+  var otherCache = useRef({ pdfs: [], results: [], editedPrices: {}, screenshotQtys: {}, error: null });
+  var mckCache = useRef({ pdfs: [], results: [], mckPaste: "", mckParsed: null, mckFile: null, mckPortalPrices: {}, editedPrices: {}, screenshotQtys: {}, mckWarnings: [], error: null });
+  var ggmCache = useRef({ pdfs: [], results: [], editedPrices: {}, screenshotQtys: {}, error: null });
+
+  function switchVendor(newVendor) {
+    if (newVendor === vendor) return;
+    // Save current state to cache
+    if (vendor === "other") {
+      otherCache.current = { pdfs: pdfs, results: results, editedPrices: editedPrices, screenshotQtys: screenshotQtys, error: error };
+    } else if (vendor === "mckesson") {
+      mckCache.current = { pdfs: pdfs, results: results, mckPaste: mckPaste, mckParsed: mckParsed, mckFile: mckFile, mckPortalPrices: mckPortalPrices, editedPrices: editedPrices, screenshotQtys: screenshotQtys, mckWarnings: mckWarnings, error: error };
+    } else if (vendor === "ggm-crossovers") {
+      ggmCache.current = { pdfs: pdfs, results: results, editedPrices: editedPrices, screenshotQtys: screenshotQtys, error: error };
+    }
+    // Restore from cache
+    if (newVendor === "other") {
+      var c = otherCache.current;
+      setPdfs(c.pdfs); setResults(c.results); setEditedPrices(c.editedPrices); setScreenshotQtys(c.screenshotQtys); setError(c.error);
+      setMckWarnings([]);
+    } else if (newVendor === "mckesson") {
+      var m = mckCache.current;
+      setPdfs(m.pdfs); setResults(m.results); setMckPaste(m.mckPaste); setMckParsed(m.mckParsed); setMckFile(m.mckFile); setMckPortalPrices(m.mckPortalPrices); setEditedPrices(m.editedPrices); setScreenshotQtys(m.screenshotQtys); setMckWarnings(m.mckWarnings); setError(m.error);
+    } else if (newVendor === "ggm-crossovers") {
+      var g = ggmCache.current;
+      setPdfs(g.pdfs); setResults(g.results); setEditedPrices(g.editedPrices); setScreenshotQtys(g.screenshotQtys); setError(g.error);
+      setMckWarnings([]);
+    }
+    setVendor(newVendor);
+  }
+
+  function fileToBase64(file) {
+    return new Promise(function(resolve, reject) {
+      var r = new FileReader();
+      r.onload = function() { resolve(r.result.split(",")[1]); };
+      r.onerror = reject;
+      r.readAsDataURL(file);
+    });
+  }
+
+  async function handlePdfChange(files) {
+    var converted = await Promise.all(files.map(async function(f) { return { data: await fileToBase64(f), name: f.name }; }));
+    setPdfs(converted);
+  }
+
+  function normalizeNdcForCompare(ndc) {
+    return (ndc || "").replace(/-/g, "").replace(/\s/g, "");
+  }
+
+  // Parse McKesson export CSV
+  // Key columns: FilledNdcUpc (NDC), OrderQty (quantity), Est. Net Price (unit cost)
+  // First row may be metadata ("Export Date = ..."), headers on row 2
+  function parseMckCsv(text) {
+    var lines = text.split("\n").map(function(l) { return l.replace(/\r/g, "").trim(); }).filter(function(l) { return l.length > 0; });
+    if (lines.length < 2) return { items: [], prices: {} };
+
+    // Detect if first line is metadata (not headers)
+    var headerIdx = 0;
+    if (lines[0].indexOf("Export Date") >= 0 || lines[0].indexOf("Number of records") >= 0) headerIdx = 1;
+
+    var headers = [];
+    var inQ = false, cur = "";
+    for (var ci = 0; ci < lines[headerIdx].length; ci++) {
+      var ch = lines[headerIdx][ci];
+      if (ch === '"') { inQ = !inQ; }
+      else if (ch === "," && !inQ) { headers.push(cur.trim()); cur = ""; }
+      else { cur += ch; }
+    }
+    headers.push(cur.trim());
+
+    var items = [];
+    var prices = {};
+
+    for (var li = headerIdx + 1; li < lines.length; li++) {
+      var vals = [];
+      var inQuote = false, cell = "";
+      for (var vi = 0; vi < lines[li].length; vi++) {
+        var c = lines[li][vi];
+        if (c === '"') { inQuote = !inQuote; }
+        else if (c === "," && !inQuote) { vals.push(cell.trim()); cell = ""; }
+        else { cell += c; }
+      }
+      vals.push(cell.trim());
+
+      var row = {};
+      headers.forEach(function(h, idx) { row[h] = vals[idx] || ""; });
+
+      // Find NDC — pad to 11 digits
+      var rawNdc = (row["FilledNdcUpc"] || row["NDC"] || "").replace(/[^0-9]/g, "");
+      if (rawNdc.length < 8) continue;
+      while (rawNdc.length < 11) rawNdc = "0" + rawNdc;
+
+      var qty = parseInt(row["OrderQty"]) || null;
+      var estNet = parseFloat((row["Est. Net Price"] || "").replace(/[$,]/g, ""));
+
+      items.push({ ndc: rawNdc, description: row["SellDescription"] || row["FirstDatabankDescription"] || "", qty: qty, mckItemNum: row["FilledItemNumber"] || "" });
+      if (!isNaN(estNet) && estNet > 0) prices[rawNdc] = estNet;
+    }
+
+    return { items: items, prices: prices };
+  }
+
+  async function handleMckFileUpload(files) {
+    var file = files[0];
+    if (!file) return;
+    setMckFile(file);
+    setMckFileLoading(true);
+    try {
+      var text = await new Promise(function(resolve, reject) {
+        var reader = new FileReader();
+        reader.onload = function() { resolve(reader.result); };
+        reader.onerror = function() { reject(new Error("Failed to read file")); };
+        reader.readAsText(file);
+      });
+      var result = parseMckCsv(text);
+      if (result.items.length === 0) throw new Error("No items found in CSV. Check that FilledNdcUpc column exists.");
+      setMckParsed(result.items);
+      setMckPortalPrices(result.prices);
+      var priceCount = Object.keys(result.prices).length;
+      toast("Loaded " + result.items.length + " items with " + priceCount + " prices from " + file.name);
+    } catch (err) {
+      toast("McKesson CSV error: " + err.message, "error");
+      setMckFile(null);
+    } finally {
+      setMckFileLoading(false);
+    }
+  }
+
+  // Extract NDCs from text (manual paste)
+  function extractNdcsFromText(text) {
+    var ndcs = [], seen = {};
+    var re11 = /\b(\d{11})\b/g, m;
+    while ((m = re11.exec(text)) !== null) { if (!seen[m[1]]) { seen[m[1]] = true; ndcs.push(m[1]); } }
+    var reDash = /\b(\d{4,5}-\d{3,4}-\d{1,2})\b/g;
+    while ((m = reDash.exec(text)) !== null) { var n = m[1].replace(/-/g, ""); if (!seen[n]) { seen[n] = true; ndcs.push(n); } }
+    return ndcs;
+  }
+
+  function handleMckManualPaste(e) {
+    var text = e.target.value;
+    setMckPaste(text);
+    var manualNdcs = extractNdcsFromText(text);
+    // Merge with file NDCs
+    var fileItems = (mckFile && mckParsed) ? mckParsed.slice() : [];
+    var allNdcs = {};
+    fileItems.forEach(function(item) { allNdcs[item.ndc] = item; });
+    manualNdcs.forEach(function(ndc) {
+      if (!allNdcs[ndc]) allNdcs[ndc] = { ndc: ndc, description: "", qty: null, mckItemNum: "" };
+    });
+    var combined = Object.values(allNdcs);
+    if (combined.length > 0) {
+      setMckParsed(combined);
+    } else {
+      setMckParsed(null);
+    }
+  }
+
+
+  // Fetch NDC → GEN- map from Acumatica
+  var fetchPerWarehouseCostMap = useCallback(async function() {
+    if (!cred || !cred.username || !cred.password) return null;
+    try {
+      var resp = await fetch("/api/acumatica", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "gen-pricing-3prx", username: cred.username, password: cred.password }),
+      });
+      var json = await resp.json();
+      if (!resp.ok) return null;
+      var data = json.data || [];
+      // Map from labeled column name to warehouse code we'll match against r.warehouse
+      var WH_COL = {
+        "TP-NY":  "TPNYAvgCost",
+        "TP-OH":  "TPOHAvgCost",
+        "TP-CA":  "TPCAAvgCost",
+        "TP-TX":  "TPTXAvgCost",
+        "GGM":    "GGMAvgCost",
+        "GGM-KY": "GGMKYAvgCost",
+        "GGM-AZ": "GGMAZAvgCost",
+      };
+      var map = {};
+      data.forEach(function(row) {
+        var invId = (row.InventoryID || "").trim();
+        if (!invId) return;
+        var perWh = {};
+        Object.keys(WH_COL).forEach(function(wh) {
+          var col = WH_COL[wh];
+          var val = parseFloat(row[col]);
+          if (!isNaN(val) && val > 0) perWh[wh] = val;
+        });
+        map[invId] = perWh;
+      });
+      return map;
+    } catch (err) { return null; }
+  }, [cred]);
+
+  var fetchUomConversionMap = useCallback(async function(force) {
+    if (!cred || !cred.username || !cred.password) return null;
+    try {
+      var resp = await fetch("/api/acumatica" + (force ? "?refresh=1" : ""), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "uom-conversions", username: cred.username, password: cred.password }),
+      });
+      var json = await resp.json();
+      if (!resp.ok) return null;
+      var data = json.data || [];
+      function pick(row, keys) {
+        for (var i = 0; i < keys.length; i++) {
+          var v = row[keys[i]];
+          if (v != null && v !== "") return v;
+        }
+        return "";
+      }
+      // Build nested map: { invId: { TO_UOM: { factor, op, fromUnit, baseUnit } } }
+      var map = {};
+      var kept = 0, dropped = 0;
+      data.forEach(function(row) {
+        var invId = String(pick(row, ["InventoryID", "Inventory ID", "InventoryCD", "InventoryId"])).trim();
+        if (!invId) { dropped++; return; }
+        var toUnit   = String(pick(row, ["ToUnit", "To Unit", "ToUOM"])).trim().toUpperCase();
+        var fromUnit = String(pick(row, ["FromUnit", "From Unit", "FromUOM"])).trim().toUpperCase();
+        var baseUnit = String(pick(row, ["BaseUnit", "Base Unit", "BaseUOM"])).trim().toUpperCase();
+        var factor   = parseFloat(pick(row, ["ConversionFactor", "Conversion Factor", "ConvFactor"]));
+        if (!toUnit || isNaN(factor) || factor <= 0) { dropped++; return; }
+        var mdRaw = String(pick(row, ["MultiplyDivide", "Multiply/Divide", "MultDiv"]) || "Multiply");
+        var op = mdRaw.toLowerCase().indexOf("div") >= 0 ? "Divide" : "Multiply";
+        if (!map[invId]) map[invId] = {};
+        map[invId][toUnit] = { factor: factor, op: op, fromUnit: fromUnit, baseUnit: baseUnit };
+        kept++;
+      });
+      console.log("[uom-conversions] rows kept:", kept, "dropped:", dropped, "items:", Object.keys(map).length);
+      return map;
+    } catch (err) { return null; }
+  }, [cred]);
+
+  var fetchAvgCostMap = useCallback(async function() {
+    if (!cred || !cred.username || !cred.password) return null;
+    try {
+      var resp = await fetch("/api/acumatica", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "gen-pricing", username: cred.username, password: cred.password }),
+      });
+      var json = await resp.json();
+      if (!resp.ok) return null;
+      var data = json.data || [];
+      var map = {};
+      data.forEach(function(row) {
+        var invId = (row.InventoryID || "").trim();
+        if (!invId) return;
+        var avgCost = parseFloat(row.AverageCost);
+        var multiplier = parseFloat(row.Multiplier);
+        var defaultPrice = parseFloat(row.DefaultPrice);
+        map[invId] = {
+          avgCost: isNaN(avgCost) ? null : avgCost,
+          multiplier: isNaN(multiplier) ? 1 : multiplier,
+          defaultPrice: isNaN(defaultPrice) ? null : defaultPrice,
+        };
+      });
+      return map;
+    } catch (err) { return null; }
+  }, [cred]);
+
+  var fetchNdcMap = useCallback(async function(forceFresh) {
+    if (!cred || !cred.username || !cred.password) { toast("Please log in first", "error"); return null; }
+    setNdcLoading(true);
+    try {
+      var resp = await fetch("/api/acumatica" + (forceFresh ? "?refresh=1" : ""), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "ndc-lookup", username: cred.username, password: cred.password }),
+      });
+      var json = await resp.json();
+      if (!resp.ok) throw new Error(json.error || "Acumatica lookup failed");
+      var data = json.data || [];
+      var map = {};
+      data.forEach(function(row) {
+        var altId = (row.AlternateID || "").trim();
+        var invId = (row.InventoryID || "").trim();
+        var desc = row.Description || "";
+        var uom = row.UOM || "";
+        if (!altId) return;
+        var variants = ndcVariants(altId);
+        variants.forEach(function(v) { map[v] = { inventoryId: invId, description: desc, uom: uom }; });
+        map[normalizeNdc(altId)] = { inventoryId: invId, description: desc, uom: uom };
+      });
+      setNdcMap(map);
+      toast("Loaded " + data.length + " NDC records from Acumatica");
+      return map;
+    } catch (err) {
+      toast("NDC Lookup error: " + err.message, "error");
+      return null;
+    } finally { setNdcLoading(false); }
+  }, [cred, toast]);
+
+  function lookupNdc(ndc, map) {
+    if (!map) return null;
+    var norm = normalizeNdc(ndc);
+    if (map[norm]) return map[norm];
+    if (map[ndc]) return map[ndc];
+    var vars = ndcVariants(ndc);
+    for (var k = 0; k < vars.length; k++) { if (map[vars[k]]) return map[vars[k]]; }
+    return null;
+  }
+
+
+  async function handleValidate() {
+    if (pdfs.length === 0) { toast("Upload at least one PDF", "error"); return; }
+    if (!ok) { lp(); return; }
+    setLoading(true); setError(null); setResults([]); setMckWarnings([]); setTrackerAdded(null);
+    try {
+      // Step 1: Parse each PDF separately to avoid text extraction state issues
+      var pdfItems = [];
+      var newStatedAmounts = {};
+      for (var pi = 0; pi < pdfs.length; pi++) {
+        var parseResp = await fetch("/api/po-import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pdfs: [pdfs[pi]], vendorHint: vendor }),
+        });
+        var parseJson = await parseResp.json();
+        if (!parseResp.ok) throw new Error(parseJson.error || "Parse failed for " + pdfs[pi].name);
+        if (parseJson.error) throw new Error(parseJson.error);
+        var items = parseJson.items || [];
+        items.forEach(function(item) { item.sourceFile = pdfs[pi].name; });
+        pdfItems = pdfItems.concat(items);
+        if (parseJson.statedAmount != null) { newStatedAmounts[pdfs[pi].name] = Math.round(parseJson.statedAmount * 100) / 100; }
+      }
+      if (pdfItems.length === 0) throw new Error("No items found. The PDF parser returned 0 NDCs. Check that your PDFs have the standard PO format.");
+
+      // Step 2: Fetch fresh NDC map, avg cost map (general + per-warehouse), and UOM conversions in parallel
+      var mapResults = await Promise.all([fetchNdcMap(), fetchAvgCostMap(), fetchUomConversionMap(), fetchPerWarehouseCostMap()]);
+      var map = mapResults[0];
+      var avgCostMap = mapResults[1] || {};
+      var uomMap = mapResults[2] || {};
+      var perWhCostMap = mapResults[3] || {};
+      if (!map) throw new Error("Could not fetch NDC data from Acumatica. Check your login.");
+
+      // Step 3: Match each item's NDC against OData
+      var matched = pdfItems.map(function(item) {
+        var match = lookupNdc(item.ndc, map);
+        var invId = match ? match.inventoryId : null;
+        var pricing = invId && avgCostMap[invId] ? avgCostMap[invId] : null;
+        var uom = match ? (match.uom || "").toUpperCase() : "";
+        // Look up conversion: how many base units (e.g., tablets) per 1 PO unit (e.g., BT100)
+        var conv = (invId && uom && uomMap[invId] && uomMap[invId][uom]) ? uomMap[invId][uom] : null;
+        var convFactor = null;
+        if (conv) {
+          convFactor = conv.op === "Divide" ? (1 / conv.factor) : conv.factor;
+        }
+        // Resolve avg cost: prefer per-warehouse from 3PRx GI, else fall back to general avg cost
+        var resolvedAvgCost = null;
+        var avgCostSource = null;
+        var wh = item.warehouse;
+        if (invId && wh && perWhCostMap[invId] && perWhCostMap[invId][wh] != null) {
+          resolvedAvgCost = perWhCostMap[invId][wh];
+          avgCostSource = "3prx:" + wh;
+        } else if (pricing && pricing.avgCost != null) {
+          resolvedAvgCost = pricing.avgCost;
+          avgCostSource = "general";
+        }
+        return {
+          ndc: item.ndc,
+          drugName: item.drugName,
+          qty: item.qty,
+          totalPrice: item.totalPrice != null ? Math.round(item.totalPrice * 100) / 100 : null,
+          unitPrice: item.unitPrice != null ? Math.round(item.unitPrice * 100) / 100 : null,
+          warehouse: item.warehouse,
+          vendorSource: item.vendorSource,
+          vendorItemNum: item.vendorItemNum,
+          poNumber: item.poNumber,
+          sourceFile: item.sourceFile,
+          orderDate: item.createDate || "",
+          inventoryId: invId,
+          acumaticaDesc: match ? match.description : null,
+          uom: match ? match.uom : null,
+          ndcFound: !!match,
+          avgCost: resolvedAvgCost,
+          avgCostSource: avgCostSource,
+          multiplier: pricing ? pricing.multiplier : null,
+          defaultPrice: pricing ? pricing.defaultPrice : null,
+          uomConvFactor: convFactor,
+        };
+      });
+
+      // Step 4: McKesson portal cross-reference (using NDCs from pasted table)
+      var warnings = [];
+      var qtyOverrides = {};
+      if (vendor === "mckesson" && mckParsed && mckParsed.length > 0) {
+        var portalNdcs = mckParsed.map(function(item) { return item.ndc; }); // already normalized (no dashes)
+        var mckItems = matched.filter(function(r) { return r.vendorSource === "McKesson"; });
+        var pdfNdcs = mckItems.map(function(r) { return normalizeNdcForCompare(r.ndc); }).filter(Boolean);
+
+        // Items in PDF but NOT in portal
+        var inPdfOnly = mckItems.filter(function(r) {
+          var ndcNorm = normalizeNdcForCompare(r.ndc);
+          return ndcNorm && portalNdcs.indexOf(ndcNorm) < 0;
+        });
+        inPdfOnly.forEach(function(item) {
+          warnings.push({ type: "pdf-only", msg: item.drugName + " (NDC " + item.ndc + ") is in the PDF but NOT on the McKesson portal", item: item });
+        });
+
+        // Items in portal but NOT in PDF
+        var inPortalOnly = mckParsed.filter(function(pi) {
+          return pi.ndc && pdfNdcs.indexOf(pi.ndc) < 0;
+        });
+        inPortalOnly.forEach(function(pi) {
+          var desc = pi.description ? " — " + pi.description : "";
+          warnings.push({ type: "screenshot-only", msg: "NDC " + pi.ndc + desc + " is on the McKesson portal but NOT in the PDF", item: null });
+        });
+
+        // Quantity mismatches — push warning AND auto-fill the portal qty
+        // into screenshotQtys so the result row shows the portal value with
+        // an orange highlight (the "edited" visual treatment). Portal always
+        // wins per Tim's spec — we trust the McKesson portal over the PDF.
+        // The warning banner still surfaces so the discrepancy is visible.
+        mckItems.forEach(function(pdfItem) {
+          var ndcNorm = normalizeNdcForCompare(pdfItem.ndc);
+          var portalMatch = mckParsed.find(function(pi) { return pi.ndc === ndcNorm; });
+          if (portalMatch && portalMatch.qty && pdfItem.qty && portalMatch.qty !== pdfItem.qty) {
+            warnings.push({ type: "qty-mismatch", msg: pdfItem.drugName + " (NDC " + pdfItem.ndc + "): PDF says qty " + pdfItem.qty + " but portal shows " + portalMatch.qty, item: pdfItem });
+            qtyOverrides[pdfItem.ndc] = String(portalMatch.qty);
+          }
+        });
+
+        // McKesson: price comes ONLY from the CSV Est. Net Price. If a line is in
+        // the PDF but not in the CSV, leave its price blank rather than falling back
+        // to the PDF price.
+        if (Object.keys(mckPortalPrices).length > 0) {
+          matched.forEach(function(r) {
+            var ndcNorm = normalizeNdcForCompare(r.ndc);
+            if (mckPortalPrices[ndcNorm] != null) {
+              r.unitPrice = Math.round(mckPortalPrices[ndcNorm] * 100) / 100;
+              r.totalPrice = r.qty ? +(r.qty * r.unitPrice).toFixed(2) : r.totalPrice;
+            } else {
+              r.unitPrice = null;
+              r.totalPrice = null;
+            }
+          });
+        }
+      }
+
+      setResults(matched);
+      setStatedAmounts(function(prev) { return Object.assign({}, prev, newStatedAmounts); });
+      // Auto-select first file tab for multi-PO vendors (other + GGM crossovers)
+      if ((vendor === "other" || vendor === "ggm-crossovers") && matched.length > 0) {
+        var files = {}; matched.forEach(function(r) { if (r.sourceFile) files[r.sourceFile] = 1; });
+        var fileList = Object.keys(files);
+        if (fileList.length > 0) setActiveFileTab(fileList[0]);
+      }
+      setMckWarnings(warnings);
+      // McKesson only: apply portal qty overrides (computed in the qty-mismatch
+      // loop above). Replaces any prior screenshotQtys since we're doing a
+      // fresh parse. Other modes leave screenshotQtys alone.
+      if (vendor === "mckesson") {
+        setScreenshotQtys(qtyOverrides);
+      }
+      var foundCount = matched.filter(function(r) { return r.ndcFound; }).length;
+      toast("Validated " + matched.length + " items: " + foundCount + " matched in OData, " + (matched.length - foundCount) + " not found");
+    } catch (err) {
+      setError(err.message);
+      toast("Validation failed: " + err.message, "error");
+    } finally { setLoading(false); }
+  }
+
+  function downloadCSV(rows) {
+    var csvRows = rows || results;
+    var header = "Status,Inventory ID,Warehouse,Description (Acumatica),UOM,Drug Name (PO),Alternate ID,Vendor,Order Qty.,Unit Cost,Ext. Cost,PO#,Source File\r\n";
+    var lines = csvRows.map(function(r) {
+      var editedQty = screenshotQtys[r.ndc] != null ? parseInt(screenshotQtys[r.ndc]) : r.qty;
+      var editedPrice = editedPrices[r.ndc] != null ? parseFloat(editedPrices[r.ndc]) : r.unitPrice;
+      var extCost = (editedQty && editedPrice) ? (editedQty * editedPrice).toFixed(2) : (r.totalPrice || "");
+      return [r.ndcFound ? "MATCHED" : "NOT FOUND", r.inventoryId || "", r.warehouse, r.acumaticaDesc || "", r.uom || "", r.drugName, r.ndc, r.vendorSource, editedQty || "", editedPrice ? editedPrice.toFixed(4) : "", extCost, r.poNumber, r.sourceFile || ""]
+        .map(function(v) { return "\"" + String(v == null ? "" : v).replace(/"/g, "\"\"") + "\""; }).join(",");
+    });
+    var csv = header + lines.join("\r\n");
+    var blob = new Blob([csv], { type: "text/csv" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    var d = new Date();
+    var dateStr = (d.getMonth() + 1) + "." + d.getDate() + "." + String(d.getFullYear()).slice(2);
+    var vendors = {}; var pos = {}; var whs = {};
+    csvRows.forEach(function(r) { if (r.vendorSource) vendors[r.vendorSource] = 1; if (r.poNumber) pos[r.poNumber] = 1; if (r.warehouse) whs[r.warehouse] = 1; });
+    var vendorStr = Object.keys(vendors).join(" ") || "Unknown";
+    var poStr = Object.keys(pos).map(function(p) { return "#" + p; }).join(" ") || "";
+    var whStr = Object.keys(whs).join(" ");
+    a.download = dateStr + " " + vendorStr + " " + (whStr ? whStr + " " : "") + "PO " + poStr + ".csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function reset() {
+    setPdfs([]); setMckPaste(""); setMckParsed(null); setMckFile(null); setMckPortalPrices({}); setScreenshotQtys({}); setEditedPrices({}); setResults([]); setMckWarnings([]); setError(null); setActiveFileTab(null); setStatedAmounts({}); setTrackerAdded(null);
+  }
+
+  // ── Acumatica auto-create: group results into POs, then validate each ─────
+  // Returns { pos: [...], blocked: [...] } where pos is ready-to-create and blocked
+  // is per-file/group reasons we can't proceed (e.g. unmatched NDC, missing vendor ref).
+  function buildAcumaticaPOs() {
+    if (results.length === 0) return { pos: [], blocked: [] };
+    // Group by sourceFile: McKesson is always 1 PDF so this collapses to 1 group;
+    // other / GGM may have multiple PDFs => multiple POs.
+    var groupsByFile = {};
+    results.forEach(function(r) {
+      var key = r.sourceFile || "(unknown)";
+      if (!groupsByFile[key]) groupsByFile[key] = [];
+      groupsByFile[key].push(r);
+    });
+
+    // Section-driven config
+    var sectionConfig;
+    if (vendor === "mckesson") {
+      sectionConfig = { vendorId: "VID0041", descriptionMode: "fixed", description: "McKesson" };
+    } else if (vendor === "ggm-crossovers") {
+      sectionConfig = { vendorId: "VID0016", descriptionMode: "blank" };
+    } else {
+      // "other" — Keysource/Anda/Bloodworth. Description comes from each item's vendorSource.
+      sectionConfig = { vendorId: "VID0041", descriptionMode: "perFile" };
+    }
+
+    var pos = [];
+    var blocked = [];
+    Object.keys(groupsByFile).forEach(function(fileKey) {
+      var items = groupsByFile[fileKey];
+      // Pull metadata that should be consistent across items in one PDF:
+      // vendorRef (poNumber), warehouse, vendorSource.
+      var vendorRefs = {};
+      var warehouses = {};
+      var vendorSources = {};
+      items.forEach(function(r) {
+        if (r.poNumber) vendorRefs[r.poNumber] = 1;
+        if (r.warehouse) warehouses[r.warehouse] = 1;
+        if (r.vendorSource) vendorSources[r.vendorSource] = 1;
+      });
+      var vendorRefList = Object.keys(vendorRefs);
+      var warehouseList = Object.keys(warehouses);
+      var vendorSourceList = Object.keys(vendorSources);
+
+      // Validation: must have exactly one of each (PDF integrity check)
+      if (vendorRefList.length === 0) {
+        blocked.push({ file: fileKey, reason: "No vendor reference (poNumber) parsed from PDF" });
+        return;
+      }
+      if (vendorRefList.length > 1) {
+        blocked.push({ file: fileKey, reason: "Multiple vendor references in one PDF: " + vendorRefList.join(", ") });
+        return;
+      }
+      if (warehouseList.length === 0) {
+        blocked.push({ file: fileKey, reason: "No warehouse parsed from PDF" });
+        return;
+      }
+      if (warehouseList.length > 1) {
+        blocked.push({ file: fileKey, reason: "Multiple warehouses in one PDF: " + warehouseList.join(", ") });
+        return;
+      }
+
+      // Strict matching: refuse the PO if ANY item didn't find its inventory ID
+      var unmatched = items.filter(function(r) { return !r.ndcFound || !r.inventoryId; });
+      if (unmatched.length > 0) {
+        blocked.push({
+          file: fileKey,
+          reason: unmatched.length + " item(s) not matched in Acumatica: " + unmatched.slice(0, 3).map(function(r) { return r.ndc; }).join(", ") + (unmatched.length > 3 ? " +" + (unmatched.length - 3) + " more" : "")
+        });
+        return;
+      }
+
+      // Description per section
+      var description;
+      if (sectionConfig.descriptionMode === "fixed") {
+        description = sectionConfig.description;
+      } else if (sectionConfig.descriptionMode === "blank") {
+        description = "";
+      } else {
+        // perFile: use the (unique) vendorSource from the PDF; if absent or multi, error
+        if (vendorSourceList.length === 0) {
+          blocked.push({ file: fileKey, reason: "PDF parser did not detect sub-vendor (Keysource/Anda/Bloodworth/TopRX)" });
+          return;
+        }
+        if (vendorSourceList.length > 1) {
+          blocked.push({ file: fileKey, reason: "Multiple sub-vendors detected in one PDF: " + vendorSourceList.join(", ") });
+          return;
+        }
+        description = vendorSourceList[0];
+      }
+
+      var warehouse = warehouseList[0];
+      // Build line items with edited prices / edited qtys taking precedence
+      var lines = items.map(function(r) {
+        var qty = screenshotQtys[r.ndc] != null ? parseInt(screenshotQtys[r.ndc]) : r.qty;
+        var price = editedPrices[r.ndc] != null ? parseFloat(editedPrices[r.ndc]) : r.unitPrice;
+        return {
+          inventoryId: r.inventoryId,
+          warehouse: warehouse,
+          orderQty: qty,
+          unitCost: price || 0,
+          uom: (r.uom || "").trim(),
+          alternateId: r.ndc || ""
+        };
+      });
+      // Sanity: positive qty + non-empty uom for every line (the route will also enforce).
+      // A blank/whitespace UOM comes from the matched Acumatica item having no purchasing
+      // UOM set — name those items so they can be fixed in Acumatica, then re-run.
+      var noUom = lines.filter(function(l) { return !l.uom; });
+      var badQty = lines.find(function(l) { return !(Number(l.orderQty) > 0); });
+      if (noUom.length) {
+        blocked.push({ file: fileKey, reason: "Missing UOM in Acumatica for: " + noUom.map(function(l) { return l.inventoryId || l.alternateId || "?"; }).join(", ") + " \u2014 set the item's purchasing UOM in Acumatica, then re-run." });
+        return;
+      }
+      if (badQty) {
+        blocked.push({ file: fileKey, reason: "Some line(s) have zero/blank quantity." });
+        return;
+      }
+
+      pos.push({
+        file: fileKey,
+        vendorId: sectionConfig.vendorId,
+        location: warehouse,           // Location matches warehouse (TP-OH, GGM-KY, etc.)
+        description: description,
+        vendorRef: vendorRefList[0],
+        lines: lines,
+        lineCount: lines.length,
+        orderTotal: lines.reduce(function(s, l) { return s + (Number(l.orderQty) * Number(l.unitCost)); }, 0)
+      });
+    });
+
+    return { pos: pos, blocked: blocked };
+  }
+
+  function onCreatePOsClick() {
+    if (!ok) { lp(); return; }
+    var built = buildAcumaticaPOs();
+    if (built.pos.length === 0) {
+      if (built.blocked.length > 0) {
+        toast("Cannot create any POs. " + built.blocked.length + " blocked \u2014 see below", "error");
+        setAcuCreateConfirm({ pos: [], blocked: built.blocked });
+      } else {
+        toast("Nothing to create \u2014 no parsed results", "error");
+      }
+      return;
+    }
+    setAcuCreateConfirm({ pos: built.pos, blocked: built.blocked });
+  }
+
+  async function executeCreatePOs(posToCreate) {
+    setAcuCreateConfirm(null);
+    setAcuCreateLoading(true);
+    setDummyDelete(null);
+    try {
+      var resp = await fetch("/api/acumatica-po-import-create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: cred.username,
+          password: cred.password,
+          pos: posToCreate.map(function(p) {
+            return {
+              vendorId: p.vendorId,
+              location: p.location,
+              description: p.description,
+              vendorRef: p.vendorRef,
+              lines: p.lines
+            };
+          })
+        })
+      });
+      var data = await resp.json();
+      setAcuCreateResult({ data: data, requested: posToCreate });
+      if (data.ok) {
+        toast("Created " + (data.succeeded ? data.succeeded.length : 0) + " PO(s) in Acumatica", "success");
+      } else {
+        var succ = data.succeeded ? data.succeeded.length : 0;
+        var attempted = succ + 1; // we stop on first failure
+        toast(succ + "/" + posToCreate.length + " created \u2014 stopped on failure (see results)", "error");
+      }
+    } catch (err) {
+      setAcuCreateResult({ data: { ok: false, stage: "fetch-error", failure: { stage: "fetch", errorDetails: [{ message: String(err) }] }, succeeded: [] }, requested: posToCreate });
+      toast("Network error \u2014 see results", "error");
+    } finally {
+      setAcuCreateLoading(false);
+    }
+    // GoGoMeds crossovers only: after a fully successful create, find and delete
+    // the placeholder dummy PO(s). Gated on data.ok so a partial/failed batch never
+    // triggers deletes. Runs after the finally so the create result is already shown.
+    if (vendor === "ggm-crossovers" && data && data.ok) {
+      await deleteDummyPOs(posToCreate);
+    }
+  }
+
+  // Find + delete the dummy PO for each GoGoMeds crossover just created. The dummy
+  // is Vetcove Generics (VID0041) with description "GOGOMEDS KY"/"GOGOMEDS AZ",
+  // On Hold. The server route enforces an exactly-one-match guard, so 0 or >1
+  // matches are reported and left untouched rather than risking the wrong delete.
+  async function deleteDummyPOs(posToCreate) {
+    var seen = {};
+    var targets = [];
+    var whRef = {};
+    posToCreate.forEach(function(p) {
+      var wh = String(p.location || "");
+      if (!/^GGM-/i.test(wh)) return;
+      if (p.vendorRef) { if (!whRef[wh]) whRef[wh] = []; if (whRef[wh].indexOf(String(p.vendorRef)) === -1) whRef[wh].push(String(p.vendorRef)); }
+      if (seen[wh]) return;
+      seen[wh] = 1;
+      targets.push({ vendorId: "VID0041", warehouse: wh });
+    });
+    if (targets.length === 0) return;
+    setDummyDelete({ loading: true });
+    try {
+      var resp = await fetch("/api/acumatica-find-delete-po", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: cred.username, password: cred.password, targets: targets })
+      });
+      var ddata = await resp.json();
+      setDummyDelete({ loading: false, data: ddata });
+      var rs = (ddata && ddata.results) || [];
+      var del = rs.filter(function(r) { return r.deleted; }).length;
+      var prob = rs.length - del;
+      if (del > 0 && prob === 0) toast("Deleted " + del + " dummy PO(s)", "success");
+      else if (del > 0) toast("Deleted " + del + " dummy PO(s), " + prob + " need attention", "error");
+      else toast("No dummy PO deleted \u2014 see results", "error");
+      // Best-effort: check off the deleted dummy in the PO Tool's Shipping tab
+      // for that warehouse. Non-fatal if it can't (the delete already succeeded).
+      for (var mi = 0; mi < rs.length; mi++) {
+        if (rs[mi].deleted && rs[mi].orderNbr && rs[mi].warehouse) {
+          await markDummyShippingDone(rs[mi].warehouse, rs[mi].orderNbr, (whRef[rs[mi].warehouse] || []).join(", "));
+        }
+      }
+    } catch (err) {
+      setDummyDelete({ loading: false, data: { ok: false, results: [], error: String(err) } });
+      toast("Dummy delete network error", "error");
+    }
+  }
+
+  // Mark a just-deleted dummy PO as "done" (checkbox) in the PO Tool's Shipping
+  // tab for its warehouse. The PO Tool stores shipping state in the KV bundle
+  // "po:<warehouse>" under shipNotes, keyed by "<VendorName> || <OrderNbr>". We
+  // read that bundle, flip the matching group's done=true, and write it back —
+  // the PO Tool's 8s poll then reflects it. We also update the per-browser
+  // ship-notes cache so it shows immediately when the tab is next opened here.
+  async function markDummyShippingDone(warehouse, orderNbr, vendorRef) {
+    try {
+      var kvKey = "po:" + warehouse;
+      var resp = await kvGet(kvKey);
+      var j = await resp.json();
+      var bundle = j && j.data;
+      if (!bundle || typeof bundle !== "object") return; // nothing cached for this warehouse
+      var rows = Array.isArray(bundle.data) ? bundle.data : [];
+      var target = String(orderNbr);
+      // Resolve the group key from the cached PO rows (VendorName + " || " + OrderNbr).
+      var vendorName = null;
+      for (var i = 0; i < rows.length; i++) {
+        if (String(rows[i].OrderNbr || "") === target) { vendorName = rows[i].VendorName; break; }
+      }
+      var notes = Object.assign({}, bundle.shipNotes || {});
+      var key = null;
+      if (vendorName != null) {
+        key = vendorName + " || " + target;
+      } else {
+        // Fallback: match an existing shipNotes key ending with this PO#.
+        var suffix = " || " + target;
+        Object.keys(notes).forEach(function(k) { if (k.length >= suffix.length && k.slice(-suffix.length) === suffix) key = k; });
+      }
+      if (!key) return; // can't resolve which row — leave untouched
+      // Check the box and, if the Vendor Reference is still blank, fill it with the
+      // GoGoMeds source PO number(s). Never overwrite a ref someone already entered.
+      var existing = notes[key] || {};
+      var haveRef = existing.notes != null && String(existing.notes).trim() !== "";
+      notes[key] = Object.assign({}, existing, { done: true }, (!haveRef && vendorRef) ? { notes: vendorRef } : {});
+      bundle.shipNotes = notes;
+      sSet("ship-notes-" + warehouse, notes); // immediate for same-browser mount
+      await kvPost(kvKey, bundle);             // shared + picked up by the PO Tool poll
+    } catch (e) { /* best-effort cleanup marking; ignore */ }
+  }
+
+
+  var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
+  // "other" and GoGoMeds crossovers can carry multiple PDFs => one PO per file,
+  // shown in separate tabs. (McKesson is always a single PO.)
+  var perFileTabs = vendor === "other" || vendor === "ggm-crossovers";
+  var fileList = useMemo(function() { if (!perFileTabs || results.length === 0) return []; var f = {}; results.forEach(function(r) { if (r.sourceFile) f[r.sourceFile] = (f[r.sourceFile] || 0) + 1; }); return Object.keys(f).map(function(name) { return { name: name, count: f[name] }; }); }, [results, perFileTabs]);
+  var activeResults = useMemo(function() { if (!perFileTabs || !activeFileTab || fileList.length <= 1) return results; return results.filter(function(r) { return r.sourceFile === activeFileTab; }); }, [results, perFileTabs, activeFileTab, fileList]);
+  var _deltaSort = useState(null), deltaSort = _deltaSort[0], setDeltaSort = _deltaSort[1];
+  function computeDeltaPct(r) {
+    if (r.avgCost == null || r.avgCost <= 0) return null;
+    var avgPerPkg = r.uomConvFactor && r.uomConvFactor > 0 ? r.avgCost * r.uomConvFactor : r.avgCost;
+    if (avgPerPkg <= 0) return null;
+    var unitCost = editedPrices[r.ndc] != null ? parseFloat(editedPrices[r.ndc]) : r.unitPrice;
+    if (!unitCost) return null;
+    return ((unitCost - avgPerPkg) / avgPerPkg) * 100;
+  }
+  var sortedActiveResults = useMemo(function() {
+    if (!deltaSort) return activeResults;
+    var withPct = activeResults.map(function(r, i) { return { r: r, i: i, pct: computeDeltaPct(r) }; });
+    withPct.sort(function(a, b) {
+      // Rows without Δ% go to bottom regardless of sort direction
+      if (a.pct == null && b.pct == null) return a.i - b.i;
+      if (a.pct == null) return 1;
+      if (b.pct == null) return -1;
+      return deltaSort === "desc" ? b.pct - a.pct : a.pct - b.pct;
+    });
+    return withPct.map(function(x) { return x.r; });
+  }, [activeResults, deltaSort, editedPrices]);
+  var foundCount = activeResults.filter(function(r) { return r.ndcFound; }).length;
+  var notFoundCount = activeResults.length - foundCount;
+  var qtyMismatchCount = activeResults.filter(function(r) { return screenshotQtys[r.ndc] != null && parseInt(screenshotQtys[r.ndc]) !== r.qty; }).length;
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+        {[["translator", "PO Translator"], ["check", "Price Check"]].map(function(t) { var on = subTab === t[0]; return <button key={t[0]} onClick={function() { setSubTab(t[0]); }} style={{ padding: "8px 18px", borderRadius: 8, border: "1px solid " + (on ? TOOL_COLOR : "#E5E7EB"), background: on ? TOOL_COLOR : "#fff", color: on ? "#fff" : "#6B7280", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>{t[1]}</button>; })}
+      </div>
+
+      {subTab === "check" && <div>
+        <p style={{ color: "#6B7280", fontSize: 13, marginBottom: 20 }}>Look up a single generic by NDC or Mfr No (GEN- Inventory ID), see our average cost, and compare a quoted price per unit.</p>
+        <div style={S.card}>
+          <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, marginBottom: 8 }}>Search by</div>
+          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+            {[["ndc", "NDC"], ["mfr", "Mfr No (GEN-)"]].map(function(m) { var on = pcMode === m[0]; return <button key={m[0]} onClick={function() { setPcMode(m[0]); }} style={{ padding: "6px 14px", borderRadius: 8, border: "1px solid " + (on ? TOOL_COLOR : "#E5E7EB"), background: on ? "rgba(6,182,212,0.08)" : "#fff", color: on ? TOOL_COLOR : "#6B7280", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>{m[1]}</button>; })}
+          </div>
+          <div style={{ display: "flex", gap: 10 }}>
+            <input value={pcQuery} onChange={function(e) { setPcQuery(e.target.value); }} onKeyDown={function(e) { if (e.key === "Enter") pcLookup(); }} placeholder={pcMode === "ndc" ? "e.g. 27808-0266-01" : "e.g. GEN-10192"} style={Object.assign({}, S.inp, { flex: "1 1 320px", maxWidth: 420, padding: "10px 12px" })} />
+            <button onClick={pcLookup} disabled={pcBusy} style={Object.assign({}, S.btn(), { padding: "10px 20px", opacity: pcBusy ? 0.7 : 1 })}>{pcBusy ? "Looking up\u2026" : "Look up"}</button>
+          </div>
+          {pcErr && <div style={{ marginTop: 12, fontSize: 13, color: "#DC2626" }}>{pcErr}</div>}
+        </div>
+
+        {pcResult && <div style={S.card}>
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 18, fontWeight: 700, color: TOOL_COLOR }}>{pcResult.inventoryId}</div>
+            <div style={{ fontSize: 14, color: "#1F2937", marginTop: 2 }}>{pcResult.description || "\u2014"}</div>
+            <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 2 }}>{"NDC " + pcResult.ndc + "  \u00B7  UOM " + (pcResult.uom || "\u2014") + (pcResult.convFactor ? "  \u00B7  " + pcResult.convFactor + " per pkg" : "")}</div>
+          </div>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
+            <div style={{ flex: 1, minWidth: 180, background: "#F8F9FB", borderRadius: 8, padding: "12px 16px" }}>
+              <div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Our avg cost / unit</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: "#1F2937", marginTop: 4 }}>{pcResult.avgCost != null ? "$" + pcResult.avgCost.toFixed(4) : "\u2014"}</div>
+            </div>
+            {pcResult.avgCost != null && pcResult.convFactor && <div style={{ flex: 1, minWidth: 180, background: "#F8F9FB", borderRadius: 8, padding: "12px 16px" }}>
+              <div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>{"Our avg cost / " + (pcResult.uom || "pkg")}</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: "#1F2937", marginTop: 4 }}>{"$" + (pcResult.avgCost * pcResult.convFactor).toFixed(2)}</div>
+            </div>}
+          </div>
+          <div style={{ borderTop: "1px solid #F3F4F6", paddingTop: 16 }}>
+            <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, marginBottom: 6 }}>Your price per unit (tablet)</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+              <input type="number" step="0.0001" value={pcPrice} onChange={function(e) { setPcPrice(e.target.value); }} placeholder="0.0000" style={Object.assign({}, S.inp, { width: 160, padding: "10px 12px" })} />
+              {(function() {
+                var yp = parseFloat(pcPrice);
+                if (!(yp > 0) || pcResult.avgCost == null || pcResult.avgCost <= 0) return null;
+                var pct = ((yp - pcResult.avgCost) / pcResult.avgCost) * 100;
+                var diff = yp - pcResult.avgCost;
+                var same = Math.abs(pct) < 0.05;
+                var color = same ? "#6B7280" : (pct > 0 ? "#DC2626" : "#059669");
+                var label = same ? "same as our cost" : (pct > 0 ? "more expensive" : "cheaper");
+                return <div style={{ fontSize: 14, color: color, fontWeight: 600 }}>{(pct > 0 ? "+" : "") + pct.toFixed(1) + "% " + label}<span style={{ color: "#9CA3AF", fontWeight: 400 }}>{"  (" + (diff >= 0 ? "+" : "") + "$" + diff.toFixed(4) + "/unit)"}</span></div>;
+              })()}
+            </div>
+          </div>
+        </div>}
+      </div>}
+
+      {subTab === "translator" && <>
+      <p style={{ color: "#6B7280", fontSize: 13, marginBottom: 20 }}>Upload vendor PO PDFs to extract NDCs, then validate against Acumatica <strong>Generic Current NDCs</strong> OData to find GEN- Inventory IDs.</p>
+
+      <div style={S.card}>
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+            <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 500 }}>Vendor Type</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 12, color: "#6B7280" }}>
+              <button onClick={function() { Promise.all([fetchNdcMap(true), fetchUomConversionMap(true)]).then(function(r) { if (r && r[0]) toast("NDC + UOM maps refreshed from Acumatica"); }); }} disabled={ndcLoading} title="Force re-fetch the Generic NDCs and UOM conversion maps from Acumatica, bypassing cache. Use this after you've just added or changed a generic or its pack sizes in Acumatica." style={{ background: "transparent", border: "1px solid #E5E7EB", borderRadius: 6, padding: "5px 10px", fontSize: 11, color: TOOL_COLOR, cursor: ndcLoading ? "not-allowed" : "pointer", fontFamily: "'Varela Round', sans-serif", display: "inline-flex", alignItems: "center", gap: 5 }}>{ndcLoading ? "Refreshing\u2026" : "\u21BB Refresh NDC map"}</button>
+              <span style={{ fontWeight: 500 }}>{"\u0394% Unit Cost Threshold"}</span>
+              <input type="number" min="1" step="1" value={flagThreshold} onChange={function(e) { updateFlagThreshold(e.target.value); }} style={{ width: 64, padding: "5px 8px", border: "1px solid #E5E7EB", borderRadius: 6, fontSize: 12, color: "#374151", outline: "none", textAlign: "center", fontFamily: "'Varela Round', sans-serif", background: "#F9FAFB" }} />
+              <span>%</span>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 10 }}>
+            {[["other", "Keysource / Anda / Bloodworth / TopRX"], ["mckesson", "McKesson"], ["ggm-crossovers", "GoGoMeds Crossovers"]].map(function(v) {
+              return <button key={v[0]} onClick={function() { switchVendor(v[0]); }}
+                style={{ padding: "8px 18px", borderRadius: 8, border: "1px solid " + (vendor === v[0] ? TOOL_COLOR : "#E5E7EB"), background: vendor === v[0] ? TOOL_COLOR + "20" : "transparent", color: vendor === v[0] ? TOOL_COLOR : "#6B7280", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>{v[1]}</button>;
+            })}
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: vendor === "mckesson" ? "1fr 1fr" : "1fr", gap: 16 }}>
+          <div>
+            <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, marginBottom: 6 }}>{vendor === "mckesson" ? "PO PDF" : "PO PDF(s)"}</div>
+            {pdfs.length > 0 ? <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(5,150,105,0.06)", border: "1px solid rgba(5,150,105,0.2)", borderRadius: 10 }}>
+                <span style={{ color: "#059669", fontSize: 12 }}>{"\u2713"} {pdfs.length} PDF{pdfs.length > 1 ? "s" : ""}: {pdfs.map(function(p) { return p.name; }).join(", ")}</span>
+                <button onClick={function() { setPdfs([]); }} style={{ background: "transparent", border: "none", color: "#9CA3AF", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 4px" }}>{"\u00D7"}</button>
+              </div>
+            </div> : vendor === "mckesson" ? <DropZone accept=".pdf" label="PO PDF" sublabel="Drop 1 PDF" icon="pdf" color={TOOL_COLOR} onFiles={function(files) { handlePdfChange([files[0]]); }} /> : <DropZone accept=".pdf" multiple label="PO PDF(s)" sublabel="Drop PDFs or click to browse" icon="pdf" color={TOOL_COLOR} onFiles={handlePdfChange} />}
+          </div>
+          {vendor === "mckesson" && <div>
+            <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, marginBottom: 6 }}>McKesson Export CSV <InfoTip text="Have the WM download the order from the McKesson portal as CSV. Key columns: FilledNdcUpc, OrderQty, Est. Net Price." /></div>
+            {mckFile && mckParsed ? <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(5,150,105,0.06)", border: "1px solid rgba(5,150,105,0.2)", borderRadius: 10 }}>
+                <span style={{ color: "#059669", fontSize: 12 }}>{"\u2713"} {mckFile.name} — {mckParsed.length} items, {Object.keys(mckPortalPrices).length} prices</span>
+                <button onClick={function() { setMckFile(null); setMckParsed(null); setMckPortalPrices({}); }} style={{ background: "transparent", border: "none", color: "#9CA3AF", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 4px" }}>{"\u00D7"}</button>
+              </div>
+            </div> : <DropZone accept=".csv" label="McKesson Export CSV" sublabel="Drop CSV from McKesson portal" icon="spreadsheet" color={TOOL_COLOR} disabled={mckFileLoading} onFiles={handleMckFileUpload} />}
+            {mckFileLoading && <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}><Spinner color={TOOL_COLOR} size={14} /><span style={{ fontSize: 12, color: TOOL_COLOR }}>Parsing CSV...</span></div>}
+            <div style={{ marginTop: 10, fontSize: 11, color: "#9CA3AF" }}>Or paste NDCs manually (one per line):</div>
+            <textarea value={mckPaste} onChange={handleMckManualPaste} placeholder={"67877019710\n29300041001\n53746075101\n..."} rows={3} style={Object.assign({}, S.inp, { resize: "vertical", fontFamily: "monospace", fontSize: 12, marginTop: 4 })} />
+          </div>}
+        </div>
+
+        {vendor === "mckesson" && mckParsed && mckParsed.length > 0 && <div style={{ marginTop: 16, background: "#F8F9FB", border: "1px solid #E5E7EB", borderRadius: 8, padding: "10px 14px" }}>
+          <div style={{ fontSize: 11, color: "#6B7280", fontWeight: 600, textTransform: "uppercase", marginBottom: 6 }}>McKesson Items ({mckParsed.length}){Object.keys(mckPortalPrices).length > 0 && <span style={{ color: "#059669", fontWeight: 600, marginLeft: 8 }}>{"\u2713"} {Object.keys(mckPortalPrices).length} prices loaded</span>}</div>
+          <div style={{ maxHeight: 100, overflow: "auto", fontSize: 12, fontFamily: "monospace", color: "#6B7280" }}>
+            {mckParsed.map(function(pi, idx) { return <div key={idx} style={{ display: "flex", gap: 16 }}><span>{pi.ndc}</span>{mckPortalPrices[pi.ndc] != null && <span style={{ color: "#059669" }}>{"$" + mckPortalPrices[pi.ndc].toFixed(2)}</span>}{pi.qty && <span style={{ color: "#9CA3AF" }}>qty: {pi.qty}</span>}</div>; })}
+          </div>
+        </div>}
+
+        <div style={{ marginTop: 16, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <button onClick={handleValidate} disabled={loading || pdfs.length === 0}
+            style={Object.assign({}, S.btn(), { padding: "10px 20px", opacity: (loading || pdfs.length === 0) ? 0.5 : 1 })}>
+            {loading ? <><Spinner /> Parsing & Validating...</> : <><IconUpload /> Parse & Validate NDCs</>}
+          </button>
+          {(pdfs.length > 0 || mckParsed || results.length > 0) && <button onClick={reset} style={Object.assign({}, S.btn("ghost"), { padding: "10px 16px", marginLeft: "auto" })}><IconTrash /> Clear</button>}
+        </div>
+      </div>
+
+      {error && <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 10, padding: "12px 16px", marginBottom: 16, color: "#DC2626", fontSize: 13 }}>Error: {error}</div>}
+
+      {mckWarnings.length > 0 && <div style={{ marginBottom: 16 }}>
+        {mckWarnings.map(function(w, i) {
+          var isPdfOnly = w.type === "pdf-only";
+          var isQtyMismatch = w.type === "qty-mismatch";
+          var bgColor = isPdfOnly ? "rgba(245,158,11,0.08)" : isQtyMismatch ? "rgba(239,68,68,0.08)" : "rgba(139,92,246,0.08)";
+          var borderColor = isPdfOnly ? "rgba(245,158,11,0.3)" : isQtyMismatch ? "rgba(239,68,68,0.3)" : "rgba(139,92,246,0.3)";
+          var textColor = isPdfOnly ? "#D97706" : isQtyMismatch ? "#DC2626" : "#7C3AED";
+          return <div key={i} style={{ background: bgColor, border: "1px solid " + borderColor, borderRadius: 10, padding: "10px 16px", marginBottom: 8, display: "flex", alignItems: "center", gap: 10 }}>
+            <IconAlert />
+            <span style={{ fontSize: 13, color: textColor, flex: 1 }}>{w.msg}</span>
+            <button onClick={function() { setMckWarnings(function(prev) { return prev.filter(function(_, idx) { return idx !== i; }); }); }} style={{ background: "transparent", border: "1px solid " + borderColor, borderRadius: 6, padding: "3px 8px", fontSize: 11, color: textColor, cursor: "pointer", flexShrink: 0 }}>Dismiss</button>
+          </div>;
+        })}
+      </div>}
+
+      {results.length > 0 && <div>
+        {/* File tabs for "other" vendor with multiple files */}
+        {perFileTabs && fileList.length > 1 && <div style={{ display: "flex", gap: 4, marginBottom: 16, background: "#FFFFFF", borderRadius: 10, padding: 3, border: "0.5px solid #E5E7EB", overflowX: "auto" }}>
+          {fileList.map(function(f) { var isActive = activeFileTab === f.name; return <button key={f.name} onClick={function() { setActiveFileTab(f.name); }} style={{ padding: "8px 16px", borderRadius: 8, fontSize: 12, fontWeight: 500, border: "none", cursor: "pointer", transition: "all 0.15s", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 6, background: isActive ? TOOL_COLOR : "transparent", color: isActive ? "#fff" : "#6B7280" }}>{f.name.replace(".pdf", "")}<span style={{ fontSize: 10, background: isActive ? "rgba(255,255,255,0.25)" : "rgba(100,116,139,0.15)", padding: "1px 6px", borderRadius: 4 }}>{f.count}</span></button>; })}
+        </div>}
+        <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
+          {(function() { var pos = {}; var vendors = {}; var whs = {}; activeResults.forEach(function(r) { if (r.poNumber) pos[r.poNumber] = 1; if (r.vendorSource) vendors[r.vendorSource] = 1; if (r.warehouse) whs[r.warehouse] = 1; }); var poList = Object.keys(pos); var vendorList = Object.keys(vendors); var whList = Object.keys(whs); function copyVal(val) { navigator.clipboard.writeText(val).then(function() { toast("Copied: " + val); }).catch(function() {}); } return <>{poList.length > 0 && <div onClick={function() { copyVal(poList.join(", ")); }} style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0, cursor: "pointer", transition: "all 0.15s" })} title="Click to copy"><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>PO #</div><div style={{ fontSize: 20, fontWeight: 700, color: TOOL_COLOR, marginTop: 4 }}>{poList.join(", ")}</div></div>}{vendorList.length > 0 && <div onClick={function() { copyVal(vendorList.join(", ")); }} style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0, cursor: "pointer", transition: "all 0.15s" })} title="Click to copy"><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Vendor</div><div style={{ fontSize: 18, fontWeight: 700, color: "#1F2937", marginTop: 4 }}>{vendorList.join(", ")}</div></div>}{whList.length > 0 && <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Warehouse</div><div style={{ fontSize: 20, fontWeight: 700, color: "#1F2937", marginTop: 4 }}>{whList.join(", ")}</div></div>}</>; })()}
+          {(function() { var totalExt = 0; activeResults.forEach(function(r) { var eq = screenshotQtys[r.ndc] != null ? parseInt(screenshotQtys[r.ndc]) : r.qty; var ep = editedPrices[r.ndc] != null ? parseFloat(editedPrices[r.ndc]) : r.unitPrice; if (eq && ep) totalExt += Math.round(eq * ep * 100) / 100; else if (r.totalPrice) totalExt += r.totalPrice; }); var activeStated = null; if (vendor === "other" && activeFileTab && statedAmounts[activeFileTab] != null) { var currentFiles = {}; results.forEach(function(r) { if (r.sourceFile) currentFiles[r.sourceFile] = 1; }); if (currentFiles[activeFileTab]) { activeStated = statedAmounts[activeFileTab]; } } var matches = activeStated != null ? Math.abs(totalExt - activeStated) < 0.02 : null; return <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Total Price</div><div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}><span style={{ fontSize: 20, fontWeight: 700, color: "#1F2937" }}>{"$" + totalExt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>{matches === true && <span style={{ color: "#059669", fontSize: 16 }}>{"\u2713"}</span>}{matches === false && <span style={{ color: "#DC2626", fontSize: 11, fontWeight: 500 }}>{"\u2717 off $" + Math.abs(totalExt - activeStated).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}</div></div>; })()}
+          <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Total Items</div><div style={{ fontSize: 24, fontWeight: 700, color: "#1F2937", marginTop: 4 }}>{activeResults.length}</div></div>
+          <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>In OData</div><div style={{ fontSize: 24, fontWeight: 700, color: "#059669", marginTop: 4 }}>{foundCount}</div></div>
+          <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Not in OData</div><div style={{ fontSize: 24, fontWeight: 700, color: notFoundCount > 0 ? "#DC2626" : "#059669", marginTop: 4 }}>{notFoundCount}</div></div>
+          {vendor === "mckesson" && <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Qty Edited</div><div style={{ fontSize: 24, fontWeight: 700, color: qtyMismatchCount > 0 ? "#D97706" : "#059669", marginTop: 4 }}>{qtyMismatchCount}</div></div>}
+          {mckWarnings.length > 0 && <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>MCK Warnings</div><div style={{ fontSize: 24, fontWeight: 700, color: "#D97706", marginTop: 4 }}>{mckWarnings.length}</div></div>}
+        </div>
+
+        {trackerAdded && <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#ECFDF5", border: "1px solid #A7F3D0", borderRadius: 8, padding: "10px 16px", marginBottom: 16 }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: "#047857" }}>{"\u2713 Added " + trackerAdded.count + " row" + (trackerAdded.count === 1 ? "" : "s") + " to " + trackerAdded.tabs}</span>
+          <button onClick={function() { setTrackerAdded(null); }} style={{ background: "transparent", border: "none", color: "#047857", fontSize: 16, cursor: "pointer", lineHeight: 1 }}>{"\u00D7"}</button>
+        </div>}
+
+        <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto" })}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", borderBottom: "1px solid #E5E7EB" }}>
+            <span style={{ fontSize: 14, fontWeight: 600, color: "#1F2937" }}>Translation Results</span>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={reset} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}><IconTrash /> Clear</button>
+              {perFileTabs && fileList.length > 1 && <button onClick={function() { downloadCSV(activeResults); }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}><IconCSV /> Download Tab</button>}
+              {perFileTabs && fileList.length > 1 && <button onClick={function() { fileList.forEach(function(f, idx) { setTimeout(function() { downloadCSV(results.filter(function(r) { return r.sourceFile === f.name; })); }, idx * 300); }); }} style={Object.assign({}, S.btn(), { padding: "6px 14px", fontSize: 12 })}><IconCSV /> Download All ({fileList.length} files)</button>}
+              {!(perFileTabs && fileList.length > 1) && <button onClick={function() { downloadCSV(results); }} style={Object.assign({}, S.btn(), { padding: "6px 14px", fontSize: 12 })}><IconCSV /> Download CSV</button>}
+              <button onClick={openTrackerPreview} style={{ background: "#8B5CF6", color: "#FFFFFF", border: "none", padding: "6px 14px", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }} title="Append these lines to the receiving tracker">{"\u2192"} Add to tracker</button>
+              <button onClick={onCreatePOsClick} disabled={acuCreateLoading || !ok} style={{ background: (acuCreateLoading || !ok) ? "#D1D5DB" : "#047857", color: "#FFFFFF", border: "none", padding: "6px 14px", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: (acuCreateLoading || !ok) ? "not-allowed" : "pointer", display: "inline-flex", alignItems: "center", gap: 6 }} title={!ok ? "Acumatica credentials required" : "Create the parsed POs in Acumatica"}>{acuCreateLoading ? <><Spinner /> Creating...</> : <>{"\u2192"} Create POs in Acumatica</>}</button>
+            </div>
+          </div>
+          <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12, tableLayout: "auto" }}>
+            <thead><tr>
+              <th style={Object.assign({}, S.th, { padding: "9px 10px", whiteSpace: "nowrap" })}>OData Status</th>
+              <th style={Object.assign({}, S.th, { padding: "9px 10px", minWidth: 108, whiteSpace: "nowrap" })}>NDC</th>
+              <th style={Object.assign({}, S.th, { padding: "9px 10px", minWidth: 92, whiteSpace: "nowrap" })}>GEN- Inventory ID</th>
+              <th style={Object.assign({}, S.th, { padding: "9px 10px", minWidth: 150 })}>Description (Acumatica)</th>
+              <th style={Object.assign({}, S.th, { padding: "9px 10px", whiteSpace: "nowrap" })}>UOM</th>
+              <th style={Object.assign({}, S.th, { padding: "9px 10px", minWidth: 150 })}>Drug Name (PO)</th>
+              <th style={Object.assign({}, S.th, { padding: "9px 10px", textAlign: "center" })}>Qty</th>
+              <th style={Object.assign({}, S.th, { padding: "9px 10px", textAlign: "right", whiteSpace: "nowrap" })}>Unit Cost</th>
+              <th style={Object.assign({}, S.th, { padding: "9px 10px", textAlign: "right", whiteSpace: "nowrap" })}>Line Total</th>
+              <th style={Object.assign({}, S.th, { padding: "9px 10px", textAlign: "right", whiteSpace: "nowrap" })}>Avg Unit Cost</th>
+              <th onClick={function() { setDeltaSort(deltaSort === "desc" ? "asc" : deltaSort === "asc" ? null : "desc"); }} style={Object.assign({}, S.th, { padding: "9px 10px", textAlign: "right", cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" })}>{"\u0394% Unit Cost"}{deltaSort === "desc" ? " \u25BE" : deltaSort === "asc" ? " \u25B4" : ""}</th>
+            </tr></thead>
+            <tbody>{sortedActiveResults.map(function(r, i) {
+              var editedQty = screenshotQtys[r.ndc] != null ? parseInt(screenshotQtys[r.ndc]) : r.qty;
+              var qtyChanged = screenshotQtys[r.ndc] != null && parseInt(screenshotQtys[r.ndc]) !== r.qty;
+              var editedPrice = editedPrices[r.ndc] != null ? parseFloat(editedPrices[r.ndc]) : r.unitPrice;
+              var priceChanged = editedPrices[r.ndc] != null && parseFloat(editedPrices[r.ndc]) !== r.unitPrice;
+              var extCost = (editedQty && editedPrice) ? Math.round(editedQty * editedPrice * 100) / 100 : r.totalPrice;
+              return <tr key={i} style={{ background: (qtyChanged || priceChanged) ? "rgba(245,158,11,0.06)" : (r.ndcFound ? "transparent" : "rgba(239,68,68,0.04)") }}>
+                <td style={Object.assign({}, S.td, { padding: "11px 10px" })}><span style={S.badge(r.ndcFound ? "success" : "danger")}>{r.ndcFound ? <><IconCheck /> Match</> : <><IconAlert /> Missing</>}</span></td>
+                <td style={Object.assign({}, S.td, { padding: "11px 10px", whiteSpace: "nowrap", fontFamily: "monospace", fontSize: 12 })}>{r.ndc}</td>
+                <td style={Object.assign({}, S.td, { padding: "11px 10px", whiteSpace: "nowrap", fontFamily: "monospace", fontSize: 12, color: r.inventoryId ? "#059669" : "#9CA3AF" })}>{r.inventoryId || "\u2014"}</td>
+                <td style={Object.assign({}, S.td, { padding: "11px 10px", minWidth: 150, wordBreak: "normal", overflowWrap: "break-word" })}>{r.acumaticaDesc || "\u2014"}</td>
+                <td style={Object.assign({}, S.td, { padding: "11px 10px", whiteSpace: "nowrap", color: r.uom ? "#06B6D4" : "#9CA3AF" })}>{r.uom || "\u2014"}</td>
+                <td style={Object.assign({}, S.td, { padding: "11px 10px", color: "#6B7280", minWidth: 150, wordBreak: "normal", overflowWrap: "break-word" })}>{r.drugName || "\u2014"}</td>
+                <td style={Object.assign({}, S.td, { padding: "8px 8px", textAlign: "center" })}><input style={Object.assign({}, S.inp, { width: 64, padding: "6px 8px", textAlign: "center", color: qtyChanged ? "#D97706" : "#374151", background: qtyChanged ? "rgba(245,158,11,0.1)" : "#F8F9FB" })} type="number" value={screenshotQtys[r.ndc] != null ? screenshotQtys[r.ndc] : (r.qty || "")} onChange={function(e) { var updated = Object.assign({}, screenshotQtys); updated[r.ndc] = e.target.value; setScreenshotQtys(updated); }} /></td>
+                <td style={Object.assign({}, S.td, { padding: "8px 8px", textAlign: "right" })}><input style={Object.assign({}, S.inp, { width: 82, padding: "6px 8px", textAlign: "right", color: priceChanged ? "#D97706" : "#059669", background: priceChanged ? "rgba(245,158,11,0.1)" : "#F8F9FB" })} type="number" step="0.01" value={editedPrices[r.ndc] != null ? editedPrices[r.ndc] : (r.unitPrice || "")} onChange={function(e) { var updated = Object.assign({}, editedPrices); updated[r.ndc] = e.target.value; setEditedPrices(updated); }} /></td>
+                <td style={Object.assign({}, S.td, { padding: "11px 10px", textAlign: "right", whiteSpace: "nowrap" })}>{extCost ? "$" + extCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "\u2014"}</td>
+                {(function() {
+                  var hasAvg = r.avgCost != null && r.avgCost > 0;
+                  // Scale avg cost (per base unit, e.g. per tablet) up to PO UOM (e.g. per BT100)
+                  var avgPerPkg = hasAvg ? (r.uomConvFactor && r.uomConvFactor > 0 ? r.avgCost * r.uomConvFactor : r.avgCost) : null;
+                  var pct = (avgPerPkg != null && avgPerPkg > 0 && editedPrice) ? ((editedPrice - avgPerPkg) / avgPerPkg) * 100 : null;
+                  var isFlag = pct != null && pct >= flagThreshold;
+                  var pctColor = pct == null ? "#9CA3AF" : isFlag ? "#FFFFFF" : pct >= 20 ? "#DC2626" : pct >= 10 ? "#D97706" : pct <= -10 ? "#059669" : "#6B7280";
+                  var pctTdStyle = isFlag
+                    ? Object.assign({}, S.td, { textAlign: "center", padding: "8px 10px" })
+                    : Object.assign({}, S.td, { padding: "11px 10px", textAlign: "right", color: pctColor, fontWeight: pct != null && pct >= 20 ? 600 : 400 });
+                  return <>
+                    <td style={Object.assign({}, S.td, { padding: "11px 10px", textAlign: "right", whiteSpace: "nowrap", color: hasAvg ? "#374151" : "#9CA3AF" })}>{avgPerPkg != null ? "$" + avgPerPkg.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 }) : "\u2014"}</td>
+                    <td style={pctTdStyle}>
+                      {pct == null ? <span style={{ color: "#9CA3AF" }}>{"\u2014"}</span>
+                        : isFlag ? <span style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "#DC2626", color: "#FFFFFF", padding: "4px 10px", borderRadius: 999, fontSize: 12, fontWeight: 700, letterSpacing: 0.3, boxShadow: "0 1px 2px rgba(220,38,38,0.3)" }}>{"\u26A0 +" + pct.toFixed(1) + "%"}</span>
+                        : <span style={{ color: pctColor, fontWeight: pct >= 20 ? 600 : 400 }}>{(pct > 0 ? "+" : "") + pct.toFixed(1) + "%"}</span>}
+                    </td>
+                  </>;
+                })()}
+              </tr>;
+            })}</tbody>
+          </table>
+        </div>
+      </div>}
+
+      {/* ── Acumatica auto-create: confirmation modal ──────────────────── */}
+      {acuCreateConfirm && (function() {
+        var posList = acuCreateConfirm.pos || [];
+        var blockedList = acuCreateConfirm.blocked || [];
+        var grandTotal = posList.reduce(function(s, p) { return s + (p.orderTotal || 0); }, 0);
+        return <div onClick={function() { setAcuCreateConfirm(null); }} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div onClick={function(e) { e.stopPropagation(); }} style={{ background: "#FFFFFF", borderRadius: 8, padding: 24, width: "min(720px, 92vw)", maxHeight: "85vh", overflow: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.2)" }}>
+            <div style={{ fontSize: 18, fontWeight: 700, color: "#1F2937", marginBottom: 8 }}>Create {posList.length} PO{posList.length === 1 ? "" : "s"} in Acumatica?</div>
+            <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 16 }}>One PO per PDF will be created with Hold:false (Open) and the values shown below. Stops on first failure.</div>
+            {vendor === "ggm-crossovers" && <div style={{ fontSize: 12, color: "#6D28D9", background: "rgba(124,58,237,0.06)", border: "1px solid rgba(124,58,237,0.18)", borderRadius: 6, padding: "8px 10px", marginBottom: 16 }}>{"\u2192"} After each Bloodworth PO is created, the matching dummy PO (Vetcove Generics {"\u00B7"} On Hold {"\u00B7"} same GGM warehouse) is found and deleted. If zero or more than one dummy matches, it's left untouched and flagged.</div>}
+
+            {posList.length > 0 && <div style={{ border: "1px solid #E5E7EB", borderRadius: 6, overflow: "hidden", marginBottom: blockedList.length > 0 ? 12 : 16 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <thead><tr style={{ background: "#F9FAFB", borderBottom: "1px solid #E5E7EB" }}>
+                  <th style={{ padding: "8px 10px", textAlign: "left", fontWeight: 600, color: "#6B7280" }}>File</th>
+                  <th style={{ padding: "8px 10px", textAlign: "left", fontWeight: 600, color: "#6B7280" }}>Vendor</th>
+                  <th style={{ padding: "8px 10px", textAlign: "left", fontWeight: 600, color: "#6B7280" }}>Description</th>
+                  <th style={{ padding: "8px 10px", textAlign: "left", fontWeight: 600, color: "#6B7280" }}>Vendor Ref</th>
+                  <th style={{ padding: "8px 10px", textAlign: "left", fontWeight: 600, color: "#6B7280" }}>Warehouse</th>
+                  <th style={{ padding: "8px 10px", textAlign: "right", fontWeight: 600, color: "#6B7280" }}>Lines</th>
+                  <th style={{ padding: "8px 10px", textAlign: "right", fontWeight: 600, color: "#6B7280" }}>Total</th>
+                </tr></thead>
+                <tbody>{posList.map(function(p, i) {
+                  return <tr key={i} style={{ borderBottom: i < posList.length - 1 ? "1px solid #F3F4F6" : "none" }}>
+                    <td style={{ padding: "8px 10px", color: "#374151", fontSize: 11 }}>{(p.file || "").split("/").pop()}</td>
+                    <td style={{ padding: "8px 10px", color: "#374151" }}>{p.vendorId}</td>
+                    <td style={{ padding: "8px 10px", color: p.description ? "#374151" : "#9CA3AF", fontStyle: p.description ? "normal" : "italic" }}>{p.description || "(blank)"}</td>
+                    <td style={{ padding: "8px 10px", color: "#374151", fontFamily: "monospace" }}>{p.vendorRef}</td>
+                    <td style={{ padding: "8px 10px", color: "#374151" }}>{p.location}</td>
+                    <td style={{ padding: "8px 10px", color: "#374151", textAlign: "right" }}>{p.lineCount}</td>
+                    <td style={{ padding: "8px 10px", color: "#374151", textAlign: "right" }}>${(p.orderTotal || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                  </tr>;
+                })}</tbody>
+                <tfoot><tr style={{ background: "#F9FAFB", borderTop: "1px solid #E5E7EB" }}>
+                  <td colSpan={6} style={{ padding: "8px 10px", textAlign: "right", fontWeight: 600, color: "#6B7280" }}>Grand total:</td>
+                  <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "#1F2937" }}>${grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                </tr></tfoot>
+              </table>
+            </div>}
+
+            {blockedList.length > 0 && <div style={{ background: "rgba(220,38,38,0.04)", border: "1px solid rgba(220,38,38,0.15)", borderRadius: 6, padding: 12, marginBottom: 16 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: "#DC2626", marginBottom: 6 }}>{"\u26A0"} {blockedList.length} file{blockedList.length === 1 ? "" : "s"} blocked (will not be created):</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>{blockedList.map(function(b, i) {
+                return <div key={i} style={{ fontSize: 11, color: "#6B7280" }}><span style={{ fontFamily: "monospace", color: "#374151" }}>{(b.file || "").split("/").pop()}</span>: {b.reason}</div>;
+              })}</div>
+            </div>}
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button onClick={function() { setAcuCreateConfirm(null); }} style={Object.assign({}, S.btn("ghost"), { padding: "8px 16px" })}>Cancel</button>
+              {posList.length > 0 && <button onClick={function() { executeCreatePOs(posList); }} style={{ background: "#047857", color: "#FFFFFF", border: "none", padding: "8px 16px", borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Create {posList.length} PO{posList.length === 1 ? "" : "s"}</button>}
+            </div>
+          </div>
+        </div>;
+      })()}
+
+      {/* ── Acumatica auto-create: results modal ───────────────────────── */}
+      {acuCreateResult && (function() {
+        var data = acuCreateResult.data || {};
+        var requested = acuCreateResult.requested || [];
+        var succeeded = data.succeeded || [];
+        var failure = data.failure || null;
+        var allOk = data.ok === true && !failure;
+        var failureRequested = failure ? requested[failure.poIndex] : null;
+        var notAttempted = failure ? requested.slice(failure.poIndex + 1) : [];
+        return <div onClick={function() { setAcuCreateResult(null); setDummyDelete(null); }} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div onClick={function(e) { e.stopPropagation(); }} style={{ background: "#FFFFFF", borderRadius: 8, padding: 24, width: "min(720px, 92vw)", maxHeight: "85vh", overflow: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.2)" }}>
+            <div style={{ fontSize: 18, fontWeight: 700, color: allOk ? "#047857" : "#DC2626", marginBottom: 8 }}>{allOk ? "\u2713 All POs created" : "\u26A0 Stopped on failure"}</div>
+            <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 16 }}>{succeeded.length} created, {failure ? "1 failed" : "0 failed"}{notAttempted.length > 0 ? ", " + notAttempted.length + " not attempted" : ""}</div>
+
+            {succeeded.length > 0 && <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "#047857", marginBottom: 8 }}>Created in Acumatica:</div>
+              <div style={{ border: "1px solid #E5E7EB", borderRadius: 6, overflow: "hidden" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                  <thead><tr style={{ background: "#F9FAFB", borderBottom: "1px solid #E5E7EB" }}>
+                    <th style={{ padding: "6px 10px", textAlign: "left", fontWeight: 600, color: "#6B7280" }}>Order Nbr</th>
+                    <th style={{ padding: "6px 10px", textAlign: "left", fontWeight: 600, color: "#6B7280" }}>Vendor Ref</th>
+                    <th style={{ padding: "6px 10px", textAlign: "left", fontWeight: 600, color: "#6B7280" }}>Description</th>
+                    <th style={{ padding: "6px 10px", textAlign: "right", fontWeight: 600, color: "#6B7280" }}>Lines</th>
+                    <th style={{ padding: "6px 10px", textAlign: "right", fontWeight: 600, color: "#6B7280" }}>Total</th>
+                  </tr></thead>
+                  <tbody>{succeeded.map(function(s, i) {
+                    return <tr key={i} style={{ borderBottom: i < succeeded.length - 1 ? "1px solid #F3F4F6" : "none" }}>
+                      <td style={{ padding: "6px 10px", color: "#1F2937", fontWeight: 600, fontFamily: "monospace" }}>{s.orderNbr || "?"}</td>
+                      <td style={{ padding: "6px 10px", color: "#374151", fontFamily: "monospace" }}>{s.vendorRef}</td>
+                      <td style={{ padding: "6px 10px", color: s.description ? "#374151" : "#9CA3AF", fontStyle: s.description ? "normal" : "italic" }}>{s.description || "(blank)"}</td>
+                      <td style={{ padding: "6px 10px", color: "#374151", textAlign: "right" }}>{s.lineCount}</td>
+                      <td style={{ padding: "6px 10px", color: "#374151", textAlign: "right" }}>${(s.orderTotal || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                    </tr>;
+                  })}</tbody>
+                </table>
+              </div>
+            </div>}
+
+            {dummyDelete && <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 8 }}>Dummy PO cleanup:</div>
+              {dummyDelete.loading ? <div style={{ fontSize: 12, color: "#6B7280", display: "flex", alignItems: "center", gap: 6 }}><Spinner /> Finding and deleting dummy PO(s)...</div> :
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {(((dummyDelete.data || {}).results) || []).map(function(r, i) {
+                    var good = r.deleted;
+                    return <div key={i} style={{ fontSize: 12, border: "1px solid " + (good ? "rgba(4,120,87,0.25)" : "rgba(220,38,38,0.25)"), background: good ? "rgba(4,120,87,0.05)" : "rgba(220,38,38,0.04)", borderRadius: 6, padding: "8px 10px" }}>
+                      <div><span style={{ fontWeight: 600, color: good ? "#047857" : "#DC2626" }}>{good ? "\u2713 Deleted" : "\u26A0 Not deleted"}</span><span style={{ color: "#6B7280" }}>{" \u00B7 "}{r.vendorId} {"\u00B7"} {r.warehouse}{r.orderNbr ? " \u00B7 " : ""}</span>{r.orderNbr ? <span style={{ fontFamily: "monospace", color: "#1F2937", fontWeight: 600 }}>{r.orderNbr}</span> : null}</div>
+                      {r.error ? <div style={{ color: "#6B7280", marginTop: 3 }}>{r.error}</div> : null}
+                      {r.hint ? <div style={{ color: "#B45309", marginTop: 2 }}>{r.hint}</div> : null}
+                      {r.candidates ? <div style={{ color: "#6B7280", marginTop: 2 }}>Candidates: {r.candidates.map(function(c) { return c.orderNbr; }).join(", ")}</div> : null}
+                    </div>;
+                  })}
+                  {(((dummyDelete.data || {}).results) || []).length === 0 && <div style={{ fontSize: 12, color: "#6B7280" }}>{(dummyDelete.data && dummyDelete.data.error) || "No dummy targets."}</div>}
+                </div>}
+            </div>}
+
+            {succeeded.length > 0 && <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 8 }}>Line NDCs (Alternate ID) as created:</div>
+              {succeeded.map(function(s, si) {
+                var lr = s.lineResults || [];
+                return <div key={si} style={{ marginBottom: 10, border: "1px solid #E5E7EB", borderRadius: 6, overflow: "hidden" }}>
+                  <div style={{ background: "#F9FAFB", borderBottom: "1px solid #E5E7EB", padding: "6px 10px", fontSize: 11, color: "#6B7280" }}>
+                    <span style={{ fontFamily: "monospace", color: "#1F2937", fontWeight: 600 }}>{s.orderNbr}</span>
+                    {" \u00B7 keyed by "}<span style={{ color: s.method === "both" ? "#047857" : "#B45309", fontWeight: 600 }}>{s.method === "both" ? "Inventory ID + NDC" : "Inventory ID"}</span>
+                    {s.createAltError ? <span style={{ color: "#B45309" }}>{" \u00B7 NDC-in-create rejected, used Inventory ID only"}</span> : null}
+                  </div>
+                  {s.createAltError && (s.createAltError.errorDetails || s.createAltError.rawBody || s.createAltError.reason) && <div style={{ background: "#FFF7ED", borderBottom: "1px solid #FED7AA", padding: "6px 10px", fontSize: 10, color: "#9A3412", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                    {s.createAltError.errorDetails && s.createAltError.errorDetails.length > 0
+                      ? s.createAltError.errorDetails.map(function(e, ei) { return <div key={ei}>{e.field ? <span style={{ fontFamily: "monospace", marginRight: 6 }}>{e.field}:</span> : null}{e.message}</div>; })
+                      : (s.createAltError.rawBody || s.createAltError.reason || "")}
+                  </div>}
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                    <thead><tr style={{ background: "#FFFFFF", borderBottom: "1px solid #F3F4F6" }}>
+                      <th style={{ padding: "4px 10px", textAlign: "left", fontWeight: 600, color: "#6B7280" }}>Inventory ID</th>
+                      <th style={{ padding: "4px 10px", textAlign: "left", fontWeight: 600, color: "#6B7280" }}>Alternate ID (NDC)</th>
+                      <th style={{ padding: "4px 10px", textAlign: "right", fontWeight: 600, color: "#6B7280" }}>Qty</th>
+                    </tr></thead>
+                    <tbody>{lr.map(function(l, li) {
+                      return <tr key={li} style={{ borderBottom: li < lr.length - 1 ? "1px solid #F9FAFB" : "none" }}>
+                        <td style={{ padding: "4px 10px", color: "#374151", fontFamily: "monospace" }}>{l.inventoryID || "\u2014"}</td>
+                        <td style={{ padding: "4px 10px", color: "#374151", fontFamily: "monospace" }}>{l.alternateID || "\u2014"}</td>
+                        <td style={{ padding: "4px 10px", color: "#374151", textAlign: "right" }}>{l.orderQty}</td>
+                      </tr>;
+                    })}</tbody>
+                  </table>
+                </div>;
+              })}
+            </div>}
+
+            {failure && <div style={{ background: "rgba(220,38,38,0.04)", border: "1px solid rgba(220,38,38,0.2)", borderRadius: 6, padding: 12, marginBottom: 16 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "#DC2626", marginBottom: 6 }}>Failed PO #{failure.poIndex + 1}:</div>
+              <div style={{ fontSize: 11, color: "#6B7280", marginBottom: 8 }}>
+                <div>Vendor Ref: <span style={{ fontFamily: "monospace", color: "#374151" }}>{failure.vendorRef}</span>{failureRequested ? <> {"\u00B7"} File: <span style={{ fontFamily: "monospace", color: "#374151" }}>{(failureRequested.file || "").split("/").pop()}</span></> : null}</div>
+                <div>Stage: <span style={{ color: "#374151" }}>{failure.stage}</span>{failure.status ? <> {"\u00B7"} HTTP {failure.status}</> : null}</div>
+              </div>
+              {failure.errorDetails && failure.errorDetails.length > 0 && <div style={{ background: "#FFFFFF", border: "1px solid #FECACA", borderRadius: 4, padding: 8, fontSize: 11, color: "#7F1D1D" }}>
+                {failure.errorDetails.map(function(e, i) {
+                  return <div key={i} style={{ marginBottom: i < failure.errorDetails.length - 1 ? 4 : 0 }}>{e.field ? <span style={{ fontFamily: "monospace", marginRight: 6 }}>{e.field}:</span> : null}{e.message}</div>;
+                })}
+              </div>}
+              {(!failure.errorDetails || failure.errorDetails.length === 0) && failure.rawBody && <pre style={{ background: "#FFFFFF", border: "1px solid #FECACA", borderRadius: 4, padding: 8, fontSize: 10, color: "#7F1D1D", maxHeight: 200, overflow: "auto", margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{failure.rawBody}</pre>}
+            </div>}
+
+            {notAttempted.length > 0 && <div style={{ background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 6, padding: 12, marginBottom: 16 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: "#6B7280", marginBottom: 6 }}>Not attempted ({notAttempted.length}):</div>
+              <div style={{ fontSize: 11, color: "#6B7280" }}>{notAttempted.map(function(p, i) { return <span key={i} style={{ fontFamily: "monospace", marginRight: 12 }}>{p.vendorRef}</span>; })}</div>
+            </div>}
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button onClick={function() { setAcuCreateResult(null); setDummyDelete(null); }} style={Object.assign({}, S.btn(), { padding: "8px 16px" })}>Close</button>
+              {allOk && <button onClick={openTrackerPreview} style={Object.assign({}, S.btn(), { padding: "8px 16px", background: "#8B5CF6", border: "1px solid #8B5CF6", color: "#fff" })}>{"\u2192"} Add to tracker</button>}
+            </div>
+          </div>
+        </div>;
+      })()}
+
+      {trackerPreview && <div onClick={function() { if (!trackerBusy) setTrackerPreview(null); }} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100 }}>
+        <div onClick={function(e) { e.stopPropagation(); }} style={{ background: "#FFFFFF", borderRadius: 8, padding: 24, width: "min(860px, 94vw)", maxHeight: "85vh", overflow: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.2)" }}>
+          <div style={{ fontSize: 18, fontWeight: 700, color: "#1F2937", marginBottom: 4 }}>Add to tracker</div>
+          <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 16 }}>Review the rows, then confirm to append them to the bottom of each tab. Nothing existing is overwritten, and it lands correctly even if the sheet is filtered.{trackerPreview.unmapped ? "  \u00B7  " + trackerPreview.unmapped + " line(s) skipped \u2014 warehouse not mapped to a tracker tab." : ""}</div>
+          {trackerPreview.targets.map(function(t, ti) {
+            return <div key={ti} style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6 }}>{t.tab} <span style={{ color: "#9CA3AF", fontWeight: 400 }}>{"\u00B7 " + t.rows.length + " row" + (t.rows.length === 1 ? "" : "s")}</span></div>
+              <div style={{ border: "1px solid #E5E7EB", borderRadius: 6, overflow: "auto", maxHeight: 240 }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+                  <thead><tr style={{ background: "#F9FAFB" }}>{["Supplier", "NDC", "Product Description", "Pkg Size", "Pkg Qty", "Expected BOH", "PO No.", "Order Date"].map(function(h) { return <th key={h} style={{ padding: "5px 8px", textAlign: "left", color: "#6B7280", fontWeight: 600, whiteSpace: "nowrap", position: "sticky", top: 0, background: "#F9FAFB" }}>{h}</th>; })}</tr></thead>
+                  <tbody>{t.rows.map(function(row, ri) {
+                    return <tr key={ri} style={{ borderTop: "1px solid #F3F4F6" }}>{row.map(function(cell, ci) {
+                      return <td key={ci} style={{ padding: "5px 8px", color: "#374151", whiteSpace: "nowrap", maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", fontStyle: ci === 5 ? "italic" : "normal", color: ci === 5 ? "#9CA3AF" : "#374151" }}>{ci === 5 ? "= Pkg Size \u00D7 Pkg Qty" : String(cell)}</td>;
+                    })}</tr>;
+                  })}</tbody>
+                </table>
+              </div>
+            </div>;
+          })}
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
+            <button onClick={function() { if (!trackerBusy) setTrackerPreview(null); }} disabled={trackerBusy} style={Object.assign({}, S.btn("ghost"), { padding: "8px 16px" })}>Cancel</button>
+            <button onClick={confirmTrackerAppend} disabled={trackerBusy} style={Object.assign({}, S.btn(), { padding: "8px 16px", opacity: trackerBusy ? 0.7 : 1, cursor: trackerBusy ? "default" : "pointer" })}>{trackerBusy ? "Adding\u2026" : "Confirm & append"}</button>
+          </div>
+        </div>
+      </div>}
+      </>}
+    </div>
+  );
+}
+
+/* ═══════ HILLS & PAWTREE TRACKER ═══════ */
+function HillsTracker(props) {
+  var toast = props.toast, ok = props.ok, lp = props.lp, cred = props.cred;
+  var TOOL_COLOR = "#10B981";
+  var _d = useState([]), data = _d[0], setData = _d[1];
+  var _ld = useState(false), loading = _ld[0], setLoading = _ld[1];
+  var _meta = useState({}), meta = _meta[0], setMeta = _meta[1];
+  var _hpSort = useState({ col: "date", dir: "asc" }), hpSort = _hpSort[0], setHpSort = _hpSort[1];
+  var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
+
+  // Persist ETA and Notes in KV (shared) + localStorage (cache)
+  var storageKey = "hills-pawtree-meta";
+  var kvMetaKey = "hills-pawtree-meta";
+  var metaRef = useRef(meta);
+  metaRef.current = meta;
+
+  useEffect(function() {
+    var m = true;
+    (async function() {
+      // Try KV first
+      try {
+        var resp = await kvGet(kvMetaKey);
+        var json = await resp.json();
+        if (m && json.data && typeof json.data === "object" && Object.keys(json.data).length > 0) {
+          setMeta(json.data);
+          sSet(storageKey, json.data);
+          return;
+        }
+      } catch (e) {}
+      // Fall back to localStorage
+      if (m) { var saved = sGet(storageKey); if (saved) setMeta(saved); }
+    })();
+    return function() { m = false; };
+  }, []);
+
+  // Poll KV every 10 seconds for changes from other users
+  useEffect(function() {
+    var m = true;
+    var poll = setInterval(async function() {
+      try {
+        var resp = await kvGet(kvMetaKey);
+        var json = await resp.json();
+        if (!m || !json.data || typeof json.data !== "object") return;
+        var remote = json.data;
+        if (JSON.stringify(remote) !== JSON.stringify(metaRef.current)) {
+          // Merge: remote wins for fields the local user hasn't touched recently
+          var merged = Object.assign({}, remote);
+          setMeta(merged);
+          sSet(storageKey, merged);
+        }
+      } catch (e) {}
+    }, 10000);
+    return function() { m = false; clearInterval(poll); };
+  }, []);
+
+  function updateMeta(po, field, value) {
+    var updated = Object.assign({}, meta);
+    if (!updated[po]) updated[po] = {};
+    updated[po][field] = value;
+    setMeta(updated);
+    sSet(storageKey, updated);
+    // Save to KV for sharing
+    kvPost(kvMetaKey, updated).catch(function() {});
+  }
+
+  // Arrow up/down move focus between rows within the same editable column (ETA / Notes).
+  function hpNav(e, col, i) {
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+    e.preventDefault();
+    var target = i + (e.key === "ArrowDown" ? 1 : -1);
+    var el = document.querySelector('[data-navcol="' + col + '"][data-navrow="' + target + '"]');
+    if (el) { el.focus(); if (el.select) el.select(); }
+  }
+
+  var fetchData = useCallback(async function() {
+    if (!ok) { lp(); return; }
+    setLoading(true);
+    try {
+      var rows = await fetchAcumatica("hills-pawtree", null, cred.username, cred.password);
+      setData(rows);
+      sSet("hills-pawtree-data", { rows: rows, fetchedAt: Date.now() });
+      toast("Hills & Pawtree: Loaded " + rows.length + " POs");
+    } catch (err) { toast("Error: " + err.message, "error"); }
+    finally { setLoading(false); }
+  }, [ok, lp, cred, toast]);
+
+  useEffect(function() {
+    if (!ok || !cred || !cred.username) return;
+    var cached = sGet("hills-pawtree-data");
+    if (cached && cached.rows && cached.rows.length > 0) {
+      setData(cached.rows);
+      // Check if last fetch was more than 24 hours ago
+      var age = Date.now() - (cached.fetchedAt || 0);
+      if (age > 24 * 60 * 60 * 1000) fetchData();
+    } else {
+      fetchData();
+    }
+  }, [ok]);
+
+  function simplifyWarehouse(wh, vendor) {
+    var w = (wh || "").trim();
+    var v = (vendor || "").trim();
+    if (v === "VID0040" || v.toLowerCase().indexOf("pawtree") >= 0) return "CA - Pawtree";
+    if (w.indexOf("CP-CA") >= 0) return "CA";
+    if (w.indexOf("CP-NJ") >= 0) return "NJ";
+    if (w.indexOf("CP-FL") >= 0) return "FL";
+    if (w.indexOf("CP-TX") >= 0) return "TX";
+    return w.replace("HILL-", "");
+  }
+
+  function parseDate(d) {
+    if (!d) return null;
+    var s = String(d);
+    if (s.indexOf("T") >= 0) s = s.split("T")[0];
+    var parts = s.split(/[-\/]/);
+    if (parts.length === 3) {
+      var yr = parts[0].length === 4 ? parseInt(parts[0]) : parseInt(parts[2]);
+      var mo = parts[0].length === 4 ? parseInt(parts[1]) - 1 : parseInt(parts[0]) - 1;
+      var dy = parts[0].length === 4 ? parseInt(parts[2]) : parseInt(parts[1]);
+      var dt = new Date(yr, mo, dy);
+      if (!isNaN(dt.getTime())) return dt;
+    }
+    var fallback = new Date(d);
+    return isNaN(fallback.getTime()) ? null : fallback;
+  }
+
+  function businessDaysSince(date) {
+    if (!date) return 0;
+    var now = new Date(); now.setHours(0,0,0,0);
+    var d = new Date(date); d.setHours(0,0,0,0);
+    if (d >= now) return 0;
+    var count = 0;
+    var cur = new Date(d);
+    while (cur < now) {
+      cur.setDate(cur.getDate() + 1);
+      var day = cur.getDay();
+      if (day !== 0 && day !== 6) count++;
+    }
+    return count;
+  }
+
+  function isDatePast(dateStr) {
+    var d = parseDate(dateStr);
+    if (!d) return false;
+    var now = new Date(); now.setHours(0,0,0,0);
+    return d < now;
+  }
+
+  // For a bare month/day, anchor the year to a reference date (the PO's order
+  // date) rather than today \u2014 an ETA can't precede the order, so a month/day
+  // that falls before the order date must be the following year. This stays
+  // correct even when the ETA is entered late. Falls back to today if no
+  // reference date is available.
+  function smartEtaYear(month, day, refDate) {
+    var ref = (refDate && !isNaN(refDate.getTime()))
+      ? new Date(refDate.getFullYear(), refDate.getMonth(), refDate.getDate())
+      : (function() { var t = new Date(); return new Date(t.getFullYear(), t.getMonth(), t.getDate()); })();
+    var y = ref.getFullYear();
+    var cand = new Date(y, month - 1, day);
+    return cand < ref ? y + 1 : y;
+  }
+  // Normalize an ETA the user typed. Accepts M/D (year auto-filled from refDate),
+  // M/D/YY, or M/D/YYYY (also tolerates - as a separator). Unparseable input is
+  // left as-is so we never clobber what the user typed.
+  function normalizeEta(raw, refDate) {
+    if (raw == null) return "";
+    var s = String(raw).trim();
+    if (!s) return "";
+    var m = s.match(/^(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2}|\d{4}))?$/);
+    if (!m) return s;
+    var month = parseInt(m[1], 10), day = parseInt(m[2], 10);
+    if (month < 1 || month > 12 || day < 1 || day > 31) return s;
+    var year;
+    if (m[3] == null || m[3] === "") year = smartEtaYear(month, day, refDate);
+    else if (m[3].length === 2) year = 2000 + parseInt(m[3], 10);
+    else year = parseInt(m[3], 10);
+    return month + "/" + day + "/" + year;
+  }
+
+  function formatDate(d) {
+    var dt = parseDate(d);
+    if (!dt) return "";
+    return (dt.getMonth() + 1) + "/" + dt.getDate() + "/" + dt.getFullYear();
+  }
+
+  // Sort: NJ first, then CA, then CA - Pawtree
+  var sorted = useMemo(function() {
+    var arr = data.slice();
+    if (hpSort.col === "date") {
+      arr.sort(function(a, b) { var da = parseDate(a.DateOrdered) || new Date(0); var db = parseDate(b.DateOrdered) || new Date(0); return hpSort.dir === "desc" ? db - da : da - db; });
+    } else if (hpSort.col === "po") {
+      arr.sort(function(a, b) { return hpSort.dir === "desc" ? (b.PONumber || "").localeCompare(a.PONumber || "") : (a.PONumber || "").localeCompare(b.PONumber || ""); });
+    } else if (hpSort.col === "wh") {
+      arr.sort(function(a, b) { var wa = simplifyWarehouse(a.Warehouse, a.Vendor); var wb = simplifyWarehouse(b.Warehouse, b.Vendor); return hpSort.dir === "desc" ? wb.localeCompare(wa) : wa.localeCompare(wb); });
+    } else {
+      arr.sort(function(a, b) { var wa = simplifyWarehouse(a.Warehouse, a.Vendor); var wb = simplifyWarehouse(b.Warehouse, b.Vendor); var order = { "NJ": 0, "CA": 1, "FL": 2, "TX": 3, "CA - Pawtree": 4 }; var oa = order[wa] != null ? order[wa] : 5; var ob = order[wb] != null ? order[wb] : 5; if (oa !== ob) return oa - ob; return (a.PONumber || "").localeCompare(b.PONumber || ""); });
+    }
+    return arr;
+  }, [data, hpSort]);
+
+  var stats = useMemo(function() {
+    var total = data.length;
+    var overdue = data.filter(function(r) { return businessDaysSince(parseDate(r.DateOrdered)) >= 14; }).length;
+    var withEta = data.filter(function(r) { return meta[r.PONumber] && meta[r.PONumber].eta; }).length;
+    var pastEta = data.filter(function(r) { var m = meta[r.PONumber]; return m && m.eta && isDatePast(m.eta); }).length;
+    return { total: total, overdue: overdue, withEta: withEta, pastEta: pastEta };
+  }, [data, meta]);
+
+  return <div>
+    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
+      <Gate ok={ok} prompt={lp} style={Object.assign({}, S.btn(), { padding: "10px 20px" })} onClick={fetchData} disabled={loading}>{loading ? <><Spinner /> Fetching...</> : <><IconRefresh /> {data.length > 0 ? "Refresh" : "Load Data"}</>}</Gate>
+      {data.length > 0 && <span style={{ fontSize: 12, color: "#6B7280" }}>{data.length} open POs</span>}
+      {data.length > 0 && (function() { var cached = sGet("hills-pawtree-data"); if (cached && cached.fetchedAt) { var d = new Date(cached.fetchedAt); return <span style={{ fontSize: 11, color: "#9CA3AF" }}>Last refreshed: {d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>; } return null; })()}
+    </div>
+
+    {data.length > 0 && <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 20 }}>
+      <div style={Object.assign({}, S.statCard, { background: "#EEF4FF" })}><div style={{ fontSize: 11, color: "#6B8ABF", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>Open POs</div><div style={{ fontSize: 28, fontWeight: 500, color: "#2563EB", marginTop: 6 }}>{stats.total}</div></div>
+      <div style={Object.assign({}, S.statCard, { background: stats.overdue > 0 ? "#FEF2F2" : "#ECFDF5" })}><div style={{ fontSize: 11, color: stats.overdue > 0 ? "#C47070" : "#6B9E8A", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>Overdue (14+ days)</div><div style={{ fontSize: 28, fontWeight: 500, color: stats.overdue > 0 ? "#DC2626" : "#059669", marginTop: 6 }}>{stats.overdue}</div></div>
+      <div style={Object.assign({}, S.statCard, { background: "#FEF7EC" })}><div style={{ fontSize: 11, color: "#B08A4A", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>ETA Set</div><div style={{ fontSize: 28, fontWeight: 500, color: "#D97706", marginTop: 6 }}>{stats.withEta}</div></div>
+      <div style={Object.assign({}, S.statCard, { background: stats.pastEta > 0 ? "#FEF2F2" : "#ECFDF5" })}><div style={{ fontSize: 11, color: stats.pastEta > 0 ? "#C47070" : "#6B9E8A", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>Past ETA</div><div style={{ fontSize: 28, fontWeight: 500, color: stats.pastEta > 0 ? "#DC2626" : "#059669", marginTop: 6 }}>{stats.pastEta}</div></div>
+    </div>}
+
+    {data.length > 0 ? <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto" })}>
+      <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 13 }}>
+        <thead><tr>
+          <th onClick={function() { setHpSort(hpSort.col === "po" ? { col: "po", dir: hpSort.dir === "desc" ? "asc" : "desc" } : { col: "po", dir: "asc" }); }} style={Object.assign({}, S.th, { cursor: "pointer", userSelect: "none" })}>PO{hpSort.col === "po" ? (hpSort.dir === "desc" ? " \u25BE" : " \u25B4") : ""}</th>
+          <th onClick={function() { setHpSort(hpSort.col === "wh" ? { col: "wh", dir: hpSort.dir === "desc" ? "asc" : "desc" } : { col: "wh", dir: "asc" }); }} style={Object.assign({}, S.th, { cursor: "pointer", userSelect: "none" })}>Warehouse{hpSort.col === "wh" ? (hpSort.dir === "desc" ? " \u25BE" : " \u25B4") : ""}</th>
+          <th onClick={function() { setHpSort(hpSort.col === "date" ? { col: "date", dir: hpSort.dir === "desc" ? "asc" : "desc" } : { col: "date", dir: "desc" }); }} style={Object.assign({}, S.th, { cursor: "pointer", userSelect: "none" })}>PO Order Date{hpSort.col === "date" ? (hpSort.dir === "desc" ? " \u25BE" : " \u25B4") : ""}</th>
+          <th style={Object.assign({}, S.th, { minWidth: 140 })}>PO ETA</th>
+          <th style={Object.assign({}, S.th, { minWidth: 200 })}>Notes</th>
+        </tr></thead>
+        <tbody>{sorted.map(function(r, i) {
+          var po = r.PONumber || "";
+          var wh = simplifyWarehouse(r.Warehouse, r.Vendor);
+          var orderedDate = parseDate(r.DateOrdered);
+          var bDays = businessDaysSince(orderedDate);
+          var isOverdue = bDays >= 14;
+          var poMeta = meta[po] || {};
+          var etaPast = poMeta.eta && isDatePast(poMeta.eta);
+
+          return <tr key={i}>
+            <td style={Object.assign({}, S.td, { fontWeight: 600, color: "#1F2937" })}>{po}</td>
+            <td style={S.td}><span style={Object.assign({}, S.badge(wh === "NJ" ? "blue" : wh === "FL" ? "danger" : wh === "TX" ? "success" : wh.indexOf("Pawtree") >= 0 ? "purple" : "default"))}>{wh}</span></td>
+            <td style={Object.assign({}, S.td, { position: "relative" })}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ color: isOverdue ? "#DC2626" : "#374151" }}>{formatDate(r.DateOrdered)}</span>
+                {isOverdue && <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 10, background: "#FEF2F2", color: "#DC2626", fontWeight: 600 }}>{bDays}d overdue</span>}
+              </div>
+            </td>
+            <td style={S.td}>
+              <input type="text" data-navcol="eta" data-navrow={i} onKeyDown={function(e) { hpNav(e, "eta", i); }} value={poMeta.eta || ""} onChange={function(e) { updateMeta(po, "eta", e.target.value); }} onBlur={function(e) { var norm = normalizeEta(e.target.value, orderedDate); if (norm !== (poMeta.eta || "")) updateMeta(po, "eta", norm); }} placeholder="mm/dd/yyyy" style={Object.assign({}, S.inp, { padding: "6px 10px", background: etaPast ? "rgba(220,38,38,0.06)" : (poMeta.eta ? "#F9FAFB" : "#FBEADB"), borderColor: etaPast ? "rgba(220,38,38,0.3)" : (poMeta.eta ? "#E5E7EB" : "transparent"), color: etaPast ? "#DC2626" : "#374151" })} />
+              {etaPast && <div style={{ fontSize: 10, color: "#DC2626", marginTop: 2, fontWeight: 500 }}>Should be delivered</div>}
+            </td>
+            <td style={S.td}>
+              <input type="text" data-navcol="notes" data-navrow={i} onKeyDown={function(e) { hpNav(e, "notes", i); }} value={poMeta.notes || ""} onChange={function(e) { updateMeta(po, "notes", e.target.value); }} placeholder="Add notes..." style={Object.assign({}, S.inp, { padding: "6px 10px" })} />
+            </td>
+          </tr>;
+        })}</tbody>
+      </table>
+    </div> : !loading && <div style={Object.assign({}, S.card, { textAlign: "center", padding: 60, color: "#9CA3AF" })}>Click <strong>Load Data</strong> to fetch open Hills & Pawtree POs from Acumatica.</div>}
+  </div>;
+}
+
+/* ═══════ FUZE TRACKER ═══════ */
+function FuzeTracker(props) {
+  var toast = props.toast, cred = props.cred;
+  var TOOL_COLOR = "#F59E0B";
+  var _wh = useState("TP-NY"), whTab = _wh[0], setWhTab = _wh[1];
+  var _d = useState([]), data = _d[0], setData = _d[1];
+  var _ld = useState(false), loading = _ld[0], setLoading = _ld[1];
+  var _q = useState(""), search = _q[0], setSearch = _q[1];
+  var _vf = useState("all"), vendorFilter = _vf[0], setVendorFilter = _vf[1];
+  var _sf = useState("all"), statusFilter = _sf[0], setStatusFilter = _sf[1];
+  var _idMap = useState({}), invIdMap = _idMap[0], setInvIdMap = _idMap[1];
+  var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
+
+  function normalizeNdc(s) { return (s || "").replace(/\D/g, ""); }
+
+  useEffect(function() {
+    if (!cred || !cred.username || !cred.password) return;
+    var m = true;
+    var crossRefP = fetch("/api/acumatica", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "stock-cross-ref", username: cred.username, password: cred.password }),
+    }).then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; });
+    var ndcLookupP = fetch("/api/acumatica", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "ndc-lookup", username: cred.username, password: cred.password }),
+    }).then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; });
+    Promise.all([crossRefP, ndcLookupP]).then(function(both) {
+      if (!m) return;
+      var map = {};
+      if (both[0] && both[0].data) {
+        both[0].data.forEach(function(row) {
+          var ndc = normalizeNdc(row.NDC);
+          var invId = (row.InventoryID || "").trim();
+          if (ndc && invId && !map[ndc]) map[ndc] = invId;
+        });
+      }
+      if (both[1] && both[1].data) {
+        both[1].data.forEach(function(row) {
+          var ndc = normalizeNdc(row.AlternateID);
+          var invId = (row.InventoryID || "").trim();
+          if (ndc && invId && !map[ndc]) map[ndc] = invId;
+        });
+      }
+      setInvIdMap(map);
+    });
+    return function() { m = false; };
+  }, [cred]);
+
+  var _lastFetched = useState(null), lastFetched = _lastFetched[0], setLastFetched = _lastFetched[1];
+  var fetchSheet = useCallback(function(wh, silent) {
+    if (!silent) setLoading(true);
+    fetch("/api/sheets?wh=" + encodeURIComponent(wh) + "&_t=" + Date.now(), { cache: "no-store" })
+      .then(function(r) { return r.json(); })
+      .then(function(json) {
+        if (json.error) { if (!silent) toast(json.error, "error"); setData([]); }
+        else {
+          setData(json.data || []);
+          setLastFetched(Date.now());
+          if (!silent) toast("Loaded " + (json.count || 0) + " items for " + wh);
+          kvPost("fuze-tracker-" + wh, { data: json.data || [], fetchedAt: Date.now() }).catch(function() {});
+        }
+      })
+      .catch(function(err) { if (!silent) toast("Error: " + err.message, "error"); })
+      .finally(function() { setLoading(false); });
+  }, [toast]);
+
+  function getTodayReset() {
+    var now = new Date();
+    var et = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
+    var reset = new Date(et); reset.setHours(5, 0, 0, 0);
+    if (et < reset) reset.setDate(reset.getDate() - 1);
+    return reset.getTime();
+  }
+
+  useEffect(function() {
+    var m = true;
+    kvGet("fuze-tracker-" + whTab).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+      if (!m) return;
+      if (d && d.data && d.data.data && d.data.data.length > 0) {
+        setData(d.data.data);
+        var resetTime = getTodayReset();
+        if (d.data.fetchedAt && d.data.fetchedAt < resetTime) {
+          fetchSheet(whTab, true);
+        }
+      } else {
+        fetchSheet(whTab);
+      }
+    }).catch(function() { if (m) fetchSheet(whTab); });
+    return function() { m = false; };
+  }, [whTab]);
+
+  var uniqueVendors = useMemo(function() { return Array.from(new Set(data.map(function(r) { return r["Supplier"]; }).filter(Boolean))).sort(); }, [data]);
+
+  var filtered = useMemo(function() {
+    var d = data.slice();
+    if (search) { var s = search.toLowerCase(); d = d.filter(function(r) { return (r["Supplier"] || "").toLowerCase().indexOf(s) >= 0 || (r["NDC"] || "").toLowerCase().indexOf(s) >= 0 || (r["Product Description"] || "").toLowerCase().indexOf(s) >= 0 || (r["PO No."] || "").toLowerCase().indexOf(s) >= 0 || (r["Tracking #"] || "").toLowerCase().indexOf(s) >= 0; }); }
+    if (vendorFilter !== "all") d = d.filter(function(r) { return r["Supplier"] === vendorFilter; });
+    if (statusFilter === "pending") d = d.filter(function(r) { return r["Received?**"] !== "TRUE" && r["Received?**"] !== "true"; });
+    if (statusFilter === "received") d = d.filter(function(r) { return r["Received?**"] === "TRUE" || r["Received?**"] === "true"; });
+    if (statusFilter === "landed") d = d.filter(function(r) { return r["Landed Onsite?"] === "TRUE" || r["Landed Onsite?"] === "true"; });
+    return d;
+  }, [data, search, vendorFilter, statusFilter]);
+
+  var stats = useMemo(function() {
+    var total = data.length;
+    var received = data.filter(function(r) { return r["Received?**"] === "TRUE" || r["Received?**"] === "true"; }).length;
+    var landed = data.filter(function(r) { return r["Landed Onsite?"] === "TRUE" || r["Landed Onsite?"] === "true"; }).length;
+    var pending = total - received;
+    return { total: total, received: received, landed: landed, pending: pending };
+  }, [data]);
+
+  var whTabs = [{ id: "TP-NY", label: "Brooklyn" }, { id: "TP-OH", label: "Seven Hills" }, { id: "TP-CA", label: "Hayward" }, { id: "TP-TX", label: "Dallas" }];
+
+  return <div>
+    {/* Warehouse tabs */}
+    <div style={{ display: "flex", gap: 4, marginBottom: 20, background: "#FFFFFF", borderRadius: 10, padding: 3, width: "fit-content", border: "0.5px solid #E5E7EB" }}>
+      {whTabs.map(function(t) { return <button key={t.id} onClick={function() { setWhTab(t.id); setSearch(""); setVendorFilter("all"); setStatusFilter("all"); }} style={S.pill(whTab === t.id, TOOL_COLOR)}>{t.label}{whTab === t.id && data.length > 0 && <span style={{ fontSize: 10, background: "rgba(255,255,255,0.25)", padding: "1px 6px", borderRadius: 4, marginLeft: 4 }}>{data.length}</span>}</button>; })}
+    </div>
+
+    {/* Stat cards */}
+    {data.length > 0 && <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 20 }}>
+      <div style={Object.assign({}, S.statCard, { background: "#EEF4FF" })}><div style={{ fontSize: 11, color: "#6B8ABF", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>Total Items</div><div style={{ fontSize: 28, fontWeight: 500, color: "#2563EB", marginTop: 6 }}>{stats.total}</div></div>
+      <div style={Object.assign({}, S.statCard, { background: "#FEF7EC" })}><div style={{ fontSize: 11, color: "#B08A4A", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>Pending</div><div style={{ fontSize: 28, fontWeight: 500, color: "#D97706", marginTop: 6 }}>{stats.pending}</div></div>
+      <div style={Object.assign({}, S.statCard, { background: "#F0FDF4" })}><div style={{ fontSize: 11, color: "#6B9E8A", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>Received</div><div style={{ fontSize: 28, fontWeight: 500, color: "#059669", marginTop: 6 }}>{stats.received}</div></div>
+      <div style={Object.assign({}, S.statCard, { background: "#EEF4FF" })}><div style={{ fontSize: 11, color: "#6B8ABF", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>Landed</div><div style={{ fontSize: 28, fontWeight: 500, color: "#3B82F6", marginTop: 6 }}>{stats.landed}</div></div>
+    </div>}
+
+    {/* Toolbar */}
+    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+      <input style={Object.assign({}, S.inp, { maxWidth: 220 })} placeholder="Search..." value={search} onChange={function(e) { setSearch(e.target.value); }} />
+      <select style={S.sel} value={vendorFilter} onChange={function(e) { setVendorFilter(e.target.value); }}><option value="all">All Suppliers</option>{uniqueVendors.map(function(v) { return <option key={v} value={v}>{v}</option>; })}</select>
+      <select style={S.sel} value={statusFilter} onChange={function(e) { setStatusFilter(e.target.value); }}>
+        <option value="all">All Statuses</option>
+        <option value="pending">Pending</option>
+        <option value="received">Received</option>
+        <option value="landed">Landed</option>
+      </select>
+      <div style={{ flex: 1 }} />
+      <CacheStatus lastFetchedAt={lastFetched} cacheHit={false} refreshing={loading} color={TOOL_COLOR} onRefresh={function() { fetchSheet(whTab); }} />
+      <span style={{ fontSize: 12, color: "#6B7280" }}>{filtered.length}/{data.length}</span>
+    </div>
+
+    {/* Table */}
+    {data.length > 0 ? <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto", maxHeight: "calc(100vh - 320px)" })}>
+      <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
+        <thead><tr>
+          <th style={S.th}>Supplier</th>
+          <th style={S.th}>NDC</th>
+          <th style={Object.assign({}, S.th, { minWidth: 200 })}>Product Description</th>
+          <th style={S.th}>Inventory ID</th>
+          <th style={Object.assign({}, S.th, { textAlign: "right" })}>Pkg Qty</th>
+          <th style={Object.assign({}, S.th, { textAlign: "right" })}>Expected BOH</th>
+          <th style={S.th}>PO No.</th>
+          <th style={S.th}>Order Date</th>
+          <th style={S.th}>Expected Arrival</th>
+          <th style={S.th}>Tracking #</th>
+          <th style={S.th}>Received</th>
+          <th style={S.th}>Landed</th>
+        </tr></thead>
+        <tbody>{filtered.map(function(r, i) {
+          var isReceived = r["Received?**"] === "TRUE" || r["Received?**"] === "true";
+          var isLanded = r["Landed Onsite?"] === "TRUE" || r["Landed Onsite?"] === "true";
+          var invId = invIdMap[normalizeNdc(r["NDC"])] || "";
+          return <tr key={i}>
+            <td style={Object.assign({}, S.td, { color: "#1F2937", fontWeight: 500 })}>{r["Supplier"]}</td>
+            <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, whiteSpace: "nowrap" })}>{r["NDC"]}</td>
+            <td style={S.td}>{r["Product Description"]}</td>
+            <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, color: invId ? "#D97706" : "#9CA3AF", fontWeight: 600 })}>{invId || "\u2014"}</td>
+            <td style={Object.assign({}, S.td, { textAlign: "right" })}>{r["Pkg Qty"]}</td>
+            <td style={Object.assign({}, S.td, { textAlign: "right" })}>{r["Expected BOH Increase"]}</td>
+            <td style={S.td}>{r["PO No."]}</td>
+            <td style={Object.assign({}, S.td, { whiteSpace: "nowrap" })}>{r["Order Date"]}</td>
+            <td style={Object.assign({}, S.td, { whiteSpace: "nowrap" })}>{r["Expected Arrival"]}</td>
+            <td style={Object.assign({}, S.td, { fontSize: 11, maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })}>{r["Tracking #"]}</td>
+            <td style={Object.assign({}, S.td, { textAlign: "center" })}><span style={S.badge(isReceived ? "success" : "warning")}>{isReceived ? "Yes" : "No"}</span></td>
+            <td style={Object.assign({}, S.td, { textAlign: "center" })}><span style={S.badge(isLanded ? "success" : "default")}>{isLanded ? "Yes" : "No"}</span></td>
+          </tr>;
+        })}</tbody>
+      </table>
+    </div> : <div style={Object.assign({}, S.card, { textAlign: "center", padding: 60, color: "#9CA3AF" })}>{loading ? <Spinner color={TOOL_COLOR} size={20} /> : "No data loaded. Check that the sheet URLs are configured."}</div>}
+  </div>;
+}
+
+/* ═══════ GGM TRACKER ═══════ */
+function GGMTracker(props) {
+  var toast = props.toast, cred = props.cred;
+  var TOOL_COLOR = "#8B5CF6";
+  var _wh = useState("GGM-KY"), whTab = _wh[0], setWhTab = _wh[1];
+  var _d = useState([]), data = _d[0], setData = _d[1];
+  var _ld = useState(false), loading = _ld[0], setLoading = _ld[1];
+  var _q = useState(""), search = _q[0], setSearch = _q[1];
+  var _vf = useState("all"), vendorFilter = _vf[0], setVendorFilter = _vf[1];
+  var _sf = useState("all"), statusFilter = _sf[0], setStatusFilter = _sf[1];
+  var _idMap = useState({}), invIdMap = _idMap[0], setInvIdMap = _idMap[1];
+  var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
+
+  function normalizeNdc(s) { return (s || "").replace(/\D/g, ""); }
+
+  useEffect(function() {
+    if (!cred || !cred.username || !cred.password) return;
+    var m = true;
+    var crossRefP = fetch("/api/acumatica", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "stock-cross-ref", username: cred.username, password: cred.password }),
+    }).then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; });
+    var ndcLookupP = fetch("/api/acumatica", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "ndc-lookup", username: cred.username, password: cred.password }),
+    }).then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; });
+    Promise.all([crossRefP, ndcLookupP]).then(function(both) {
+      if (!m) return;
+      var map = {};
+      if (both[0] && both[0].data) {
+        both[0].data.forEach(function(row) {
+          var ndc = normalizeNdc(row.NDC);
+          var invId = (row.InventoryID || "").trim();
+          if (ndc && invId && !map[ndc]) map[ndc] = invId;
+        });
+      }
+      if (both[1] && both[1].data) {
+        both[1].data.forEach(function(row) {
+          var ndc = normalizeNdc(row.AlternateID);
+          var invId = (row.InventoryID || "").trim();
+          if (ndc && invId && !map[ndc]) map[ndc] = invId;
+        });
+      }
+      setInvIdMap(map);
+    });
+    return function() { m = false; };
+  }, [cred]);
+
+  var _lastFetched = useState(null), lastFetched = _lastFetched[0], setLastFetched = _lastFetched[1];
+  var fetchSheet = useCallback(function(wh, silent) {
+    if (!silent) setLoading(true);
+    fetch("/api/sheets?wh=" + encodeURIComponent(wh) + "&_t=" + Date.now(), { cache: "no-store" })
+      .then(function(r) { return r.json(); })
+      .then(function(json) {
+        if (json.error) { if (!silent) toast(json.error, "error"); setData([]); }
+        else {
+          setData(json.data || []);
+          setLastFetched(Date.now());
+          if (!silent) toast("Loaded " + (json.count || 0) + " items for " + wh);
+          kvPost("ggm-tracker-" + wh, { data: json.data || [], fetchedAt: Date.now() }).catch(function() {});
+        }
+      })
+      .catch(function(err) { if (!silent) toast("Error: " + err.message, "error"); })
+      .finally(function() { setLoading(false); });
+  }, [toast]);
+
+  function getTodayReset() {
+    var now = new Date();
+    var et = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
+    var reset = new Date(et); reset.setHours(5, 0, 0, 0);
+    if (et < reset) reset.setDate(reset.getDate() - 1);
+    return reset.getTime();
+  }
+
+  useEffect(function() {
+    var m = true;
+    kvGet("ggm-tracker-" + whTab).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+      if (!m) return;
+      if (d && d.data && d.data.data && d.data.data.length > 0) {
+        setData(d.data.data);
+        var resetTime = getTodayReset();
+        if (d.data.fetchedAt && d.data.fetchedAt < resetTime) {
+          fetchSheet(whTab, true);
+        }
+      } else {
+        fetchSheet(whTab);
+      }
+    }).catch(function() { if (m) fetchSheet(whTab); });
+    return function() { m = false; };
+  }, [whTab]);
+
+  var uniqueVendors = useMemo(function() { return Array.from(new Set(data.map(function(r) { return r["Manufacturer"]; }).filter(Boolean))).sort(); }, [data]);
+
+  var filtered = useMemo(function() {
+    var d = data.slice();
+    if (search) { var s = search.toLowerCase(); d = d.filter(function(r) { return (r["Manufacturer"] || "").toLowerCase().indexOf(s) >= 0 || (r["NDC"] || "").toLowerCase().indexOf(s) >= 0 || (r["Product Description"] || "").toLowerCase().indexOf(s) >= 0 || (r["PO Number"] || "").toLowerCase().indexOf(s) >= 0 || (r["Tracking #"] || "").toLowerCase().indexOf(s) >= 0; }); }
+    if (vendorFilter !== "all") d = d.filter(function(r) { return r["Manufacturer"] === vendorFilter; });
+    if (statusFilter === "pending") d = d.filter(function(r) { return r["Received?"] !== "TRUE" && r["Received?"] !== "true"; });
+    if (statusFilter === "received") d = d.filter(function(r) { return r["Received?"] === "TRUE" || r["Received?"] === "true"; });
+    return d;
+  }, [data, search, vendorFilter, statusFilter]);
+
+  var stats = useMemo(function() {
+    var total = data.length;
+    var received = data.filter(function(r) { return r["Received?"] === "TRUE" || r["Received?"] === "true"; }).length;
+    var pending = total - received;
+    return { total: total, received: received, pending: pending };
+  }, [data]);
+
+  var whTabs = [{ id: "GGM-KY", label: "Kentucky" }, { id: "GGM-AZ", label: "Arizona" }];
+
+  return <div>
+    {/* Warehouse tabs */}
+    <div style={{ display: "flex", gap: 4, marginBottom: 20, background: "#FFFFFF", borderRadius: 10, padding: 3, width: "fit-content", border: "0.5px solid #E5E7EB" }}>
+      {whTabs.map(function(t) { return <button key={t.id} onClick={function() { setWhTab(t.id); setSearch(""); setVendorFilter("all"); setStatusFilter("all"); }} style={S.pill(whTab === t.id, TOOL_COLOR)}>{t.label}{whTab === t.id && data.length > 0 && <span style={{ fontSize: 10, background: "rgba(255,255,255,0.25)", padding: "1px 6px", borderRadius: 4, marginLeft: 4 }}>{data.length}</span>}</button>; })}
+    </div>
+
+    {/* Stat cards */}
+    {data.length > 0 && <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 20 }}>
+      <div style={Object.assign({}, S.statCard, { background: "#EEF4FF" })}><div style={{ fontSize: 11, color: "#6B8ABF", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>Total Items</div><div style={{ fontSize: 28, fontWeight: 500, color: "#2563EB", marginTop: 6 }}>{stats.total}</div></div>
+      <div style={Object.assign({}, S.statCard, { background: "#FEF7EC" })}><div style={{ fontSize: 11, color: "#B08A4A", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>Pending</div><div style={{ fontSize: 28, fontWeight: 500, color: "#D97706", marginTop: 6 }}>{stats.pending}</div></div>
+      <div style={Object.assign({}, S.statCard, { background: "#F0FDF4" })}><div style={{ fontSize: 11, color: "#6B9E8A", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>Received</div><div style={{ fontSize: 28, fontWeight: 500, color: "#059669", marginTop: 6 }}>{stats.received}</div></div>
+    </div>}
+
+    {/* Toolbar */}
+    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+      <input style={Object.assign({}, S.inp, { maxWidth: 220 })} placeholder="Search..." value={search} onChange={function(e) { setSearch(e.target.value); }} />
+      <select style={S.sel} value={vendorFilter} onChange={function(e) { setVendorFilter(e.target.value); }}><option value="all">All Manufacturers</option>{uniqueVendors.map(function(v) { return <option key={v} value={v}>{v}</option>; })}</select>
+      <select style={S.sel} value={statusFilter} onChange={function(e) { setStatusFilter(e.target.value); }}>
+        <option value="all">All Statuses</option>
+        <option value="pending">Pending</option>
+        <option value="received">Received</option>
+      </select>
+      <div style={{ flex: 1 }} />
+      <CacheStatus lastFetchedAt={lastFetched} cacheHit={false} refreshing={loading} color={TOOL_COLOR} onRefresh={function() { fetchSheet(whTab); }} />
+      <span style={{ fontSize: 12, color: "#6B7280" }}>{filtered.length}/{data.length}</span>
+    </div>
+
+    {/* Table */}
+    {data.length > 0 ? <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto", maxHeight: "calc(100vh - 320px)" })}>
+      <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
+        <thead><tr>
+          <th style={S.th}>Manufacturer</th>
+          <th style={S.th}>NDC</th>
+          <th style={Object.assign({}, S.th, { minWidth: 200 })}>Product Description</th>
+          <th style={S.th}>Inventory ID</th>
+          <th style={Object.assign({}, S.th, { textAlign: "right" })}>Pkg Qty</th>
+          <th style={Object.assign({}, S.th, { textAlign: "right" })}>Expected BOH</th>
+          <th style={S.th}>PO Number</th>
+          <th style={S.th}>Order Date</th>
+          <th style={S.th}>Expected Arrival</th>
+          <th style={S.th}>Tracking #</th>
+          <th style={S.th}>Received</th>
+        </tr></thead>
+        <tbody>{filtered.map(function(r, i) {
+          var isReceived = r["Received?"] === "TRUE" || r["Received?"] === "true";
+          var invId = invIdMap[normalizeNdc(r["NDC"])] || r["Inventory ID"] || "";
+          return <tr key={i}>
+            <td style={Object.assign({}, S.td, { color: "#1F2937", fontWeight: 500 })}>{r["Manufacturer"]}</td>
+            <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, whiteSpace: "nowrap" })}>{r["NDC"]}</td>
+            <td style={S.td}>{r["Product Description"]}</td>
+            <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, color: invId ? "#7C3AED" : "#9CA3AF", fontWeight: 600 })}>{invId || "\u2014"}</td>
+            <td style={Object.assign({}, S.td, { textAlign: "right" })}>{r["Pkg Qty"]}</td>
+            <td style={Object.assign({}, S.td, { textAlign: "right" })}>{r["Expected BOH Increase"]}</td>
+            <td style={S.td}>{r["PO Number"]}</td>
+            <td style={Object.assign({}, S.td, { whiteSpace: "nowrap" })}>{r["Order Date"]}</td>
+            <td style={Object.assign({}, S.td, { whiteSpace: "nowrap" })}>{r["Expected Arrival"]}</td>
+            <td style={Object.assign({}, S.td, { fontSize: 11, maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })}>{r["Tracking #"]}</td>
+            <td style={Object.assign({}, S.td, { textAlign: "center" })}><span style={S.badge(isReceived ? "success" : "warning")}>{isReceived ? "Yes" : "No"}</span></td>
+          </tr>;
+        })}</tbody>
+      </table>
+    </div> : <div style={Object.assign({}, S.card, { textAlign: "center", padding: 60, color: "#9CA3AF" })}>{loading ? <Spinner color={TOOL_COLOR} size={20} /> : "No data loaded. Check that the sheet URLs are configured."}</div>}
+  </div>;
+}
+
+/* ═══════ HOW-TO GUIDE ═══════ */
+function HowToGuide(props) {
+  var toast = props.toast;
+  var TOOL_COLOR = "#6B7280";
+  var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
+  var _open = useState(null), openSection = _open[0], setOpen = _open[1];
+
+  function toggle(id) { setOpen(openSection === id ? null : id); }
+
+  function Section(p) {
+    var isOpen = openSection === p.id;
+    return <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden", marginBottom: 12 })}>
+      <div onClick={function() { toggle(p.id); }} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", cursor: "pointer", background: isOpen ? "var(--color-background-secondary)" : "transparent" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ width: 8, height: 8, borderRadius: "50%", background: p.color, flexShrink: 0 }} />
+          <span style={{ fontSize: 15, fontWeight: 500, color: "var(--color-text-primary)" }}>{p.title}</span>
+        </div>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-text-secondary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transition: "transform 0.2s", transform: isOpen ? "rotate(180deg)" : "rotate(0deg)" }}><polyline points="6 9 12 15 18 9" /></svg>
+      </div>
+      {isOpen && <div style={{ padding: "0 20px 20px", fontSize: 13, color: "var(--color-text-secondary)", lineHeight: 1.7 }}>{p.children}</div>}
+    </div>;
+  }
+
+  function Step(p) {
+    return <div style={{ display: "flex", gap: 10, margin: "10px 0" }}>
+      <div style={{ width: 22, height: 22, borderRadius: "50%", background: p.color || "#E5E7EB", color: p.color ? "#fff" : "#6B7280", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 600, flexShrink: 0, marginTop: 1 }}>{p.n}</div>
+      <div style={{ fontSize: 13, color: "var(--color-text-primary)", lineHeight: 1.6 }}>{p.children}</div>
+    </div>;
+  }
+
+  function Note(p) {
+    return <div style={{ background: "var(--color-background-secondary)", borderRadius: 8, padding: "10px 14px", margin: "10px 0", fontSize: 12, color: "var(--color-text-secondary)", lineHeight: 1.6 }}>{p.children}</div>;
+  }
+
+  function TruckloaderWalkthrough() {
+    var _wt = useState(0), wtStep = _wt[0], setWtStep = _wt[1];
+    var wtS = { card: { background: "var(--color-background-secondary)", borderRadius: 8, padding: 12, margin: "8px 0" }, label: { fontSize: 10, color: "var(--color-text-tertiary)", textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: 500, marginBottom: 6 }, formula: { background: "var(--color-background-primary)", borderRadius: 8, padding: "12px 16px", margin: "8px 0", fontFamily: "var(--font-mono, monospace)", fontSize: 12, color: "var(--color-text-primary)", lineHeight: 1.8, border: "0.5px solid var(--color-border-tertiary)" }, tbl: { width: "100%", borderCollapse: "collapse", fontSize: 11, margin: "6px 0" }, th: { padding: "5px 8px", textAlign: "left", background: "var(--color-background-secondary)", color: "var(--color-text-secondary)", fontWeight: 500, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.3px", borderBottom: "0.5px solid var(--color-border-tertiary)" }, td: { padding: "5px 8px", borderBottom: "0.5px solid var(--color-border-tertiary)", color: "var(--color-text-primary)", fontSize: 11 }, badge: function(bg, color, text) { return <span style={{ background: bg, color: color, padding: "2px 8px", borderRadius: 5, fontSize: 10, fontWeight: 500 }}>{text}</span>; } };
+
+    var wtTabs = [
+      { t: "Data sources", c: function() { return <div>
+        <div style={wtS.card}><div style={wtS.label}>Three systems feed the truckloader</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 140, background: "#E1F5EE", borderRadius: 8, padding: "8px 10px", border: "0.5px solid #0F6E56" }}><div style={{ fontSize: 12, fontWeight: 500, color: "#085041" }}>Acumatica (live)</div><div style={{ fontSize: 11, color: "#0F6E56", marginTop: 3 }}>Replenishment needs GI: what items are below reorder point, qty available, qty on PO, max qty. Also Whse Replenish for replenishment classes (A/B/C).</div></div>
+            <div style={{ flex: 1, minWidth: 140, background: "#FAEEDA", borderRadius: 8, padding: "8px 10px", border: "0.5px solid #854F0B" }}><div style={{ fontSize: 12, fontWeight: 500, color: "#633806" }}>Hills Master (upload)</div><div style={{ fontSize: 11, color: "#854F0B", marginTop: 3 }}>Manufacturer spreadsheet with pallet weights, cases per pallet. Uploaded once, stored in cloud (KV). Re-upload only when Hill's sends a new version.</div></div>
+            <div style={{ flex: 1, minWidth: 140, background: "#FAECE7", borderRadius: 8, padding: "8px 10px", border: "0.5px solid #993C1D" }}><div style={{ fontSize: 12, fontWeight: 500, color: "#712B13" }}>Netstock DOH (upload)</div><div style={{ fontSize: 11, color: "#993C1D", marginTop: 3 }}>Days on hand, sales velocity, on-hand quantities. Used only for fill suggestions. Uploaded each session, not stored.</div></div>
+          </div>
+        </div></div>; }
+      },
+      { t: "The GI query", c: function() { return <div>
+        <div style={{ fontSize: 12, color: "var(--color-text-secondary)", marginBottom: 8 }}>A custom query in Acumatica that joins three database tables:</div>
+        <div style={{ background: "var(--color-background-primary)", borderRadius: 8, border: "0.5px solid var(--color-border-tertiary)", overflow: "hidden" }}>
+          <table style={wtS.tbl}><thead><tr><th style={wtS.th}>Table</th><th style={wtS.th}>What it holds</th><th style={wtS.th}>Key fields</th></tr></thead>
+          <tbody>
+            <tr><td style={wtS.td}>INItemSite</td><td style={wtS.td}>Per-warehouse item settings</td><td style={Object.assign({}, wtS.td, { fontFamily: "monospace", fontSize: 10 })}>MinQty (reorder pt), MaxQty, SafetyStock</td></tr>
+            <tr><td style={wtS.td}>INSiteStatus</td><td style={wtS.td}>Live inventory levels</td><td style={Object.assign({}, wtS.td, { fontFamily: "monospace", fontSize: 10 })}>QtyAvail, QtyPOOrders, QtySOBooked</td></tr>
+            <tr><td style={wtS.td}>InventoryItem</td><td style={wtS.td}>Item master</td><td style={Object.assign({}, wtS.td, { fontFamily: "monospace", fontSize: 10 })}>InventoryCD, Description, ItemStatus</td></tr>
+          </tbody></table>
+        </div>
+        <div style={wtS.formula}><span style={{ color: "#534AB7", fontWeight: 500 }}>(</span> QtyAvail <span style={{ color: "#534AB7", fontWeight: 500 }}>{"\u2264"}</span> MinQty <span style={{ color: "#534AB7", fontWeight: 500 }}>AND</span> MinQty <span style={{ color: "#534AB7", fontWeight: 500 }}>{">"}</span> 0 <span style={{ color: "#534AB7", fontWeight: 500 }}>)</span><br /><span style={{ color: "#534AB7", fontWeight: 500 }}>AND</span> ItemStatus <span style={{ color: "#534AB7", fontWeight: 500 }}>=</span> <span style={{ color: "#0F6E56", fontWeight: 500 }}>Active</span><br /><span style={{ color: "#534AB7", fontWeight: 500 }}>AND (</span> SiteID <span style={{ color: "#534AB7", fontWeight: 500 }}>=</span> <span style={{ color: "#0F6E56", fontWeight: 500 }}>HILL-CP-CA</span> <span style={{ color: "#534AB7", fontWeight: 500 }}>OR</span> SiteID <span style={{ color: "#534AB7", fontWeight: 500 }}>=</span> <span style={{ color: "#0F6E56", fontWeight: 500 }}>HILL-CP-NJ</span> <span style={{ color: "#534AB7", fontWeight: 500 }}>)</span></div>
+        <div style={{ fontSize: 11, color: "var(--color-text-secondary)" }}>Returns ~66 items below reorder point. Exposed via OData so the website can call it as an API.</div>
+      </div>; }
+      },
+      { t: "Client filter", c: function() { return <div>
+        <div style={{ fontSize: 12, color: "var(--color-text-secondary)", marginBottom: 8 }}>The GI returns all items below reorder, but Prepare Replenishment also factors in stock on PO. The website applies this filter:</div>
+        <div style={wtS.formula}><span style={{ color: "#534AB7", fontWeight: 500 }}>Show item if:</span> QtyAvail <span style={{ color: "#534AB7", fontWeight: 500 }}>+</span> OnPO <span style={{ color: "#534AB7", fontWeight: 500 }}>{"\u2264"}</span> ReorderPoint</div>
+        <div style={{ background: "var(--color-background-primary)", borderRadius: 8, border: "0.5px solid var(--color-border-tertiary)", overflow: "hidden" }}>
+          <table style={wtS.tbl}><thead><tr><th style={wtS.th}>Item</th><th style={Object.assign({}, wtS.th, { textAlign: "right" })}>Qty avail</th><th style={Object.assign({}, wtS.th, { textAlign: "right" })}>On PO</th><th style={Object.assign({}, wtS.th, { textAlign: "right" })}>Projected</th><th style={Object.assign({}, wtS.th, { textAlign: "right" })}>Reorder pt</th><th style={wtS.th}>Show?</th></tr></thead>
+          <tbody>
+            <tr><td style={Object.assign({}, wtS.td, { fontFamily: "monospace" })}>8694</td><td style={Object.assign({}, wtS.td, { textAlign: "right" })}>190</td><td style={Object.assign({}, wtS.td, { textAlign: "right" })}>288</td><td style={Object.assign({}, wtS.td, { textAlign: "right" })}>478</td><td style={Object.assign({}, wtS.td, { textAlign: "right" })}>502</td><td style={Object.assign({}, wtS.td, { color: "#059669", fontWeight: 500 })}>Yes (478 {"\u2264"} 502)</td></tr>
+            <tr><td style={Object.assign({}, wtS.td, { fontFamily: "monospace" })}>10013</td><td style={Object.assign({}, wtS.td, { textAlign: "right" })}>254</td><td style={Object.assign({}, wtS.td, { textAlign: "right" })}>520</td><td style={Object.assign({}, wtS.td, { textAlign: "right" })}>774</td><td style={Object.assign({}, wtS.td, { textAlign: "right" })}>459</td><td style={Object.assign({}, wtS.td, { color: "#DC2626", fontWeight: 500 })}>No (774 {">"} 459)</td></tr>
+          </tbody></table>
+        </div>
+        <div style={{ fontSize: 11, color: "var(--color-text-secondary)", marginTop: 6 }}>This reduces ~66 GI items to ~37 that genuinely need ordering, matching Prepare Replenishment exactly.</div>
+      </div>; }
+      },
+      { t: "Order calc", c: function() { return <div>
+        <div style={wtS.formula}><span style={{ color: "#534AB7", fontWeight: 500 }}>Case need</span> = MaxQty <span style={{ color: "#534AB7", fontWeight: 500 }}>-</span> QtyAvail <span style={{ color: "#534AB7", fontWeight: 500 }}>-</span> OnPO<br /><span style={{ color: "#534AB7", fontWeight: 500 }}>Pallets</span> = <span style={{ color: "#534AB7", fontWeight: 500 }}>ceil(</span> CaseNeed <span style={{ color: "#534AB7", fontWeight: 500 }}>/</span> CasesPerPallet <span style={{ color: "#534AB7", fontWeight: 500 }}>)</span><br /><span style={{ color: "#534AB7", fontWeight: 500 }}>Order qty</span> = Pallets <span style={{ color: "#534AB7", fontWeight: 500 }}>{"\u00D7"}</span> CasesPerPallet<br /><span style={{ color: "#534AB7", fontWeight: 500 }}>Total lbs</span> = Pallets <span style={{ color: "#534AB7", fontWeight: 500 }}>{"\u00D7"}</span> PalletWeight</div>
+        <div style={{ fontSize: 12, color: "var(--color-text-secondary)", marginBottom: 6 }}>Worked example for item 8694 at HILL-CP-NJ:</div>
+        <div style={{ background: "var(--color-background-primary)", borderRadius: 8, border: "0.5px solid var(--color-border-tertiary)", overflow: "hidden" }}>
+          <table style={wtS.tbl}><thead><tr><th style={wtS.th}>Field</th><th style={wtS.th}>Source</th><th style={Object.assign({}, wtS.th, { textAlign: "right" })}>Value</th></tr></thead>
+          <tbody>
+            <tr><td style={wtS.td}>Max qty</td><td style={Object.assign({}, wtS.td, { fontFamily: "monospace", fontSize: 10 })}>Acumatica GI</td><td style={Object.assign({}, wtS.td, { textAlign: "right" })}>994</td></tr>
+            <tr><td style={wtS.td}>Qty available</td><td style={Object.assign({}, wtS.td, { fontFamily: "monospace", fontSize: 10 })}>Acumatica GI</td><td style={Object.assign({}, wtS.td, { textAlign: "right" })}>190</td></tr>
+            <tr><td style={wtS.td}>On PO</td><td style={Object.assign({}, wtS.td, { fontFamily: "monospace", fontSize: 10 })}>Acumatica GI</td><td style={Object.assign({}, wtS.td, { textAlign: "right" })}>228</td></tr>
+            <tr><td style={wtS.td}>Case need</td><td style={Object.assign({}, wtS.td, { fontFamily: "monospace", fontSize: 10 })}>994 - 190 - 228</td><td style={Object.assign({}, wtS.td, { textAlign: "right", color: "#D97706", fontWeight: 500 })}>576</td></tr>
+            <tr><td style={wtS.td}>Cases/pallet</td><td style={Object.assign({}, wtS.td, { fontFamily: "monospace", fontSize: 10 })}>Hills Master</td><td style={Object.assign({}, wtS.td, { textAlign: "right" })}>96</td></tr>
+            <tr><td style={wtS.td}>Pallets</td><td style={Object.assign({}, wtS.td, { fontFamily: "monospace", fontSize: 10 })}>ceil(576 / 96)</td><td style={Object.assign({}, wtS.td, { textAlign: "right", color: "#D97706", fontWeight: 500 })}>6</td></tr>
+            <tr><td style={wtS.td}>Order qty</td><td style={Object.assign({}, wtS.td, { fontFamily: "monospace", fontSize: 10 })}>6 {"\u00D7"} 96</td><td style={Object.assign({}, wtS.td, { textAlign: "right", color: "#059669", fontWeight: 600 })}>576</td></tr>
+            <tr><td style={wtS.td}>Total lbs</td><td style={Object.assign({}, wtS.td, { fontFamily: "monospace", fontSize: 10 })}>6 {"\u00D7"} 866.9</td><td style={Object.assign({}, wtS.td, { textAlign: "right", color: "#059669", fontWeight: 600 })}>5,201</td></tr>
+          </tbody></table>
+        </div>
+      </div>; }
+      },
+      { t: "Truck optimizer", c: function() { return <div>
+        <div style={wtS.formula}>1. Sort all items by weight, <span style={{ color: "#534AB7", fontWeight: 500 }}>heaviest first</span><br />2. For each item, find the truck with <span style={{ color: "#534AB7", fontWeight: 500 }}>least remaining space</span> that fits<br />3. If no truck fits, <span style={{ color: "#534AB7", fontWeight: 500 }}>open a new truck</span><br />4. If item exceeds 42,500 lbs, <span style={{ color: "#534AB7", fontWeight: 500 }}>split by pallet</span> across two trucks</div>
+        <div style={{ margin: "10px 0" }}>
+          {[{ label: "Truck 1", pct: 92, lbs: "39,100", color: "#059669" }, { label: "Truck 2", pct: 85, lbs: "36,200", color: "#059669" }, { label: "Truck 3", pct: 21, lbs: "9,100", color: "#D97706" }].map(function(t) {
+            return <div key={t.label} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5 }}>
+              <span style={{ fontSize: 11, color: "var(--color-text-secondary)", minWidth: 50 }}>{t.label}</span>
+              <div style={{ flex: 1, height: 14, background: "var(--color-background-primary)", borderRadius: 3, border: "0.5px solid var(--color-border-tertiary)", overflow: "hidden" }}><div style={{ height: "100%", width: t.pct + "%", background: t.color, borderRadius: 3 }} /></div>
+              <span style={{ fontSize: 10, fontWeight: 500, color: t.color, minWidth: 64, textAlign: "right" }}>{t.lbs} lbs</span>
+            </div>;
+          })}
+        </div>
+        <div style={{ fontSize: 11, color: "var(--color-text-secondary)" }}>Trucks under 35,000 lbs (amber) are flagged for fill suggestions.</div>
+      </div>; }
+      },
+      { t: "Fill suggestions", c: function() { return <div>
+        <div style={{ fontSize: 12, color: "var(--color-text-secondary)", marginBottom: 8 }}>Cross-references two data sources to find good candidates for underfilled trucks:</div>
+        <div style={wtS.formula}>Start with all Netstock items for the warehouse<br /><span style={{ color: "#534AB7", fontWeight: 500 }}>{"\u2192"}</span> Remove items already on the order<br /><span style={{ color: "#534AB7", fontWeight: 500 }}>{"\u2192"}</span> Remove items not in Acumatica Replen Class A/B/C<br /><span style={{ color: "#534AB7", fontWeight: 500 }}>{"\u2192"}</span> Remove pawTree items<br /><span style={{ color: "#534AB7", fontWeight: 500 }}>{"\u2192"}</span> Sort by DOH + DOO ascending<br /><span style={{ color: "#D85A30", fontWeight: 500 }}>{"\u2248"} 130 candidates</span></div>
+        <div style={{ fontSize: 12, color: "var(--color-text-secondary)", marginBottom: 4, fontWeight: 500 }}>Key columns:</div>
+        <div style={{ background: "var(--color-background-primary)", borderRadius: 8, border: "0.5px solid var(--color-border-tertiary)", overflow: "hidden" }}>
+          <table style={wtS.tbl}><thead><tr><th style={wtS.th}>Column</th><th style={wtS.th}>What it tells you</th></tr></thead>
+          <tbody>
+            <tr><td style={Object.assign({}, wtS.td, { fontWeight: 500 })}>DOH+DOO</td><td style={wtS.td}>Total days of stock coverage (lower = more urgent)</td></tr>
+            <tr><td style={Object.assign({}, wtS.td, { fontWeight: 500 })}>Days/Pal</td><td style={wtS.td}>How many days one pallet covers (fixed rate)</td></tr>
+            <tr><td style={Object.assign({}, wtS.td, { fontWeight: 500, color: "#7C3AED" })}>+Days</td><td style={wtS.td}>Total days being added at current pallet count (reactive)</td></tr>
+            <tr><td style={Object.assign({}, wtS.td, { fontWeight: 500, color: "#059669" })}>Order Qty</td><td style={wtS.td}>Cases being ordered at current pallet count (reactive)</td></tr>
+            <tr><td style={Object.assign({}, wtS.td, { fontWeight: 500 })}>Total Lbs</td><td style={wtS.td}>Weight impact on the truck (reactive)</td></tr>
+          </tbody></table>
+        </div>
+      </div>; }
+      },
+      { t: "CSV export", c: function() { return <div>
+        <div style={wtS.formula}><span style={{ color: "#534AB7", fontWeight: 500 }}>File name:</span> <span style={{ color: "#0F6E56", fontWeight: 500 }}>CA 4.11.26 Truck 1.csv</span><br /><span style={{ color: "#534AB7", fontWeight: 500 }}>Format:</span> Inventory ID, Warehouse, Order Qty<br /><span style={{ color: "#534AB7", fontWeight: 500 }}>Example:</span><br />8694, HILL-CP-CA, 576<br />10013, HILL-CP-CA, 520<br />6247, HILL-CP-CA, 800</div>
+        <div style={{ fontSize: 12, color: "var(--color-text-secondary)", marginBottom: 6, fontWeight: 500 }}>Complete workflow timing:</div>
+        <div style={{ background: "var(--color-background-primary)", borderRadius: 8, border: "0.5px solid var(--color-border-tertiary)", overflow: "hidden" }}>
+          <table style={wtS.tbl}><thead><tr><th style={Object.assign({}, wtS.th, { width: 20 })}>#</th><th style={wtS.th}>Step</th><th style={Object.assign({}, wtS.th, { textAlign: "right" })}>Time</th></tr></thead>
+          <tbody>
+            <tr><td style={wtS.td}>1</td><td style={wtS.td}>Upload Hills Master (first time only)</td><td style={Object.assign({}, wtS.td, { textAlign: "right" })}>30 sec</td></tr>
+            <tr><td style={wtS.td}>2</td><td style={wtS.td}>Pick warehouse, Fetch Replenishment</td><td style={Object.assign({}, wtS.td, { textAlign: "right" })}>5 sec</td></tr>
+            <tr><td style={wtS.td}>3</td><td style={wtS.td}>Review order table, adjust if needed</td><td style={Object.assign({}, wtS.td, { textAlign: "right" })}>1 min</td></tr>
+            <tr><td style={wtS.td}>4</td><td style={wtS.td}>Optimize Trucks</td><td style={Object.assign({}, wtS.td, { textAlign: "right" })}>1 sec</td></tr>
+            <tr><td style={wtS.td}>5</td><td style={wtS.td}>Upload DOH, add fill items</td><td style={Object.assign({}, wtS.td, { textAlign: "right" })}>3 min</td></tr>
+            <tr><td style={wtS.td}>6</td><td style={wtS.td}>Re-optimize, export CSVs</td><td style={Object.assign({}, wtS.td, { textAlign: "right" })}>10 sec</td></tr>
+          </tbody></table>
+        </div>
+        <div style={{ fontSize: 11, color: "var(--color-text-secondary)", marginTop: 8 }}>Total: under 5 minutes. The old Google Sheets workflow took 15-20 minutes.</div>
+      </div>; }
+      }
+    ];
+
+    return <div style={{ borderRadius: 10, border: "0.5px solid var(--color-border-tertiary)", overflow: "hidden" }}>
+      <div style={{ display: "flex", gap: 0, overflowX: "auto", borderBottom: "0.5px solid var(--color-border-tertiary)", background: "var(--color-background-secondary)" }}>
+        {wtTabs.map(function(tab, idx) {
+          var isActive = wtStep === idx;
+          return <button key={idx} onClick={function() { setWtStep(idx); }} style={{ padding: "8px 12px", fontSize: 11, fontWeight: isActive ? 500 : 400, border: "none", borderBottom: isActive ? "2px solid #D97706" : "2px solid transparent", cursor: "pointer", background: "transparent", color: isActive ? "#D97706" : "var(--color-text-secondary)", whiteSpace: "nowrap", transition: "all 0.15s" }}>{(idx + 1) + ". " + tab.t}</button>;
+        })}
+      </div>
+      <div style={{ padding: 14 }}>{wtTabs[wtStep].c()}</div>
+    </div>;
+  }
+
+  return <div>
+    <p style={{ fontSize: 14, color: "var(--color-text-secondary)", marginBottom: 20, lineHeight: 1.6 }}>Click any section below to see how it works. All tools require an Acumatica login unless noted otherwise.</p>
+
+    <Section id="po" title="PO tools (Brooklyn, Seven Hills, Hayward, Dallas, GoGoMeds)" color="#3B82F6">
+      <p style={{ marginBottom: 12 }}>Each warehouse tab shows today's purchase orders from Acumatica, grouped by vendor. This is your daily ordering dashboard.</p>
+      <Step n="1" color="#3B82F6">Click a warehouse in the sidebar (Brooklyn, Seven Hills, Hayward, Dallas, or a GoGoMeds site). The tool fetches today's POs from Acumatica via OData.</Step>
+      <Step n="2" color="#3B82F6">Review the order table. Items are grouped by vendor with shipping cost status shown. Short-dating items are flagged red, sell-off items orange. Flagged items sort to the top.</Step>
+      <Step n="3" color="#3B82F6">Add shipping notes per vendor if needed. These are saved and shared with your team via KV storage.</Step>
+      <Step n="4" color="#3B82F6">Click "Generate Email Drafts" to create one Gmail draft per vendor with the order details as an attached spreadsheet. Drafts appear in your Gmail ready to review and send.</Step>
+      <Step n="5" color="#3B82F6">When you run "Process All POs", the created lines are automatically appended to that warehouse's receiving tracker (the FuzeRX or GGM Google Sheet) — supplier, NDC, description, pack size, qty, PO number, order date, and Expected Arrival (Promise Date). Already-added POs aren't duplicated.</Step>
+      <Note>Data syncs across devices. If someone else fetches POs, your view updates within 8 seconds. Shipping rules (free shipping thresholds, fee calculations) are configurable under Settings {">"} Vendor Settings.</Note>
+      <Note>For TP warehouses (Brooklyn, Seven Hills, Hayward, Dallas), email is blocked when flagged items are present to prevent accidentally ordering short-dated product. GoGoMeds is exempt from this rule.</Note>
+    </Section>
+
+    <Section id="ndc" title="Generic PO Translator" color="#06B6D4">
+      <p style={{ marginBottom: 12 }}>Turns vendor PO PDFs (or a McKesson export) into validated Acumatica POs. It extracts NDCs, matches them to GEN- inventory IDs via the Generic Current NDCs OData, and lets you create the POs in Acumatica. Two tabs at the top: <span style={{ fontWeight: 500, color: "var(--color-text-primary)" }}>PO Translator</span> and <span style={{ fontWeight: 500, color: "var(--color-text-primary)" }}>Price Check</span>.</p>
+
+      <div style={{ fontWeight: 500, color: "var(--color-text-primary)", marginTop: 8, marginBottom: 6, fontSize: 13 }}>PO Translator tab</div>
+      <Step n="1" color="#06B6D4">Pick the vendor type: Keysource / Anda / Bloodworth / TopRX (PDF), McKesson (PDF + Export CSV), or GoGoMeds Crossovers (PDF).</Step>
+      <Step n="2" color="#06B6D4">Drop the PO PDF(s). The parser pulls NDC, quantity, description, PO number, and order date. It handles the wrapped-column Keysource/McKesson exports where the NDC and numbers spill onto separate lines.</Step>
+      <Step n="3" color="#06B6D4">Review the grid: OData match status, GEN- ID, UOM, qty, unit cost, and Δ% vs our average cost (red if the PO price is higher). Fix qty/price inline if needed.</Step>
+      <Step n="4" color="#06B6D4">Download CSV, or "Add to tracker" to append the lines to the receiving tracker, or "Create POs in Acumatica". After a successful create you can also Add to tracker from the results modal.</Step>
+      <Note>McKesson pricing comes only from the Export CSV's "Est. Net Price". If a line is in the PDF but not in the CSV, its price is left blank (it won't fall back to the PDF price) and it's flagged in MCK Warnings — fill it in manually before creating.</Note>
+      <Note>"Add to tracker" writes to the correct FuzeRX/GGM Google Sheet tab by warehouse. Expected BOH is a live formula (Pack Size {"\u00D7"} Pkg Qty); it appends to the true last row and is filter-proof.</Note>
+
+      <div style={{ fontWeight: 500, color: "var(--color-text-primary)", marginTop: 16, marginBottom: 6, fontSize: 13 }}>Price Check tab</div>
+      <Step n="1" color="#06B6D4">Search one item by NDC or by Mfr No (GEN- inventory ID).</Step>
+      <Step n="2" color="#06B6D4">It shows the item, our average cost per unit and per package, then you type a quoted price per unit to see how much more (red) or less (green) expensive it is vs our cost.</Step>
+    </Section>
+
+    <Section id="cycle" title="Cycle counting" color="#14B8A6">
+      <p style={{ marginBottom: 12 }}>Compares physical inventory counts (from warehouse SFTP BOH reports or CSV uploads) against Acumatica stock levels to identify discrepancies.</p>
+      <Step n="1" color="#14B8A6">Upload or paste your physical count data: either an SFTP BOH report from the warehouse, or a CSV with NDCs and counted quantities.</Step>
+      <Step n="2" color="#14B8A6">Upload a Stock Items export from Acumatica (cached locally so you only need to do this once until the data changes).</Step>
+      <Step n="3" color="#14B8A6">Select the warehouse and click Process. The tool matches items by NDC and shows the variance between physical count and system quantity.</Step>
+      <Step n="4" color="#14B8A6">Download the discrepancy report as a CSV for review or adjustment in Acumatica.</Step>
+    </Section>
+
+    <Section id="trackers" title="Short-dating and backorder trackers" color="#E879F9">
+      <p style={{ marginBottom: 12 }}>These two tools work identically but pull different data from Acumatica.</p>
+      <p style={{ marginBottom: 8 }}><span style={{ fontWeight: 500, color: "var(--color-text-primary)" }}>Short-Dating</span> shows items approaching expiration with their best-known dating. Use it to identify products that need to be sold, returned, or disposed of before they expire.</p>
+      <p style={{ marginBottom: 12 }}><span style={{ fontWeight: 500, color: "var(--color-text-primary)" }}>Backorders</span> shows items that are backordered from vendors with recovery dates and open quantities. Use it to track when stock will be available again.</p>
+      <Step n="1" color="#E879F9">Click "Sync Data" to pull the latest data from Acumatica. Results are cached locally.</Step>
+      <Step n="2" color="#E879F9">Filter by vendor or search for specific items. Data is displayed in a sortable table.</Step>
+      <Step n="3" color="#E879F9">Click "Generate Email Drafts" to create vendor-specific email drafts asking about better dating availability (short-dating) or recovery ETA updates (backorders).</Step>
+      <Note>Both tools fetch from dedicated Acumatica Generic Inquiries that surface the relevant item status data.</Note>
+    </Section>
+
+    <Section id="hills" title="Hills and Pawtree tracker" color="#10B981">
+      <p style={{ marginBottom: 12 }}>Tracks all open purchase orders for Hill's and Pawtree vendors. Shows PO number, date ordered, vendor, and warehouse with editable ETA and notes fields that sync across your team.</p>
+      <Step n="1" color="#10B981">Data loads automatically from a dedicated Acumatica GI that shows open and pending-approval POs for Hill's (VID0024) and Pawtree (VID0040).</Step>
+      <Step n="2" color="#10B981">Add ETA dates and notes for each PO. These are saved to KV storage and sync with other users every 10 seconds.</Step>
+      <Step n="3" color="#10B981">Filter by vendor (Hills vs Pawtree) or warehouse (CA, NJ, Pawtree). The table color-codes POs by age.</Step>
+      <Note>PO age coloring: green = recent, yellow = 5+ days, orange = 10+ days, red = 15+ days since ordered.</Note>
+    </Section>
+
+    <Section id="fuze" title="Fuze tracker" color="#F59E0B">
+      <p style={{ marginBottom: 12 }}>Tracks shipments processed by Fuze Health (your 3PL) across Brooklyn, Seven Hills, and Hayward warehouses. Shows PO details, tracking numbers, and received/landed status.</p>
+      <Step n="1" color="#F59E0B">Select a warehouse tab. Data loads from a connected Google Sheet that Fuze maintains.</Step>
+      <Step n="2" color="#F59E0B">Filter by vendor, search for specific POs or tracking numbers, or filter by status (pending, received, landed).</Step>
+      <Step n="3" color="#F59E0B">Stats cards at the top show total items, received count, landed count, and pending count for a quick overview.</Step>
+      <Note>This tool does not require Acumatica login. Data comes directly from the shared Fuze tracking sheets.</Note>
+    </Section>
+
+    <Section id="truck" title="Hills Truckloader" color="#D97706">
+      <p style={{ marginBottom: 12 }}>Automates the entire Hill's truck ordering workflow: pull replenishment needs from Acumatica, calculate pallet quantities, optimize items into 42,500 lb trucks, find fill items from Netstock, and export CSVs for import.</p>
+
+      <div style={{ fontWeight: 500, color: "var(--color-text-primary)", marginTop: 16, marginBottom: 6, fontSize: 13 }}>Data sources</div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+        <span style={{ background: "#E1F5EE", color: "#085041", padding: "3px 10px", borderRadius: 6, fontSize: 11, fontWeight: 500 }}>Acumatica GI (live)</span>
+        <span style={{ background: "#FAEEDA", color: "#633806", padding: "3px 10px", borderRadius: 6, fontSize: 11, fontWeight: 500 }}>Hills Master (upload once)</span>
+        <span style={{ background: "#FAECE7", color: "#712B13", padding: "3px 10px", borderRadius: 6, fontSize: 11, fontWeight: 500 }}>Netstock DOH (fill only)</span>
+      </div>
+
+      <div style={{ fontWeight: 500, color: "var(--color-text-primary)", marginTop: 16, marginBottom: 6, fontSize: 13 }}>Workflow</div>
+      <Step n="1" color="#D97706">Upload Hills Master spreadsheet (first time only, saved to cloud storage). This provides pallet weights and cases per pallet for every Hill's item.</Step>
+      <Step n="2" color="#D97706">Select warehouse (HILL-CP-CA or HILL-CP-NJ) and click Fetch Replenishment. The tool queries a custom Acumatica GI that finds items below reorder point, then filters client-side using the formula: QtyAvail + OnPO {"<="} ReorderPoint to match Prepare Replenishment exactly.</Step>
+      <Step n="3" color="#D97706">The order table auto-calculates: Case Need = MaxQty - QtyAvail - OnPO, rounded up to full pallets using Hills Master data. Review quantities, edit Case Need if needed.</Step>
+      <Step n="4" color="#D97706">Click Optimize Trucks. The bin-packing algorithm sorts items heaviest-first, then fits each into the truck with the least remaining space. Target is 42,500 lbs per truck. Items over one truck's capacity are automatically split by pallet count.</Step>
+      <Step n="5" color="#D97706">If a truck is under 35,000 lbs, use Fill Suggestions. Upload a Netstock DOH export, click Build Suggestions. The tool cross-references Acumatica's Whse Replenish for replenishment class (A/B/C only), excludes already-ordered items, and sorts by DOH+DOO ascending.</Step>
+      <Step n="6" color="#D97706">The fill page shows a split layout: suggestions on the left with Days/Pal and +Days columns for easy mental math, and a sticky panel on the right showing truck status and items you've added. Adjust pallets, click + to add, then re-optimize.</Step>
+      <Step n="7" color="#D97706">Export CSVs per truck (Inventory ID, Warehouse, Order Qty format) for Acumatica import.</Step>
+
+      <div style={{ fontWeight: 500, color: "var(--color-text-primary)", marginTop: 16, marginBottom: 6, fontSize: 13 }}>The Acumatica GI</div>
+      <Note>The "PURCH - Replenishment Needs" GI joins INItemSite (reorder settings), INSiteStatus (live stock), and InventoryItem (descriptions). Conditions: QtyAvail {"<="} MinQty AND MinQty {">"} 0 AND ItemStatus = Active AND warehouse is HILL-CP-CA or NJ. Exposed via OData. The GI returns all items below reorder point (~66); the website further filters to ~37 that genuinely need ordering by accounting for stock already on PO.</Note>
+
+      <div style={{ fontWeight: 500, color: "var(--color-text-primary)", marginTop: 20, marginBottom: 10, fontSize: 13 }}>Deep dive walkthrough</div>
+      <TruckloaderWalkthrough />
+    </Section>
+
+    <Section id="rules" title="Shipping rules" color="#6B7280">
+      <p style={{ marginBottom: 12 }}>Configure vendor-specific shipping cost rules used by the PO tools. Rules are saved in your browser.</p>
+      <Note>Rule format examples: "message:Free Shipping" for always-free vendors, "min:5000; message:Free Shipping; else:Not Free Shipping" for minimum order thresholds, "range:0-99.99=15%; range:100-1499.99=8%; min:1500; message:Free Shipping" for tiered percentage-based fees. Rules can be added, edited, or removed per vendor.</Note>
+    </Section>
+
+    <Section id="po-recon" title="PO Reconciliation (Settings)" color="#6366F1">
+      <p style={{ marginBottom: 12 }}>The safety net for POs created directly in Acumatica (not through the hub), so they still land on the FuzeRX / GGM receiving trackers. Also catches POs you ran through the Translator but forgot to Add to Tracker. Found under Settings {">"} PO Reconciliation.</p>
+      <Step n="1" color="#6366F1">Click "Check &amp; sync trackers" (or let the nightly job run — see below).</Step>
+      <Step n="2" color="#6366F1">It pulls the HD PO Tracker GIs (TP + GGM), keeps the last 6 days, and routes each warehouse to its receiving tab (Brooklyn / Seven Hills / Hayward / Dallas / KY / AZ).</Step>
+      <Step n="3" color="#6366F1">It reads each tab's existing PO refs live, then adds any PO whose Vendor Ref isn't already there. POs already present are skipped; lines with a blank Vendor Ref are skipped and reported.</Step>
+      <Step n="4" color="#6366F1">It re-reads each tab to verify the additions landed, and shows a running log the whole time.</Step>
+      <Note>Runs automatically every night at 8 PM. Generics are included (with NDC from the PO line's Alternate ID); Expected Arrival is left blank for Vetcove Generics and Bloodworth. Match key is Vendor Ref, so manual POs must have one.</Note>
+      <Note>To confirm the nightly job is healthy, open /api/cron/po-recon — a good response is {"{ \"ok\": true, ... }"}. If it says the Acumatica cron credentials are missing, set them in Vercel.</Note>
+    </Section>
+  </div>;
+}
+/* ═══════ TRUCKLOADER TOOL ═══════ */
+function TruckloaderTool(props) {
+  var toast = props.toast, ok = props.ok, lp = props.lp, cred = props.cred, gmail = props.gmail;
+  var TOOL_COLOR = "#D97706";
+  var TARGET = 42500;
+  var MIN_WEIGHT = 35000;
+  var TRUCK_COLORS = ["#d9ead3","#cfe2f3","#fff2cc","#f4cccc","#ead1dc","#d9d2e9","#fce5cd","#d0e0e3","#ccddff","#ccffcc","#ffe5cc","#e5ccff"];
+  // Truckloader warehouse map. Add new Hill's CP warehouses here.
+  // shortCode is used for CSV filename + email subject ("Vetcove <shortCode>").
+  // cpTo is the Central Pet recipient list for the email tab.
+  var WH_META = {
+    "HILL-CP-CA": { label: "California", shortCode: "CA", cpTo: "ap.petd.santafesprings@central.com, jcanter@centralpet.com, jspengler@central.com, hd-purchaseorders@vetcove.com" },
+    "HILL-CP-NJ": { label: "New Jersey", shortCode: "NJ", cpTo: "jcanter@centralpet.com, jspengler@central.com, hd-purchaseorders@vetcove.com, gcustode@central.com" },
+    "HILL-CP-FL": { label: "Tampa",      shortCode: "Tampa",  cpTo: "jcanter@centralpet.com, jspengler@central.com, hd-purchaseorders@vetcove.com" },
+    "HILL-CP-TX": { label: "Dallas",     shortCode: "Dallas", cpTo: "mcabrera@centralpet.com, jcanter@centralpet.com, jspengler@central.com, hd-purchaseorders@vetcove.com" },
+  };
+  var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
+
+  var _wh = useState("HILL-CP-CA"), warehouse = _wh[0], setWarehouse = _wh[1];
+  var _hm = useState(null), hillsMaster = _hm[0], setHillsMaster = _hm[1];
+  var _hmLoad = useState(true), hmLoading = _hmLoad[0], setHmLoading = _hmLoad[1];
+  var _replen = useState([]), replenData = _replen[0], setReplenData = _replen[1];
+  var _rLoad = useState(false), replenLoading = _rLoad[0], setReplenLoading = _rLoad[1];
+  var _order = useState([]), orderItems = _order[0], setOrderItems = _order[1];
+  var _confirmRemove = useState(null), confirmRemove = _confirmRemove[0], setConfirmRemove = _confirmRemove[1];
+  var _trucks = useState(null), truckGroups = _trucks[0], setTruckGroups = _trucks[1];
+  var _step = useState("order"), step = _step[0], setStep = _step[1];
+  var _nsDoh = useState(null), netstockDoh = _nsDoh[0], setNetstockDoh = _nsDoh[1];
+  var _fills = useState(null), fillSuggestions = _fills[0], setFillSuggestions = _fills[1];
+  var _highlight = useState("all"), highlightTruck = _highlight[0], setHighlightTruck = _highlight[1];
+  var _fillAdded = useState([]), fillAdded = _fillAdded[0], setFillAdded = _fillAdded[1];
+  var _orderSort = useState(null), orderSort = _orderSort[0], setOrderSort = _orderSort[1];
+  var _fillSort = useState(null), fillSort = _fillSort[0], setFillSort = _fillSort[1];
+  var _dohTarget = useState(45), dohTarget = _dohTarget[0], setDohTarget = _dohTarget[1];
+  var _fillPals = useState({}), fillPals = _fillPals[0], setFillPals = _fillPals[1];
+  // Shared derived values for a Fill Suggestions row (used by both the table and its sort).
+  function fillCalc(f) {
+    var dailySales = f.avgSales > 0 ? f.avgSales / 30 : 0;
+    var unitsForTarget = Math.max(0, (dohTarget * dailySales) - f.onHand - f.onOrder);
+    var sugPals = (f.unitsPerPallet > 0 && dailySales > 0) ? Math.max(1, Math.ceil(unitsForTarget / f.unitsPerPallet)) : "";
+    var curPals = fillPals[f.productCode] || sugPals || 1;
+    var rowLbs = curPals * (f.palletWeight || 0);
+    var addDays = (dailySales > 0 && f.unitsPerPallet > 0) ? Math.round((curPals * f.unitsPerPallet) / dailySales) : null;
+    var newDoh = addDays == null ? null : (f.combined + addDays);
+    var daysPal = (dailySales > 0 && f.unitsPerPallet > 0) ? Math.round(f.unitsPerPallet / dailySales) : null;
+    var orderQty = f.unitsPerPallet > 0 ? (curPals * f.unitsPerPallet) : null;
+    return { dailySales: dailySales, sugPals: sugPals, curPals: curPals, rowLbs: rowLbs, addDays: addDays, newDoh: newDoh, daysPal: daysPal, orderQty: orderQty };
+  }
+  function fillSortVal(f, col) {
+    var c = fillCalc(f);
+    if (col === "Inv ID") return String(f.productCode || "");
+    if (col === "Description") return String(f.description || "");
+    if (col === "R") return String(f.replenClass || "");
+    if (col === "On Hand") return f.onHand;
+    if (col === "Days/Pal") return c.daysPal;
+    if (col === "DOH+DOO") return f.combined;
+    if (col === "+Days") return c.addDays;
+    if (col === "= New DOH") return c.newDoh;
+    if (col === "Pallets") return c.curPals;
+    if (col === "Order Qty") return c.orderQty;
+    if (col === "Total Lbs") return c.rowLbs;
+    return null;
+  }
+  function sortedFillList() {
+    if (!fillSuggestions) return [];
+    if (!fillSort) return fillSuggestions;
+    var d = fillSort.dir === "desc" ? -1 : 1;
+    return fillSuggestions.slice().sort(function (a, b) {
+      var va = fillSortVal(a, fillSort.col), vb = fillSortVal(b, fillSort.col);
+      var na = va == null || va === "", nb = vb == null || vb === "";
+      if (na && nb) return 0; if (na) return 1; if (nb) return -1;
+      if (typeof va === "number" && typeof vb === "number") return (va - vb) * d;
+      va = String(va).toLowerCase(); vb = String(vb).toLowerCase();
+      return va < vb ? -d : (va > vb ? d : 0);
+    });
+  }
+  var _hillsDraftSent = useState(false), hillsDraftSent = _hillsDraftSent[0], setHillsDraftSent = _hillsDraftSent[1];
+  var _cpDraftSent = useState(false), cpDraftSent = _cpDraftSent[0], setCpDraftSent = _cpDraftSent[1];
+  var _emailOverrides = useState({}), emailOverrides = _emailOverrides[0], setEmailOverrides = _emailOverrides[1];
+  var DEFAULT_HILLS_TO = "truckloador@hillspet.com, brian_shively@hillspet.com, hd-purchaseorders@vetcove.com";
+  var _editingEmail = useState(null), editingEmail = _editingEmail[0], setEditingEmail = _editingEmail[1];
+  var _emailEditValue = useState(""), emailEditValue = _emailEditValue[0], setEmailEditValue = _emailEditValue[1];
+  var fileRef = useRef(null);
+  var nsFileRef = useRef(null);
+
+  // Load Hills Master from KV on mount
+  useEffect(function() {
+    var m = true;
+    (async function() {
+      try {
+        var resp = await kvGet("hills-master");
+        var json = await resp.json();
+        if (m && json.data && json.data.items && json.data.items.length > 0) {
+          setHillsMaster(json.data);
+          sSet("hills-master", json.data);
+          if (m) setHmLoading(false);
+          return;
+        }
+      } catch (e) {}
+      if (m) {
+        var saved = sGet("hills-master");
+        if (saved && saved.items) setHillsMaster(saved);
+        setHmLoading(false);
+      }
+    })();
+    return function() { m = false; };
+  }, []);
+
+  // Load Email recipient overrides from KV (shared with team)
+  useEffect(function() {
+    var m = true;
+    kvGet("truckloader-email-overrides").then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+      if (m && d && d.data && typeof d.data === "object") setEmailOverrides(d.data);
+    }).catch(function() {});
+    return function() { m = false; };
+  }, []);
+
+  // Load Netstock DOH from KV on mount (wipes at 4am EST daily)
+  useEffect(function() {
+    var m = true;
+    kvGet("netstock-doh").then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+      if (!m || !d || !d.data || !d.data.items) return;
+      var savedAt = d.data._savedAt || 0;
+      var now = new Date();
+      var et = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
+      var reset = new Date(et); reset.setHours(4, 0, 0, 0);
+      if (et < reset) reset.setDate(reset.getDate() - 1);
+      if (savedAt < reset.getTime()) { kvPost("netstock-doh", { _savedAt: Date.now() }); return; }
+      setNetstockDoh({ items: d.data.items, fileName: d.data.fileName || "Loaded from cloud" });
+    }).catch(function() {});
+    return function() { m = false; };
+  }, []);
+
+  // Parse Hills Master xlsx
+  function handleHillsUpload(e) {
+    var file = e.target.files && e.target.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function(ev) {
+      try {
+        var XLSX = require("xlsx");
+        var wb = XLSX.read(ev.target.result, { type: "array" });
+        var ws = wb.Sheets[wb.SheetNames[0]];
+        var rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
+        if (rows.length === 0) { toast("No data found in file", "error"); return; }
+        var items = rows.map(function(r) {
+          var id = String(r["Inventory ID"] || r["InventoryID"] || r["inventory id"] || "").trim();
+          var utp = parseFloat(r["Units to Pallet"] || r["UnitsToPallet"] || 0);
+          var pgw = parseFloat(r["Pallet Gross Weight"] || r["PalletGrossWeight"] || 0);
+          var desc = r["Description"] || r["Descr"] || "";
+          return { id: id, unitsPerPallet: utp, palletWeight: pgw, description: desc };
+        }).filter(function(x) { return x.id && x.palletWeight > 0; });
+        var data = { items: items, uploadedAt: Date.now(), fileName: file.name };
+        setHillsMaster(data);
+        sSet("hills-master", data);
+        kvPost("hills-master", data).catch(function() {});
+        toast("Hills Master loaded: " + items.length + " items");
+      } catch (err) { toast("Error parsing file: " + err.message, "error"); }
+    };
+    reader.readAsArrayBuffer(file);
+    e.target.value = "";
+  }
+
+  // Build Hills Master lookup
+  var hmLookup = useMemo(function() {
+    if (!hillsMaster || !hillsMaster.items) return {};
+    var m = {};
+    hillsMaster.items.forEach(function(it) { m[it.id] = it; });
+    return m;
+  }, [hillsMaster]);
+
+  // Fetch replenishment needs from GI
+  var fetchReplen = useCallback(async function() {
+    if (!ok) { lp(); return; }
+    if (!hillsMaster) { toast("Upload Hills Master first", "error"); return; }
+    setReplenLoading(true);
+    setTruckGroups(null);
+    setStep("order");
+    setFillSuggestions(null);
+    setFillAdded([]);
+    setFillPals({});
+    try {
+      var rows = await fetchAcumatica("replenishment-needs", null, cred.username, cred.password);
+      setReplenData(rows);
+      // Filter by warehouse client-side (GI params don't pass through OData)
+      var whRows = rows.filter(function(r) { return String(r.Warehouse || "").trim() === warehouse; });
+      // Filter: QtyAvail + OnPO + POPrepared < ReorderPoint (match Prepare Replenishment)
+      var filtered = whRows.filter(function(r) {
+        var avail = parseFloat(r.QtyAvailable) || 0;
+        var onPO = parseFloat(r.OnPO) || 0;
+        var poPrepared = parseFloat(r.POPrepared) || 0;
+        var reorder = parseFloat(r.ReorderPoint) || 0;
+        return (avail + onPO + poPrepared) <= reorder && reorder > 0;
+      });
+      // Build order items with Hills Master lookup
+      var items = filtered.map(function(r) {
+        var id = String(r.InventoryID || "").trim();
+        var hm = hmLookup[id] || {};
+        var maxQty = parseFloat(r.MaxQty) || 0;
+        var avail = parseFloat(r.QtyAvailable) || 0;
+        var onPO = parseFloat(r.OnPO) || 0;
+        var poPrepared = parseFloat(r.POPrepared) || 0;
+        var caseNeed = Math.max(0, Math.round(maxQty - avail - onPO - poPrepared));
+        var casesPerPallet = hm.unitsPerPallet || 0;
+        var lbsPerPallet = hm.palletWeight || 0;
+        var palletCount = casesPerPallet > 0 ? caseNeed / casesPerPallet : 0;
+        var roundedPallets = Math.ceil(palletCount);
+        var orderQty = roundedPallets * (casesPerPallet || 1);
+        var totalLbs = roundedPallets * lbsPerPallet;
+        return {
+          inventoryID: id,
+          description: r.Description || hm.description || "",
+          caseNeed: caseNeed,
+          casesPerPallet: casesPerPallet,
+          roundedPallets: roundedPallets,
+          orderQty: orderQty,
+          lbsPerPallet: lbsPerPallet,
+          totalLbs: totalLbs,
+          qtyAvail: parseFloat(r.QtyAvailable) || 0,
+          onPO: parseFloat(r.OnPO) || 0,
+          reorderPt: parseFloat(r.ReorderPoint) || 0,
+          maxQty: maxQty,
+          inHillsMaster: !!hm.unitsPerPallet,
+        };
+      }).filter(function(x) { return x.caseNeed > 0; });
+      setOrderItems(items);
+      toast("Loaded " + items.length + " items to order for " + warehouse);
+    } catch (err) { toast("Error: " + err.message, "error"); }
+    setReplenLoading(false);
+  }, [ok, lp, cred, warehouse, hillsMaster, hmLookup, toast]);
+
+  // Recalculate a single order item when user edits caseNeed
+  function updateCaseNeed(idx, val) {
+    var items = orderItems.slice();
+    var it = Object.assign({}, items[idx]);
+    it.caseNeed = Math.max(0, parseInt(val) || 0);
+    var cpp = it.casesPerPallet || 1;
+    it.roundedPallets = Math.ceil(it.caseNeed / cpp);
+    it.orderQty = it.roundedPallets * cpp;
+    it.totalLbs = it.roundedPallets * it.lbsPerPallet;
+    items[idx] = it;
+    setOrderItems(items);
+    setTruckGroups(null);
+  }
+
+  function removeItem(idx) {
+    var item = orderItems[idx];
+    if (item && !item.isFill) {
+      setConfirmRemove({ id: item.inventoryID, action: function() { var items = orderItems.slice(); items.splice(idx, 1); setOrderItems(items); setTruckGroups(null); setConfirmRemove(null); } });
+      return;
+    }
+    var items = orderItems.slice();
+    items.splice(idx, 1);
+    setOrderItems(items);
+    setTruckGroups(null);
+  }
+
+  // DOH-priority truck optimizer: lowest DOH → Truck 1
+  function optimizeTrucks() {
+    if (orderItems.length === 0) { toast("No items to optimize", "error"); return; }
+    var target = TARGET * 100;
+    var minW = MIN_WEIGHT * 100;
+    // Build DOH lookup from Netstock if uploaded
+    var dohLookup = {};
+    if (netstockDoh && netstockDoh.items) {
+      netstockDoh.items.forEach(function(ns) { dohLookup[ns.productCode] = ns.doh; });
+    }
+    var available = [];
+    var errors = [];
+    orderItems.forEach(function(item, idx) {
+      var weight = Math.round(item.totalLbs * 100);
+      if (weight <= 0) return;
+      var doh = dohLookup[item.inventoryID] != null ? dohLookup[item.inventoryID] : null;
+      var urgency = doh != null ? doh : item.qtyAvail;
+      if (weight > target) {
+        if (item.lbsPerPallet > 0 && item.roundedPallets > 0) {
+          var maxPals = Math.floor(target / Math.round(item.lbsPerPallet * 100));
+          var remainder = item.roundedPallets - maxPals;
+          if (maxPals === 0) { errors.push({ idx: idx, reason: "Single pallet > 42,500 lbs" }); return; }
+          var c1 = maxPals * Math.round(item.lbsPerPallet * 100);
+          var c2 = remainder * Math.round(item.lbsPerPallet * 100);
+          if (c2 > target) { errors.push({ idx: idx, reason: "Too large, needs 2+ splits" }); return; }
+          available.push({ weight: c1, idx: idx, isSplit: true, splitPals: maxPals, urgency: urgency });
+          available.push({ weight: c2, idx: idx, isSplit: true, splitPals: remainder, urgency: urgency });
+        } else { errors.push({ idx: idx, reason: "Missing pallet info for split" }); }
+      } else {
+        available.push({ weight: weight, idx: idx, isSplit: false, urgency: urgency });
+      }
+    });
+    // Sort by urgency ascending (lowest DOH/qty first → Truck 1), tiebreak by inventoryID
+    available.sort(function(a, b) { var d = a.urgency - b.urgency; if (d !== 0) return d; var idA = orderItems[a.idx].inventoryID || ""; var idB = orderItems[b.idx].inventoryID || ""; return idA.localeCompare(idB); });
+    // Sequential first-fit: fill Truck 1 first, then 2, etc.
+    var groups = [];
+    available.forEach(function(item) {
+      var placed = false;
+      for (var i = 0; i < groups.length; i++) {
+        if (groups[i].total + item.weight <= target) {
+          groups[i].items.push(item); groups[i].total += item.weight;
+          placed = true; break;
+        }
+      }
+      if (!placed) { groups.push({ items: [item], total: item.weight }); }
+    });
+    // Build truck assignments
+    var trucks = groups.map(function(g, ti) {
+      var totalLbs = g.total / 100;
+      var remaining = (target - g.total) / 100;
+      var needsFill = g.total < minW;
+      var assignments = g.items.map(function(it) {
+        var oi = orderItems[it.idx];
+        return { inventoryID: oi.inventoryID, description: oi.description, orderQty: it.isSplit ? it.splitPals * oi.casesPerPallet : oi.orderQty, pallets: it.isSplit ? it.splitPals : oi.roundedPallets, lbs: it.weight / 100, isSplit: it.isSplit, isFill: !!oi.isFill, idx: it.idx };
+      });
+      return { label: "Truck " + (ti + 1), totalLbs: totalLbs, remaining: remaining, needsFill: needsFill, color: TRUCK_COLORS[ti % TRUCK_COLORS.length], assignments: assignments, errors: [] };
+    });
+    // Add errors to a virtual truck
+    if (errors.length > 0) {
+      var errAssign = errors.map(function(e) { return { inventoryID: orderItems[e.idx].inventoryID, description: orderItems[e.idx].description, error: e.reason, idx: e.idx }; });
+      trucks.push({ label: "Errors", totalLbs: 0, remaining: 0, needsFill: false, color: "#ff9999", assignments: errAssign, errors: errors, isError: true });
+    }
+    setTruckGroups(trucks);
+    setFillAdded([]);
+    setStep("trucks");
+    var underFill = trucks.filter(function(t) { return t.needsFill; }).length;
+    var dohNote = Object.keys(dohLookup).length > 0 ? " (sorted by DOH)" : " (sorted by available qty)";
+    if (underFill > 0) toast(trucks.length + " trucks created" + dohNote + ". " + underFill + " flagged to fill (<35k lbs)", "info");
+    else toast(trucks.length + " trucks optimized" + dohNote + "!");
+  }
+
+  // ─── Acumatica PO creation state + handler ───
+  var _acuLoading = useState(false), acuLoading = _acuLoading[0], setAcuLoading = _acuLoading[1];
+  var _acuConfirm = useState(false), acuConfirm = _acuConfirm[0], setAcuConfirm = _acuConfirm[1];
+  var _acuResult  = useState(null),  acuResult  = _acuResult[0],  setAcuResult  = _acuResult[1];
+  var _ediSending = useState(false), ediSending = _ediSending[0], setEdiSending = _ediSending[1];
+  var _ediConfirm = useState(false), ediConfirm = _ediConfirm[0], setEdiConfirm = _ediConfirm[1];
+  var _ediResult  = useState(null),  ediResult  = _ediResult[0],  setEdiResult  = _ediResult[1];
+  var _ediSent    = useState(false), ediSent    = _ediSent[0],    setEdiSent    = _ediSent[1];
+  var _createdPOs = useState([]),    createdPOs = _createdPOs[0],  setCreatedPOs = _createdPOs[1];
+
+  async function createPOsInAcumatica() {
+    setAcuConfirm(false);
+    if (!truckGroups || truckGroups.length === 0) { toast("No trucks to create", "error"); return; }
+    if (!cred || !cred.username || !cred.password) { toast("Acumatica credentials required", "error"); lp && lp(); return; }
+
+    var validTrucks = truckGroups.filter(function(t) { return !t.isError; });
+    if (validTrucks.length === 0) { toast("No valid trucks to create", "error"); return; }
+
+    var trucksPayload = validTrucks.map(function(t) {
+      return {
+        label: t.label,
+        lines: t.assignments.filter(function(a) { return !a.error; }).map(function(a) {
+          return {
+            inventoryID: String(a.inventoryID),
+            orderQty: Number.isInteger(a.orderQty) ? a.orderQty : Math.round(a.orderQty)
+          };
+        })
+      };
+    }).filter(function(t) { return t.lines.length > 0; });
+
+    if (trucksPayload.length === 0) { toast("No valid lines in any truck", "error"); return; }
+
+    setAcuLoading(true);
+    setAcuResult(null);
+    setEdiSent(false);
+    setCreatedPOs([]);
+    try {
+      var res = await fetch("/api/acumatica-create-po", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: cred.username,
+          password: cred.password,
+          warehouse: warehouse,
+          trucks: trucksPayload
+        })
+      });
+      var data = await res.json();
+      setAcuResult(data);
+      setCreatedPOs((data && data.succeeded) || []);
+      if (data.ok) {
+        toast("Created " + (data.succeeded || []).length + " PO(s) in Acumatica", "success");
+      } else {
+        toast("PO creation stopped: " + ((data.failure && data.failure.stage) || data.stage || "error"), "error");
+      }
+    } catch (err) {
+      setAcuResult({ ok: false, stage: "network", error: String(err) });
+      toast("Network error: " + err.message, "error");
+    } finally {
+      setAcuLoading(false);
+    }
+  }
+
+  // Send the just-created Truckloader POs (held in createdPOs, which survives
+  // EDI. Reuses the exact PO Tools route + channel; Vendor Ref = the PO's Order Nbr,
+  // which the create-PO flow already wrote into Vendor Ref.
+  async function sendAllPOsToEDI() {
+    setEdiConfirm(false);
+    var succeeded = createdPOs || [];
+    if (succeeded.length === 0) { toast("No created POs to send \u2014 create POs in the Truck Assignments tab first.", "error"); return; }
+    if (!cred || !cred.username || !cred.password) { toast("Acumatica credentials required", "error"); lp && lp(); return; }
+    setEdiSending(true);
+    setEdiResult(null);
+    try {
+      var posPayload = succeeded.map(function(s) {
+        return { orderNbr: s.orderNbr, vendorRef: s.orderNbr, channel: "TrueCommerce EDI" };
+      });
+      var res = await fetch("/api/acumatica-process-pos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: cred.username, password: cred.password, pos: posPayload })
+      });
+      var resp = await res.json();
+      setEdiResult({ resp: resp, orderNbrs: succeeded.map(function(s) { return s.orderNbr; }) });
+      if (!resp || !Array.isArray(resp.results)) { toast("Unexpected response from Acumatica", "error"); return; }
+      var s = resp.summary || {};
+      // Lock the button if any PO actually went out, so a second click can't
+      // re-transmit the ones that already succeeded. A total failure (nothing
+      // sent) leaves it unlocked so it can be retried.
+      if (resp.ok || (s.ediSentCount && s.ediSentCount > 0)) setEdiSent(true);
+      if (resp.ok) {
+        toast((s.ediSentCount || posPayload.length) + " PO(s) sent to EDI", "success");
+      } else {
+        var bits = [];
+        if (s.ediSentCount) bits.push(s.ediSentCount + " sent");
+        if (s.ediFailedCount) bits.push(s.ediFailedCount + " failed");
+        toast("EDI send: " + (bits.join(", ") || "see results"), "error");
+      }
+      // Extra step: draft a plain-text confirmation email listing the POs that went to EDI (no attachments).
+      try {
+        var sentNbrs = [];
+        resp.results.forEach(function(r, i) { if (r && r.ok && r.ediSent) { var nbr = (succeeded[i] && succeeded[i].orderNbr) || r.orderNbr; if (nbr) sentNbrs.push(nbr); } });
+        if (sentNbrs.length > 0) {
+          if (gmail && gmail.token) {
+            var scode = (WH_META[warehouse] && WH_META[warehouse].shortCode) || warehouse;
+            scode = scode === "Tampa" ? "FL" : scode === "Dallas" ? "TX" : scode; // email uses state codes
+            var dt = new Date();
+            var dstr = (dt.getMonth() + 1) + "/" + dt.getDate() + "/" + String(dt.getFullYear()).slice(2);
+            var poBlock = sentNbrs.map(function(n) { return n + " " + scode; }).join("\n");
+            var bodyText = "Hi,\n\nThe following list below have been sent through EDI, please respond back with confirmation of receipt and ETA at your earliest convenience. Let us know if you have any questions.\n\n" + poBlock + "\n\nThank you!";
+            var safe = bodyText.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+            var htmlBody = "<p>" + safe.replace(/\n\n+/g, "</p><p>").replace(/\n/g, "<br>") + "</p>";
+            var _ovr = emailOverrides[warehouse] || {};
+            var toAddr = _ovr.hillsTo != null ? _ovr.hillsTo : DEFAULT_HILLS_TO;
+            var ccAddr = _ovr.hillsCc != null ? _ovr.hillsCc : "";
+            var dres = await postGmailDrafts([{ to: toAddr, cc: ccAddr, subject: "Weekly Replenishment Orders " + scode + " " + dstr, htmlBody: htmlBody, attachments: [] }], gmail.token);
+            if (dres && dres.failed > 0) toast("PO-list draft failed to create", "error");
+            else toast("Draft created listing " + sentNbrs.length + " PO(s)", "success");
+          } else {
+            toast("POs sent to EDI \u2014 connect Gmail to auto-draft the PO list", "info");
+          }
+        }
+      } catch (de) { toast("PO-list draft error: " + de.message, "error"); }
+    } catch (err) {
+      setEdiResult({ resp: { ok: false, error: String(err) }, orderNbrs: succeeded.map(function(s) { return s.orderNbr; }) });
+      toast("Network error: " + err.message, "error");
+    } finally {
+      setEdiSending(false);
+    }
+  }
+
+  // CSV export for a single truck
+  function exportTruckCSV(truck, whShort) {
+    var now = new Date();
+    var dateStr = (now.getMonth() + 1) + "." + ("0" + now.getDate()).slice(-2) + "." + String(now.getFullYear()).slice(-2);
+    var shortCode = (WH_META[warehouse] && WH_META[warehouse].shortCode) || warehouse;
+    var fileName = shortCode + " " + dateStr + " " + truck.label + ".csv";
+    var lines = ["Inventory ID,Warehouse,Order Qty."];
+    truck.assignments.forEach(function(a) {
+      if (!a.error) {
+        var qty = Number.isInteger(a.orderQty) ? a.orderQty : Math.round(a.orderQty);
+        lines.push(a.inventoryID + "," + warehouse + "," + qty);
+      }
+    });
+    var blob = new Blob([lines.join("\n")], { type: "text/csv" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url; a.download = fileName;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast("Downloaded " + fileName);
+  }
+
+  function exportAllCSVs() {
+    if (!truckGroups) return;
+    var idx = 0;
+    function next() {
+      if (idx >= truckGroups.length) return;
+      var t = truckGroups[idx];
+      if (!t.isError) exportTruckCSV(t);
+      idx++;
+      setTimeout(next, 400);
+    }
+    next();
+  }
+
+  // Parse Netstock DOH upload
+  function handleNetstockUpload(e) {
+    var file = e.target.files && e.target.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function(ev) {
+      try {
+        var XLSX = require("xlsx");
+        var wb = XLSX.read(ev.target.result, { type: "array" });
+        var ws = wb.Sheets[wb.SheetNames[0]];
+        var rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
+        var items = rows.map(function(r) {
+          return {
+            productCode: String(r["Product code"] || r["ProductCode"] || "").trim(),
+            description: r["Product description"] || r["Description"] || "",
+            location: String(r["Location code"] || r["LocationCode"] || "").trim(),
+            onHand: parseFloat(r["On hand"] || 0),
+            doh: parseFloat(r["Days on hand"] || 0),
+            onOrder: parseFloat(r["On order"] || 0),
+            doo: parseFloat(r["Days on order"] || 0),
+            velocity: r["Velocity"] || "",
+            netClass: r["Class"] || "",
+            avgSales: parseFloat(r["Avg sales units (3m)"] || 0),
+          };
+        }).filter(function(x) { return x.productCode; });
+        setNetstockDoh({ items: items, fileName: file.name });
+        kvPost("netstock-doh", { items: items, fileName: file.name, _savedAt: Date.now() }).catch(function() {});
+        toast("Netstock DOH loaded: " + items.length + " items");
+      } catch (err) { toast("Error parsing Netstock file: " + err.message, "error"); }
+    };
+    reader.readAsArrayBuffer(file);
+    e.target.value = "";
+  }
+
+  // Build fill suggestions
+  var _fillLoading = useState(false), fillLoading = _fillLoading[0], setFillLoading = _fillLoading[1];
+
+  async function buildFillSuggestions() {
+    if (!netstockDoh || !hillsMaster) { toast("Upload both Netstock DOH and Hills Master first", "error"); return; }
+    if (!ok) { lp(); return; }
+    setFillLoading(true);
+    try {
+      // Fetch Whse Replenish from Acumatica for real Replenishment Class
+      var whseRows = await fetchAcumatica("whse-replenish", null, cred.username, cred.password);
+      // Build lookup: "inventoryID|warehouse" → replenishment class
+      var replenClassLookup = {};
+      whseRows.forEach(function(r) {
+        var id = String(r.InventoryID || "").trim();
+        var wh = String(r.Warehouse || "").trim();
+        var cls = String(r.ReplenishmentClass || "").trim().toUpperCase();
+        if (id && wh) replenClassLookup[id + "|" + wh] = cls;
+      });
+
+      var orderedIds = {};
+      orderItems.forEach(function(it) { orderedIds[it.inventoryID] = true; });
+
+      var candidates = netstockDoh.items.filter(function(ns) {
+        if (ns.location !== warehouse) return false;
+        if (orderedIds[ns.productCode]) return false;
+        // Only stocked items: Acumatica Replenishment Class A, B, or C
+        var key = ns.productCode + "|" + warehouse;
+        var cls = replenClassLookup[key] || "";
+        if (cls !== "A" && cls !== "B" && cls !== "C") return false;
+        // Exclude pawTree items
+        var desc = (ns.description || "").toLowerCase();
+        if (desc.indexOf("pawtree") !== -1 || desc.indexOf("paw tree") !== -1) return false;
+        return true;
+      }).map(function(ns) {
+        var hm = hmLookup[ns.productCode] || {};
+        var key = ns.productCode + "|" + warehouse;
+        var combined = ns.doh + ns.doo;
+        return {
+          productCode: ns.productCode,
+          description: ns.description || hm.description || "",
+          replenClass: replenClassLookup[key] || "",
+          doh: ns.doh,
+          doo: ns.doo,
+          combined: combined,
+          onHand: ns.onHand,
+          onOrder: ns.onOrder,
+          velocity: ns.velocity,
+          netClass: ns.netClass,
+          avgSales: ns.avgSales,
+          palletWeight: hm.palletWeight || 0,
+          unitsPerPallet: hm.unitsPerPallet || 0,
+        };
+      });
+      candidates.sort(function(a, b) { return a.combined - b.combined; });
+      // Initialize pallet counts with suggested values
+      var initPals = {};
+      candidates.forEach(function(c) {
+        var daily = c.avgSales > 0 ? c.avgSales / 30 : 0;
+        var needed = Math.max(0, (dohTarget * daily) - c.onHand - c.onOrder);
+        var sug = (c.unitsPerPallet > 0 && daily > 0) ? Math.max(1, Math.ceil(needed / c.unitsPerPallet)) : 1;
+        initPals[c.productCode] = sug;
+      });
+      setFillPals(initPals);
+      setFillSuggestions(candidates);
+      toast("Found " + candidates.length + " stocked items (A/B/C) for " + warehouse);
+    } catch (err) {
+      toast("Error: " + err.message, "error");
+    }
+    setFillLoading(false);
+  }
+
+  function addFillToOrder(f, pallets) {
+    var pals = Math.max(1, parseInt(pallets) || 1);
+    var hm = hmLookup[f.productCode] || {};
+    var cpp = hm.unitsPerPallet || 0;
+    var lpp = hm.palletWeight || 0;
+    var orderQty = pals * (cpp || 1);
+    var totalLbs = pals * lpp;
+    var newItem = {
+      inventoryID: f.productCode,
+      description: f.description,
+      caseNeed: orderQty,
+      casesPerPallet: cpp,
+      roundedPallets: pals,
+      orderQty: orderQty,
+      lbsPerPallet: lpp,
+      totalLbs: totalLbs,
+      qtyAvail: 0, onPO: 0, reorderPt: 0, maxQty: 0,
+      inHillsMaster: !!hm.unitsPerPallet,
+      isFill: true,
+    };
+    setOrderItems(orderItems.concat([newItem]));
+    setFillAdded(fillAdded.concat([{ productCode: f.productCode, description: f.description, pallets: pals, orderQty: orderQty, totalLbs: totalLbs, _orig: f }]));
+    if (fillSuggestions) {
+      setFillSuggestions(fillSuggestions.filter(function(s) { return s.productCode !== f.productCode; }));
+    }
+    toast("Added " + f.productCode + " (" + pals + " pal) \u2192 " + totalLbs.toLocaleString(undefined, { maximumFractionDigits: 0 }) + " lbs");
+  }
+
+  function removeFillItem(productCode) {
+    setOrderItems(orderItems.filter(function(it) { return it.inventoryID !== productCode; }));
+    var removed = fillAdded.find(function(a) { return a.productCode === productCode; });
+    setFillAdded(fillAdded.filter(function(a) { return a.productCode !== productCode; }));
+    // Add it back to suggestions list
+    if (removed && removed._orig && fillSuggestions) {
+      var updated = fillSuggestions.concat([removed._orig]);
+      updated.sort(function(a, b) { return a.combined - b.combined; });
+      setFillSuggestions(updated);
+    }
+    toast("Removed " + productCode + " from order");
+  }
+
+  function updateFillPallets(productCode, newPals) {
+    var pals = Math.max(1, parseInt(newPals) || 1);
+    var hm = hmLookup[productCode] || {};
+    var cpp = hm.unitsPerPallet || 0;
+    var lpp = hm.palletWeight || 0;
+    var orderQty = pals * (cpp || 1);
+    var totalLbs = pals * lpp;
+    // Update order items
+    setOrderItems(orderItems.map(function(it) {
+      if (it.inventoryID !== productCode) return it;
+      return Object.assign({}, it, { roundedPallets: pals, orderQty: orderQty, caseNeed: orderQty, totalLbs: totalLbs });
+    }));
+    // Update fill added tracker
+    setFillAdded(fillAdded.map(function(a) {
+      if (a.productCode !== productCode) return a;
+      return Object.assign({}, a, { pallets: pals, orderQty: orderQty, totalLbs: totalLbs });
+    }));
+  }
+
+  // Summary stats
+  var totalWeight = useMemo(function() { return orderItems.reduce(function(s, it) { return s + it.totalLbs; }, 0); }, [orderItems]);
+  var totalPallets = useMemo(function() { return orderItems.reduce(function(s, it) { return s + it.roundedPallets; }, 0); }, [orderItems]);
+  var missingHM = useMemo(function() { return orderItems.filter(function(it) { return !it.inHillsMaster; }).length; }, [orderItems]);
+
+  var hasFillFlag = truckGroups && truckGroups.some(function(t) { return t.needsFill; });
+
+  return <div>
+    {/* HEADER CARD - Warehouse selector + Hills Master */}
+    <div style={Object.assign({}, S.card, { display: "flex", gap: 24, alignItems: "flex-start", flexWrap: "wrap" })}>
+      <div style={{ flex: 1, minWidth: 200 }}>
+        <div style={{ fontSize: 11, color: "#9CA3AF", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 6 }}>Warehouse</div>
+        <select value={warehouse} onChange={function(e) { setWarehouse(e.target.value); setOrderItems([]); setTruckGroups(null); setFillSuggestions(null); setFillAdded([]); setFillPals({}); setHillsDraftSent(false); setCpDraftSent(false); setEditingEmail(null); setStep("order"); }} style={Object.assign({}, S.sel, { width: "100%", maxWidth: 280 })}>
+          {Object.keys(WH_META).map(function(code) { return <option key={code} value={code}>{code} ({WH_META[code].label})</option>; })}
+        </select>
+      </div>
+      <div style={{ flex: 1, minWidth: 260 }}>
+        <div style={{ fontSize: 11, color: "#9CA3AF", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 6 }}>Hills Master</div>
+        {hmLoading ? <Spinner color={TOOL_COLOR} size={16} /> : hillsMaster ? <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={S.badge("success")}><IconCheck /> {hillsMaster.items.length} items loaded</span>
+          <span style={{ fontSize: 11, color: "#9CA3AF" }}>{hillsMaster.fileName || ""}</span>
+          <button onClick={function() { fileRef.current && fileRef.current.click(); }} style={{ background: "transparent", border: "1px solid #E5E7EB", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", color: "#6B7280" }}>Replace</button>
+        </div> : <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <button onClick={function() { fileRef.current && fileRef.current.click(); }} style={S.btn("ghost")}><IconUpload /> Upload Hills Master XLSX</button>
+          <span style={{ fontSize: 11, color: "#DC2626" }}>Required</span>
+        </div>}
+        <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleHillsUpload} style={{ display: "none" }} />
+      </div>
+      <div style={{ flex: 1, minWidth: 240 }}>
+        <div style={{ fontSize: 11, color: "#9CA3AF", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 6 }}>Netstock DOH</div>
+        {netstockDoh ? <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={S.badge("success")}><IconCheck /> {netstockDoh.items.length} items</span>
+          <span style={{ fontSize: 11, color: "#9CA3AF" }}>{netstockDoh.fileName || ""}</span>
+          <button onClick={function() { nsFileRef.current && nsFileRef.current.click(); }} style={{ background: "transparent", border: "1px solid #E5E7EB", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", color: "#6B7280" }}>Replace</button>
+        </div> : <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <button onClick={function() { nsFileRef.current && nsFileRef.current.click(); }} style={S.btn("ghost")}><IconUpload /> Upload DOH XLSX</button>
+          <span style={{ fontSize: 11, color: "#9CA3AF" }}>Optional</span>
+        </div>}
+        <input ref={nsFileRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleNetstockUpload} style={{ display: "none" }} />
+      </div>
+      <div>
+        <div style={{ fontSize: 11, color: "#9CA3AF", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 6 }}>{"\u00A0"}</div>
+        <button onClick={fetchReplen} disabled={replenLoading || !hillsMaster} style={Object.assign({}, S.btn(), { opacity: replenLoading || !hillsMaster ? 0.6 : 1 })}>
+          {replenLoading ? <><Spinner color="#fff" size={14} /> Fetching...</> : <><IconRefresh /> Fetch Replenishment</>}
+        </button>
+      </div>
+    </div>
+
+    {/* STATS ROW */}
+    {orderItems.length > 0 && <div style={{ display: "flex", gap: 14, marginBottom: 20, flexWrap: "wrap" }}>
+      <div style={Object.assign({}, S.statCard, { background: TOOL_COLOR + "12", border: "1px solid " + TOOL_COLOR + "30" })}>
+        <div style={{ fontSize: 22, fontWeight: 700, color: TOOL_COLOR }}>{orderItems.length}</div>
+        <div style={{ fontSize: 11, color: "#9CA3AF", fontWeight: 500 }}>Items</div>
+      </div>
+      <div style={Object.assign({}, S.statCard, { background: "#3B82F612", border: "1px solid #3B82F630" })}>
+        <div style={{ fontSize: 22, fontWeight: 700, color: "#3B82F6" }}>{totalPallets}</div>
+        <div style={{ fontSize: 11, color: "#9CA3AF", fontWeight: 500 }}>Total Pallets</div>
+      </div>
+      <div style={Object.assign({}, S.statCard, { background: "#05966912", border: "1px solid #05966930" })}>
+        <div style={{ fontSize: 22, fontWeight: 700, color: "#059669" }}>{totalWeight.toLocaleString(undefined, { maximumFractionDigits: 0 })} lbs</div>
+        <div style={{ fontSize: 11, color: "#9CA3AF", fontWeight: 500 }}>Total Weight</div>
+      </div>
+      <div style={Object.assign({}, S.statCard, { background: "#7C3AED12", border: "1px solid #7C3AED30" })}>
+        <div style={{ fontSize: 22, fontWeight: 700, color: "#7C3AED" }}>{Math.ceil(totalWeight / TARGET)}</div>
+        <div style={{ fontSize: 11, color: "#9CA3AF", fontWeight: 500 }}>Est. Trucks</div>
+      </div>
+      {missingHM > 0 && <div style={Object.assign({}, S.statCard, { background: "#DC262612", border: "1px solid #DC262630" })}>
+        <div style={{ fontSize: 22, fontWeight: 700, color: "#DC2626" }}>{missingHM}</div>
+        <div style={{ fontSize: 11, color: "#9CA3AF", fontWeight: 500 }}>Missing from Hills Master</div>
+      </div>}
+    </div>}
+
+    {/* TAB PILLS */}
+    {orderItems.length > 0 && <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
+      <button onClick={function() { setStep("order"); }} style={S.pill(step === "order", TOOL_COLOR)}>Order Table</button>
+      <button onClick={function() { if (fillAdded.length > 0) { optimizeTrucks(); } else if (truckGroups) { setStep("trucks"); } else { toast("Run Optimize Trucks first", "info"); } }} style={S.pill(step === "trucks", "#059669")}>Truck Assignments{truckGroups ? " (" + truckGroups.filter(function(t) { return !t.isError; }).length + ")" : ""}</button>
+      <button onClick={function() { setStep("fill"); }} style={S.pill(step === "fill", "#7C3AED")}>Fill Suggestions</button>
+      <button onClick={function() { setStep("email"); }} style={S.pill(step === "email", "#3B82F6")}>Email</button>
+    </div>}
+
+    {/* ORDER TABLE */}
+    {step === "order" && orderItems.length > 0 && <div style={S.card}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <span style={{ fontWeight: 600, color: "#374151" }}>Order Table — {warehouse}</span>
+        <button onClick={optimizeTrucks} style={S.btn()}><IconBox /> Optimize Trucks</button>
+      </div>
+      <div style={{ overflow: "auto", borderRadius: 10, border: "1px solid #E5E7EB" }}>
+        <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, minWidth: 900 }}>
+          <thead><tr>
+            {["Inventory ID", "Description", "Order Qty", "Case Need", "Pallets", "Total Lbs", "Lbs/Pallet", "Cases/Pallet", ""].map(function(h) {
+              var sortable = h === "Order Qty" || h === "Pallets" || h === "Total Lbs";
+              var isSorted = orderSort && orderSort.col === h;
+              var align = (h === "Inventory ID" || h === "Description" || h === "") ? "left" : "center";
+              return <th key={h} onClick={sortable ? function() { setOrderSort(!isSorted ? { col: h, dir: "desc" } : orderSort.dir === "desc" ? { col: h, dir: "asc" } : null); } : undefined} style={Object.assign({}, S.th, { textAlign: align, cursor: sortable ? "pointer" : "default", userSelect: "none" }, h === "Order Qty" ? { background: "#F0FDF4", color: "#059669" } : {})}>{h}{isSorted ? (orderSort.dir === "desc" ? " \u25BE" : " \u25B4") : ""}</th>;
+            })}
+          </tr></thead>
+          <tbody>{(function() {
+            var sorted = orderItems.slice();
+            if (orderSort) {
+              var key = orderSort.col === "Order Qty" ? "orderQty" : orderSort.col === "Pallets" ? "roundedPallets" : orderSort.col === "Total Lbs" ? "totalLbs" : null;
+              if (key) sorted.sort(function(a, b) { return orderSort.dir === "desc" ? (b[key] || 0) - (a[key] || 0) : (a[key] || 0) - (b[key] || 0); });
+            }
+            return sorted;
+          })().map(function(it, i) {
+            var origIdx = orderItems.indexOf(it);
+            var rowBg = !it.inHillsMaster ? "#FEF2F2" : i % 2 === 0 ? "#fff" : "#FAFAFA";
+            return <tr key={it.inventoryID + "-" + i}>
+              <td style={Object.assign({}, S.td, { background: rowBg, fontFamily: "monospace", fontSize: 12, fontWeight: 600 })}>{it.inventoryID}</td>
+              <td style={Object.assign({}, S.td, { background: rowBg, maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })} title={it.description}>{it.description}</td>
+              <td style={Object.assign({}, S.td, { background: rowBg, textAlign: "center", fontSize: 15, fontWeight: 700, color: "#059669" })}>{it.orderQty}</td>
+              <td style={Object.assign({}, S.td, { background: rowBg, textAlign: "center", width: 90 })}>
+                <input type="number" min="0" value={it.caseNeed} onChange={function(e) { updateCaseNeed(origIdx, e.target.value); }} style={Object.assign({}, S.inp, { width: 70, textAlign: "right", padding: "4px 8px", color: "#9CA3AF" })} />
+              </td>
+              <td style={Object.assign({}, S.td, { background: rowBg, textAlign: "center", fontWeight: 600 })}>{it.roundedPallets}</td>
+              <td style={Object.assign({}, S.td, { background: rowBg, textAlign: "center", fontWeight: 600, color: it.totalLbs > TARGET ? "#DC2626" : "#374151" })}>{it.totalLbs ? it.totalLbs.toLocaleString(undefined, { maximumFractionDigits: 1 }) : "\u2014"}</td>
+              <td style={Object.assign({}, S.td, { background: rowBg, textAlign: "center", color: "#9CA3AF" })}>{it.lbsPerPallet ? it.lbsPerPallet.toLocaleString(undefined, { maximumFractionDigits: 1 }) : "\u2014"}</td>
+              <td style={Object.assign({}, S.td, { background: rowBg, textAlign: "center", color: "#9CA3AF" })}>{it.casesPerPallet || "\u2014"}</td>
+              <td style={Object.assign({}, S.td, { background: rowBg, width: 40 })}>
+                <button onClick={function() { removeItem(origIdx); }} style={{ background: "transparent", border: "none", cursor: "pointer", color: "#DC2626", fontSize: 14 }}>{"\u2715"}</button>
+              </td>
+            </tr>;
+          })}</tbody>
+        </table>
+      </div>
+    </div>}
+
+    {/* TRUCK ASSIGNMENTS */}
+    {step === "trucks" && truckGroups && <div>
+      <div style={Object.assign({}, S.card, { display: "flex", justifyContent: "space-between", alignItems: "center" })}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <span style={{ fontWeight: 600, color: "#374151" }}>Truck Assignments</span>
+          <select value={highlightTruck} onChange={function(e) { setHighlightTruck(e.target.value); }} style={Object.assign({}, S.sel, { padding: "6px 12px", fontSize: 12 })}>
+            <option value="all">Show All</option>
+            {truckGroups.filter(function(t) { return !t.isError; }).map(function(t) { return <option key={t.label} value={t.label}>{t.label}</option>; })}
+          </select>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={function() { setStep("order"); setTruckGroups(null); }} style={S.btn("ghost")}><IconRefresh /> Re-edit Order</button>
+          <button onClick={exportAllCSVs} style={S.btn()}><IconDL /> Export All CSVs</button>
+          <button onClick={function() { setAcuConfirm(true); }} disabled={acuLoading} style={Object.assign({}, S.btn(), { background: acuLoading ? "#9CA3AF" : "#1E40AF", borderColor: acuLoading ? "#9CA3AF" : "#1E40AF" })}>
+            {acuLoading ? <><Spinner /> Creating POs...</> : <>{"\u2192"} Create POs in Acumatica</>}
+          </button>
+        </div>
+      </div>
+
+      {/* ─── Acumatica confirmation modal ─── */}
+      {acuConfirm && <div onClick={function() { setAcuConfirm(false); }} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+        <div onClick={function(e) { e.stopPropagation(); }} style={{ background: "#fff", borderRadius: 12, padding: 24, maxWidth: 480, width: "90%", boxShadow: "0 20px 50px rgba(0,0,0,0.3)" }}>
+          <div style={{ fontSize: 18, fontWeight: 600, color: "#1F2937", marginBottom: 12 }}>Create POs in Acumatica?</div>
+          <div style={{ fontSize: 14, color: "#4B5563", marginBottom: 8 }}>
+            This will create <b>{truckGroups ? truckGroups.filter(function(t) { return !t.isError; }).length : 0} purchase order(s)</b> in Acumatica for vendor <b>Hill's (VID0024)</b> at warehouse <b>{warehouse}</b>.
+          </div>
+          <div style={{ fontSize: 13, color: "#6B7280", background: "#FEF3C7", border: "1px solid #FCD34D", borderRadius: 8, padding: "10px 12px", marginBottom: 16 }}>
+            All POs will be created with status <b>On Hold</b>. They will not release, print, or email Hill's until you manually click <b>Remove Hold</b> in Acumatica.
+          </div>
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <button onClick={function() { setAcuConfirm(false); }} style={S.btn("ghost")}>Cancel</button>
+            <button onClick={createPOsInAcumatica} style={Object.assign({}, S.btn(), { background: "#1E40AF", borderColor: "#1E40AF" })}>Yes, Create POs</button>
+          </div>
+        </div>
+      </div>}
+
+      {/* ─── Acumatica results modal ─── */}
+      {acuResult && <div onClick={function() { setAcuResult(null); }} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+        <div onClick={function(e) { e.stopPropagation(); }} style={{ background: "#fff", borderRadius: 12, padding: 24, maxWidth: 600, width: "90%", maxHeight: "80vh", overflow: "auto", boxShadow: "0 20px 50px rgba(0,0,0,0.3)" }}>
+          <div style={{ fontSize: 18, fontWeight: 600, color: acuResult.ok ? "#059669" : "#DC2626", marginBottom: 12 }}>
+            {acuResult.ok ? "All POs created" : "Stopped on failure"}
+          </div>
+          {acuResult.succeeded && acuResult.succeeded.length > 0 && <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 13, color: "#374151", fontWeight: 600, marginBottom: 8 }}>Created in Acumatica ({acuResult.succeeded.length}):</div>
+            <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 13 }}>
+              <thead><tr>
+                <th style={Object.assign({}, S.th, { textAlign: "left" })}>Truck</th>
+                <th style={Object.assign({}, S.th, { textAlign: "left" })}>PO Number</th>
+                <th style={Object.assign({}, S.th, { textAlign: "right" })}>Lines</th>
+                <th style={Object.assign({}, S.th, { textAlign: "right" })}>Total</th>
+              </tr></thead>
+              <tbody>{acuResult.succeeded.map(function(s) {
+                return <tr key={s.orderNbr}>
+                  <td style={S.td}>{s.truckLabel}</td>
+                  <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontWeight: 600 })}>{s.orderNbr}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "right" })}>{s.lineCount}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "right" })}>${(s.orderTotal || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                </tr>;
+              })}</tbody>
+            </table>
+            <div style={{ fontSize: 12, color: "#6B7280", marginTop: 8 }}>All POs are <b>On Hold</b>. Review in Acumatica before removing hold.</div>
+          </div>}
+          {acuResult.failure && <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 8, padding: 12, marginBottom: 12 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "#991B1B", marginBottom: 4 }}>
+              Failed on: {acuResult.failure.truckLabel} ({acuResult.failure.stage})
+            </div>
+            {acuResult.failure.partialPO && <div style={{ fontSize: 12, color: "#991B1B", marginBottom: 4 }}>
+              Partial PO created: <b>{acuResult.failure.partialPO.orderNbr}</b> — {acuResult.failure.partialPO.note}
+            </div>}
+            {acuResult.failure.errorDetails && acuResult.failure.errorDetails.length > 0 && <div style={{ fontSize: 12, color: "#991B1B", marginTop: 6 }}>
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>What Acumatica reported:</div>
+              {acuResult.failure.errorDetails.map(function(e, ei) {
+                var label;
+                if (e.scope === "line") {
+                  label = "Line " + (e.lineIndex + 1) + (e.inventoryID ? " (item " + e.inventoryID + ")" : "") + " — " + e.field;
+                } else if (e.scope === "header") {
+                  label = "Header field " + e.field;
+                } else {
+                  label = "Acumatica";
+                }
+                return <div key={ei} style={{ background: "#FFF", borderLeft: "3px solid " + (e.scope === "header" ? "#B91C1C" : e.scope === "line" ? "#D97706" : "#6B7280"), padding: "6px 10px", marginBottom: 4, borderRadius: 4 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: "#374151", marginBottom: 2 }}>{label}</div>
+                  <div style={{ fontSize: 12, color: "#1F2937" }}>{e.message}</div>
+                  {e.value !== undefined && e.value !== null && e.value !== "" && <div style={{ fontSize: 10, fontFamily: "monospace", color: "#6B7280", marginTop: 2 }}>value sent: {String(e.value)}</div>}
+                </div>;
+              })}
+            </div>}
+            {acuResult.failure.rawBody && <details style={{ fontSize: 11, marginTop: 8 }}>
+              <summary style={{ cursor: "pointer", color: "#6B7280" }}>Show technical details</summary>
+              <pre style={{ background: "#FFF", padding: 8, borderRadius: 4, overflow: "auto", maxHeight: 200, marginTop: 4 }}>{acuResult.failure.rawBody}</pre>
+            </details>}
+          </div>}
+          {acuResult.error && <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 8, padding: 12, marginBottom: 12, fontSize: 13, color: "#991B1B" }}>
+            {acuResult.error}
+          </div>}
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <button onClick={function() { setAcuResult(null); }} style={S.btn()}>Done</button>
+          </div>
+        </div>
+      </div>}
+
+      {/* TRUCK SUMMARY TABLE */}
+      <div style={Object.assign({}, S.card, { marginTop: 0 })}>
+        <div style={{ overflow: "auto", borderRadius: 10, border: "1px solid #E5E7EB" }}>
+          <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
+            <thead><tr>
+              <th style={Object.assign({}, S.th, { background: "#374151", color: "#fff" })}>Truck #</th>
+              <th style={Object.assign({}, S.th, { background: "#374151", color: "#fff" })}>Items</th>
+              <th style={Object.assign({}, S.th, { background: "#374151", color: "#fff" })}>Total Weight</th>
+              <th style={Object.assign({}, S.th, { background: "#374151", color: "#fff" })}>Remaining Space</th>
+              <th style={Object.assign({}, S.th, { background: "#374151", color: "#fff", width: 90 })}>Export</th>
+            </tr></thead>
+            <tbody>{truckGroups.filter(function(t) { return !t.isError; }).map(function(t, ti) {
+              return <tr key={t.label}>
+                <td style={Object.assign({}, S.td, { fontWeight: 600 })}><Dot color={t.color} />{" "}{t.label}</td>
+                <td style={S.td}>{t.assignments.length}</td>
+                <td style={Object.assign({}, S.td, { fontWeight: 600 })}>{t.totalLbs.toLocaleString(undefined, { maximumFractionDigits: 1 })} lbs</td>
+                <td style={S.td}>{t.needsFill ? <span style={Object.assign({}, S.badge("warning"))}>{"\uD83D\uDEA9"} FILL MORE ({t.remaining.toLocaleString(undefined, { maximumFractionDigits: 0 })} lbs remaining)</span> : <span style={{ color: "#059669" }}>{t.remaining.toLocaleString(undefined, { maximumFractionDigits: 1 })} lbs</span>}</td>
+                <td style={S.td}><button onClick={function() { exportTruckCSV(t); }} style={Object.assign({}, S.btn("ghost"), { padding: "4px 10px", fontSize: 11 })}><IconDL /> CSV</button></td>
+              </tr>;
+            })}</tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* DETAILED ITEM LIST BY TRUCK */}
+      {truckGroups.filter(function(t) { return !t.isError && (highlightTruck === "all" || highlightTruck === t.label); }).map(function(t) {
+        return <div key={t.label} style={Object.assign({}, S.card, { borderLeft: "4px solid " + t.color })}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <span style={{ fontWeight: 600, color: "#374151" }}>{t.label} — {t.totalLbs.toLocaleString(undefined, { maximumFractionDigits: 1 })} lbs</span>
+            {t.needsFill && <span style={S.badge("warning")}>Needs Fill</span>}
+          </div>
+          <div style={{ overflow: "auto", borderRadius: 8, border: "1px solid #E5E7EB" }}>
+            <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
+              <thead><tr>
+                <th style={S.th}>Inventory ID</th>
+                <th style={S.th}>Description</th>
+                <th style={Object.assign({}, S.th, { textAlign: "right" })}>Order Qty</th>
+                <th style={Object.assign({}, S.th, { textAlign: "right" })}>Pallets</th>
+                <th style={Object.assign({}, S.th, { textAlign: "right" })}>Weight</th>
+                <th style={Object.assign({}, S.th, { width: 40 })}></th>
+              </tr></thead>
+              <tbody>{t.assignments.map(function(a, ai) {
+                return <tr key={ai} style={{ background: t.color + "30" }}>
+                  <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 12, fontWeight: 600 })}>{a.inventoryID}{a.isFill ? <span style={{ marginLeft: 6, padding: "1px 6px", borderRadius: 999, fontSize: 9, fontWeight: 700, fontFamily: "system-ui, -apple-system, sans-serif", letterSpacing: "0.3px", color: "#fff", background: "#7C3AED", verticalAlign: "middle" }}>FILL</span> : null}</td>
+                  <td style={Object.assign({}, S.td, { maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })} title={a.description}>{a.description}{a.isSplit ? <span style={Object.assign({}, S.badge("purple"), { marginLeft: 6, fontSize: 10 })}>SPLIT</span> : ""}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "right" })}>{a.orderQty}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "right" })}>{a.pallets}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "right", fontWeight: 600 })}>{a.lbs ? a.lbs.toLocaleString(undefined, { maximumFractionDigits: 1 }) + " lbs" : "—"}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "center", padding: "8px 4px" })}><button onClick={function() { var id = a.inventoryID; var srcItem = orderItems.find(function(it) { return it.inventoryID === id; }); if (srcItem && !srcItem.isFill) { setConfirmRemove({ id: id, action: function() { setOrderItems(orderItems.filter(function(it) { return it.inventoryID !== id; })); var updated = truckGroups.map(function(tk) { if (tk.isError) return tk; var newAssign = tk.assignments.filter(function(x) { return x.inventoryID !== id; }); var newLbs = newAssign.reduce(function(s, x) { return s + (x.lbs || 0); }, 0); return Object.assign({}, tk, { assignments: newAssign, totalLbs: newLbs, remaining: TARGET - newLbs, needsFill: newLbs < MIN_WEIGHT }); }).filter(function(tk) { return tk.isError || tk.assignments.length > 0; }); setTruckGroups(updated); toast("Removed " + id); setConfirmRemove(null); } }); return; } setOrderItems(orderItems.filter(function(it) { return it.inventoryID !== id; })); var updated = truckGroups.map(function(tk) { if (tk.isError) return tk; var newAssign = tk.assignments.filter(function(x) { return x.inventoryID !== id; }); var newLbs = newAssign.reduce(function(s, x) { return s + (x.lbs || 0); }, 0); return Object.assign({}, tk, { assignments: newAssign, totalLbs: newLbs, remaining: TARGET - newLbs, needsFill: newLbs < MIN_WEIGHT }); }).filter(function(tk) { return tk.isError || tk.assignments.length > 0; }); setTruckGroups(updated); toast("Removed " + id); }} style={{ background: "none", border: "none", cursor: "pointer", color: "#D1D5DB", fontSize: 14, padding: 2, borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center" }} title="Remove from order">{"\u2715"}</button></td>
+                </tr>;
+              })}</tbody>
+            </table>
+          </div>
+        </div>;
+      })}
+    </div>}
+
+    {/* FILL SUGGESTIONS - SPLIT LAYOUT */}
+    {step === "fill" && <div>
+      <div style={Object.assign({}, S.card, { display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" })}>
+        <span style={{ fontWeight: 600, color: "#374151" }}>Fill Suggestions — {warehouse}</span>
+        {netstockDoh ? <span style={S.badge("success")}><IconCheck /> {netstockDoh.items.length} items ({netstockDoh.fileName})</span> : <span style={{ fontSize: 12, color: "#DC2626" }}>Upload Netstock DOH above to build suggestions</span>}
+        {netstockDoh && <button onClick={buildFillSuggestions} disabled={fillLoading} style={Object.assign({}, S.btn(), { opacity: fillLoading ? 0.6 : 1 })}>{fillLoading ? <><Spinner color="#fff" size={14} /> Loading...</> : <><IconFilter /> Build Suggestions</>}</button>}
+      </div>
+      {fillSuggestions && (fillSuggestions.length > 0 || fillAdded.length > 0) && <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
+        {/* LEFT - Suggestions table */}
+        <div style={Object.assign({}, S.card, { marginTop: 0, flex: 1, minWidth: 0 })}>
+          {fillSuggestions.length > 0 ? <>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+            <div style={{ fontSize: 12, color: "#9CA3AF" }}>{fillSuggestions.length} items {fillSort ? "\u2022 sorted by " + fillSort.col + (fillSort.dir === "desc" ? " \u25BE" : " \u25B4") : "sorted by DOH+DOO"}</div>
+          </div>
+          <div style={{ overflow: "auto", borderRadius: 10, border: "1px solid #E5E7EB", maxHeight: 600 }}>
+            <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0 }}>
+              <thead><tr>
+                {["Inv ID", "Description", "R", "On Hand", "Days/Pal", "DOH+DOO", "+Days", "= New DOH", "Pallets", "Order Qty", "Total Lbs", ""].map(function(h) {
+                  var align = (h === "Inv ID" || h === "Description") ? "left" : "center";
+                  if (h === "On Hand" || h === "Days/Pal" || h === "Order Qty" || h === "Total Lbs") align = "right";
+                  var sortable = h !== "";
+                  var isSorted = fillSort && fillSort.col === h;
+                  return <th key={h} onClick={sortable ? function() { setFillSort(!isSorted ? { col: h, dir: "desc" } : fillSort.dir === "desc" ? { col: h, dir: "asc" } : null); } : undefined} style={Object.assign({}, S.th, { padding: "8px 6px", fontSize: 10, textAlign: align, cursor: sortable ? "pointer" : "default", userSelect: "none" }, h === "+Days" ? { color: "#A78BFA" } : {}, h === "= New DOH" ? { color: "#7C3AED", background: "#F5F3FF" } : {}, (h === "Pallets" || h === "Order Qty" || h === "Total Lbs" || h === "") ? { background: "#F0FDF4" } : {})}>{h}{isSorted ? (fillSort.dir === "desc" ? " \u25BE" : " \u25B4") : ""}</th>;
+                })}
+              </tr></thead>
+              <tbody>{sortedFillList().slice(0, 150).map(function(f, fi, arr) {
+                var urgBg = f.combined === 0 ? "#FEF2F2" : f.combined <= 14 ? "#FFF7ED" : f.combined <= 30 ? "#FFFBEB" : "#FFFFFF";
+                var urgCol = f.combined === 0 ? "#DC2626" : f.combined <= 14 ? "#EA580C" : f.combined <= 30 ? "#CA8A04" : "#16A34A";
+                var c = fillCalc(f);
+                var dailySales = c.dailySales;
+                var sugPals = c.sugPals;
+                var curPals = c.curPals;
+                var rowLbs = c.rowLbs;
+                var addDays = c.addDays;
+                var newDoh = c.newDoh;
+                return <tr key={fi} style={{ background: urgBg }}>
+                  <td onClick={function() { navigator.clipboard.writeText(f.productCode); toast("Copied: " + f.productCode); }} style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, fontWeight: 600, padding: "6px 6px", cursor: "pointer", whiteSpace: "nowrap" })} title="Click to copy">{f.productCode}</td>
+                  <td style={Object.assign({}, S.td, { maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", padding: "6px 6px", fontSize: 11 })} title={f.description}>{f.description}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "center", fontWeight: 700, padding: "6px 6px", fontSize: 11 })}>{f.replenClass}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "right", padding: "6px 6px", fontSize: 11 })}>{f.onHand}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "right", padding: "6px 6px", fontSize: 11, color: "#9CA3AF" })}>{(dailySales > 0 && f.unitsPerPallet > 0) ? Math.round(f.unitsPerPallet / dailySales) : "\u2014"}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "center", fontWeight: 700, color: urgCol, padding: "6px 6px", fontSize: 11 })}>{f.combined}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "center", padding: "6px 6px", fontSize: 11, fontWeight: 600, color: "#A78BFA" })}>{addDays == null ? "\u2014" : "+" + addDays}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "center", padding: "6px 6px", fontSize: 11, fontWeight: 700, color: "#7C3AED", background: "#F5F3FF" })}>{newDoh == null ? "\u2014" : newDoh}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "center", width: 44, padding: "4px 2px" })}><input type="number" min="1" value={curPals} onChange={function(e) { var u = Object.assign({}, fillPals); u[f.productCode] = Math.max(1, parseInt(e.target.value) || 1); setFillPals(u); }} style={Object.assign({}, S.inp, { width: 38, textAlign: "center", padding: "2px 2px", fontSize: 11 })} /></td>
+                  <td style={Object.assign({}, S.td, { textAlign: "right", padding: "6px 6px", fontSize: 12, fontWeight: 700, color: "#059669" })}>{f.unitsPerPallet > 0 ? (curPals * f.unitsPerPallet) : "\u2014"}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "right", padding: "6px 6px", fontSize: 11, fontWeight: 600 })}>{rowLbs > 0 ? rowLbs.toLocaleString(undefined, { maximumFractionDigits: 0 }) : "\u2014"}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "center", width: 36, padding: "4px 2px" })}><button onClick={function() { addFillToOrder(f, fillPals[f.productCode] || sugPals || 1); }} style={{ background: "#059669", color: "#fff", border: "none", borderRadius: 6, padding: "3px 7px", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>+</button></td>
+                </tr>;
+              })}</tbody>
+            </table>
+          </div>
+          </> : <div style={{ padding: "48px 24px", textAlign: "center", color: "#9CA3AF", fontSize: 13 }}>All suggestions added {"\u2014"} review or remove items in the panel on the right.</div>}
+        </div>
+
+        {/* RIGHT - Sticky order panel */}
+        <div style={{ width: 240, flexShrink: 0, position: "sticky", top: 16 }}>
+          {/* Truck status */}
+          {truckGroups && function() {
+            var trucks = truckGroups.filter(function(t) { return !t.isError; });
+            var lastTruck = trucks[trucks.length - 1];
+            var fillTruck = trucks.find(function(t) { return t.needsFill; });
+            var currentTruck = fillTruck || lastTruck;
+            if (!currentTruck) return null;
+            var addedLbs = fillAdded.reduce(function(s, a) { return s + a.totalLbs; }, 0);
+            var liveLbs = currentTruck.totalLbs + addedLbs;
+            var pct = Math.min(100, (liveLbs / TARGET) * 100);
+            var remaining = TARGET - liveLbs;
+            var barColor = remaining > 7500 ? "#F59E0B" : remaining > 0 ? "#059669" : "#DC2626";
+            return <div style={Object.assign({}, S.card, { marginTop: 0, marginBottom: 12 })}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>{currentTruck.label}</div>
+                <div style={{ fontSize: 11, color: "#9CA3AF" }}>{trucks.length} truck{trucks.length > 1 ? "s" : ""} total</div>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#374151", marginBottom: 4 }}>
+                <span style={{ fontWeight: 500 }}>{liveLbs.toLocaleString(undefined, { maximumFractionDigits: 0 })} lbs</span>
+                <span style={{ color: "#9CA3AF" }}>/ {TARGET.toLocaleString()} lbs</span>
+              </div>
+              <div style={{ height: 10, background: "#F3F4F6", borderRadius: 5, overflow: "hidden", marginBottom: 6 }}><div style={{ height: "100%", width: pct + "%", background: barColor, borderRadius: 5, transition: "width 0.3s" }} /></div>
+              {remaining > 0 && <div style={{ fontSize: 11, color: remaining > 7500 ? "#D97706" : "#059669", fontWeight: 500 }}>{remaining.toLocaleString(undefined, { maximumFractionDigits: 0 })} lbs remaining</div>}
+              {remaining <= 0 && <div style={{ fontSize: 11, color: "#DC2626", fontWeight: 500 }}>{Math.abs(remaining).toLocaleString(undefined, { maximumFractionDigits: 0 })} lbs over capacity</div>}
+              <button onClick={optimizeTrucks} style={Object.assign({}, S.btn(), { width: "100%", justifyContent: "center", marginTop: 8, fontSize: 12, padding: "8px 12px" })}><IconBox /> {fillAdded.length > 0 ? "Add fill to trucks" : "Re-optimize"}</button>
+            </div>;
+          }()}
+
+          {!truckGroups && <div style={Object.assign({}, S.card, { marginTop: 0, marginBottom: 12, textAlign: "center", padding: 16 })}>
+            <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 8 }}>{orderItems.length} items, {totalWeight.toLocaleString(undefined, { maximumFractionDigits: 0 })} lbs total</div>
+            <button onClick={optimizeTrucks} style={Object.assign({}, S.btn(), { width: "100%", justifyContent: "center", fontSize: 12, padding: "8px 12px" })}><IconBox /> Optimize Trucks</button>
+          </div>}
+
+          {/* Fill items added */}
+          <div style={Object.assign({}, S.card, { marginTop: 0 })}>
+            <div style={{ fontSize: 11, color: "#9CA3AF", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8 }}>Added from Fill ({fillAdded.length})</div>
+            {fillAdded.length === 0 && <div style={{ fontSize: 12, color: "#D1D5DB", textAlign: "center", padding: "12px 0" }}>No fill items added yet</div>}
+            {fillAdded.map(function(a) {
+              return <div key={a.productCode} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: "1px solid #F3F4F6" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: "#374151" }}>{a.productCode}</div>
+                  <div style={{ fontSize: 10, color: "#9CA3AF" }}>{a.orderQty} qty {"\u00B7"} {a.totalLbs.toLocaleString(undefined, { maximumFractionDigits: 0 })} lbs</div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 3, flexShrink: 0 }}>
+                  <button onClick={function() { updateFillPallets(a.productCode, a.pallets - 1); }} disabled={a.pallets <= 1} style={{ background: "#F3F4F6", border: "none", borderRadius: 4, width: 20, height: 20, fontSize: 13, fontWeight: 700, cursor: a.pallets <= 1 ? "default" : "pointer", color: a.pallets <= 1 ? "#D1D5DB" : "#374151", display: "flex", alignItems: "center", justifyContent: "center" }}>{"\u2212"}</button>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: "#374151", minWidth: 18, textAlign: "center" }}>{a.pallets}</span>
+                  <button onClick={function() { updateFillPallets(a.productCode, a.pallets + 1); }} style={{ background: "#F3F4F6", border: "none", borderRadius: 4, width: 20, height: 20, fontSize: 13, fontWeight: 700, cursor: "pointer", color: "#374151", display: "flex", alignItems: "center", justifyContent: "center" }}>+</button>
+                  <button onClick={function() { removeFillItem(a.productCode); }} style={{ background: "transparent", border: "none", cursor: "pointer", color: "#DC2626", fontSize: 13, padding: "2px 4px", marginLeft: 4 }}>{"\u2715"}</button>
+                </div>
+              </div>;
+            })}
+            {fillAdded.length > 0 && <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #E5E7EB", display: "flex", justifyContent: "space-between", fontSize: 12, fontWeight: 600 }}>
+              <span style={{ color: "#6B7280" }}>Fill weight:</span>
+              <span style={{ color: "#059669" }}>+{fillAdded.reduce(function(s, a) { return s + a.totalLbs; }, 0).toLocaleString(undefined, { maximumFractionDigits: 0 })} lbs</span>
+            </div>}
+          </div>
+        </div>
+      </div>}
+      {fillSuggestions && fillSuggestions.length === 0 && <div style={Object.assign({}, S.card, { textAlign: "center", padding: 40, color: "#9CA3AF" })}>No fill candidates found for {warehouse}.</div>}
+    </div>}
+
+    {/* EMAIL DRAFTS */}
+    {step === "email" && <div>
+      {(function() {
+        var whMeta = WH_META[warehouse] || { shortCode: warehouse, cpTo: "jcanter@centralpet.com, jspengler@central.com, hd-purchaseorders@vetcove.com" };
+        var whShort = whMeta.shortCode;
+        var now = new Date();
+        var dateStr = (now.getMonth() + 1) + "." + ("0" + now.getDate()).slice(-2) + "." + now.getFullYear();
+        var subject = dateStr + " Weekly Replenishment - Vetcove " + whShort;
+        var defaultHillsTo = DEFAULT_HILLS_TO;
+        var whOverrides = emailOverrides[warehouse] || {};
+        var hillsTo = whOverrides.hillsTo != null ? whOverrides.hillsTo : defaultHillsTo;
+        var hillsCc = whOverrides.hillsCc != null ? whOverrides.hillsCc : "";
+        var cpTo = whOverrides.cpTo != null ? whOverrides.cpTo : whMeta.cpTo;
+        var cpCc = whOverrides.cpCc != null ? whOverrides.cpCc : "";
+        function saveEmailOverride(field, value) {
+          var updated = Object.assign({}, emailOverrides);
+          updated[warehouse] = Object.assign({}, updated[warehouse] || {}, {});
+          updated[warehouse][field] = value;
+          setEmailOverrides(updated);
+          kvPost("truckloader-email-overrides", updated).catch(function() {});
+        }
+        var hillsBody = "<p>Hi, please find attached our weekly replenishment order. Please include the Purchase Order # on our packing list.</p><p>We look forward to confirmation of receipt. Let us know if you have any questions.</p><p>Thanks,</p>";
+        var cpBody = "<p>Hi Central Pet team,</p><p>I've just placed this week's replenishment POs with Hill's. Attaching here to create in your systems. Hill's hasn't set delivery appointments yet.</p><p>Thanks,</p>";
+
+        async function createDraft(type) {
+          if (!gmail || !gmail.token) { toast("Connect Gmail first (bottom-left)", "error"); return; }
+          try {
+            var payload = type === "hills"
+              ? { to: hillsTo, cc: hillsCc, subject: subject, htmlBody: hillsBody, attachments: [] }
+              : { to: cpTo, cc: cpCc, subject: subject, htmlBody: cpBody, attachments: [] };
+            var result = await postGmailDrafts([payload], gmail.token);
+            if (result.failed > 0) throw new Error("Draft creation failed");
+            if (type === "hills") setHillsDraftSent(true); else setCpDraftSent(true);
+            toast((type === "hills" ? "Hill's" : "Central Pet") + " draft created!");
+          } catch (err) { toast("Gmail error: " + err.message, "error"); }
+        }
+
+        return <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <div style={Object.assign({}, S.card, { borderLeft: "4px solid " + TOOL_COLOR })}>
+            <div style={{ fontSize: 11, color: "#9CA3AF", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 12 }}>{warehouse}</div>
+            <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 4 }}><strong>Subject:</strong> {subject}</div>
+          </div>
+
+          {/* Hill's Draft */}
+          <div style={S.card}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12, gap: 12 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 15, fontWeight: 600, color: "#1F2937", marginBottom: 8 }}>Hill{"'"}s Pet Nutrition</div>
+
+                {/* To row */}
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 6 }}>
+                  <span style={{ fontSize: 11, color: "#6B7280", fontWeight: 600, minWidth: 26, paddingTop: 1 }}>To:</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>{editingEmail === "hills" ? <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    <textarea value={emailEditValue} onChange={function(e) { setEmailEditValue(e.target.value); }} autoFocus onKeyDown={function(e) { if (e.key === "Escape") setEditingEmail(null); }} placeholder="recipient1@example.com, recipient2@example.com" rows={2} style={Object.assign({}, S.inp, { padding: "8px 12px", fontSize: 13, lineHeight: 1.5, color: "#374151", width: "100%", resize: "vertical", fontFamily: "'Varela Round', sans-serif" })} />
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button onClick={function() { saveEmailOverride("hillsTo", emailEditValue); setEditingEmail(null); }} style={Object.assign({}, S.btn(), { padding: "5px 14px", fontSize: 11 })}>Save</button>
+                      <button onClick={function() { setEditingEmail(null); }} style={Object.assign({}, S.btn("ghost"), { padding: "5px 14px", fontSize: 11 })}>Cancel</button>
+                    </div>
+                  </div> : <div style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ fontSize: 11, color: "#9CA3AF", wordBreak: "break-all", flex: 1 }}>{hillsTo}</span><button onClick={function() { setEmailEditValue(hillsTo); setEditingEmail("hills"); }} title="Edit To recipients" style={{ background: "transparent", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 12, padding: 2, flexShrink: 0 }}>{"\u270E"}</button></div>}</div>
+                </div>
+
+                {/* Cc row */}
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                  <span style={{ fontSize: 11, color: "#6B7280", fontWeight: 600, minWidth: 26, paddingTop: 1 }}>Cc:</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>{editingEmail === "hills-cc" ? <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    <textarea value={emailEditValue} onChange={function(e) { setEmailEditValue(e.target.value); }} autoFocus onKeyDown={function(e) { if (e.key === "Escape") setEditingEmail(null); }} placeholder="cc1@example.com, cc2@example.com (optional)" rows={2} style={Object.assign({}, S.inp, { padding: "8px 12px", fontSize: 13, lineHeight: 1.5, color: "#374151", width: "100%", resize: "vertical", fontFamily: "'Varela Round', sans-serif" })} />
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button onClick={function() { saveEmailOverride("hillsCc", emailEditValue); setEditingEmail(null); }} style={Object.assign({}, S.btn(), { padding: "5px 14px", fontSize: 11 })}>Save</button>
+                      <button onClick={function() { setEditingEmail(null); }} style={Object.assign({}, S.btn("ghost"), { padding: "5px 14px", fontSize: 11 })}>Cancel</button>
+                    </div>
+                  </div> : <div style={{ display: "flex", alignItems: "center", gap: 6 }}>{hillsCc ? <span style={{ fontSize: 11, color: "#9CA3AF", wordBreak: "break-all", flex: 1 }}>{hillsCc}</span> : <span style={{ fontSize: 11, color: "#9CA3AF", fontStyle: "italic", flex: 1 }}>no CC set</span>}<button onClick={function() { setEmailEditValue(hillsCc); setEditingEmail("hills-cc"); }} title="Edit Cc recipients" style={{ background: "transparent", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 12, padding: 2, flexShrink: 0 }}>{"\u270E"}</button></div>}</div>
+                </div>
+              </div>
+              {hillsDraftSent && <span style={{ fontSize: 11, color: "#059669", fontWeight: 500, display: "flex", alignItems: "center", gap: 4 }}><IconCheck /> Sent</span>}
+            </div>
+            <div style={{ background: "#F9FAFB", borderRadius: 8, padding: "14px 16px", fontSize: 13, color: "#374151", lineHeight: 1.7, marginBottom: 12 }}>
+              Hi, please find attached our weekly replenishment order. Please include the Purchase Order # on our packing list.<br /><br />
+              We look forward to confirmation of receipt. Let us know if you have any questions.<br /><br />
+              Thanks,<br /><br />
+              <span style={{ color: "#9CA3AF", fontSize: 11, fontStyle: "italic" }}>Your Vetcove Gmail signature will be appended automatically</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <button onClick={function() { createDraft("hills"); }} disabled={hillsDraftSent} style={Object.assign({}, S.btn(), { opacity: hillsDraftSent ? 0.5 : 1 })}><IconMail /> {hillsDraftSent ? "Draft Created" : "Create Draft for Hill\u2019s"}</button>
+              {(function() {
+                var ediCount = createdPOs ? createdPOs.length : 0;
+                return <button onClick={function() { if (ediCount === 0) { toast("No created POs to send \u2014 create POs in the Truck Assignments tab first.", "error"); return; } setEdiConfirm(true); }} disabled={ediSending || ediCount === 0 || ediSent} title={ediSent ? "Already sent to EDI \u2014 click Unlock to re-send the same POs" : ediCount === 0 ? "Create POs in the Truck Assignments tab first" : "Send the " + ediCount + " created PO(s) to TrueCommerce EDI"} style={{ background: ediSent ? "#059669" : (ediSending || ediCount === 0) ? "#93C5FD" : "#2563EB", color: "#fff", border: "none", padding: "9px 16px", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: (ediSending || ediCount === 0 || ediSent) ? "not-allowed" : "pointer", opacity: ediSent ? 0.7 : 1, display: "inline-flex", alignItems: "center", gap: 6 }}>{ediSent ? <><IconCheck /> Sent to EDI</> : ediSending ? <><Spinner /> Sending{"\u2026"}</> : <>{"\u2192"} Send all POs to EDI{ediCount > 0 ? " (" + ediCount + ")" : ""}</>}</button>;
+              })()}
+              {ediSent && <button onClick={function() { setEdiSent(false); }} title="Unlock so you can send these same POs to EDI again (no new POs are created)" style={Object.assign({}, S.btn("ghost"), { fontSize: 12, padding: "8px 12px" })}>{"\u21BB"} Unlock to re-send</button>}
+            </div>
+
+            {/* Send to EDI — confirmation modal */}
+            {ediConfirm && <div onClick={function() { setEdiConfirm(false); }} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+              <div onClick={function(e) { e.stopPropagation(); }} style={{ background: "#fff", borderRadius: 12, padding: 24, maxWidth: 440, width: "90%", boxShadow: "0 20px 50px rgba(0,0,0,0.3)" }}>
+                <div style={{ fontSize: 18, fontWeight: 700, color: "#1F2937", marginBottom: 8 }}>Send POs to EDI?</div>
+                <div style={{ fontSize: 13, color: "#374151", lineHeight: 1.6, marginBottom: 16 }}>
+                  About to send <strong>{createdPOs.length} Hill{"\u2019"}s PO(s)</strong> to TrueCommerce EDI (same action as Process All POs in PO Tools). This transmits the orders to the vendor and <strong>can{"\u2019"}t be undone</strong>. Vendor Ref will be each PO{"\u2019"}s Order Nbr.
+                </div>
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                  <button onClick={function() { setEdiConfirm(false); }} style={Object.assign({}, S.btn("ghost"))}>Cancel</button>
+                  <button onClick={sendAllPOsToEDI} style={{ background: "#2563EB", color: "#fff", border: "none", padding: "8px 16px", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Yes, send to EDI</button>
+                </div>
+              </div>
+            </div>}
+
+            {/* Send to EDI — results modal */}
+            {ediResult && <div onClick={function() { setEdiResult(null); }} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+              <div onClick={function(e) { e.stopPropagation(); }} style={{ background: "#fff", borderRadius: 12, padding: 24, maxWidth: 520, width: "90%", maxHeight: "80vh", overflow: "auto", boxShadow: "0 20px 50px rgba(0,0,0,0.3)" }}>
+                <div style={{ fontSize: 18, fontWeight: 700, color: (ediResult.resp && ediResult.resp.ok) ? "#059669" : "#DC2626", marginBottom: 12 }}>{(ediResult.resp && ediResult.resp.ok) ? "Sent to EDI" : "EDI send finished with issues"}</div>
+                {ediResult.resp && Array.isArray(ediResult.resp.results) ? <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 13 }}>
+                  <thead><tr><th style={Object.assign({}, S.th, { textAlign: "left" })}>PO Number</th><th style={Object.assign({}, S.th, { textAlign: "left" })}>Result</th></tr></thead>
+                  <tbody>{ediResult.resp.results.map(function(r, ri) {
+                    var sent = r.ok && r.ediSent;
+                    var label = sent ? "\u2713 Sent to EDI" : r.ediError ? ("\u26A0 " + r.ediError) : r.error ? ("\u26A0 " + r.error) : "\u26A0 Not sent";
+                    return <tr key={ri}><td style={Object.assign({}, S.td, { fontFamily: "monospace", fontWeight: 600 })}>{ediResult.orderNbrs[ri] || "\u2014"}</td><td style={Object.assign({}, S.td, { color: sent ? "#059669" : "#DC2626" })}>{label}</td></tr>;
+                  })}</tbody>
+                </table> : <div style={{ fontSize: 13, color: "#DC2626" }}>{(ediResult.resp && ediResult.resp.error) || "Unexpected response from Acumatica."}</div>}
+                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+                  <button onClick={function() { setEdiResult(null); }} style={Object.assign({}, S.btn())}>Close</button>
+                </div>
+              </div>
+            </div>}
+          </div>
+
+          {/* Central Pet Draft */}
+          <div style={S.card}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12, gap: 12 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 15, fontWeight: 600, color: "#1F2937", marginBottom: 8 }}>Central Pet</div>
+
+                {/* To row */}
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 6 }}>
+                  <span style={{ fontSize: 11, color: "#6B7280", fontWeight: 600, minWidth: 26, paddingTop: 1 }}>To:</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>{editingEmail === "cp" ? <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    <textarea value={emailEditValue} onChange={function(e) { setEmailEditValue(e.target.value); }} autoFocus onKeyDown={function(e) { if (e.key === "Escape") setEditingEmail(null); }} placeholder="recipient1@example.com, recipient2@example.com" rows={2} style={Object.assign({}, S.inp, { padding: "8px 12px", fontSize: 13, lineHeight: 1.5, color: "#374151", width: "100%", resize: "vertical", fontFamily: "'Varela Round', sans-serif" })} />
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button onClick={function() { saveEmailOverride("cpTo", emailEditValue); setEditingEmail(null); }} style={Object.assign({}, S.btn(), { padding: "5px 14px", fontSize: 11 })}>Save</button>
+                      <button onClick={function() { setEditingEmail(null); }} style={Object.assign({}, S.btn("ghost"), { padding: "5px 14px", fontSize: 11 })}>Cancel</button>
+                    </div>
+                  </div> : <div style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ fontSize: 11, color: "#9CA3AF", wordBreak: "break-all", flex: 1 }}>{cpTo}</span><button onClick={function() { setEmailEditValue(cpTo); setEditingEmail("cp"); }} title="Edit To recipients" style={{ background: "transparent", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 12, padding: 2, flexShrink: 0 }}>{"\u270E"}</button></div>}</div>
+                </div>
+
+                {/* Cc row */}
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                  <span style={{ fontSize: 11, color: "#6B7280", fontWeight: 600, minWidth: 26, paddingTop: 1 }}>Cc:</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>{editingEmail === "cp-cc" ? <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    <textarea value={emailEditValue} onChange={function(e) { setEmailEditValue(e.target.value); }} autoFocus onKeyDown={function(e) { if (e.key === "Escape") setEditingEmail(null); }} placeholder="cc1@example.com, cc2@example.com (optional)" rows={2} style={Object.assign({}, S.inp, { padding: "8px 12px", fontSize: 13, lineHeight: 1.5, color: "#374151", width: "100%", resize: "vertical", fontFamily: "'Varela Round', sans-serif" })} />
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button onClick={function() { saveEmailOverride("cpCc", emailEditValue); setEditingEmail(null); }} style={Object.assign({}, S.btn(), { padding: "5px 14px", fontSize: 11 })}>Save</button>
+                      <button onClick={function() { setEditingEmail(null); }} style={Object.assign({}, S.btn("ghost"), { padding: "5px 14px", fontSize: 11 })}>Cancel</button>
+                    </div>
+                  </div> : <div style={{ display: "flex", alignItems: "center", gap: 6 }}>{cpCc ? <span style={{ fontSize: 11, color: "#9CA3AF", wordBreak: "break-all", flex: 1 }}>{cpCc}</span> : <span style={{ fontSize: 11, color: "#9CA3AF", fontStyle: "italic", flex: 1 }}>no CC set</span>}<button onClick={function() { setEmailEditValue(cpCc); setEditingEmail("cp-cc"); }} title="Edit Cc recipients" style={{ background: "transparent", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 12, padding: 2, flexShrink: 0 }}>{"\u270E"}</button></div>}</div>
+                </div>
+              </div>
+              {cpDraftSent && <span style={{ fontSize: 11, color: "#059669", fontWeight: 500, display: "flex", alignItems: "center", gap: 4 }}><IconCheck /> Sent</span>}
+            </div>
+            <div style={{ background: "#F9FAFB", borderRadius: 8, padding: "14px 16px", fontSize: 13, color: "#374151", lineHeight: 1.7, marginBottom: 12 }}>
+              Hi Central Pet team,<br /><br />
+              I{"'"}ve just placed this week{"'"}s replenishment POs with Hill{"'"}s. Attaching here to create in your systems. Hill{"'"}s hasn{"'"}t set delivery appointments yet.<br /><br />
+              Thanks,<br /><br />
+              <span style={{ color: "#9CA3AF", fontSize: 11, fontStyle: "italic" }}>Your Vetcove Gmail signature will be appended automatically</span>
+            </div>
+            <button onClick={function() { createDraft("cp"); }} disabled={cpDraftSent} style={Object.assign({}, S.btn(), { opacity: cpDraftSent ? 0.5 : 1 })}><IconMail /> {cpDraftSent ? "Draft Created" : "Create Draft for Central Pet"}</button>
+          </div>
+        </div>;
+      })()}
+    </div>}
+
+    {/* EMPTY STATE */}
+    {orderItems.length === 0 && !replenLoading && <div style={Object.assign({}, S.card, { textAlign: "center", padding: 60, color: "#9CA3AF" })}>
+      <IconBox /><br /><br />
+      {hillsMaster ? "Select warehouse and click Fetch Replenishment to load items." : "Upload Hills Master XLSX to get started."}
+    </div>}
+
+    {/* Confirm Remove Modal */}
+    {confirmRemove && <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={function() { setConfirmRemove(null); }}>
+      <div style={{ background: "#FFFFFF", borderRadius: 16, padding: 32, width: 420, boxShadow: "0 20px 60px rgba(0,0,0,0.15)", animation: "slideUp 0.2s ease" }} onClick={function(e) { e.stopPropagation(); }}>
+        <div style={{ width: 48, height: 48, borderRadius: 12, background: "rgba(245,158,11,0.12)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#D97706" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        </div>
+        <h3 style={{ fontSize: 16, fontWeight: 700, color: "#1F2937", textAlign: "center", margin: "0 0 8px" }}>Remove Replenishment Item</h3>
+        <p style={{ fontSize: 13, color: "#6B7280", textAlign: "center", margin: "0 0 24px", lineHeight: 1.6 }}>Item <strong style={{ color: "#D97706", fontFamily: "monospace" }}>{confirmRemove.id}</strong> came from Prepare Replenishment. Removing it means it won{"'"}t be included in the order or any truck assignments.</p>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button onClick={function() { setConfirmRemove(null); }} style={{ flex: 1, padding: "10px 16px", borderRadius: 10, border: "1px solid #E5E7EB", background: "#FFFFFF", color: "#374151", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
+          <button onClick={function() { confirmRemove.action(); }} style={{ flex: 1, padding: "10px 16px", borderRadius: 10, border: "none", background: "#DC2626", color: "#FFFFFF", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Remove Item</button>
+        </div>
+      </div>
+    </div>}
+  </div>;
+}
+
+/* ═══════ OOS TRACKER ═══════ */
+function DownloadMenu(props) {
+  var rows = props.rows || [];
+  var filename = props.filename || "export";
+  var color = props.color || "#6B7280";
+  var _open = useState(false), open = _open[0], setOpen = _open[1];
+  function cols() { if (!rows.length) return []; return Object.keys(rows[0]).filter(function(k) { return k.charAt(0) !== "_"; }); }
+  function downloadCSV() {
+    var c = cols();
+    var esc = function(v) { var s = String(v == null ? "" : v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+    var lines = [c.join(",")];
+    rows.forEach(function(r) { lines.push(c.map(function(k) { return esc(r[k]); }).join(",")); });
+    var blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a"); a.href = url; a.download = filename + ".csv"; a.click();
+    setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
+    setOpen(false);
+  }
+  function downloadXLSX() {
+    var XLSX = require("xlsx");
+    var c = cols();
+    var aoa = [c].concat(rows.map(function(r) { return c.map(function(k) { return r[k]; }); }));
+    var ws = XLSX.utils.aoa_to_sheet(aoa);
+    var wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "OOS");
+    XLSX.writeFile(wb, filename + ".xlsx");
+    setOpen(false);
+  }
+  var item = { padding: "8px 14px", fontSize: 12, color: "#374151", cursor: "pointer", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 8 };
+  return <div style={{ position: "relative", display: "inline-block" }} onMouseEnter={function() { setOpen(true); }} onMouseLeave={function() { setOpen(false); }}>
+    <button style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "transparent", border: "none", color: color, fontSize: 12, fontWeight: 500, cursor: "pointer", padding: "4px 6px" }}>{rows.length} rows <IconDL /></button>
+    {open && <div style={{ position: "absolute", right: 0, top: "100%", background: "#FFFFFF", border: "1px solid #E5E7EB", borderRadius: 8, boxShadow: "0 4px 16px rgba(0,0,0,0.12)", zIndex: 50, overflow: "hidden", minWidth: 190 }}>
+      <div onClick={downloadCSV} onMouseEnter={function(e) { e.currentTarget.style.background = "#F3F4F6"; }} onMouseLeave={function(e) { e.currentTarget.style.background = "transparent"; }} style={item}><IconDL /> Download as CSV</div>
+      <div onClick={downloadXLSX} onMouseEnter={function(e) { e.currentTarget.style.background = "#F3F4F6"; }} onMouseLeave={function(e) { e.currentTarget.style.background = "transparent"; }} style={item}><IconDL /> Download as XLSX</div>
+    </div>}
+  </div>;
+}
+
+function OOSTracker(props) {
+  var toast = props.toast, cred = props.cred;
+  var TOOL_COLOR = "#EF4444";
+  var _tab = useState("fuzerx"), tab = _tab[0], setTab = _tab[1];
+  var _orderMap = useState({}), orderMap = _orderMap[0], setOrderMap = _orderMap[1];
+  var _orderMapLastFetched = useState(null), orderMapLastFetched = _orderMapLastFetched[0], setOrderMapLastFetched = _orderMapLastFetched[1];
+  var _orderMapLoading = useState(false), orderMapLoading = _orderMapLoading[0], setOrderMapLoading = _orderMapLoading[1];
+  var _orderMapCacheHit = useState(false), orderMapCacheHit = _orderMapCacheHit[0], setOrderMapCacheHit = _orderMapCacheHit[1];
+  function normalizeNdc(s) { return (s || "").replace(/\D/g, ""); }
+  // Which Acumatica warehouses (and which Google Sheets) are relevant per OOS tab
+  var TAB_WAREHOUSES = { fuzerx: ["TP-NY", "TP-OH", "TP-CA"], gogomeds: ["GGM-KY", "GGM-AZ"], cgp: [] };
+  function loadOrderMap(forceFresh) {
+    var whsForTab = TAB_WAREHOUSES[tab] || [];
+    setOrderMapLoading(true);
+    var refreshParam = forceFresh ? "?refresh=1" : "";
+    var sheetPromise = Promise.all(whsForTab.map(function(wh) {
+      return fetch("/api/sheets?wh=" + encodeURIComponent(wh) + "&_t=" + Date.now(), { cache: "no-store" })
+        .then(function(r) { return r.ok ? r.json() : null; })
+        .then(function(j) { return { wh: wh, rows: (j && j.data) || [] }; })
+        .catch(function() { return { wh: wh, rows: [] }; });
+    }));
+    var openPoPromise = (cred && cred.username && cred.password)
+      ? fetch("/api/acumatica" + refreshParam, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "open-po-lines", username: cred.username, password: cred.password }),
+        }).then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; })
+      : Promise.resolve(null);
+    var hillsMetaPromise = kvGet("hills-pawtree-meta").then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; });
+    // NDC <-> Inventory ID cross-reference (only needed for tabs that use sheets)
+    var needsNdcLookup = whsForTab.length > 0 && cred && cred.username && cred.password;
+    var crossRefPromise = needsNdcLookup
+      ? fetch("/api/acumatica", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "stock-cross-ref", username: cred.username, password: cred.password }) }).then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; })
+      : Promise.resolve(null);
+    var ndcLookupPromise = needsNdcLookup
+      ? fetch("/api/acumatica", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "ndc-lookup", username: cred.username, password: cred.password }) }).then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; })
+      : Promise.resolve(null);
+    function parseDateLoose(s) {
+      if (!s) return null;
+      var t = String(s).split("T")[0];
+      var iso = t.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (iso) return new Date(parseInt(iso[1]), parseInt(iso[2]) - 1, parseInt(iso[3])).getTime();
+      var us = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+      if (us) { var y = parseInt(us[3]); if (y < 100) y += 2000; return new Date(y, parseInt(us[1]) - 1, parseInt(us[2])).getTime(); }
+      var d = new Date(t); return isNaN(d.getTime()) ? null : d.getTime();
+    }
+    Promise.all([sheetPromise, openPoPromise, hillsMetaPromise, crossRefPromise, ndcLookupPromise]).then(function(all) {
+      var sheetResults = all[0];
+      var openPoJson = all[1];
+      var hillsMetaResp = all[2];
+      var crossRefJson = all[3];
+      var ndcLookupJson = all[4];
+      // Build NDC -> [Inventory IDs] map (branded + GEN- can both map to same NDC)
+      var ndcToInvIds = {};
+      // Reverse: Inventory ID -> NDC (used so we can look up an Acumatica PO's NDC)
+      var invIdToNdc = {};
+      function addNdcMapping(ndc, invId) {
+        if (!ndc || !invId) return;
+        if (!ndcToInvIds[ndc]) ndcToInvIds[ndc] = [];
+        if (ndcToInvIds[ndc].indexOf(invId) < 0) ndcToInvIds[ndc].push(invId);
+        if (!invIdToNdc[invId]) invIdToNdc[invId] = ndc;
+      }
+      if (crossRefJson && crossRefJson.data) {
+        crossRefJson.data.forEach(function(row) {
+          addNdcMapping(normalizeNdc(row.NDC), (row.InventoryID || "").trim());
+        });
+      }
+      if (ndcLookupJson && ndcLookupJson.data) {
+        ndcLookupJson.data.forEach(function(row) {
+          addNdcMapping(normalizeNdc(row.AlternateID), (row.InventoryID || "").trim());
+        });
+      }
+      // Build tracker proximity map, dual-keyed under (sheet Inventory ID) + (NDC-resolved Inventory IDs) + (raw NDC fallback)
+      // Each entry stores `source` so we can attribute the ETA in the UI.
+      var trackerByInvId = {};
+      sheetResults.forEach(function(rs) {
+        var sourceLabel = rs.wh.indexOf("TP-") === 0 ? "Fuze" : (rs.wh.indexOf("GGM-") === 0 ? "GGM" : "Sheet");
+        rs.rows.forEach(function(r) {
+          var eta = r["Expected Arrival"] || "";
+          if (!eta) return;
+          var orderDate = r["Order Date"] || "";
+          var orderDateMs = parseDateLoose(orderDate);
+          var sheetInvId = (r["Inventory ID"] || "").trim();
+          var sheetNdc = normalizeNdc(r["NDC"]);
+          // Collect every key this row should be indexed under
+          var keys = [];
+          if (sheetInvId) keys.push(sheetInvId);
+          if (sheetNdc && ndcToInvIds[sheetNdc]) {
+            ndcToInvIds[sheetNdc].forEach(function(id) { if (keys.indexOf(id) < 0) keys.push(id); });
+          }
+          if (sheetNdc) keys.push("NDC:" + sheetNdc);
+          if (keys.length === 0) return;
+          var entry = { eta: eta, orderDateMs: orderDateMs, source: sourceLabel };
+          keys.forEach(function(key) {
+            if (!trackerByInvId[key]) trackerByInvId[key] = [];
+            trackerByInvId[key].push(entry);
+          });
+        });
+      });
+      // Hills KV meta: { "P0001234": { eta: "5/15/2026", notes: "..." } }
+      var hillsMeta = {};
+      if (hillsMetaResp && hillsMetaResp.data) {
+        var raw = typeof hillsMetaResp.data === "string" ? JSON.parse(hillsMetaResp.data) : hillsMetaResp.data;
+        Object.keys(raw || {}).forEach(function(po) {
+          if (raw[po] && raw[po].eta) hillsMeta[po] = raw[po].eta;
+        });
+      }
+      // Find best tracker entry for a given Acumatica PO's Inventory ID + Order Date
+      function bestTrackerEta(invId, orderDateMs) {
+        // Try keys in priority order: direct Inventory ID, then NDC-resolved (via reverse map)
+        var candidates = trackerByInvId[invId] || [];
+        if (candidates.length === 0) {
+          var ndc = invIdToNdc[invId];
+          if (ndc) candidates = trackerByInvId["NDC:" + ndc] || [];
+        }
+        if (candidates.length === 0 || !orderDateMs) return null;
+        var best = null, bestDelta = Infinity;
+        candidates.forEach(function(t) {
+          if (!t.orderDateMs) return;
+          var delta = Math.abs(t.orderDateMs - orderDateMs);
+          if (delta < bestDelta && delta <= 14 * 86400000) { bestDelta = delta; best = t; }
+        });
+        return best;
+      }
+      // Build final map from Open PO Lines, enriched with ETA where possible
+      var map = {};
+      if (openPoJson && openPoJson.data) {
+        openPoJson.data.forEach(function(row) {
+          var invId = (row.InventoryID || "").trim();
+          if (!invId) return;
+          var whCode = (row.Warehouse || "").trim();
+          // Skip warehouses we don't work with (e.g. EXP-NJ and any other EXP- prefixed)
+          if (whCode.indexOf("EXP") === 0) return;
+          var orderQty = parseFloat(row.OrderQty) || 0;
+          var qtyReceived = parseFloat(row.QtyOnReceipts) || 0;
+          var outstanding = orderQty - qtyReceived;
+          var po = (row.OrderNbr || "").trim();
+          var orderDate = row.OrderDate || "";
+          var orderDateMs = parseDateLoose(orderDate);
+          // ETA resolution priority:
+          // 1) Hills KV (matches by Acumatica PO# directly)
+          // 2) Tracker sheet (matches by Inventory ID or NDC-resolved Inventory ID, within 14 days of Order Date)
+          var eta = "";
+          var etaSource = "";
+          if (po && hillsMeta[po]) {
+            eta = hillsMeta[po];
+            etaSource = "Hills KV";
+          } else {
+            var best = bestTrackerEta(invId, orderDateMs);
+            if (best) { eta = best.eta; etaSource = best.source; }
+          }
+          if (!map[invId]) map[invId] = [];
+          map[invId].push({
+            wh: row.Warehouse || "",
+            po: po,
+            vendorRef: (row.VendorRef || "").trim(),
+            orderDate: orderDate,
+            expectedArrival: eta,
+            etaSource: etaSource,
+            orderQty: orderQty,
+            qtyReceived: qtyReceived,
+            received: outstanding <= 0,
+          });
+        });
+      }
+      setOrderMap(map);
+      var ts = (openPoJson && openPoJson._cachedAt) || Date.now();
+      setOrderMapLastFetched(ts);
+      setOrderMapCacheHit(openPoJson && openPoJson._cache === "hit");
+      setOrderMapLoading(false);
+    });
+  }
+  useEffect(function() { loadOrderMap(false); }, [cred, tab]);
+  var _fuzeData = useState([]), fuzeData = _fuzeData[0], setFuzeData = _fuzeData[1];
+  var _ggmData = useState([]), ggmData = _ggmData[0], setGgmData = _ggmData[1];
+  var _cgpData = useState([]), cgpData = _cgpData[0], setCgpData = _cgpData[1];
+  var _fuzeName = useState(null), fuzeName = _fuzeName[0], setFuzeName = _fuzeName[1];
+  var _ggmName = useState(null), ggmName = _ggmName[0], setGgmName = _ggmName[1];
+  var _cgpName = useState(null), cgpName = _cgpName[0], setCgpName = _cgpName[1];
+  var _allWhse = useState([]), allWhseData = _allWhse[0], setAllWhseData = _allWhse[1];
+  var _allWhseName = useState(null), allWhseName = _allWhseName[0], setAllWhseName = _allWhseName[1];
+  var _totals = useState({}), totalsByVendor = _totals[0], setTotalsByVendor = _totals[1];
+  var _awSearch = useState(""), allWhseSearch = _awSearch[0], setAllWhseSearch = _awSearch[1];
+  var _awSort = useState({ col: null, dir: "asc" }), allWhseSort = _awSort[0], setAllWhseSort = _awSort[1];
+  var _search = useState(""), search = _search[0], setSearch = _search[1];
+  var _whFilter = useState("all"), whFilter = _whFilter[0], setWhFilter = _whFilter[1];
+  var _sort = useState({ col: "warehouse", dir: "asc" }), sortState = _sort[0], setSortState = _sort[1];
+  var _notes = useState({}), notes = _notes[0], setNotes = _notes[1];
+  var _notesLoaded = useState(false), notesLoaded = _notesLoaded[0], setNotesLoaded = _notesLoaded[1];
+  var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
+  var OOS_KV_KEY = "oos-notes-shared";
+  var OOS_DATA_KEY = "oos-data-shared";
+  var OOS_ALLWHSE_KEY = "oos-allwhse-shared";
+  var OOS_TOTALS_KEY = "oos-totals-shared";
+  var OOS_LASTPULL_KEY = "oos-lastpull-shared";
+  var OOS_NOTES_PERM_KEY = "oos-notes-permanent";
+  var OOS_NOTES_MISS_KEY = "oos-notes-misscount";
+  var NOTE_EXPIRY_MISSES = 7; // Note clears when item has been missing from this many uploads in a row
+  // Legacy keys (read-only, for one-time migration of surviving notes)
+  var OOS_PNOTES_KEY = "oos-persistent-notes";
+  var OOS_PREV_NOTES_KEY = "oos-previous-notes";
+  var OOS_PREV_ITEMS_KEY = "oos-previous-items";
+  var _permNotes = useState({}), permNotes = _permNotes[0], setPermNotes = _permNotes[1];
+  var _missCount = useState({}), missCount = _missCount[0], setMissCount = _missCount[1];
+  var _prevItems = useState({}), prevItems = _prevItems[0], setPrevItems = _prevItems[1];
+  var _snapBusy = useState(false), snapBusy = _snapBusy[0], setSnapBusy = _snapBusy[1];
+
+  // Manually trigger the daily OOS-history snapshot. It runs entirely server-side
+  // via the service-account cron; ?force=1 bypasses the once-a-day guard.
+  async function snapshotToHistory() {
+    setSnapBusy(true);
+    try {
+      var resp = await fetch("/api/cron/oos-history?force=1", { cache: "no-store" });
+      var data = await resp.json();
+      if (data && data.ok) { toast("Saved " + (data.appended != null ? data.appended : 0) + " rows to OOS history."); }
+      else { toast("History save failed: " + ((data && data.error) || "unknown"), "error"); }
+    } catch (e) { toast("History save failed: " + (e && e.message ? e.message : e), "error"); }
+    finally { setSnapBusy(false); }
+  }
+
+  function getDailyReset() {
+    var now = new Date();
+    var et = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
+    var day = et.getDay(); // 0=Sun, 1=Mon, 6=Sat
+    // Find the most recent weekday 5am reset
+    var reset = new Date(et); reset.setHours(5, 0, 0, 0);
+    if (et < reset) reset.setDate(reset.getDate() - 1);
+    // Walk back past weekends
+    while (reset.getDay() === 0 || reset.getDay() === 6) {
+      reset.setDate(reset.getDate() - 1);
+    }
+    return reset.getTime();
+  }
+
+  useEffect(function() {
+    var m = true;
+    // Load notes
+    kvGet(OOS_KV_KEY).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+      if (!m) return;
+      if (d && d.data) {
+        var parsed = typeof d.data === "string" ? JSON.parse(d.data) : d.data;
+        var savedAt = parsed._savedAt || 0;
+        var resetTime = getDailyReset();
+        if (savedAt < resetTime) { setNotes({}); kvPost(OOS_KV_KEY, { _savedAt: Date.now() }); }
+        else { delete parsed._savedAt; setNotes(parsed); }
+      }
+      setNotesLoaded(true);
+    }).catch(function() { setNotesLoaded(true); });
+    // Load CSV data
+    kvGet(OOS_DATA_KEY).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+      if (!m || !d || !d.data) return;
+      var parsed = typeof d.data === "string" ? JSON.parse(d.data) : d.data;
+      var resetTime = getDailyReset();
+      if (parsed._savedAt && parsed._savedAt < resetTime) {
+        // Save manufacturer numbers as previous items before wiping
+        var prevIds = {};
+        if (parsed.fuze) parsed.fuze.forEach(function(r) { prevIds["fuzerx:" + r.MANUFACTURER_NO] = true; });
+        if (parsed.ggm) parsed.ggm.forEach(function(r) { prevIds["gogomeds:" + r.MANUFACTURER_NO] = true; });
+        if (parsed.cgp) parsed.cgp.forEach(function(r) { prevIds["cgp:" + r.MANUFACTURER_NO] = true; });
+        // Only rotate prevItems if current data actually has rows — otherwise keep whatever's already in prev
+        if (Object.keys(prevIds).length > 0) {
+          kvPost(OOS_PREV_ITEMS_KEY, prevIds);
+          setPrevItems(prevIds);
+        }
+        kvPost(OOS_DATA_KEY, { _savedAt: Date.now() });
+        return;
+      }
+      // Re-split the cached buckets under the CURRENT vendor aliases so an alias
+      // change (e.g. dropping Hill's from CGP) takes effect on reload without
+      // needing a re-fetch. Cached buckets can overlap, so dedupe by Mfr No +
+      // product line before re-splitting.
+      var combined = [], seen = {};
+      ["fuze", "ggm", "cgp"].forEach(function(k) {
+        (parsed[k] || []).forEach(function(row) {
+          var id = String(row.MANUFACTURER_NO == null ? "" : row.MANUFACTURER_NO) + "|" + String(row.PRODUCT_LINE_NAME == null ? "" : row.PRODUCT_LINE_NAME);
+          if (seen[id]) return;
+          seen[id] = 1; combined.push(row);
+        });
+      });
+      if (combined.length > 0) {
+        var sp0 = splitByVendor(combined);
+        var nm0 = parsed.fuzeName || parsed.cgpName || parsed.ggmName || "Loaded from cloud";
+        setFuzeData(sp0.fuze); setFuzeName(parsed.fuzeName || nm0);
+        setGgmData(sp0.ggm); setGgmName(parsed.ggmName || nm0);
+        setCgpData(sp0.cgp); setCgpName(parsed.cgpName || nm0);
+      }
+    }).catch(function() {});
+    // Load table 2 (All Warehouse-Manufacturer Nos OOS)
+    kvGet(OOS_ALLWHSE_KEY).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+      if (!m || !d || !d.data) return;
+      var parsed = typeof d.data === "string" ? JSON.parse(d.data) : d.data;
+      if (parsed.rows && parsed.rows.length > 0) { setAllWhseData(parsed.rows.map(deriveAllWhse)); setAllWhseName(parsed.name || "Loaded from cloud"); }
+    }).catch(function() {});
+    kvGet(OOS_TOTALS_KEY).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+      if (!m || !d || !d.data) return;
+      var parsed = typeof d.data === "string" ? JSON.parse(d.data) : d.data;
+      if (parsed.totals) setTotalsByVendor(parsed.totals);
+    }).catch(function() {});
+    kvGet(OOS_LASTPULL_KEY).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+      if (!m || !d || !d.data) return;
+      var parsed = typeof d.data === "string" ? JSON.parse(d.data) : d.data;
+      if (parsed && parsed.at) setLastPull({ at: parsed.at, by: parsed.by || "" });
+    }).catch(function() {});
+    // Load previous items
+    kvGet(OOS_PREV_ITEMS_KEY).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+      if (!m || !d || !d.data) return;
+      var parsed = typeof d.data === "string" ? JSON.parse(d.data) : d.data;
+      setPrevItems(parsed);
+    }).catch(function() {});
+    // Load permanent notes + miss count map. On very first run (perm key doesn't exist), do a
+    // one-time migration from the old pNotes + prevNotes buckets so surviving notes carry over.
+    // No time-based sweep — miss count only changes when a new CSV is uploaded.
+    Promise.all([
+      kvGet(OOS_NOTES_PERM_KEY).then(function(r) { return r.ok ? r.json() : null; }),
+      kvGet(OOS_PNOTES_KEY).then(function(r) { return r.ok ? r.json() : null; }),
+      kvGet(OOS_PREV_NOTES_KEY).then(function(r) { return r.ok ? r.json() : null; }),
+      kvGet(OOS_NOTES_MISS_KEY).then(function(r) { return r.ok ? r.json() : null; })
+    ]).then(function(results) {
+      if (!m) return;
+      var permRaw = results[0] && results[0].data ? (typeof results[0].data === "string" ? JSON.parse(results[0].data) : results[0].data) : null;
+      var missRaw = results[3] && results[3].data ? (typeof results[3].data === "string" ? JSON.parse(results[3].data) : results[3].data) : {};
+      delete missRaw._savedAt;
+      if (permRaw && Object.keys(permRaw).filter(function(k) { return k !== "_savedAt"; }).length > 0) {
+        // Already migrated — just load
+        delete permRaw._savedAt;
+        setPermNotes(permRaw);
+      } else {
+        // First-ever load — merge from legacy buckets
+        var legacyPrev = results[2] && results[2].data ? (typeof results[2].data === "string" ? JSON.parse(results[2].data) : results[2].data) : {};
+        var legacyCur = results[1] && results[1].data ? (typeof results[1].data === "string" ? JSON.parse(results[1].data) : results[1].data) : {};
+        delete legacyPrev._savedAt; delete legacyCur._savedAt;
+        var merged = Object.assign({}, legacyPrev, legacyCur);
+        setPermNotes(merged);
+        // Seed missCount = 0 for migrated notes
+        Object.keys(merged).forEach(function(k) { if (missRaw[k] === undefined) missRaw[k] = 0; });
+        kvPost(OOS_NOTES_PERM_KEY, Object.assign({}, merged, { _savedAt: Date.now() })).catch(function() {});
+        kvPost(OOS_NOTES_MISS_KEY, Object.assign({}, missRaw, { _savedAt: Date.now() })).catch(function() {});
+      }
+      setMissCount(missRaw);
+    }).catch(function() {});
+    return function() { m = false; };
+  }, []);
+
+  useEffect(function() {
+    var iv = setInterval(function() {
+      kvGet(OOS_KV_KEY).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+        if (d && d.data) {
+          var parsed = typeof d.data === "string" ? JSON.parse(d.data) : d.data;
+          delete parsed._savedAt; setNotes(parsed);
+        }
+      }).catch(function() {});
+      kvGet(OOS_NOTES_PERM_KEY).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+        if (d && d.data) {
+          var parsed = typeof d.data === "string" ? JSON.parse(d.data) : d.data;
+          delete parsed._savedAt; setPermNotes(parsed);
+        }
+      }).catch(function() {});
+
+    }, 8000);
+    return function() { clearInterval(iv); };
+  }, []);
+
+  var WH_MAP = { "TRUEPILL_BROOKLYN": "Brooklyn", "TRUEPILL_OHIO": "Ohio", "TRUEPILL_HAYWARD": "Hayward", "GOGOMEDS_KY": "Kentucky", "GOGOMEDS_AZ": "Arizona", "GOGOMEDS_KENTUCKY": "Kentucky", "GOGOMEDS_ARIZONA": "Arizona", "HILLS_CGP_WAREHOUSE_CA": "Hills CA", "HILLS_CGP_WAREHOUSE_NJ": "Hills NJ", "HILLS_CGP_WAREHOUSE_FL": "Hills FL", "HILLS_CGP_WAREHOUSE_TX": "Hills TX" };
+  function mapWH(slug) { return WH_MAP[slug] || slug || "\u2014"; }
+  function splitList(s) { return String(s == null ? "" : s).split(",").map(function(x) { return x.trim(); }).filter(Boolean); }
+  function deriveOOS(r) {
+    r._vendors = splitList(r.OOS_VENDOR_NAMES);
+    r._whSlugs = splitList(r.WAREHOUSE_SLUGS);
+    var seen = {}, whs = [];
+    r._whSlugs.forEach(function(s) { var d = mapWH(s); if (!seen[d]) { seen[d] = 1; whs.push(d); } });
+    r._whs = whs;
+    return r;
+  }
+  // Table 2 (OOS_ALLWHSENOSOOS): one row per warehouse-manufacturer, single VENDOR_NAME/WAREHOUSE_SLUG.
+  function deriveAllWhse(r) {
+    r._vendor = String(r.VENDOR_NAME == null ? "" : r.VENDOR_NAME).trim();
+    r._wh = mapWH(String(r.WAREHOUSE_SLUG == null ? "" : r.WAREHOUSE_SLUG).trim());
+    return r;
+  }
+  // Maps the raw OOS_VENDOR_NAMES values to a tab. A vendor name matches a tab
+  // if it contains any of that tab's aliases (case-insensitive). Easy to extend:
+  // add more vendor names to a tab's list as the channel mappings are confirmed.
+  var TAB_VENDORS = {
+    fuzerx: ["fuzerx", "fuze"],
+    gogomeds: ["gogomeds", "gogo"],
+    cgp: ["central garden", "cgp"]
+  };
+  function vendorMatch(vendors, vendorTab) {
+    var aliases = TAB_VENDORS[vendorTab] || [];
+    return (vendors || []).some(function(v) {
+      var t = String(v).toLowerCase().trim();
+      return aliases.some(function(a) { return t.indexOf(a) >= 0; });
+    });
+  }
+  // Canonical vendor name per tab, used to look up the totals denominator.
+  var TAB_VENDOR_LABEL = { fuzerx: "FuzeRx", gogomeds: "GoGoMeds", cgp: "Central Garden & Pet" };
+  // Build a { vendorName(lowercased): total } map from TOTALITEMSEVER rows.
+  function buildTotals(rows) {
+    var m = {};
+    (rows || []).forEach(function(r) {
+      var v = String(r.VENDOR_NAME == null ? "" : r.VENDOR_NAME).trim().toLowerCase();
+      var n = parseFloat(String(r.TOTAL_MNO_VENDOR_PAIRS == null ? "" : r.TOTAL_MNO_VENDOR_PAIRS).replace(/,/g, ""));
+      if (v) m[v] = isNaN(n) ? 0 : n;
+    });
+    return m;
+  }
+  function splitByVendor(rows) {
+    var fuze = [], ggm = [], cgp = [];
+    (rows || []).forEach(function(r) {
+      deriveOOS(r);
+      if (vendorMatch(r._vendors, "fuzerx")) fuze.push(r);
+      if (vendorMatch(r._vendors, "gogomeds")) ggm.push(r);
+      if (vendorMatch(r._vendors, "cgp")) cgp.push(r);
+    });
+    return { fuze: fuze, ggm: ggm, cgp: cgp };
+  }
+  function whStyle(d) {
+    var bg = d === "Brooklyn" ? "#EFF6FF" : d === "Ohio" ? "#ECFDF5" : d === "Hayward" ? "#FFF7ED" : d === "Kentucky" ? "#F5F3FF" : d === "Arizona" ? "#FDF2F8" : d === "Hills CA" ? "#FEF9C3" : d === "Hills NJ" ? "#E0F2FE" : d === "Hills FL" ? "#FFE4E6" : d === "Hills TX" ? "#CCFBF1" : "#F3F4F6";
+    var color = d === "Brooklyn" ? "#2563EB" : d === "Ohio" ? "#059669" : d === "Hayward" ? "#D97706" : d === "Kentucky" ? "#7C3AED" : d === "Arizona" ? "#DB2777" : d === "Hills CA" ? "#A16207" : d === "Hills NJ" ? "#0369A1" : d === "Hills FL" ? "#BE123C" : d === "Hills TX" ? "#0F766E" : "#6B7280";
+    return { bg: bg, color: color };
+  }
+
+
+  function updateNote(key, field, value) {
+    if (field === "note") {
+      // Permanent notes — no rotation, persist indefinitely
+      var pu = Object.assign({}, permNotes); pu[key] = value; setPermNotes(pu);
+      kvPost(OOS_NOTES_PERM_KEY, Object.assign({}, pu, { _savedAt: Date.now() })).catch(function() {});
+    } else {
+      // SD/BO go to daily-reset storage
+      var u = Object.assign({}, notes); u[key] = Object.assign({}, u[key] || {}); u[key][field] = value; setNotes(u);
+      var toSave = Object.assign({}, u, { _savedAt: Date.now() }); kvPost(OOS_KV_KEY, toSave).catch(function() {});
+    }
+  }
+
+  function parseCSV(text) {
+    var lines = text.split("\n").filter(function(l) { return l.trim(); });
+    if (lines.length < 2) return [];
+    var headers = lines[0].split(",").map(function(h) { return h.trim().replace(/^"|"$/g, ""); });
+    var rows = [];
+    for (var i = 1; i < lines.length; i++) {
+      var vals = []; var cur = ""; var inQuote = false;
+      for (var c = 0; c < lines[i].length; c++) { var ch = lines[i][c]; if (ch === '"') { inQuote = !inQuote; } else if (ch === ',' && !inQuote) { vals.push(cur.trim()); cur = ""; } else { cur += ch; } }
+      vals.push(cur.trim());
+      var obj = {}; headers.forEach(function(h, hi) { obj[h] = vals[hi] || ""; }); deriveOOS(obj); rows.push(obj);
+    }
+    return rows;
+  }
+
+  function saveDataToKV(fuze, fuzeFn, ggm, ggmFn, cgp, cgpFn) {
+    kvPost(OOS_DATA_KEY, { fuze: fuze, fuzeName: fuzeFn, ggm: ggm, ggmName: ggmFn, cgp: cgp, cgpName: cgpFn, _savedAt: Date.now() }).catch(function() {});
+  }
+
+  // Pure: given current miss/notes maps, compute the updated maps for one vendor's
+  // upload. No state writes, so it can be chained across vendors (e.g. a single
+  // Snowflake fetch that loads all tabs at once) before one combined state update.
+  function computeMissUpdate(rows, vendorTab, missIn, notesIn) {
+    var prefix = vendorTab + ":";
+    var seenKeys = {};
+    (rows || []).forEach(function(r) {
+      seenKeys[vendorTab + ":" + r.MANUFACTURER_NO] = true;
+    });
+    var newMiss = Object.assign({}, missIn);
+    var newNotes = Object.assign({}, notesIn);
+    var notesChanged = false;
+    Object.keys(newNotes).forEach(function(k) {
+      if (k.indexOf(prefix) !== 0) return; // only touch keys for this vendor
+      if (seenKeys[k]) {
+        newMiss[k] = 0;
+      } else {
+        var c = (newMiss[k] || 0) + 1;
+        if (c >= NOTE_EXPIRY_MISSES) {
+          delete newNotes[k];
+          delete newMiss[k];
+          notesChanged = true;
+        } else {
+          newMiss[k] = c;
+        }
+      }
+    });
+    // Initialize missCount = 0 for new keys in this upload (items with no note yet)
+    Object.keys(seenKeys).forEach(function(k) { if (newMiss[k] === undefined) newMiss[k] = 0; });
+    return { miss: newMiss, notes: newNotes, notesChanged: notesChanged };
+  }
+
+  function applyUploadToMissCount(rows, vendorTab) {
+    var u = computeMissUpdate(rows, vendorTab, missCount, permNotes);
+    setMissCount(u.miss);
+    var now = Date.now();
+    kvPost(OOS_NOTES_MISS_KEY, Object.assign({}, u.miss, { _savedAt: now })).catch(function() {});
+    if (u.notesChanged) {
+      setPermNotes(u.notes);
+      kvPost(OOS_NOTES_PERM_KEY, Object.assign({}, u.notes, { _savedAt: now })).catch(function() {});
+    }
+  }
+
+  function handleFile(file) {
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function(e) {
+      var rows = parseCSV(e.target.result);
+      var nm = file.name;
+      // Auto-detect which table this CSV belongs to by its columns.
+      var sample = rows[0] || {};
+      if ("TOTAL_MNO_VENDOR_PAIRS" in sample) {
+        var m2 = buildTotals(rows);
+        setTotalsByVendor(m2);
+        kvPost(OOS_TOTALS_KEY, { totals: m2, _savedAt: Date.now() }).catch(function() {});
+        toast("Loaded vendor totals (" + rows.length + " vendors) from " + file.name);
+        return;
+      }
+      var isAllWhse = ("VENDOR_NAME" in sample || "WAREHOUSE_SLUG" in sample) && !("OOS_VENDOR_NAMES" in sample);
+      if (isAllWhse) {
+        rows.forEach(deriveAllWhse);
+        setAllWhseData(rows); setAllWhseName(nm);
+        kvPost(OOS_ALLWHSE_KEY, { rows: rows, name: nm, _savedAt: Date.now() }).catch(function() {});
+        setWhFilter("all"); setSearch("");
+        toast("Loaded " + rows.length + " rows into All Warehouse-Manufacturer Nos OOS from " + file.name);
+        return;
+      }
+      var sp = splitByVendor(rows);
+      setFuzeData(sp.fuze); setFuzeName(nm);
+      setGgmData(sp.ggm); setGgmName(nm);
+      setCgpData(sp.cgp); setCgpName(nm);
+      saveDataToKV(sp.fuze, nm, sp.ggm, nm, sp.cgp, nm);
+      var now = Date.now();
+      var u1 = computeMissUpdate(sp.fuze, "fuzerx", missCount, permNotes);
+      var u2 = computeMissUpdate(sp.ggm, "gogomeds", u1.miss, u1.notes);
+      var u3 = computeMissUpdate(sp.cgp, "cgp", u2.miss, u2.notes);
+      setMissCount(u3.miss);
+      kvPost(OOS_NOTES_MISS_KEY, Object.assign({}, u3.miss, { _savedAt: now })).catch(function() {});
+      if (u1.notesChanged || u2.notesChanged || u3.notesChanged) {
+        setPermNotes(u3.notes);
+        kvPost(OOS_NOTES_PERM_KEY, Object.assign({}, u3.notes, { _savedAt: now })).catch(function() {});
+      }
+      setWhFilter("all"); setSearch("");
+      toast("Loaded " + rows.length + " OOS products from " + file.name);
+    };
+    reader.readAsText(file);
+  }
+
+  function loadFromSnowflake() {
+    setSfLoading(true);
+    // Table 2 (All Warehouse-Manufacturer Nos OOS) loads independently of table 1.
+    fetch("/api/oos-allwhse-nos-oos", { cache: "no-store" }).then(function(r) { return r.json(); }).then(function(d2) {
+      if (d2 && d2.ok) {
+        var rows2 = (d2.rows || []).map(deriveAllWhse);
+        var nm2 = "Snowflake \u00B7 " + new Date().toLocaleString();
+        setAllWhseData(rows2); setAllWhseName(nm2);
+        kvPost(OOS_ALLWHSE_KEY, { rows: rows2, name: nm2, _savedAt: Date.now() }).catch(function() {});
+      }
+    }).catch(function() {});
+    // Totals (TOTALITEMSEVER) for the % Mfr Nos OOS denominator.
+    fetch("/api/oos-total-items-ever", { cache: "no-store" }).then(function(r) { return r.json(); }).then(function(dt) {
+      if (dt && dt.ok) {
+        var m = buildTotals(dt.rows || []);
+        setTotalsByVendor(m);
+        kvPost(OOS_TOTALS_KEY, { totals: m, _savedAt: Date.now() }).catch(function() {});
+      }
+    }).catch(function() {});
+    fetch("/api/oos-vendor-report", { cache: "no-store" }).then(function(r) { return r.json(); }).then(function(d) {
+      if (!d || !d.ok) { setSfLoading(false); toast("Snowflake fetch failed: " + ((d && (d.message || d.hint || d.error)) || "unknown error"), "error"); return; }
+      var all = d.rows || [];
+      var sp = splitByVendor(all);
+      var fuze = sp.fuze, ggm = sp.ggm, cgp = sp.cgp;
+      var dropped = all.filter(function(r) { return !(vendorMatch(r._vendors, "fuzerx") || vendorMatch(r._vendors, "gogomeds") || vendorMatch(r._vendors, "cgp")); }).length;
+      var nm = "Snowflake \u00B7 " + new Date().toLocaleString();
+      setFuzeData(fuze); setFuzeName(nm);
+      setGgmData(ggm); setGgmName(nm);
+      setCgpData(cgp); setCgpName(nm);
+      saveDataToKV(fuze, nm, ggm, nm, cgp, nm);
+      // Chain miss-count updates across all three vendors into ONE state write.
+      var now = Date.now();
+      var u1 = computeMissUpdate(fuze, "fuzerx", missCount, permNotes);
+      var u2 = computeMissUpdate(ggm, "gogomeds", u1.miss, u1.notes);
+      var u3 = computeMissUpdate(cgp, "cgp", u2.miss, u2.notes);
+      setMissCount(u3.miss);
+      kvPost(OOS_NOTES_MISS_KEY, Object.assign({}, u3.miss, { _savedAt: now })).catch(function() {});
+      if (u1.notesChanged || u2.notesChanged || u3.notesChanged) {
+        setPermNotes(u3.notes);
+        kvPost(OOS_NOTES_PERM_KEY, Object.assign({}, u3.notes, { _savedAt: now })).catch(function() {});
+      }
+      setWhFilter("all"); setSearch("");
+      setSfLoading(false);
+      var pulledAt = Date.now(), pulledBy = cred && cred.username ? cred.username : "";
+      setLastPull({ at: pulledAt, by: pulledBy });
+      kvPost(OOS_LASTPULL_KEY, { at: pulledAt, by: pulledBy, _savedAt: pulledAt }).catch(function() {});
+      toast("Loaded " + (fuze.length + ggm.length + cgp.length) + " OOS items from Snowflake" + (dropped > 0 ? " (" + dropped + " other-vendor rows skipped)" : ""));
+    }).catch(function(e) { setSfLoading(false); toast("Snowflake fetch error: " + (e && e.message || e), "error"); });
+  }
+
+  function uploadZone() {
+    return <div style={Object.assign({}, S.card, { textAlign: "center", padding: 40 })}>
+      <div onDragOver={function(e) { e.preventDefault(); }} onDrop={function(e) { e.preventDefault(); if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); }} style={{ border: "2px dashed #E5E7EB", borderRadius: 12, padding: 40, cursor: "pointer" }} onClick={function() { var inp = document.createElement("input"); inp.type = "file"; inp.accept = ".csv"; inp.onchange = function(e) { handleFile(e.target.files[0]); }; inp.click(); }}>
+        <div style={{ fontSize: 32, marginBottom: 8 }}>{"\uD83D\uDCC4"}</div>
+        <div style={{ fontSize: 14, fontWeight: 600, color: "#374151", marginBottom: 4 }}>Upload OOS CSV (all vendors)</div>
+        <div style={{ fontSize: 12, color: "#9CA3AF" }}>{"Drag and drop or click to browse \u00B7 or Fetch from Snowflake above"}</div>
+      </div>
+    </div>;
+  }
+
+  var data = tab === "fuzerx" ? fuzeData : tab === "cgp" ? cgpData : ggmData;
+  var currentName = tab === "fuzerx" ? fuzeName : tab === "cgp" ? cgpName : ggmName;
+  var _sdIds = useState({}), sdIds = _sdIds[0], setSdIds = _sdIds[1];
+  var _boIds = useState({}), boIds = _boIds[0], setBoIds = _boIds[1];
+  var _sfLoading = useState(false), sfLoading = _sfLoading[0], setSfLoading = _sfLoading[1];
+  var _lastPull = useState(null), lastPull = _lastPull[0], setLastPull = _lastPull[1];
+  useEffect(function() {
+    // Try localStorage first
+    var cached = sGet("tracker-short-dating");
+    if (cached && cached.data && cached.data.length > 0) {
+      var ids = {}; cached.data.forEach(function(r) { if (r.InventoryID) ids[String(r.InventoryID)] = true; }); setSdIds(ids);
+    }
+    // Then try KV for fresher data
+    kvGet("tracker-shared-short-dating").then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+      if (d && d.data && d.data.data && d.data.data.length > 0) {
+        var ids = {}; d.data.data.forEach(function(r) { if (r.InventoryID) ids[String(r.InventoryID)] = true; }); setSdIds(ids);
+        sSet("tracker-short-dating", d.data);
+      }
+    }).catch(function() {});
+    // Backorder feed (mirrors short-dating) -> powers the BO auto-check
+    var cachedBO = sGet("tracker-backorder");
+    if (cachedBO && cachedBO.data && cachedBO.data.length > 0) {
+      var bids = {}; cachedBO.data.forEach(function(r) { if (r.InventoryID) bids[String(r.InventoryID)] = true; }); setBoIds(bids);
+    }
+    kvGet("tracker-shared-backorder").then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+      if (d && d.data && d.data.data && d.data.data.length > 0) {
+        var bids = {}; d.data.data.forEach(function(r) { if (r.InventoryID) bids[String(r.InventoryID)] = true; }); setBoIds(bids);
+        sSet("tracker-backorder", d.data);
+      }
+    }).catch(function() {});
+  }, []);
+  var warehouses = useMemo(function() { var w = {}; data.forEach(function(r) { (r._whs || []).forEach(function(x) { w[x] = 1; }); }); return Object.keys(w).sort(); }, [data]);
+
+  var filtered = useMemo(function() {
+    var d = data.slice();
+    if (whFilter !== "all") d = d.filter(function(r) { return (r._whs || []).indexOf(whFilter) >= 0; });
+    if (search) { var s = search.toLowerCase(); d = d.filter(function(r) { return (r.PRODUCT_LINE_NAME || "").toLowerCase().indexOf(s) >= 0 || (r.MANUFACTURER_NAME || "").toLowerCase().indexOf(s) >= 0 || (r.MANUFACTURER_NO || "").toLowerCase().indexOf(s) >= 0; }); }
+    var col = sortState.col; var dir = sortState.dir;
+    d.sort(function(a, b) { var va, vb; var nkA = tab + ":" + a.MANUFACTURER_NO; var nkB = tab + ":" + b.MANUFACTURER_NO; var nA = notes[nkA] || {}; var nB = notes[nkB] || {}; if (col === "warehouse") { va = (a._whs || []).join(","); vb = (b._whs || []).join(","); } else if (col === "manufacturer") { va = a.MANUFACTURER_NAME; vb = b.MANUFACTURER_NAME; } else if (col === "product") { va = a.PRODUCT_LINE_NAME; vb = b.PRODUCT_LINE_NAME; } else if (col === "status") { va = a.SUPPLY_STATUS; vb = b.SUPPLY_STATUS; } else if (col === "sd") { va = (nA.sd !== undefined ? nA.sd : sdIds[String(a.MANUFACTURER_NO)]) ? 1 : 0; vb = (nB.sd !== undefined ? nB.sd : sdIds[String(b.MANUFACTURER_NO)]) ? 1 : 0; return dir === "desc" ? vb - va : va - vb; } else if (col === "bo") { va = (nA.bo !== undefined ? nA.bo : boIds[String(a.MANUFACTURER_NO)]) ? 1 : 0; vb = (nB.bo !== undefined ? nB.bo : boIds[String(b.MANUFACTURER_NO)]) ? 1 : 0; return dir === "desc" ? vb - va : va - vb; } else if (col === "oos") { va = prevItems[tab + ":" + a.MANUFACTURER_NO] ? 1 : 0; vb = prevItems[tab + ":" + b.MANUFACTURER_NO] ? 1 : 0; return dir === "desc" ? vb - va : va - vb; } else { va = a.MANUFACTURER_NO; vb = b.MANUFACTURER_NO; } return dir === "desc" ? -(va || "").localeCompare(vb || "") : (va || "").localeCompare(vb || ""); });
+    return d;
+  }, [data, whFilter, search, sortState, notes, sdIds, boIds, prevItems]);
+
+  function sortHeader(col, label) {
+    var isSorted = sortState.col === col;
+    return <th onClick={function() { setSortState(isSorted ? { col: col, dir: sortState.dir === "asc" ? "desc" : "asc" } : { col: col, dir: "asc" }); }} style={Object.assign({}, S.th, { cursor: "pointer", userSelect: "none" })}>{label}{isSorted ? (sortState.dir === "desc" ? " \u25BE" : " \u25B4") : ""}</th>;
+  }
+
+  function dataTable() {
+    return <div>
+      <div style={{ fontSize: 16, fontWeight: 600, color: "#1F2937", marginBottom: 12 }}>Manufacturer Nos OOS in All Warehouses</div>
+      <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+        <div style={Object.assign({}, S.statCard, { background: "#FEF2F2" })}><div style={{ fontSize: 11, color: "#C47070", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>Total OOS</div><div style={{ fontSize: 28, fontWeight: 500, color: "#EF4444", marginTop: 6 }}>{data.length}</div></div>
+        {(function() {
+          var total = totalsByVendor[(TAB_VENDOR_LABEL[tab] || "").toLowerCase()];
+          var pct = total ? (data.length / total * 100) : null;
+          return <div style={Object.assign({}, S.statCard, { background: "#FFF7ED" })}><div style={{ fontSize: 11, color: "#B45309", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>% Mfr Nos OOS</div><div style={{ fontSize: 28, fontWeight: 500, color: "#EA580C", marginTop: 6 }}>{pct == null ? "\u2014" : pct.toFixed(1) + "%"}</div><div style={{ fontSize: 11, color: "#9A6B3F", marginTop: 2 }}>{total ? (data.length + " / " + total) : "no total"}</div></div>;
+        })()}
+        {warehouses.map(function(wh) { var ct = data.filter(function(r) { return (r._whs || []).indexOf(wh) >= 0; }).length; return <div key={wh} style={Object.assign({}, S.statCard, { background: "#F9FAFB" })}><div style={{ fontSize: 11, color: "#6B7280", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>{wh}</div><div style={{ fontSize: 28, fontWeight: 500, color: "#374151", marginTop: 6 }}>{ct}</div></div>; })}
+      </div>
+      <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
+        <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search..." style={Object.assign({}, S.inp, { padding: "8px 14px", width: 200 })} />
+        <select value={whFilter} onChange={function(e) { setWhFilter(e.target.value); }} style={Object.assign({}, S.sel, { padding: "8px 12px" })}><option value="all">All Warehouses</option>{warehouses.map(function(w) { return <option key={w} value={w}>{w}</option>; })}</select>
+        <div style={{ flex: 1 }} />
+        <span style={{ fontSize: 12, color: "#9CA3AF" }}>{filtered.length} of {data.length} items</span>
+        <CacheStatus lastFetchedAt={orderMapLastFetched} cacheHit={orderMapCacheHit} refreshing={orderMapLoading} color={TOOL_COLOR} onRefresh={function() { loadOrderMap(true); }} />
+        <button onClick={function() { setFuzeData([]); setFuzeName(null); setGgmData([]); setGgmName(null); setCgpData([]); setCgpName(null); saveDataToKV([], null, [], null, [], null); }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}><IconTrash /> Replace CSV</button>
+      </div>
+      <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto", maxHeight: "calc(100vh - 220px)" })}>
+        <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
+          <thead><tr>
+            <th style={Object.assign({}, S.th, { minWidth: 360 })}>Notes</th>
+            {sortHeader("sd", "SD")}
+            {sortHeader("bo", "BO")}
+            {sortHeader("oos", "OOS")}
+            {sortHeader("id", "Mfr No.")}
+            {sortHeader("manufacturer", "Manufacturer")}
+            {sortHeader("product", "Product")}
+            <th style={S.th}>Vendors</th>
+            {sortHeader("warehouse", "Warehouse")}
+            <th style={Object.assign({}, S.th, { minWidth: 220 })}>Order Status</th>
+          </tr></thead>
+          <tbody>{filtered.map(function(r, i) {
+            var noteKey = tab + ":" + r.MANUFACTURER_NO;
+            var n = notes[noteKey] || {};
+            var autoSD = sdIds[String(r.MANUFACTURER_NO)] || false;
+            var isSD = n.sd !== undefined ? n.sd : autoSD;
+            var autoBO = boIds[String(r.MANUFACTURER_NO)] || false;
+            var isBO = n.bo !== undefined ? n.bo : autoBO;
+            var isOld = prevItems[tab + ":" + r.MANUFACTURER_NO];
+            return <tr key={i}>
+              <td style={S.td}><textarea value={permNotes[noteKey] !== undefined ? permNotes[noteKey] : ""} onChange={function(e) { updateNote(noteKey, "note", e.target.value); e.target.style.height = "auto"; e.target.style.height = e.target.scrollHeight + "px"; }} placeholder="Add notes..." rows={1} style={Object.assign({}, S.inp, { padding: "5px 10px", fontSize: 12, resize: "none", overflow: "hidden", minHeight: 32, lineHeight: "1.4", display: "block", width: "100%" })} ref={function(el) { if (el) { el.style.height = "auto"; el.style.height = el.scrollHeight + "px"; } }} /></td>
+              <td style={Object.assign({}, S.td, { textAlign: "center" })}><button onClick={function() { updateNote(noteKey, "sd", !isSD); }} style={{ width: 20, height: 20, borderRadius: 4, border: isSD ? "2px solid #E879F9" : "2px solid #D1D5DB", background: isSD ? "#E879F9" : "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", transition: "all 0.15s" }}>{isSD && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}</button></td>
+              <td style={Object.assign({}, S.td, { textAlign: "center" })}><button onClick={function() { updateNote(noteKey, "bo", !isBO); }} style={{ width: 20, height: 20, borderRadius: 4, border: isBO ? "2px solid #F97316" : "2px solid #D1D5DB", background: isBO ? "#F97316" : "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", transition: "all 0.15s" }}>{isBO && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}</button></td>
+              <td style={Object.assign({}, S.td, { textAlign: "center" })}><span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 6, fontWeight: 600, background: isOld ? "#FFF7ED" : "#ECFDF5", color: isOld ? "#D97706" : "#059669" }}>{isOld ? "Old" : "New"}</span></td>
+              <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, fontWeight: 600, color: "#374151" })}>{r.MANUFACTURER_NO}</td>
+              <td style={Object.assign({}, S.td, { color: "#374151" })}>{r.MANUFACTURER_NAME}</td>
+              <td style={Object.assign({}, S.td, { color: "#374151", maxWidth: 300 })}>{r.PRODUCT_LINE_NAME}</td>
+              <td style={S.td}><div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>{(r._vendors || []).map(function(v, vi) { return <span key={vi} style={{ fontSize: 11, padding: "2px 8px", borderRadius: 6, fontWeight: 500, background: "#FEF2F2", color: "#B91C1C" }}>{v}</span>; })}</div></td>
+              <td style={S.td}><div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>{(r._whs || []).map(function(w, wi) { var st = whStyle(w); return <span key={wi} style={{ fontSize: 11, padding: "2px 8px", borderRadius: 6, fontWeight: 500, background: st.bg, color: st.color }}>{w}</span>; })}</div></td>
+              <td style={S.td}>{(function() {
+                // Map OOS row's display warehouse to Acumatica warehouse codes
+                var OOS_TO_ACU = { "Brooklyn": ["TP-NY"], "Ohio": ["TP-OH"], "Hayward": ["TP-CA"], "Dallas": ["TP-TX"], "Kentucky": ["GGM-KY"], "Arizona": ["GGM-AZ"], "Hills CA": ["HILL-CP-CA"], "Hills NJ": ["HILL-CP-NJ"], "Hills FL": ["HILL-CP-FL"], "Hills TX": ["HILL-CP-TX"] };
+                var allowed = []; (r._whs || []).forEach(function(dn) { (OOS_TO_ACU[dn] || []).forEach(function(c) { if (allowed.indexOf(c) < 0) allowed.push(c); }); }); if (allowed.length === 0) allowed = null;
+                var allMatches = orderMap[String(r.MANUFACTURER_NO)] || [];
+                var matches = allowed ? allMatches.filter(function(m) { return allowed.indexOf((m.wh || "").trim().toUpperCase()) >= 0; }) : allMatches;
+                if (matches.length === 0) return <span style={{ color: "#D1D5DB", fontSize: 13 }}>{"\u2014"}</span>;
+                function fmtDate(s) {
+                  if (!s) return "";
+                  var iso = String(s).split("T")[0];
+                  var parts = iso.split("-");
+                  if (parts.length === 3) return parseInt(parts[1]) + "/" + parseInt(parts[2]) + "/" + parts[0].slice(2);
+                  return s;
+                }
+                var pendingCount = matches.filter(function(m) { return !m.received; }).length;
+                var allPending = pendingCount === matches.length;
+                var allReceived = pendingCount === 0;
+                var pillContent, pillBg, pillFg, dotBg;
+                if (allReceived) { pillContent = "Received"; pillBg = "#EFF6FF"; pillFg = "#2563EB"; dotBg = "#3B82F6"; }
+                else if (allPending) { pillContent = matches.length > 1 ? "On Order \u00B7 " + matches.length + " POs" : "On Order"; pillBg = "#ECFDF5"; pillFg = "#059669"; dotBg = "#10B981"; }
+                else { pillContent = "On Order \u00B7 " + pendingCount + " of " + matches.length; pillBg = "#ECFDF5"; pillFg = "#059669"; dotBg = "#10B981"; }
+                return <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 220 }}>
+                  <div style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 600, color: pillFg, background: pillBg, padding: "3px 8px", borderRadius: 999, width: "fit-content" }}>
+                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: dotBg }} />
+                    {pillContent}
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {matches.map(function(m, mi) {
+                      var ordStr = m.orderDate ? fmtDate(m.orderDate) : "";
+                      var etaStr = m.expectedArrival ? fmtDate(m.expectedArrival) : "";
+                      return <div key={mi} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                        <span style={{ fontFamily: "monospace", fontSize: 11, fontWeight: 600, color: m.received ? "#9CA3AF" : "#1F2937", textDecoration: m.received ? "line-through" : "none" }}>{m.vendorRef || "\u2014"}</span>
+                        {m.po && <span style={{ fontFamily: "monospace", fontSize: 10, fontWeight: 500, color: "#9CA3AF" }}>{m.po}</span>}
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                          {ordStr && <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, color: m.received ? "#9CA3AF" : "#4B5563", background: m.received ? "#F9FAFB" : "#F3F4F6", padding: "2px 7px", borderRadius: 999, whiteSpace: "nowrap" }}>
+                            <span style={{ fontWeight: 600, opacity: 0.7 }}>Order Date</span>
+                            <span style={{ fontWeight: 500 }}>{ordStr}</span>
+                          </span>}
+                          {etaStr && <span title={m.etaSource ? "ETA source: " + m.etaSource : ""} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, color: m.received ? "#9CA3AF" : "#9A3412", background: m.received ? "#F9FAFB" : "#FFEDD5", padding: "2px 7px", borderRadius: 999, whiteSpace: "nowrap", cursor: m.etaSource ? "help" : "default" }}>
+                            <span style={{ fontWeight: 700, opacity: 0.85 }}>ETA</span>
+                            <span style={{ fontWeight: 600 }}>{etaStr}</span>
+                          </span>}
+                        </div>
+                      </div>;
+                    })}
+                  </div>
+                </div>;
+              })()}</td>
+            </tr>;
+          })}</tbody>
+        </table>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8 }}>
+        <div style={{ fontSize: 11, color: "#9CA3AF" }}>{currentName ? "Source: " + currentName : ""}</div>
+        <DownloadMenu rows={filtered} filename={"Manufacturer_Nos_OOS_All_Warehouses_" + tab} color={TOOL_COLOR} />
+      </div>
+    </div>;
+  }
+
+  function allWhseTable() {
+    var vendorRows = allWhseData.filter(function(r) { return vendorMatch([r._vendor], tab); });
+    var rows = vendorRows;
+    if (allWhseSearch) {
+      var s = allWhseSearch.toLowerCase();
+      rows = rows.filter(function(r) {
+        return (r.PRODUCT_LINE_NAME || "").toLowerCase().indexOf(s) >= 0
+          || (r.MANUFACTURER_NAME || "").toLowerCase().indexOf(s) >= 0
+          || (r.MANUFACTURER_NO || "").toLowerCase().indexOf(s) >= 0
+          || (r._vendor || "").toLowerCase().indexOf(s) >= 0
+          || (r._wh || "").toLowerCase().indexOf(s) >= 0
+          || (r.VENDOR_SUPPLY_IDS || "").toLowerCase().indexOf(s) >= 0
+          || (r.SUPPLY_STATUS || "").toLowerCase().indexOf(s) >= 0;
+      });
+    }
+    // Column header -> the value used for sorting that column.
+    var SORT_KEYS = {
+      "Mfr No.": function(r) { return r.MANUFACTURER_NO; },
+      "Manufacturer": function(r) { return r.MANUFACTURER_NAME; },
+      "Product": function(r) { return r.PRODUCT_LINE_NAME; },
+      "Vendor": function(r) { return r._vendor; },
+      "Warehouse": function(r) { return r._wh; },
+      "Supply IDs": function(r) { return r.VENDOR_SUPPLY_IDS; },
+      "Order Status": function(r) { return r.SUPPLY_STATUS; }
+    };
+    if (allWhseSort.col && SORT_KEYS[allWhseSort.col]) {
+      var getv = SORT_KEYS[allWhseSort.col];
+      var dir = allWhseSort.dir === "desc" ? -1 : 1;
+      rows = rows.slice().sort(function(a, b) {
+        var va = getv(a), vb = getv(b);
+        va = va == null ? "" : va; vb = vb == null ? "" : vb;
+        var na = parseFloat(va), nb = parseFloat(vb);
+        var bothNum = !isNaN(na) && !isNaN(nb) && String(va).trim() !== "" && String(vb).trim() !== "" && /^[0-9.,\-]+$/.test(String(va).trim()) && /^[0-9.,\-]+$/.test(String(vb).trim());
+        if (bothNum) return (na - nb) * dir;
+        return String(va).toLowerCase().localeCompare(String(vb).toLowerCase()) * dir;
+      });
+    }
+    function sortHeader(label) {
+      var active = allWhseSort.col === label;
+      var caret = active ? (allWhseSort.dir === "asc" ? " \u25B2" : " \u25BC") : "";
+      return <th style={Object.assign({}, S.th, { cursor: "pointer", userSelect: "none", whiteSpace: "nowrap", color: active ? "#EF4444" : undefined })}
+        onClick={function() { setAllWhseSort(active ? { col: label, dir: allWhseSort.dir === "asc" ? "desc" : "asc" } : { col: label, dir: "asc" }); }}
+        title="Click to sort">{label + caret}</th>;
+    }
+    return <div style={{ marginTop: 28 }}>
+      <div style={{ fontSize: 16, fontWeight: 600, color: "#1F2937", marginBottom: 12 }}>All Warehouse-Manufacturer Nos OOS</div>
+      <div style={{ marginBottom: 10 }}>
+        <input value={allWhseSearch} onChange={function(e) { setAllWhseSearch(e.target.value); }} placeholder={"Search this table\u2026"} style={Object.assign({}, S.inp, { maxWidth: 280 })} />
+      </div>
+      <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto", maxHeight: 440 })}>
+        <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
+          <thead><tr>
+            {sortHeader("Mfr No.")}
+            {sortHeader("Manufacturer")}
+            {sortHeader("Product")}
+            {sortHeader("Vendor")}
+            {sortHeader("Warehouse")}
+            {sortHeader("Supply IDs")}
+            {sortHeader("Order Status")}
+          </tr></thead>
+          <tbody>{rows.map(function(r, i) {
+            var st = whStyle(r._wh);
+            return <tr key={i}>
+              <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, fontWeight: 600, color: "#374151" })}>{r.MANUFACTURER_NO}</td>
+              <td style={Object.assign({}, S.td, { color: "#374151" })}>{r.MANUFACTURER_NAME}</td>
+              <td style={Object.assign({}, S.td, { color: "#374151", maxWidth: 300 })}>{r.PRODUCT_LINE_NAME}</td>
+              <td style={S.td}><span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 6, fontWeight: 500, background: "#FEF2F2", color: "#B91C1C" }}>{r._vendor}</span></td>
+              <td style={S.td}><span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 6, fontWeight: 500, background: st.bg, color: st.color }}>{r._wh}</span></td>
+              <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, color: "#6B7280" })}>{r.VENDOR_SUPPLY_IDS}</td>
+              <td style={S.td}>{r.SUPPLY_STATUS}</td>
+            </tr>;
+          })}</tbody>
+        </table>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8 }}>
+        <div style={{ fontSize: 11, color: "#9CA3AF" }}>{(allWhseName ? "Source: " + allWhseName : "") + (rows.length !== vendorRows.length ? "  \u00B7  showing " + rows.length + " of " + vendorRows.length : "")}</div>
+        <DownloadMenu rows={rows} filename={"All_Warehouse_Manufacturer_Nos_OOS_" + tab} color={TOOL_COLOR} />
+      </div>
+    </div>;
+  }
+
+  return <div>
+    <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
+      <button onClick={function() { setTab("fuzerx"); setWhFilter("all"); setSearch(""); setAllWhseSearch(""); }} style={S.pill(tab === "fuzerx", "#3B82F6")}>FuzeRx{fuzeData.length > 0 && <span style={{ fontSize: 10, background: tab === "fuzerx" ? "rgba(255,255,255,0.2)" : "rgba(100,116,139,0.2)", padding: "1px 6px", borderRadius: 4, marginLeft: 6 }}>{fuzeData.length}</span>}</button>
+      <button onClick={function() { setTab("gogomeds"); setWhFilter("all"); setSearch(""); setAllWhseSearch(""); }} style={S.pill(tab === "gogomeds", "#8B5CF6")}>GoGoMeds{ggmData.length > 0 && <span style={{ fontSize: 10, background: tab === "gogomeds" ? "rgba(255,255,255,0.2)" : "rgba(100,116,139,0.2)", padding: "1px 6px", borderRadius: 4, marginLeft: 6 }}>{ggmData.length}</span>}</button>
+      <button onClick={function() { setTab("cgp"); setWhFilter("all"); setSearch(""); setAllWhseSearch(""); }} style={S.pill(tab === "cgp", "#10B981")}>Central Garden &amp; Pet{cgpData.length > 0 && <span style={{ fontSize: 10, background: tab === "cgp" ? "rgba(255,255,255,0.2)" : "rgba(100,116,139,0.2)", padding: "1px 6px", borderRadius: 4, marginLeft: 6 }}>{cgpData.length}</span>}</button>
+      <div style={{ flex: 1 }} />
+      {lastPull && lastPull.at && <div style={{ fontSize: 11, color: "#9CA3AF", alignSelf: "center", marginRight: 4, whiteSpace: "nowrap" }}>Last pull: {(function() { try { return new Date(lastPull.at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); } catch (e) { return ""; } })()}{lastPull.by ? " by " + lastPull.by : ""}</div>}
+      <button onClick={function() { loadFromSnowflake(); }} disabled={sfLoading} style={Object.assign({}, S.btn("ghost"), { background: "#EF4444", color: "#fff", border: "none", padding: "8px 14px", fontSize: 12, opacity: sfLoading ? 0.6 : 1, cursor: sfLoading ? "default" : "pointer" })}>{sfLoading ? "Fetching\u2026" : "\u2601 Fetch from Snowflake"}</button>
+    </div>
+    {(fuzeData.length === 0 && ggmData.length === 0 && cgpData.length === 0 && allWhseData.length === 0)
+      ? uploadZone()
+      : <div>
+          {(fuzeData.length > 0 || ggmData.length > 0 || cgpData.length > 0) ? dataTable() : null}
+          {allWhseData.length > 0 ? allWhseTable() : null}
+        </div>}
+    {(fuzeData.length > 0 || ggmData.length > 0 || cgpData.length > 0 || allWhseData.length > 0) && <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 14, marginTop: 28, paddingTop: 12, borderTop: "1px solid #F3F4F6" }}>
+      <a href="https://docs.google.com/spreadsheets/d/1HJu5kVC-kM59ZGuBtjOGc9MBpBGgZdsdvIfZ8MLNsJs/edit" target="_blank" rel="noopener noreferrer" title="Open the OOS History sheet" style={{ fontSize: 11, color: "#9CA3AF", textDecoration: "none" }}>history sheet {"\u2197"}</a>
+      <button onClick={function() { snapshotToHistory(); }} disabled={snapBusy} title="Save today's OOS snapshot (rows + notes) to the history sheet" style={{ border: "1px solid #E5E7EB", background: "#fff", color: "#9CA3AF", padding: "6px 12px", borderRadius: 8, fontSize: 11, fontWeight: 500, cursor: snapBusy ? "default" : "pointer", opacity: snapBusy ? 0.6 : 1 }}>{snapBusy ? "Saving\u2026" : "\u2913 Snapshot to history"}</button>
+    </div>}
+  </div>;
+}
+
+/* ═══════ BACKORDER RESOLVER ═══════ */
+function BackorderResolver(props) {
+  var toast = props.toast, cred = props.cred;
+  var TOOL_COLOR = "#14B8A6";
+  var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
+  var _ld = useState(false), loading = _ld[0], setLoading = _ld[1];
+  var _err = useState(null), err = _err[0], setErr = _err[1];
+  var _resolved = useState([]), resolved = _resolved[0], setResolved = _resolved[1];
+  var _backTotal = useState(0), backTotal = _backTotal[0], setBackTotal = _backTotal[1];
+  var _notes = useState({}), notes = _notes[0], setNotes = _notes[1];
+  var _statusMap = useState({}), statusMap = _statusMap[0], setStatusMap = _statusMap[1];
+  var _search = useState(""), search = _search[0], setSearch = _search[1];
+  var _vf = useState("all"), vendorFilter = _vf[0], setVendorFilter = _vf[1];
+  var _sf = useState("all"), statusFilter = _sf[0], setStatusFilter = _sf[1];
+  var _sort = useState(null), sortState = _sort[0], setSortState = _sort[1];
+  var _lastFetched = useState(null), lastFetched = _lastFetched[0], setLastFetched = _lastFetched[1];
+  var _cacheHit = useState(false), cacheHit = _cacheHit[0], setCacheHit = _cacheHit[1];
+  var KV_NOTES = "backorder-resolver-notes";
+  var KV_STATUS = "backorder-resolver-status";
+
+  function fetchAll(forceFresh) {
+    if (!cred || !cred.username || !cred.password) { setErr("Login required to fetch from Acumatica"); return; }
+    setLoading(true); setErr(null);
+    var refreshParam = forceFresh ? "?refresh=1" : "";
+    Promise.all([
+      fetch("/api/acumatica" + refreshParam, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "backorder", username: cred.username, password: cred.password }) }).then(function(r) { return r.json(); }),
+      fetch("/api/acumatica" + refreshParam, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "open-po-lines", username: cred.username, password: cred.password }) }).then(function(r) { return r.json(); }),
+    ]).then(function(both) {
+      var bo = both[0].data || []; var pos = both[1].data || [];
+      // Cache freshness based on the older of the two responses
+      var ts0 = both[0]._cachedAt || Date.now();
+      var ts1 = both[1]._cachedAt || Date.now();
+      var bothHit = both[0]._cache === "hit" && both[1]._cache === "hit";
+      setLastFetched(Math.min(ts0, ts1));
+      setCacheHit(bothHit);
+      var openIds = {};
+      pos.forEach(function(p) { var id = (p.InventoryID || "").trim(); var open = (parseFloat(p.OrderQty) || 0) - (parseFloat(p.QtyOnReceipts) || 0); if (id && open > 0) openIds[id] = true; });
+      var filtered = bo.filter(function(r) {
+        var id = (r.InventoryID || "").trim();
+        var vendor = (r.VendorName || "").trim();
+        var mc = (r.MovementClass || "").trim();
+        return id && !openIds[id] && vendor !== "Bloodworth Wholesale Drugs" && mc !== "Long-Term Backorder";
+      });
+      setBackTotal(bo.length);
+      setResolved(filtered);
+      setLoading(false);
+      toast("Found " + filtered.length + " resolved backorders of " + bo.length + " total");
+    }).catch(function(e) { setErr(e.message || "Failed"); setLoading(false); });
+  }
+
+  useEffect(function() {
+    var m = true;
+    kvGet(KV_NOTES).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+      if (!m || !d || !d.data) return;
+      var parsed = typeof d.data === "string" ? JSON.parse(d.data) : d.data;
+      delete parsed._savedAt; setNotes(parsed || {});
+    }).catch(function() {});
+    kvGet(KV_STATUS).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+      if (!m || !d || !d.data) return;
+      var parsed = typeof d.data === "string" ? JSON.parse(d.data) : d.data;
+      delete parsed._savedAt; setStatusMap(parsed || {});
+    }).catch(function() {});
+    return function() { m = false; };
+  }, []);
+
+  useEffect(function() { if (cred && cred.username) fetchAll(); }, [cred]);
+
+  function updateNote(id, v) { var u = Object.assign({}, notes); u[id] = v; setNotes(u); kvPost(KV_NOTES, Object.assign({}, u, { _savedAt: Date.now() })).catch(function() {}); }
+  function updateStatus(id, s) { var u = Object.assign({}, statusMap); if (s === "new") delete u[id]; else u[id] = s; setStatusMap(u); kvPost(KV_STATUS, Object.assign({}, u, { _savedAt: Date.now() })).catch(function() {}); }
+
+  var vendors = useMemo(function() { return Array.from(new Set(resolved.map(function(r) { return r.VendorName; }).filter(Boolean))).sort(); }, [resolved]);
+
+  var filtered = useMemo(function() {
+    var d = resolved.slice();
+    if (search) { var s = search.toLowerCase(); d = d.filter(function(r) { return (r.InventoryID || "").toLowerCase().indexOf(s) >= 0 || (r.Description || "").toLowerCase().indexOf(s) >= 0 || (r.VendorName || "").toLowerCase().indexOf(s) >= 0 || (r.SKUNDC || "").toLowerCase().indexOf(s) >= 0; }); }
+    if (vendorFilter !== "all") d = d.filter(function(r) { return r.VendorName === vendorFilter; });
+    if (statusFilter !== "all") d = d.filter(function(r) { var st = statusMap[r.InventoryID] || "new"; return st === statusFilter; });
+    if (sortState) {
+      d.sort(function(a, b) {
+        var av, bv;
+        if (sortState.col === "id") { av = a.InventoryID || ""; bv = b.InventoryID || ""; return sortState.dir === "desc" ? bv.localeCompare(av) : av.localeCompare(bv); }
+        if (sortState.col === "desc") { av = a.Description || ""; bv = b.Description || ""; return sortState.dir === "desc" ? bv.localeCompare(av) : av.localeCompare(bv); }
+        if (sortState.col === "vendor") { av = a.VendorName || ""; bv = b.VendorName || ""; return sortState.dir === "desc" ? bv.localeCompare(av) : av.localeCompare(bv); }
+        if (sortState.col === "mc") { av = a.MovementClass || ""; bv = b.MovementClass || ""; return sortState.dir === "desc" ? bv.localeCompare(av) : av.localeCompare(bv); }
+        if (sortState.col === "qty") { av = parseFloat(a.QtyOnHand) || 0; bv = parseFloat(b.QtyOnHand) || 0; return sortState.dir === "desc" ? bv - av : av - bv; }
+        return 0;
+      });
+    }
+    return d;
+  }, [resolved, search, vendorFilter, statusFilter, sortState, statusMap]);
+
+  function sortHeader(col, label, opts) {
+    opts = opts || {};
+    var isSorted = sortState && sortState.col === col;
+    return <th onClick={function() { setSortState(isSorted ? (sortState.dir === "desc" ? { col: col, dir: "asc" } : null) : { col: col, dir: "desc" }); }} style={Object.assign({}, S.th, { cursor: "pointer", userSelect: "none" }, opts)}>{label}{isSorted ? (sortState.dir === "desc" ? " \u25BE" : " \u25B4") : ""}</th>;
+  }
+
+  function statusBadge(st) {
+    var map = { "review": { bg: "#FEF3C7", fg: "#A16207", label: "In Review" }, "ordered": { bg: "#DBEAFE", fg: "#1D4ED8", label: "Ordered" }, "ignored": { bg: "#F3F4F6", fg: "#6B7280", label: "Ignored" } };
+    var m = map[st]; if (!m) return null;
+    return <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 999, fontWeight: 600, background: m.bg, color: m.fg }}>{m.label}</span>;
+  }
+
+  return <div>
+    {/* Stat cards */}
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 20 }}>
+      <div style={Object.assign({}, S.statCard, { background: "#FEF2F2" })}><div style={{ fontSize: 11, color: "#B5736B", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>Total Backordered</div><div style={{ fontSize: 28, fontWeight: 500, color: "#DC2626", marginTop: 6 }}>{backTotal}</div></div>
+      <div style={Object.assign({}, S.statCard, { background: "#F0FDFA" })}><div style={{ fontSize: 11, color: "#6B9CA0", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>Resolved (No Open PO)</div><div style={{ fontSize: 28, fontWeight: 500, color: "#0D9488", marginTop: 6 }}>{resolved.length}</div></div>
+      <div style={Object.assign({}, S.statCard, { background: "#FEF3C7" })}><div style={{ fontSize: 11, color: "#A1804A", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>In Review</div><div style={{ fontSize: 28, fontWeight: 500, color: "#A16207", marginTop: 6 }}>{resolved.filter(function(r) { return statusMap[r.InventoryID] === "review"; }).length}</div></div>
+      <div style={Object.assign({}, S.statCard, { background: "#DBEAFE" })}><div style={{ fontSize: 11, color: "#6B85B5", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>Ordered</div><div style={{ fontSize: 28, fontWeight: 500, color: "#1D4ED8", marginTop: 6 }}>{resolved.filter(function(r) { return statusMap[r.InventoryID] === "ordered"; }).length}</div></div>
+    </div>
+
+    {/* Toolbar */}
+    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+      <input style={Object.assign({}, S.inp, { maxWidth: 260 })} placeholder="Search by ID, NDC, description, vendor..." value={search} onChange={function(e) { setSearch(e.target.value); }} />
+      <select style={S.sel} value={vendorFilter} onChange={function(e) { setVendorFilter(e.target.value); }}><option value="all">All Vendors</option>{vendors.map(function(v) { return <option key={v} value={v}>{v}</option>; })}</select>
+      <select style={S.sel} value={statusFilter} onChange={function(e) { setStatusFilter(e.target.value); }}>
+        <option value="all">All Statuses</option>
+        <option value="new">New</option>
+        <option value="review">In Review</option>
+        <option value="ordered">Ordered</option>
+        <option value="ignored">Ignored</option>
+      </select>
+      <div style={{ flex: 1 }} />
+      <span style={{ fontSize: 12, color: "#6B7280" }}>{filtered.length}/{resolved.length}</span>
+      <CacheStatus lastFetchedAt={lastFetched} cacheHit={cacheHit} refreshing={loading} color={TOOL_COLOR} onRefresh={function() { fetchAll(true); }} />
+    </div>
+
+    {err && <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", color: "#991B1B", padding: "10px 14px", borderRadius: 8, marginBottom: 12, fontSize: 13 }}>{err}</div>}
+
+    {/* Table */}
+    {resolved.length > 0 ? <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto", maxHeight: "calc(100vh - 360px)" })}>
+      <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
+        <thead><tr>
+          <th style={Object.assign({}, S.th, { minWidth: 110 })}>Status</th>
+          {sortHeader("id", "Inventory ID")}
+          {sortHeader("desc", "Description", { minWidth: 200 })}
+          {sortHeader("vendor", "Vendor")}
+          {sortHeader("mc", "Movement Class")}
+          {sortHeader("qty", "Qty On Hand", { textAlign: "right" })}
+          <th style={Object.assign({}, S.th, { minWidth: 200 })}>Notes</th>
+        </tr></thead>
+        <tbody>{filtered.map(function(r, i) {
+          var id = r.InventoryID; var st = statusMap[id] || "new";
+          return <tr key={id + ":" + i}>
+            <td style={S.td}>
+              <select value={st} onChange={function(e) { updateStatus(id, e.target.value); }} style={{ background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 6, padding: "4px 8px", fontSize: 11, color: "#374151", outline: "none", fontFamily: "'Varela Round', sans-serif", width: "100%" }}>
+                <option value="new">New</option>
+                <option value="review">In Review</option>
+                <option value="ordered">Ordered</option>
+                <option value="ignored">Ignored</option>
+              </select>
+            </td>
+            <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontWeight: 600, color: "#0D9488" })}>{id}</td>
+            <td style={Object.assign({}, S.td, { color: "#374151" })}>{r.Description}</td>
+            <td style={S.td}>{r.VendorName}</td>
+            <td style={S.td}><span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 6, fontWeight: 500, background: "#F3F4F6", color: "#6B7280" }}>{r.MovementClass}</span></td>
+            <td style={Object.assign({}, S.td, { textAlign: "right" })}>{r.QtyOnHand}</td>
+            <td style={S.td}><input value={notes[id] !== undefined ? notes[id] : ""} onChange={function(e) { updateNote(id, e.target.value); }} placeholder="Add notes..." style={Object.assign({}, S.inp, { padding: "5px 10px", fontSize: 12, width: "100%" })} /></td>
+          </tr>;
+        })}</tbody>
+      </table>
+    </div> : <div style={Object.assign({}, S.card, { textAlign: "center", padding: 60, color: "#9CA3AF" })}>{loading ? <Spinner color={TOOL_COLOR} size={20} /> : err ? err : "No resolved backorders found. Click Refresh to check."}</div>}
+  </div>;
+}
+
+/* ═══════ VENDOR CONTACTS PAGE ═══════ */
+function VendorSettingsPage(props) {
+  var contacts = props.contacts, updateContacts = props.updateContacts, toast = props.toast;
+  var channels = props.channels || {};
+  var updateChannels = props.updateChannels;
+  var shipRules = props.shipRules || {};
+  var updateShipRules = props.updateShipRules;
+  var S = useMemo(function() { return makeStyles("#6366F1"); }, []);
+  var _editing = useState(null), editing = _editing[0], setEditing = _editing[1];
+  var _newVendor = useState(""), newVendor = _newVendor[0], setNewVendor = _newVendor[1];
+  var _newEmail = useState(""), newEmail = _newEmail[0], setNewEmail = _newEmail[1];
+  var _editEmail = useState(""), editEmail = _editEmail[0], setEditEmail = _editEmail[1];
+  var _editChannel = useState(""), editChannel = _editChannel[0], setEditChannel = _editChannel[1];
+  var _editRule = useState(""), editRule = _editRule[0], setEditRule = _editRule[1];
+  var _search = useState(""), search = _search[0], setSearch = _search[1];
+
+  // Union of all vendor names across contacts, channels, and shipRules — so that
+  // legacy vendors that exist only in shipRules (and not yet in contacts) still
+  // show up on this combined page.
+  var allVendors = useMemo(function() {
+    var set = {};
+    Object.keys(contacts || {}).forEach(function(v) { if (v) set[v] = true; });
+    Object.keys(channels || {}).forEach(function(v) { if (v) set[v] = true; });
+    Object.keys(shipRules || {}).forEach(function(v) { if (v) set[v] = true; });
+    return Object.keys(set);
+  }, [contacts, channels, shipRules]);
+
+  var sorted = useMemo(function() {
+    var rows = allVendors.map(function(v) {
+      return { vendor: v, email: contacts[v] || "", channel: channels[v] || "", rule: shipRules[v] || "" };
+    });
+    if (search) {
+      var s = search.toLowerCase();
+      rows = rows.filter(function(r) {
+        return r.vendor.toLowerCase().indexOf(s) >= 0
+            || r.email.toLowerCase().indexOf(s) >= 0
+            || r.channel.toLowerCase().indexOf(s) >= 0
+            || r.rule.toLowerCase().indexOf(s) >= 0;
+      });
+    }
+    return rows.sort(function(a, b) { return a.vendor.localeCompare(b.vendor); });
+  }, [allVendors, contacts, channels, shipRules, search]);
+
+  // Add a new vendor. Email and rule are both optional; vendor name is required.
+  function addVendor() {
+    var v = newVendor.trim(), e = newEmail.trim();
+    if (!v) { toast("Enter vendor name", "error"); return; }
+    var u = Object.assign({}, contacts);
+    u[v] = e;
+    updateContacts(u);
+    // Seed an empty shipping rule entry if one doesn't exist
+    if (updateShipRules && !shipRules.hasOwnProperty(v)) {
+      var sr = Object.assign({}, shipRules);
+      sr[v] = "";
+      updateShipRules(sr);
+    }
+    setNewVendor(""); setNewEmail("");
+    toast("Added " + v);
+  }
+
+  // Save the in-place edit. All four fields (email, channel, rule) come out together.
+  function saveEdit(vendor) {
+    var uc = Object.assign({}, contacts);
+    uc[vendor] = editEmail.trim();
+    updateContacts(uc);
+
+    if (updateChannels) {
+      var uch = Object.assign({}, channels);
+      if (editChannel) { uch[vendor] = editChannel; } else { delete uch[vendor]; }
+      updateChannels(uch);
+    }
+
+    if (updateShipRules) {
+      var ur = Object.assign({}, shipRules);
+      ur[vendor] = editRule.trim();
+      updateShipRules(ur);
+    }
+
+    setEditing(null);
+    toast("Updated " + vendor);
+  }
+
+  // Remove vendor everywhere
+  function removeVendor(vendor) {
+    var msg = "Remove " + vendor + "?\n\nThis will delete its email, channel, and shipping rule.";
+    if (!confirm(msg)) return;
+    var uc = Object.assign({}, contacts); delete uc[vendor]; updateContacts(uc);
+    if (updateChannels) { var uch = Object.assign({}, channels); delete uch[vendor]; updateChannels(uch); }
+    if (updateShipRules) { var ur = Object.assign({}, shipRules); delete ur[vendor]; updateShipRules(ur); }
+    toast("Removed " + vendor);
+  }
+
+  return <div>
+    <div style={Object.assign({}, S.card, { display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" })}>
+      <input value={newVendor} onChange={function(e) { setNewVendor(e.target.value); }} placeholder="Vendor name..." style={Object.assign({}, S.inp, { padding: "8px 14px", flex: 1, minWidth: 180 })} />
+      <input value={newEmail} onChange={function(e) { setNewEmail(e.target.value); }} placeholder="email1@example.com, email2@example.com (optional)" style={Object.assign({}, S.inp, { padding: "8px 14px", flex: 2, minWidth: 280 })} />
+      <button onClick={addVendor} style={S.btn()}>+ Add</button>
+    </div>
+    <div style={{ display: "flex", gap: 10, marginBottom: 16, alignItems: "center" }}>
+      <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search vendors, emails, channels, or rules..." style={Object.assign({}, S.inp, { padding: "8px 14px", width: 360 })} />
+      <div style={{ flex: 1 }} />
+      <span style={{ fontSize: 12, color: "#9CA3AF" }}>{sorted.length} vendors</span>
+    </div>
+    <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto" })}>
+      <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 13 }}>
+        <thead><tr><th style={Object.assign({}, S.th, { width: "20%" })}>Vendor</th><th style={Object.assign({}, S.th, { width: "22%" })}>Email(s)</th><th style={S.th}>Shipping Rule</th><th style={Object.assign({}, S.th, { width: 170 })}>Channel</th><th style={Object.assign({}, S.th, { width: 140 })}>Actions</th></tr></thead>
+        <tbody>{sorted.map(function(row) {
+          var vendor = row.vendor, email = row.email, ch = row.channel, rule = row.rule;
+          var isEditing = editing === vendor;
+          return <tr key={vendor}>
+            <td style={Object.assign({}, S.td, { fontWeight: 500, color: "#374151" })}>{vendor}</td>
+
+            <td style={S.td}>{isEditing ? <input value={editEmail} onChange={function(ev) { setEditEmail(ev.target.value); }} placeholder="email1@example.com (optional)" style={Object.assign({}, S.inp, { padding: "5px 10px", fontSize: 13, width: "100%" })} autoFocus onKeyDown={function(ev) { if (ev.key === "Enter") { saveEdit(vendor); } if (ev.key === "Escape") setEditing(null); }} /> : (email ? <span style={{ color: "#6B7280" }}>{email}</span> : <span style={{ color: "#9CA3AF", fontStyle: "italic", fontSize: 12 }}>no email set</span>)}</td>
+
+            <td style={S.td}>{isEditing ? <input value={editRule} onChange={function(ev) { setEditRule(ev.target.value); }} placeholder="e.g. min:5000; message:Free Shipping; else:Not Free Shipping" style={Object.assign({}, S.inp, { padding: "5px 10px", fontSize: 13, width: "100%" })} onKeyDown={function(ev) { if (ev.key === "Enter") { saveEdit(vendor); } if (ev.key === "Escape") setEditing(null); }} /> : (rule ? <span style={{ color: "#6B7280" }}>{rule}</span> : <span style={{ color: "#9CA3AF", fontStyle: "italic", fontSize: 12 }}>no rule set</span>)}</td>
+
+            <td style={S.td}>{isEditing ? (
+              <select value={editChannel} onChange={function(ev) { setEditChannel(ev.target.value); }} style={Object.assign({}, S.sel, { padding: "5px 8px", fontSize: 12, width: "100%" })}>
+                <option value="">— select —</option>
+                <option value="Email">Email</option>
+                <option value="TrueCommerce EDI">TrueCommerce EDI</option>
+                <option value="Website Ordering">Website Ordering</option>
+              </select>
+            ) : (
+              ch ? <span style={{ fontSize: 11, padding: "3px 9px", borderRadius: 10, fontWeight: 600, background: ch === "Email" ? "#ECFDF5" : ch === "TrueCommerce EDI" ? "#EFF6FF" : "#FFF7ED", color: ch === "Email" ? "#059669" : ch === "TrueCommerce EDI" ? "#2563EB" : "#C2410C" }}>{ch}</span> : <span style={{ fontSize: 11, color: "#9CA3AF", fontStyle: "italic" }}>not set</span>
+            )}</td>
+
+            <td style={Object.assign({}, S.td, { textAlign: "center" })}>{isEditing ? <div style={{ display: "flex", gap: 4, justifyContent: "center", alignItems: "center" }}>
+              <button onClick={function() { saveEdit(vendor); }} style={Object.assign({}, S.btn(), { padding: "4px 10px", fontSize: 11 })}>Save</button>
+              <button onClick={function() { removeVendor(vendor); }} style={{ background: "#DC2626", color: "#FFFFFF", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Delete</button>
+              <button onClick={function() { setEditing(null); }} style={{ background: "none", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 14, padding: 4, marginLeft: 4 }} title="Exit edit mode">{"\u2715"}</button>
+            </div> : <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
+              <button onClick={function() { setEditing(vendor); setEditEmail(email); setEditChannel(ch); setEditRule(rule); }} style={{ background: "none", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 14, padding: 4 }} title="Edit">{"\u270E"}</button>
+            </div>}</td>
+          </tr>;
+        })}</tbody>
+      </table>
+    </div>
+    <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 8 }}>Shared with team &middot; Channel controls PO Tools behavior (Email = Acumatica email; TrueCommerce EDI / Website Ordering = write Vendor Ref only, keep On Hold). Shipping Rule controls free-shipping logic on PO Tools.</div>
+  </div>;
+}
+
+
+/* ═══════ MAIN HUB ═══════ */
+/* ═══════ FORECASTING TOOL (Phase 1: ingest + auto-format + export; Phase 2: methods) ═══════ */
+var FC_KNOWN_WAREHOUSES = ["TP-NY", "TP-OH", "TP-CA", "GGM-KY", "GGM-AZ", "HILL-CP-CA", "HILL-CP-NJ", "HILL-CP-FL", "HILL-CP-TX"];
+
+// Full-text, quote-aware CSV parser (handles commas/newlines inside quoted
+// fields and "" escapes). Returns an array of row-arrays; row 0 = headers.
+function fcParseCSV(text) {
+  text = String(text || "").replace(/^\uFEFF/, "");
+  var rows = [], cur = [], field = "", inQ = false, i = 0, n = text.length;
+  while (i < n) {
+    var ch = text[i];
+    if (inQ) {
+      if (ch === '"') { if (text[i + 1] === '"') { field += '"'; i += 2; continue; } inQ = false; i++; continue; }
+      field += ch; i++; continue;
+    }
+    if (ch === '"') { inQ = true; i++; continue; }
+    if (ch === ',') { cur.push(field); field = ""; i++; continue; }
+    if (ch === '\r') { if (text[i + 1] === '\n') i++; cur.push(field); rows.push(cur); cur = []; field = ""; i++; continue; }
+    if (ch === '\n') { cur.push(field); rows.push(cur); cur = []; field = ""; i++; continue; }
+    field += ch; i++;
+  }
+  if (field !== "" || cur.length) { cur.push(field); rows.push(cur); }
+  return rows.filter(function (r) { return r.some(function (c) { return String(c).trim() !== ""; }); });
+}
+
+function fcCsvCell(v) { v = (v == null ? "" : String(v)); return /[",\r\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+function fcToCSV(headers, rowArrs) {
+  var out = [headers.map(fcCsvCell).join(",")];
+  rowArrs.forEach(function (r) { out.push(r.map(fcCsvCell).join(",")); });
+  return out.join("\r\n");
+}
+function fcDetectWarehouse(fname) {
+  var m = String(fname || "").match(/([A-Za-z]{2,4}-[A-Za-z]{2,4}(?:-[A-Za-z]{2,4})?)/);
+  return m ? m[1].toUpperCase() : "";
+}
+function fcIdxExact(headers, name) {
+  var t = name.toLowerCase().trim();
+  for (var i = 0; i < headers.length; i++) if (String(headers[i]).toLowerCase().trim() === t) return i;
+  return -1;
+}
+function fcIdxContains(headers, sub) {
+  var t = sub.toLowerCase();
+  for (var i = 0; i < headers.length; i++) if (String(headers[i]).toLowerCase().indexOf(t) !== -1) return i;
+  return -1;
+}
+// Detect the columns the methods key off, by header name (resilient to month shifts).
+function fcAnchors(headers) {
+  var mtd = fcIdxExact(headers, "Hist: MTD");
+  var hist = [];
+  for (var i = 0; i < headers.length; i++) { var h = String(headers[i]); if (/^hist:/i.test(h) && !/mtd/i.test(h)) hist.push(i); }
+  var lastHist = hist.length ? hist[hist.length - 1] : -1;
+  var trail3 = hist.slice(-3);
+  var final1 = fcIdxContains(headers, "final:1:");
+  var comp1 = -1; for (var j = 0; j < headers.length; j++) { if (/^computer:/i.test(String(headers[j]))) { comp1 = j; break; } }
+  var finals = {};
+  for (var f = 0; f < headers.length; f++) { var fm = String(headers[f]).match(/^final:\s*(\d+):/i); if (fm) finals[parseInt(fm[1], 10)] = f; }
+  var uploads = [];
+  for (var k = 0; k < headers.length; k++) { var hh = String(headers[k]); var um = hh.match(/^upload:\s*(\d+):/i); if (um) uploads.push({ idx: k, num: parseInt(um[1], 10), label: hh.replace(/^upload:\s*\d+:\s*/i, "") }); }
+  return { mtd: mtd, lastHist: lastHist, trail3: trail3, final1: final1, comp1: comp1, finals: finals, uploads: uploads };
+}
+function fcNum(row, idx) {
+  if (idx == null || idx < 0) return null;
+  var raw = String(row[idx] == null ? "" : row[idx]).replace(/[^0-9.\-]/g, "");
+  if (raw === "" || raw === "-" || raw === ".") return null;
+  var v = parseFloat(raw); return isNaN(v) ? null : v;
+}
+function fcFmt(v) {
+  if (v == null || v === "") return "";
+  var n = Number(String(v).replace(/,/g, ""));
+  return isNaN(n) ? String(v) : n.toLocaleString("en-US");
+}
+var FC_METHODS = [
+  { id: "A", label: "A - MTD run-rate (current month only)", short: "MTD run-rate" },
+  { id: "B", label: "B - Last month x growth (compounds each month)", short: "Last mo x growth" },
+  { id: "C", label: "C - Netstock Final (per month)", short: "Netstock Final" },
+  { id: "D", label: "D - Trailing 3-month average (flat)", short: "Trailing 3-mo avg" },
+  { id: "E", label: "E - Last month historical (flat)", short: "Last month" },
+  { id: "F", label: "F - Max of last 3 months x growth (current month only)", short: "Max 3-mo x growth" },
+];
+
+function ReplenishUpdate(props) {
+  var toast = props.toast, cred = props.cred, lp = props.lp;
+  var S = makeStyles("#7C3AED");
+
+  var _rp = useState([]), rpRows = _rp[0], setRpRows = _rp[1];
+  var _rpn = useState(""), rpName = _rpn[0], setRpName = _rpn[1];
+  var _cur = useState([]), curRows = _cur[0], setCurRows = _cur[1];
+  var _curn = useState(""), curName = _curn[0], setCurName = _curn[1];
+  var _cdrag = useState(false), cdrag = _cdrag[0], setCdrag = _cdrag[1];
+  var curRef = useRef(null);
+  var _busy = useState(false), busy = _busy[0], setBusy = _busy[1];
+  var _res = useState(null), result = _res[0], setResult = _res[1];
+  var _all = useState(false), inclAll = _all[0], setInclAll = _all[1];
+  var _genOnly = useState(false), genOnly = _genOnly[0], setGenOnly = _genOnly[1];
+  var _drag = useState(false), drag = _drag[0], setDrag = _drag[1];
+  var fileRef = useRef(null);
+
+  function chooseFile() { if (fileRef.current) fileRef.current.click(); }
+  function onFile(e) { var f = e.target.files && e.target.files[0]; if (f) loadRp(f); e.target.value = ""; }
+  function loadRp(file) {
+    var reader = new FileReader();
+    reader.onload = function (ev) {
+      try {
+        var XLSX = require("xlsx");
+        var wb = XLSX.read(ev.target.result, { type: "array" });
+        var ws = wb.Sheets[wb.SheetNames[0]];
+        var aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "" });
+        if (!aoa.length) { toast("That file looks empty", "error"); return; }
+        var hdr = aoa[0].map(function (x) { return String(x).trim(); });
+        var idx = function (name) { for (var i = 0; i < hdr.length; i++) { if (hdr[i].toLowerCase() === name.toLowerCase()) return i; } return -1; };
+        var iP = idx("Product code"), iL = idx("Location code"), iC = idx("Class"), iSS = idx("SS units"), iLT = idx("LT units"), iMax = idx("Maximum level");
+        var iLTd = idx("LT days");
+        var iFinal = -1; for (var fc = 0; fc < hdr.length; fc++) { if (hdr[fc].toLowerCase().indexOf("final fc units") === 0) { iFinal = fc; break; } }
+        var fcDays = 30;
+        if (iFinal >= 0) {
+          var mm = String(hdr[iFinal]).match(/([A-Za-z]{3,})\s+(\d{4})/);
+          if (mm) {
+            var MN = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
+            var mi = MN[mm[1].slice(0, 3).toLowerCase()];
+            if (mi != null) fcDays = new Date(parseInt(mm[2], 10), mi + 1, 0).getDate();
+          }
+        }
+        var missing = []; if (iP < 0) missing.push("Product code"); if (iL < 0) missing.push("Location code"); if (iSS < 0) missing.push("SS units"); if (iLT < 0) missing.push("LT units"); if (iMax < 0) missing.push("Maximum level");
+        if (missing.length) { toast("Reorder Points file is missing: " + missing.join(", "), "error"); return; }
+        var num = function (v) { var n = parseFloat(String(v == null ? "" : v).replace(/,/g, "")); return isNaN(n) ? 0 : n; };
+        var out = [];
+        for (var r = 1; r < aoa.length; r++) {
+          var row = aoa[r]; if (!row || !row.length) continue;
+          var pc = String(row[iP] == null ? "" : row[iP]).trim(); if (!pc) continue;
+          out.push({ pc: pc, loc: String(row[iL] == null ? "" : row[iL]).trim(), cls: String(iC >= 0 ? row[iC] : "").trim().toUpperCase(), ss: num(row[iSS]), lt: num(row[iLT]), max: num(row[iMax]), ltDays: iLTd >= 0 ? num(row[iLTd]) : null, fcDays: fcDays });
+        }
+        setRpRows(out); setRpName(file.name); setResult(null);
+        toast("Loaded " + out.length + " Reorder Point rows");
+      } catch (err) { toast("Error reading file: " + err.message, "error"); }
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  function chooseCur() { if (curRef.current) curRef.current.click(); }
+  function onCurFile(e) { var f = e.target.files && e.target.files[0]; if (f) loadCur(f); e.target.value = ""; }
+  function normSheet(ws) {
+    var lower = false;
+    Object.keys(ws).forEach(function (k) { if (k[0] !== "!" && /[a-z]/.test(k)) lower = true; });
+    if (!lower) return ws;
+    var colNum = function (c) { var n = 0; for (var i = 0; i < c.length; i++) n = n * 26 + (c.charCodeAt(i) - 64); return n; };
+    var numCol = function (n) { var s = ""; for (; n; n = Math.floor((n - 1) / 26)) s = String.fromCharCode((n - 1) % 26 + 65) + s; return s; };
+    var ns = {}, minR = 1e9, maxR = 0, minC = 1e9, maxC = 0;
+    Object.keys(ws).forEach(function (k) {
+      if (k[0] === "!") { if (k !== "!ref") ns[k] = ws[k]; return; }
+      var m = k.match(/^([A-Za-z]+)(\d+)$/); if (!m) { ns[k] = ws[k]; return; }
+      var col = m[1].toUpperCase(), row = +m[2]; ns[col + row] = ws[k];
+      var cn = colNum(col); if (row < minR) minR = row; if (row > maxR) maxR = row; if (cn < minC) minC = cn; if (cn > maxC) maxC = cn;
+    });
+    if (maxR > 0) ns["!ref"] = numCol(minC) + minR + ":" + numCol(maxC) + maxR;
+    return ns;
+  }
+  function loadCur(file) {
+    var reader = new FileReader();
+    reader.onload = function (ev) {
+      try {
+        var XLSX = require("xlsx");
+        var wb = XLSX.read(ev.target.result, { type: "array" });
+        var nm = wb.SheetNames.indexOf("Data") >= 0 ? "Data" : wb.SheetNames[0];
+        var ws = normSheet(wb.Sheets[nm]);
+        var aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "" });
+        if (!aoa.length) { toast("That file looks empty", "error"); return; }
+        var hdrRow = -1;
+        for (var r = 0; r < Math.min(aoa.length, 15); r++) {
+          var low = (aoa[r] || []).map(function (x) { return String(x).toLowerCase().trim(); });
+          if (low.indexOf("inventory id") >= 0 && low.indexOf("reorder point") >= 0) { hdrRow = r; break; }
+        }
+        if (hdrRow < 0) { toast("Couldn't find the header row (Inventory ID / Reorder Point) in that file", "error"); return; }
+        var hdr = aoa[hdrRow].map(function (x) { return String(x).trim(); });
+        var idx = function (re) { for (var i = 0; i < hdr.length; i++) { if (re.test(hdr[i])) return i; } return -1; };
+        var iID = idx(/^inventory ?id$/i), iWH = idx(/^warehouse$/i), iROP = idx(/^reorder ?point$/i), iMAX = idx(/^max ?qty\.?$/i), iSS = idx(/^safety ?stock$/i), iCLS = idx(/^replenishment ?class$/i), iMV = idx(/^movement ?class$/i);
+        var missing = []; if (iID < 0) missing.push("Inventory ID"); if (iWH < 0) missing.push("Warehouse"); if (iROP < 0) missing.push("Reorder Point"); if (iMAX < 0) missing.push("Max Qty.");
+        if (missing.length) { toast("Current-settings file is missing: " + missing.join(", "), "error"); return; }
+        var num = function (v) { var n = parseFloat(String(v == null ? "" : v).replace(/,/g, "")); return isNaN(n) ? 0 : n; };
+        var out = [];
+        for (var d = hdrRow + 1; d < aoa.length; d++) {
+          var row = aoa[d]; if (!row || !row.length) continue;
+          var id = String(row[iID] == null ? "" : row[iID]).trim(); var wh = String(row[iWH] == null ? "" : row[iWH]).trim();
+          if (!id || !wh) continue;
+          out.push({ id: id, wh: wh, rop: num(row[iROP]), max: num(row[iMAX]), ss: iSS >= 0 ? num(row[iSS]) : 0, cls: String(iCLS >= 0 ? row[iCLS] : "").trim().toUpperCase(), mvmt: String(iMV >= 0 ? row[iMV] : "").trim() });
+        }
+        setCurRows(out); setCurName(file.name); setResult(null);
+        toast("Loaded " + out.length + " current-settings rows");
+      } catch (err) { toast("Error reading current-settings file: " + err.message, "error"); }
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  async function build() {
+    if (!rpRows.length) { toast("Upload the Netstock Reorder Points file first", "error"); return; }
+    if (!cred || !cred.username) { if (lp) lp(); return; }
+    setBusy(true);
+    try {
+      var cur = {}, fieldMap;
+      if (curRows.length) {
+        curRows.forEach(function (w) { if (w.id && w.wh) cur[w.id + "|" + w.wh] = { rop: w.rop, max: w.max, cls: w.cls, mvmt: w.mvmt }; });
+        fieldMap = { source: "file", rows: curRows.length, name: curName };
+      } else {
+        var whseRows = await fetchAcumatica("whse-replenish", null, cred.username, cred.password);
+        whseRows = whseRows || [];
+        var keySet = {};
+        whseRows.forEach(function (w) { if (w) Object.keys(w).forEach(function (k) { keySet[k] = 1; }); });
+        var keys = Object.keys(keySet);
+        var find = function (pats) { for (var p = 0; p < pats.length; p++) { for (var i = 0; i < keys.length; i++) { if (pats[p].test(keys[i])) return keys[i]; } } return null; };
+        var kID = find([/^inventory ?id$/i, /inventoryid/i, /^inventory/i]);
+        var kWH = find([/^warehouse$/i, /warehouse/i]);
+        var kROP = find([/^reorder ?point$/i, /reorder/i]);
+        var kMAX = find([/^max ?qty\.?$/i, /^max ?quantity$/i, /\bmax\b/i]);
+        var kCLS = find([/^replenishment ?class$/i, /replenish.*class/i, /^class$/i]);
+        var kMV = find([/^movement ?class$/i, /movement/i]);
+        var numv = function (v) { var n = parseFloat(String(v == null ? "" : v).replace(/,/g, "")); return isNaN(n) ? 0 : n; };
+        whseRows.forEach(function (w) {
+          var id = String(kID ? (w[kID] == null ? "" : w[kID]) : "").trim();
+          var wh = String(kWH ? (w[kWH] == null ? "" : w[kWH]) : "").trim();
+          if (!id || !wh) return;
+          cur[id + "|" + wh] = { rop: kROP ? numv(w[kROP]) : 0, max: kMAX ? numv(w[kMAX]) : 0, cls: String(kCLS ? (w[kCLS] == null ? "" : w[kCLS]) : "").trim().toUpperCase(), mvmt: String(kMV ? (w[kMV] == null ? "" : w[kMV]) : "").trim() };
+        });
+        fieldMap = { source: "live", rop: kROP, max: kMAX, cls: kCLS, mvmt: kMV, id: kID, wh: kWH, keys: keys };
+      }
+      var best = {};
+      rpRows.forEach(function (rp) {
+        var k = rp.pc + "|" + rp.loc; var score = rp.ss + rp.lt + rp.max;
+        if (!best[k] || score > best[k]._score) best[k] = Object.assign({}, rp, { _score: score });
+      });
+      var included = [], decrease = [], outliers = [], matched = 0;
+      Object.keys(best).forEach(function (k) {
+        var rp = best[k]; var c = cur[rp.pc + "|" + rp.loc];
+        if (!c) return;
+        if (["A", "B", "C"].indexOf(c.cls) === -1) return;
+        if (genOnly && !/gen-/i.test(rp.pc)) return;
+        matched++;
+        var newSS = rp.ss;
+        var newMax = rp.max; if (newMax < 2) newMax = 2;
+        var isGen = /gen-/i.test(rp.pc);
+        var newROP;
+        if (isGen) {
+          // Generic ROP = 9 days on hand, derived from the Max:
+          //   ROP = round( Max x 9 / days-in-forecast-month )
+          // The forecast month's real day count (28/29/30/31) comes from the
+          // "Final FC units <Mon Year>" header; defaults to 30 if unknown.
+          var dim = (rp.fcDays && rp.fcDays > 0) ? rp.fcDays : 30;
+          newROP = Math.round(newMax * 9 / dim);
+        } else {
+          newROP = rp.ss + rp.lt;
+        }
+        if (newROP < 1) newROP = 1;
+        var curROP = c.rop, curMax = c.max;
+        var increases = (newROP > curROP) || (newMax > curMax);
+        var bothDrop15 = (newROP < curROP * 0.85) && (newMax < curMax * 0.85);
+        var include = inclAll ? true : (increases && !bothDrop15);
+        var rec = { id: rp.pc, wh: rp.loc, cls: c.cls, newSS: newSS, newROP: newROP, newMax: newMax, curROP: curROP, curMax: curMax, mvmt: c.mvmt, gen: isGen };
+        if (include) included.push(rec);
+        if ((newROP < curROP) && (newMax < curMax)) decrease.push(rec);
+        var ropOut = (curROP > 0 && newROP > curROP * 3) || (curROP === 0 && newROP > 50);
+        var maxOut = (curMax > 0 && newMax > curMax * 3) || (curMax === 0 && newMax > 100);
+        if (include && (ropOut || maxOut)) outliers.push(rec);
+      });
+      included.sort(function (a, b) { return a.wh < b.wh ? -1 : a.wh > b.wh ? 1 : (a.id < b.id ? -1 : a.id > b.id ? 1 : 0); });
+      setResult({ included: included, decrease: decrease, outliers: outliers, matched: matched, rpTotal: rpRows.length, fieldMap: fieldMap });
+      toast("Built " + included.length + " upload rows (" + matched + " matched active items)");
+    } catch (err) { toast("Build failed: " + (err && err.message || err), "error"); }
+    finally { setBusy(false); }
+  }
+
+  function ldate() { var d = new Date(); return String(d.getMonth() + 1).padStart(2, "0") + "/" + String(d.getDate()).padStart(2, "0") + "/" + d.getFullYear(); }
+  function stamp() { var d = new Date(); return String(d.getMonth() + 1).padStart(2, "0") + String(d.getDate()).padStart(2, "0") + d.getFullYear(); }
+  var MAIN_HDR = ["Inventory ID", "Replenishment Warehouse", "Override Settings", "Replenishment Class", "Seasonality", "Overide Safety Stock", "Safety Stock", "Overide Reorder Point", "Reorder Point", "Overide Max Quantity", "Max Quantity", "Overide Launch Date", "Launch Date"];
+  function rowAoa(r, ld) { return [r.id, r.wh, true, r.cls, "None", true, r.newSS, true, r.newROP, true, r.newMax, true, ld]; }
+  function exportMain() {
+    if (!result || !result.included.length) { toast("Build first", "error"); return; }
+    var XLSX = require("xlsx"); var ld = ldate();
+    var aoa = [MAIN_HDR].concat(result.included.map(function (r) { return rowAoa(r, ld); }));
+    var ws = XLSX.utils.aoa_to_sheet(aoa); var wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "DATA");
+    XLSX.writeFile(wb, "IN_Update_Whse_Replenish_" + stamp() + ".xlsx");
+  }
+  function exportDecrease() {
+    if (!result || !result.decrease.length) { toast("No decrease rows to export", "error"); return; }
+    var XLSX = require("xlsx"); var ld = ldate();
+    var hdr = MAIN_HDR.concat(["ROP % Change", "Max Qty % Change", "Movement Class"]);
+    var aoa = [hdr].concat(result.decrease.map(function (r) {
+      var rp = r.curROP ? Math.round((r.newROP - r.curROP) / r.curROP * 1000) / 10 : "";
+      var mp = r.curMax ? Math.round((r.newMax - r.curMax) / r.curMax * 1000) / 10 : "";
+      return rowAoa(r, ld).concat([rp, mp, r.mvmt]);
+    }));
+    var ws = XLSX.utils.aoa_to_sheet(aoa); var wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "DATA");
+    XLSX.writeFile(wb, "IN_Update_Whse_Replenish_DECREASE_" + stamp() + ".xlsx");
+  }
+
+  var summary = useMemo(function () {
+    if (!result) return null;
+    var byWh = {}, counts = {};
+    result.included.forEach(function (r) {
+      if (!byWh[r.wh]) byWh[r.wh] = { items: 0, curROP: 0, newROP: 0, curMax: 0, newMax: 0 };
+      var b = byWh[r.wh]; b.items++; b.curROP += r.curROP; b.newROP += r.newROP; b.curMax += r.curMax; b.newMax += r.newMax;
+      if (!counts[r.wh]) counts[r.wh] = { A: 0, B: 0, C: 0, total: 0 };
+      if (counts[r.wh][r.cls] != null) counts[r.wh][r.cls]++; counts[r.wh].total++;
+    });
+    return { byWh: byWh, counts: counts };
+  }, [result]);
+
+  var pct = function (cur, nw) { return cur ? (Math.round((nw - cur) / cur * 1000) / 10) : null; };
+  var fmt = function (n) { return (Math.round(n) || 0).toLocaleString(); };
+
+  return (
+    <div>
+      <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 16 }}>Upload the Netstock <b>Reorder Points</b> export and the current <b>Stock Item Whse Replenish</b> export. The Hub joins them on Inventory ID + Warehouse, recalculates SS / ROP / Max, applies the include/exclude rules, and produces the <b>IN Update Whse Replenish</b> upload file plus summaries.</div>
+
+      <div onDragOver={function (e) { e.preventDefault(); setDrag(true); }} onDragLeave={function (e) { e.preventDefault(); setDrag(false); }} onDrop={function (e) { e.preventDefault(); setDrag(false); var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if (f) loadRp(f); }} style={Object.assign({}, S.card, drag ? { borderColor: "#7C3AED", borderStyle: "dashed", background: "#F5F3FF" } : {})}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 600, color: "#1F2937", marginBottom: 4 }}>Reorder Points (Netstock)</div>
+            <div style={{ fontSize: 13, color: "#6B7280" }}>{rpName ? <span style={{ color: "#059669" }}>{"\u2713 " + rpName + " \u00B7 " + rpRows.length + " rows"}</span> : "Drag the Reorder Points .xlsx here, or click Upload."}</div>
+          </div>
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={onFile} style={{ display: "none" }} />
+            <button onClick={chooseFile} style={S.btn()}><IconUpload /> {rpName ? "Replace file" : "Upload file"}</button>
+          </div>
+        </div>
+      </div>
+
+      <div onDragOver={function (e) { e.preventDefault(); setCdrag(true); }} onDragLeave={function (e) { e.preventDefault(); setCdrag(false); }} onDrop={function (e) { e.preventDefault(); setCdrag(false); var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if (f) loadCur(f); }} style={Object.assign({}, S.card, { marginTop: 12 }, cdrag ? { borderColor: "#7C3AED", borderStyle: "dashed", background: "#F5F3FF" } : {})}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 600, color: "#1F2937", marginBottom: 4 }}>Current Settings (Stock Item Whse Replenish)</div>
+            <div style={{ fontSize: 13, color: "#6B7280" }}>{curName ? <span style={{ color: "#059669" }}>{"\u2713 " + curName + " \u00B7 " + curRows.length + " rows"}</span> : "Export Stock Item Whse Replenish from Acumatica and drop the .xlsx here. This supplies the current ROP / Max."}</div>
+          </div>
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <input ref={curRef} type="file" accept=".xlsx,.xls" onChange={onCurFile} style={{ display: "none" }} />
+            <button onClick={chooseCur} style={S.btn()}><IconUpload /> {curName ? "Replace file" : "Upload file"}</button>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap", margin: "16px 0" }}>
+        <button onClick={build} disabled={busy || !rpRows.length} style={Object.assign({}, S.btn(), (busy || !rpRows.length) ? { opacity: 0.6, cursor: "default" } : {})}>{busy ? <><Spinner color="#fff" size={14} /> Building...</> : "Build upload file"}</button>
+        <button onClick={function () { setInclAll(!inclAll); }} title="Include every matched item regardless of whether values went up or down" style={{ padding: "7px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", border: "1px solid " + (inclAll ? "#C4B5FD" : "#E5E7EB"), background: inclAll ? "#F5F3FF" : "#fff", color: inclAll ? "#6D28D9" : "#6B7280" }}>{inclAll ? "\u2713 " : ""}Include all (ignore direction)</button>
+        <button onClick={function () { setGenOnly(!genOnly); }} title="Only include generic items (Inventory ID starts with Gen-). Click Build upload file again to apply." style={{ padding: "7px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", border: "1px solid " + (genOnly ? "#C4B5FD" : "#E5E7EB"), background: genOnly ? "#F5F3FF" : "#fff", color: genOnly ? "#6D28D9" : "#6B7280" }}>{genOnly ? "\u2713 " : ""}Generics only</button>
+        <span style={{ fontSize: 12, color: "#9CA3AF" }}>{curRows.length ? ("Current settings from " + curName + " (" + curRows.length + " rows).") : "Upload the Stock Item Whse Replenish export above for current ROP / Max."}</span>
+      </div>
+
+      {result && <div style={{ display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap", padding: "10px 18px", background: "#FFFFFF", border: "0.5px solid #E5E7EB", borderRadius: 12, marginBottom: 16, boxShadow: "0 1px 4px rgba(15,23,42,0.06)" }}>
+        <span style={{ fontSize: 12, color: "#6B7280" }}>Matched <b style={{ color: "#1F2937" }}>{fmt(result.matched)}</b></span>
+        <span style={{ fontSize: 12, color: "#6B7280" }}>Included <b style={{ color: "#7C3AED" }}>{fmt(result.included.length)}</b></span>
+        <span style={{ fontSize: 12, color: "#6B7280" }}>Decrease candidates <b style={{ color: "#1F2937" }}>{fmt(result.decrease.length)}</b></span>
+        <span style={{ fontSize: 12, color: "#6B7280" }}>Outliers <b style={{ color: result.outliers.length ? "#B45309" : "#1F2937" }}>{fmt(result.outliers.length)}</b></span>
+        <span style={{ marginLeft: "auto", display: "flex", gap: 10 }}>
+          <button onClick={exportMain} style={S.btn()}><IconDL /> Upload file ({result.included.length})</button>
+          {result.decrease.length ? <button onClick={exportDecrease} style={Object.assign({}, S.btn("ghost"), { background: "#F5F3FF", color: "#6D28D9", border: "1px solid #C4B5FD" })}><IconDL /> Decrease file ({result.decrease.length})</button> : null}
+        </span>
+      </div>}
+
+      {result && result.fieldMap && result.fieldMap.source === "file" && <div style={{ padding: "8px 14px", marginBottom: 16, background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 10, fontSize: 11, color: "#166534" }}>{"Current ROP / Max / Class read from the uploaded export (" + result.fieldMap.rows + " rows): " + (result.fieldMap.name || "")}</div>}
+      {result && result.fieldMap && result.fieldMap.source === "live" && (!result.fieldMap.rop || !result.fieldMap.max) && <div style={{ padding: "10px 14px", marginBottom: 16, background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 10, fontSize: 12, color: "#991B1B" }}>{"The live whse-replenish feed didn't return Reorder Point / Max (current values are 0). Fields it returned: " + (result.fieldMap.keys || []).join(", ") + ". Upload the Stock Item Whse Replenish export above and I'll read current values from that instead."}</div>}
+      {result && result.fieldMap && result.fieldMap.source === "live" && result.fieldMap.rop && result.fieldMap.max && <div style={{ padding: "8px 14px", marginBottom: 16, background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 10, fontSize: 11, color: "#166534" }}>{"Current values mapped from live feed fields \u2014 ROP: \"" + result.fieldMap.rop + "\", Max: \"" + result.fieldMap.max + "\"" + (result.fieldMap.cls ? ", Class: \"" + result.fieldMap.cls + "\"" : "")}</div>}
+
+      {result && summary && <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden" })}>
+        <div style={{ padding: "10px 16px", fontWeight: 600, fontSize: 13, color: "#1F2937", borderBottom: "1px solid #F3F4F6" }}>Change summary by warehouse</div>
+        <div style={{ overflow: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead><tr>{["Warehouse", "Items", "A", "B", "C", "ROP now", "ROP new", "ROP \u0394", "ROP %", "Max now", "Max new", "Max \u0394", "Max %"].map(function (h, i) { return <th key={i} style={Object.assign({}, S.th, { textAlign: i === 0 ? "left" : "right" })}>{h}</th>; })}</tr></thead>
+            <tbody>{Object.keys(summary.byWh).sort().map(function (wh) {
+              var b = summary.byWh[wh], c = summary.counts[wh] || { A: 0, B: 0, C: 0 };
+              var rPct = pct(b.curROP, b.newROP), mPct = pct(b.curMax, b.newMax);
+              return <tr key={wh}>
+                <td style={Object.assign({}, S.td, { fontWeight: 600 })}>{wh}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right" })}>{b.items}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right" })}>{c.A}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right" })}>{c.B}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right" })}>{c.C}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right" })}>{fmt(b.curROP)}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right" })}>{fmt(b.newROP)}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right" })}>{fmt(b.newROP - b.curROP)}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right", color: rPct == null ? "#9CA3AF" : rPct >= 0 ? "#059669" : "#DC2626" })}>{rPct == null ? "-" : (rPct > 0 ? "+" : "") + rPct + "%"}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right" })}>{fmt(b.curMax)}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right" })}>{fmt(b.newMax)}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right" })}>{fmt(b.newMax - b.curMax)}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right", color: mPct == null ? "#9CA3AF" : mPct >= 0 ? "#059669" : "#DC2626" })}>{mPct == null ? "-" : (mPct > 0 ? "+" : "") + mPct + "%"}</td>
+              </tr>;
+            })}</tbody>
+          </table>
+        </div>
+      </div>}
+
+      {result && result.outliers.length > 0 && <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden", marginTop: 16, border: "1px solid #FCD34D" })}>
+        <div style={{ padding: "10px 16px", fontWeight: 600, fontSize: 13, color: "#92400E", background: "#FFFBEB", borderBottom: "1px solid #FDE68A" }}>{"\u26A0 Outliers for review (" + result.outliers.length + ") \u2014 large increases; these are still in the upload file, just flagged"}</div>
+        <div style={{ maxHeight: 320, overflow: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead><tr>{["Inventory ID", "Whse", "Class", "ROP now", "ROP new", "ROP %", "Max now", "Max new", "Max %"].map(function (h, i) { return <th key={i} style={Object.assign({}, S.th, { textAlign: i < 3 ? "left" : "right" })}>{h}</th>; })}</tr></thead>
+            <tbody>{result.outliers.map(function (r, i) {
+              var rPct = pct(r.curROP, r.newROP), mPct = pct(r.curMax, r.newMax);
+              return <tr key={i}>
+                <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 12 })}>{r.id}</td>
+                <td style={S.td}>{r.wh}</td>
+                <td style={S.td}>{r.cls}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right" })}>{fmt(r.curROP)}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right" })}>{fmt(r.newROP)}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right", color: "#B45309" })}>{rPct == null ? "new" : (rPct > 0 ? "+" : "") + rPct + "%"}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right" })}>{fmt(r.curMax)}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right" })}>{fmt(r.newMax)}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right", color: "#B45309" })}>{mPct == null ? "new" : (mPct > 0 ? "+" : "") + mPct + "%"}</td>
+              </tr>;
+            })}</tbody>
+          </table>
+        </div>
+      </div>}
+
+      {result && <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden", marginTop: 16 })}>
+        <div style={{ padding: "10px 16px", fontWeight: 600, fontSize: 13, color: "#1F2937", borderBottom: "1px solid #F3F4F6" }}>Upload preview ({result.included.length})</div>
+        <div style={{ maxHeight: 480, overflow: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead><tr>{["Inventory ID", "Whse", "Class", "SS", "ROP now", "ROP new", "Max now", "Max new"].map(function (h, i) { return <th key={i} style={Object.assign({}, S.th, { textAlign: i < 3 ? "left" : "right" })}>{h}</th>; })}</tr></thead>
+            <tbody>{result.included.map(function (r, i) {
+              return <tr key={i}>
+                <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 12 })}>{r.id}{r.gen && <span style={{ marginLeft: 6, fontFamily: "inherit", fontSize: 9, fontWeight: 700, color: "#7C3AED", background: "#F5F3FF", borderRadius: 4, padding: "1px 5px" }}>9d ROP</span>}</td>
+                <td style={S.td}>{r.wh}</td>
+                <td style={S.td}>{r.cls}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right" })}>{fmt(r.newSS)}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right", color: "#9CA3AF" })}>{fmt(r.curROP)}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right", fontWeight: 600 })}>{fmt(r.newROP)}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right", color: "#9CA3AF" })}>{fmt(r.curMax)}</td>
+                <td style={Object.assign({}, S.td, { textAlign: "right", fontWeight: 600 })}>{fmt(r.newMax)}</td>
+              </tr>;
+            })}</tbody>
+          </table>
+        </div>
+      </div>}
+    </div>
+  );
+}
+
+// Excel-style column-header filter: funnel icon opens a checkbox dropdown with
+// Select all / None / Clear. sel is null (no filter, all shown), or an array of
+// values to show ([] = show none). Collapses back to null when everything is checked.
+function FcHeadFilter(props) {
+  var _o = useState(false), open = _o[0], setOpen = _o[1];
+  var _d = useState([]), draft = _d[0], setDraft = _d[1];
+  var _pos = useState(null), pos = _pos[0], setPos = _pos[1];
+  var btnRef = useRef(null);
+  var options = props.options || [];
+  var sel = props.sel;                       // committed: null = show all, [] = show none, array = show those
+  var active = sel != null;                  // funnel lights up whenever a filter is committed
+  var allVals = options.map(function (o) { return o.value; });
+  function isChecked(v) { return draft.indexOf(v) !== -1; }
+  function toggle(v) { var cur = draft.slice(); var i = cur.indexOf(v); if (i === -1) cur.push(v); else cur.splice(i, 1); setDraft(cur); }
+  function openMenu() { if (btnRef.current) { var r = btnRef.current.getBoundingClientRect(); setPos({ top: r.bottom + 4, left: Math.max(8, Math.min(r.left, (typeof window !== "undefined" ? window.innerWidth : 1200) - 190)) }); } setDraft(sel == null ? allVals.slice() : sel.slice()); setOpen(true); }
+  function commitAndClose() {
+    var next = draft.slice();
+    // all checked => no filter (show all); otherwise keep the exact set (incl. [] = show none)
+    if (next.length === allVals.length && allVals.every(function (v) { return next.indexOf(v) !== -1; })) next = null;
+    props.onSel(next);
+    setOpen(false);
+  }
+  var lnk = { border: "none", background: "transparent", cursor: "pointer", padding: 0, fontSize: 11, fontWeight: 600 };
+  return <th style={Object.assign({}, props.thStyle, props.align === "right" ? { textAlign: "right" } : {}, { whiteSpace: "nowrap", verticalAlign: "middle" })}>
+    <span onClick={props.onSort} style={{ cursor: "pointer", userSelect: "none", verticalAlign: "middle" }}>{props.label}{props.sortActive ? (props.sortDir === "desc" ? " \u25BE" : " \u25B4") : ""}</span>
+    <button ref={btnRef} onClick={function (e) { e.stopPropagation(); if (open) commitAndClose(); else openMenu(); }} title="Filter" style={{ marginLeft: 6, verticalAlign: "middle", border: "none", background: active ? "#E0F2FE" : "transparent", cursor: "pointer", padding: 3, borderRadius: 5, color: active ? "#0284C7" : "#9CA3AF", lineHeight: 0 }}>
+      <svg width="12" height="12" viewBox="0 0 24 24" fill={active ? "#0284C7" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>
+    </button>
+    {open && <>
+      <div onClick={commitAndClose} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 1000 }} />
+      <div style={{ position: "fixed", top: pos ? pos.top : 0, left: pos ? pos.left : 0, zIndex: 1001, background: "#fff", border: "1px solid #E5E7EB", borderRadius: 10, boxShadow: "0 8px 24px rgba(0,0,0,0.14)", padding: 8, minWidth: 180, maxWidth: 320, textAlign: "left", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>
+        <div style={{ display: "flex", gap: 12, padding: "2px 6px 8px", borderBottom: "1px solid #F3F4F6", marginBottom: 6 }}>
+          <button onClick={function () { setDraft(allVals.slice()); }} style={Object.assign({}, lnk, { color: "#0B6FA8" })}>Select all</button>
+          <button onClick={function () { setDraft([]); }} style={Object.assign({}, lnk, { color: "#6B7280" })}>Uncheck all</button>
+        </div>
+        <div style={{ maxHeight: 220, overflow: "auto" }}>
+          {options.map(function (o) {
+            var ck = isChecked(o.value);
+            return <div key={o.value} onClick={function () { toggle(o.value); }} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "5px 6px", borderRadius: 6, cursor: "pointer", fontSize: 13, color: "#374151" }}>
+              <span style={{ width: 16, height: 16, marginTop: 1, borderRadius: 4, border: "1.5px solid " + (ck ? "#0EA5E9" : "#CBD5E1"), background: ck ? "#0EA5E9" : "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{ck && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}</span>
+              <span style={{ flex: 1, lineHeight: 1.35 }}>{o.label}</span>
+            </div>;
+          })}
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #F3F4F6", marginTop: 6, paddingTop: 6 }}>
+          <span style={{ fontSize: 10.5, color: "#9CA3AF" }}>Applies when you click away</span>
+          <button onClick={function () { props.onSel(null); setOpen(false); }} style={{ border: "1px solid #E5E7EB", background: "#fff", color: "#6B7280", fontSize: 11, fontWeight: 600, cursor: "pointer", padding: "4px 10px", borderRadius: 6 }}>Clear filter</button>
+        </div>
+      </div>
+    </>}
+  </th>;
+}
+
+function FcTextFilter(props) {
+  var _o = useState(false), open = _o[0], setOpen = _o[1];
+  var _pos = useState(null), pos = _pos[0], setPos = _pos[1];
+  var btnRef = useRef(null);
+  var val = props.value || null;                 // { mode, text } or null
+  var mode = val ? (val.mode || "contains") : "contains";
+  var text = val ? (val.text || "") : "";
+  var active = !!(val && val.text);
+  function openMenu() { if (btnRef.current) { var r = btnRef.current.getBoundingClientRect(); setPos({ top: r.bottom + 4, left: Math.max(8, Math.min(r.left, (typeof window !== "undefined" ? window.innerWidth : 1200) - 260)) }); } setOpen(true); }
+  function update(nextMode, nextText) { if (!nextText) props.onChange(null); else props.onChange({ mode: nextMode, text: nextText }); }
+  var modeBtn = function (m, lbl) { var on = mode === m; return <button onClick={function () { update(m, text); }} style={{ flex: 1, border: "1px solid " + (on ? "#0EA5E9" : "#E5E7EB"), background: on ? "#0EA5E9" : "#fff", color: on ? "#fff" : "#6B7280", fontSize: 11, fontWeight: 600, cursor: "pointer", padding: "6px 8px", borderRadius: 6 }}>{lbl}</button>; };
+  return <th style={Object.assign({}, props.thStyle, props.align === "right" ? { textAlign: "right" } : {}, { whiteSpace: "nowrap", verticalAlign: "middle" })}>
+    <span onClick={props.onSort} style={{ cursor: "pointer", userSelect: "none", verticalAlign: "middle" }}>{props.label}{props.sortActive ? (props.sortDir === "desc" ? " \u25BE" : " \u25B4") : ""}</span>
+    <button ref={btnRef} onClick={function (e) { e.stopPropagation(); if (open) setOpen(false); else openMenu(); }} title="Filter" style={{ marginLeft: 6, verticalAlign: "middle", border: "none", background: active ? "#E0F2FE" : "transparent", cursor: "pointer", padding: 3, borderRadius: 5, color: active ? "#0284C7" : "#9CA3AF", lineHeight: 0 }}>
+      <svg width="12" height="12" viewBox="0 0 24 24" fill={active ? "#0284C7" : "none"} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>
+    </button>
+    {open && <>
+      <div onClick={function () { setOpen(false); }} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, zIndex: 1000 }} />
+      <div style={{ position: "fixed", top: pos ? pos.top : 0, left: pos ? pos.left : 0, zIndex: 1001, background: "#fff", border: "1px solid #E5E7EB", borderRadius: 10, boxShadow: "0 8px 24px rgba(0,0,0,0.14)", padding: 10, minWidth: 240, textAlign: "left", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>
+        <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>{modeBtn("contains", "contains")}{modeBtn("excludes", "does not contain")}</div>
+        <input autoFocus value={text} onChange={function (e) { update(mode, e.target.value); }} onKeyDown={function (e) { if (e.key === "Enter" || e.key === "Escape") setOpen(false); }} placeholder="Type to filter..." style={{ width: "100%", boxSizing: "border-box", padding: "8px 10px", border: "1px solid #E5E7EB", borderRadius: 6, fontSize: 13, color: "#374151", fontFamily: "'Varela Round', sans-serif" }} />
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #F3F4F6", marginTop: 8, paddingTop: 8 }}>
+          <span style={{ fontSize: 10.5, color: "#9CA3AF" }}>Filters as you type</span>
+          <button onClick={function () { props.onChange(null); setOpen(false); }} style={{ border: "1px solid #E5E7EB", background: "#fff", color: "#6B7280", fontSize: 11, fontWeight: 600, cursor: "pointer", padding: "4px 10px", borderRadius: 6 }}>Clear filter</button>
+        </div>
+      </div>
+    </>}
+  </th>;
+}
+
+function ForecastingTool(props) {
+  var toast = props.toast, cred = props.cred, ok = props.ok, lp = props.lp;
+  var S = makeStyles("#0EA5E9");
+
+  var _hd = useState([]), headers = _hd[0], setHeaders = _hd[1];
+  var _rw = useState([]), rows = _rw[0], setRows = _rw[1];
+  var _fn = useState(""), fileName = _fn[0], setFileName = _fn[1];
+  var _dw = useState(""), detectedWh = _dw[0], setDetectedWh = _dw[1];
+  var _wh = useState(""), warehouse = _wh[0], setWarehouse = _wh[1];
+  var _md = useState("non"), mode = _md[0], setMode = _md[1];
+  var _fmt = useState(null), formatted = _fmt[0], setFormatted = _fmt[1];
+  var _st = useState(null), stats = _st[0], setStats = _st[1];
+  var _busy = useState(false), busy = _busy[0], setBusy = _busy[1];
+  var _tab = useState("forecast"), tab = _tab[0], setTab = _tab[1];
+  // Phase 2 state
+  var _gm = useState("none"), globalMethod = _gm[0], setGlobalMethod = _gm[1];
+  var _gr = useState("1.10"), growth = _gr[0], setGrowth = _gr[1];
+  var _tc = useState([]), targetCols = _tc[0], setTargetCols = _tc[1];
+  var _rm = useState({}), rowMethod = _rm[0], setRowMethod = _rm[1];
+  var _rg = useState({}), rowGrowth = _rg[0], setRowGrowth = _rg[1];
+  var _me = useState({}), manualEdits = _me[0], setManualEdits = _me[1];
+  var _dbf = useState(false), dropBelowFinal = _dbf[0], setDropBelowFinal = _dbf[1];
+  var _hd = useState(false), hideDropped = _hd[0], setHideDropped = _hd[1];
+  // Sales-exceeding-forecast overlay
+  var _sef = useState([]), sefCodes = _sef[0], setSefCodes = _sef[1];
+  var _sefn = useState(""), sefFileName = _sefn[0], setSefFileName = _sefn[1];
+  var _sefo = useState(false), sefOnly = _sefo[0], setSefOnly = _sefo[1];
+  var _dgF = useState(false), dragF = _dgF[0], setDragF = _dgF[1];
+  var _dgS = useState(false), dragS = _dgS[0], setDragS = _dgS[1];
+  var _sk = useState(""), sortKey = _sk[0], setSortKey = _sk[1];
+  var _sd = useState("asc"), sortDir = _sd[0], setSortDir = _sd[1];
+  var _so = useState(null), sortOrder = _so[0], setSortOrder = _so[1];
+  var _q = useState(""), query = _q[0], setQuery = _q[1];
+  var _colf = useState({}), colFilters = _colf[0], setColFilters = _colf[1];
+  function setColF(col, next) { var u = Object.assign({}, colFilters); if (next == null) delete u[col]; else u[col] = next; setColFilters(u); }
+  var _sdi = useState({}), sdInfo = _sdi[0], setSdInfo = _sdi[1];
+  var _bki = useState({}), bkoInfo = _bki[0], setBkoInfo = _bki[1];
+  var _pd = useState(function () { var d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }), pullDate = _pd[0], setPullDate = _pd[1];
+  // Phase 3 (TP Forecast) state
+  // TP Forecast: multiple independent report sessions (one sub-tab each).
+  var _tpss = useState([]), tpSessions = _tpss[0], setTpSessions = _tpss[1];
+  var _tpai = useState(0), tpActive = _tpai[0], setTpActive = _tpai[1];
+  var _tpbusy = useState(false), tpBusy = _tpbusy[0], setTpBusy = _tpbusy[1];
+  var _tppend = useState(null), tpPending = _tppend[0], setTpPending = _tppend[1];   // parsed report awaiting warehouse pick: { fileName, headers, rows, warehouses }
+  var _tppick = useState({}), tpPicked = _tppick[0], setTpPicked = _tppick[1];       // { warehouse: true } checkbox map in the picker
+  var tpReadyRef = useRef(false);
+  var tpAct = tpSessions[tpActive] || null;
+  var tpHeaders = tpAct ? tpAct.headers : [];
+  var tpRows = tpAct ? tpAct.rows : [];
+  var tpFileName = tpAct ? tpAct.fileName : "";
+  var tpWarehouse = tpAct ? (tpAct.warehouse || "") : "";
+  var tpFinalCol = tpAct ? tpAct.finalCol : -1;
+  var tpFormatted = tpAct ? tpAct.formatted : null;
+  var tpStats = tpAct ? tpAct.stats : null;
+  var tpSort = tpAct ? (tpAct.sort || null) : null;
+  function patchTpSession(patch) { setTpSessions(function (prev) { var u = prev.slice(); if (u[tpActive]) u[tpActive] = Object.assign({}, u[tpActive], patch); return u; }); }
+  function setTpFinalCol(v) { patchTpSession({ finalCol: v }); }
+  function setTpFormatted(v) { patchTpSession({ formatted: v }); }
+  function setTpStats(v) { patchTpSession({ stats: v }); }
+  function setTpSort(v) { patchTpSession({ sort: v }); }
+  function setTpWarehouse(v) { patchTpSession({ warehouse: v }); }
+  function closeTpSession(i) {
+    var newLen = tpSessions.length - 1;
+    setTpSessions(function (prev) { var u = prev.slice(); u.splice(i, 1); return u; });
+    setTpActive(function (cur) { var ni = cur; if (i < cur) ni = cur - 1; if (ni > newLen - 1) ni = newLen - 1; if (ni < 0) ni = 0; return ni; });
+  }
+  var fileRef = useRef(null);
+  var tpFileRef = useRef(null);
+  var sefFileRef = useRef(null);
+
+  var anchors = useMemo(function () { return fcAnchors(headers); }, [headers]);
+  var productCol = useMemo(function () { return fcIdxExact(headers, "Product code"); }, [headers]);
+  var descCol = useMemo(function () { return fcIdxExact(headers, "Description"); }, [headers]);
+  var classCol = useMemo(function () { return fcIdxExact(headers, "Classification"); }, [headers]);
+
+  // Date facts for Method A (pull-day excluded; ~5am pull means the pull day is incomplete).
+  // Uses the Netstock pull date (editable) so MTD divides by the right number of elapsed days,
+  // even when Netstock didn't refresh and the upload is older than today.
+  var now = new Date();
+  var pull = /^\d{4}-\d{2}-\d{2}$/.test(pullDate || "") ? new Date(pullDate + "T00:00:00") : now;
+  var dom = pull.getDate();
+  var denom = dom - 1; if (denom < 1) denom = 1;
+  var daysInMonth = new Date(pull.getFullYear(), pull.getMonth() + 1, 0).getDate();
+
+  function defaultTargetCols(an) {
+    if (!an || !an.uploads.length) return [];
+    var monShort = now.toLocaleString("en-US", { month: "short" });
+    var yr = String(now.getFullYear());
+    var hit = -1;
+    for (var i = 0; i < an.uploads.length; i++) { var l = an.uploads[i].label; if (l.indexOf(monShort) !== -1 && l.indexOf(yr) !== -1) { hit = i; break; } }
+    if (hit < 0) hit = 0;
+    return [an.uploads[hit].idx];
+  }
+
+  // restore on mount
+  useEffect(function () {
+    (async function () {
+      try { var inp = await idbGet("fc-input"); if (inp && inp.headers) { setHeaders(inp.headers); setRows(inp.rows || []); setFileName(inp.fileName || ""); setDetectedWh(inp.detectedWh || ""); } } catch (e) {}
+      try { var res = await idbGet("fc-result"); if (res) { if (res.formattedRows) setFormatted(res.formattedRows); if (res.stats) setStats(res.stats); } } catch (e) {}
+      try { var fc = await idbGet("fc-forecast"); if (fc) { if (fc.globalMethod) setGlobalMethod(fc.globalMethod); if (fc.growth) setGrowth(fc.growth); if (fc.targetCols) setTargetCols(fc.targetCols); if (fc.rowMethod) setRowMethod(fc.rowMethod); if (fc.rowGrowth) setRowGrowth(fc.rowGrowth); if (fc.manualEdits) setManualEdits(fc.manualEdits); if (fc.dropBelowFinal != null) setDropBelowFinal(!!fc.dropBelowFinal); if (fc.sefOnly != null) setSefOnly(!!fc.sefOnly); } } catch (e) {}
+      try { var sef = await idbGet("fc-sef"); if (sef && sef.codes) { setSefCodes(sef.codes); setSefFileName(sef.fileName || ""); } } catch (e) {}
+      try { var sb = await idbGet("fc-sdbko"); if (sb) { if (sb.sd) setSdInfo(sb.sd); if (sb.bko) setBkoInfo(sb.bko); } } catch (e) {}
+      try { var tps = await idbGet("fc-tp-sessions"); if (tps && tps.sessions && tps.sessions.length) { setTpSessions(tps.sessions); setTpActive(Math.min(tps.active || 0, tps.sessions.length - 1)); } } catch (e) {}
+      tpReadyRef.current = true;
+      var m = sGet("fc-mode"); if (m) setMode(m);
+      var w = sGet("fc-wh"); if (w) setWarehouse(w);
+    })();
+  }, []);
+
+  useEffect(function () { if (!warehouse && detectedWh) setWarehouse(detectedWh); }, [detectedWh]);
+  // seed default fill-month once headers are known and nothing selected yet
+  useEffect(function () { if (headers.length && anchors.uploads.length && targetCols.length === 0) setTargetCols(defaultTargetCols(anchors)); }, [headers]);
+
+  // persist Phase-2 working state
+  useEffect(function () {
+    if (!headers.length) return;
+    idbSet("fc-forecast", { globalMethod: globalMethod, growth: growth, targetCols: targetCols, rowMethod: rowMethod, rowGrowth: rowGrowth, manualEdits: manualEdits, dropBelowFinal: dropBelowFinal, sefOnly: sefOnly }).catch(function () {});
+  }, [globalMethod, growth, targetCols, rowMethod, rowGrowth, manualEdits, dropBelowFinal, sefOnly]);
+
+  useEffect(function () { if (!tpReadyRef.current) return; idbSet("fc-tp-sessions", { sessions: tpSessions, active: tpActive }).catch(function () {}); }, [tpSessions, tpActive]);
+
+  function chooseFile() { if (fileRef.current) fileRef.current.click(); }
+
+  function loadForecastFile(file) {
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      try {
+        var parsed = fcParseCSV(reader.result);
+        if (parsed.length < 2) { toast("That file has no data rows", "error"); return; }
+        var hdr = parsed[0].map(function (h) { return String(h).trim(); });
+        var dataRows = parsed.slice(1).map(function (r) {
+          var row = r.slice(0, hdr.length);
+          while (row.length < hdr.length) row.push("");
+          return row;
+        });
+        var dw = fcDetectWarehouse(file.name);
+        setHeaders(hdr); setRows(dataRows); setFileName(file.name); setDetectedWh(dw);
+        if (dw) { setWarehouse(dw); sSet("fc-wh", dw); }
+        setFormatted(null); setStats(null);
+        setSortOrder(null); setSortKey(""); setQuery(""); setColFilters({});
+        // new file: clear per-row forecasting overrides, reset fill-month default
+        setRowMethod({}); setRowGrowth({}); setManualEdits({}); setTargetCols(defaultTargetCols(fcAnchors(hdr)));
+        idbSet("fc-input", { headers: hdr, rows: dataRows, fileName: file.name, detectedWh: dw }).catch(function () {});
+        idbDel("fc-result").catch(function () {}); idbDel("fc-forecast").catch(function () {});
+        toast("Loaded " + dataRows.length + " forecast rows" + (dw ? " (" + dw + ")" : ""));
+      } catch (err) { toast("Error parsing CSV: " + err.message, "error"); }
+    };
+    reader.readAsText(file);
+  }
+  function onFile(e) { var file = e.target.files && e.target.files[0]; loadForecastFile(file); e.target.value = ""; }
+
+  function chooseSefFile() { if (sefFileRef.current) sefFileRef.current.click(); }
+  function clearSef() { setSefCodes([]); setSefFileName(""); setSefOnly(false); idbDel("fc-sef").catch(function () {}); }
+  function loadSefFile(file) {
+    if (!file) return;
+    var isXlsx = /\.xlsx?$/i.test(file.name);
+    var reader = new FileReader();
+    reader.onload = function (ev) {
+      try {
+        var hdr, rws;
+        if (isXlsx) {
+          var XLSX = require("xlsx");
+          var wb = XLSX.read(ev.target.result, { type: "array" });
+          var aoa = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: "", raw: true });
+          hdr = (aoa[0] || []).map(function (x) { return String(x).trim(); });
+          rws = aoa.slice(1);
+        } else {
+          var parsed = fcParseCSV(ev.target.result);
+          hdr = (parsed[0] || []).map(function (x) { return String(x).trim(); });
+          rws = parsed.slice(1);
+        }
+        var pc = -1; for (var i = 0; i < hdr.length; i++) { if (hdr[i].toLowerCase() === "product code") { pc = i; break; } }
+        if (pc < 0) { toast("No 'Product code' column found in that file", "error"); return; }
+        var seen = {}, uniq = [];
+        rws.forEach(function (r) { var v = r[pc] == null ? "" : String(r[pc]).trim().toUpperCase(); if (v && !seen[v]) { seen[v] = 1; uniq.push(v); } });
+        if (!uniq.length) { toast("No product codes found in that file", "error"); return; }
+        setSefCodes(uniq); setSefFileName(file.name);
+        idbSet("fc-sef", { codes: uniq, fileName: file.name }).catch(function () {});
+        toast("Loaded " + uniq.length + " items from sales-exceeding-forecast file");
+      } catch (err) { toast("Error reading file: " + err.message, "error"); }
+    };
+    if (isXlsx) reader.readAsArrayBuffer(file); else reader.readAsText(file);
+  }
+  function onSefFile(e) { var file = e.target.files && e.target.files[0]; loadSefFile(file); e.target.value = ""; }
+
+  function changeWarehouse(v) { setWarehouse(v); sSet("fc-wh", v); }
+  function changeMode(v) { setMode(v); sSet("fc-mode", v); }
+
+  async function autoFormat() {
+    if (!headers.length || !rows.length) { toast("Upload a forecast CSV first", "error"); return; }
+    if (!warehouse) { toast("Pick a warehouse first", "error"); return; }
+    if (!ok) { lp(); return; }
+    if (productCol < 0) { toast("Could not find a 'Product code' column", "error"); return; }
+    var classCol = fcIdxExact(headers, "Classification");
+    if (classCol < 0) { toast("Could not find a 'Classification' column", "error"); return; }
+    setBusy(true);
+    try {
+      var fetched = await Promise.all([
+        fetchAcumatica("whse-replenish", null, cred.username, cred.password),
+        fetchAcumatica("short-dating", null, cred.username, cred.password).catch(function () { return []; }),
+        fetchAcumatica("backorder", null, cred.username, cred.password).catch(function () { return []; })
+      ]);
+      var whseRows = fetched[0];
+      var sdMap = {}; (fetched[1] || []).forEach(function (r) { var id = String(r.InventoryID || "").trim(); if (id && !sdMap[id]) sdMap[id] = r; });
+      var bkoMap = {}; (fetched[2] || []).forEach(function (r) { var id = String(r.InventoryID || "").trim(); if (id && !bkoMap[id]) bkoMap[id] = r; });
+      setSdInfo(sdMap); setBkoInfo(bkoMap);
+      idbSet("fc-sdbko", { sd: sdMap, bko: bkoMap }).catch(function () {});
+      var allowed = {};
+      (whseRows || []).forEach(function (r) {
+        if (String(r.Warehouse || "").trim() !== warehouse) return;
+        var cls = String(r.ReplenishmentClass || "").trim().toUpperCase();
+        if (cls !== "A" && cls !== "B" && cls !== "C") return;
+        if (String(r.ItemStatus || "").trim().toLowerCase() === "no purchases") return;
+        var id = String(r.InventoryID || "").trim();
+        if (!id) return;
+        var isGen = id.toUpperCase().indexOf("GEN-") !== -1;
+        if (mode === "gen" && !isGen) return;
+        if (mode === "non" && isGen) return;
+        allowed[id] = true;
+      });
+      var allowedCount = Object.keys(allowed).length;
+      var kept = rows.filter(function (row) {
+        var pc = String(row[productCol] || "").trim();
+        if (!allowed[pc]) return false;
+        var cl = String(row[classCol] || "").trim().toUpperCase();
+        return cl === "A" || cl === "B" || cl === "C";
+      });
+      var st = { input: rows.length, allowed: allowedCount, kept: kept.length, dropped: rows.length - kept.length, warehouse: warehouse, mode: mode, at: Date.now() };
+      setFormatted(kept); setStats(st);
+      setSortOrder(null); setSortKey(""); setQuery(""); setColFilters({});
+      // rows changed: clear stale per-row overrides
+      setRowMethod({}); setRowGrowth({}); setManualEdits({});
+      idbSet("fc-result", { formattedRows: kept, stats: st }).catch(function () {});
+      toast("Kept " + kept.length + " of " + rows.length + " rows for " + warehouse);
+    } catch (err) {
+      toast("Auto-format failed: " + (err && err.message ? err.message : err), "error");
+    } finally { setBusy(false); }
+  }
+
+  function exportFormatted() {
+    if (!formatted || !formatted.length) { toast("Run Auto-format first", "error"); return; }
+    var rowsOut = sefActive ? formatted.filter(inSef) : formatted;
+    fcDownload(fcToCSV(headers, rowsOut), "forecast_" + (warehouse || "all") + "_" + (mode === "gen" ? "generics" : mode === "all" ? "all" : "nongenerics") + "_formatted.csv");
+  }
+
+  function fcDownload(csv, name) {
+    var blob = new Blob([csv], { type: "text/csv" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a"); a.href = url; a.download = name; a.click();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  }
+
+  // ── TP Forecast (generics) ──
+  var TP_KEEP = ["Product code", "Location code", "Product description", "Supplier description", "Class", "Velocity", "Main unit of measure"];
+  function tpFinalCols() {
+    var out = [];
+    for (var i = 0; i < tpHeaders.length; i++) { if (/^final fc units/i.test(String(tpHeaders[i]))) out.push({ idx: i, label: String(tpHeaders[i]).replace(/^final fc units\s*/i, "") }); }
+    return out;
+  }
+  function tpDefaultFinal(hdr) {
+    if (!hdr || !hdr.length) return -1;
+    var finals = []; for (var i = 0; i < hdr.length; i++) { if (/^final fc units/i.test(String(hdr[i]))) finals.push(i); }
+    if (!finals.length) return -1;
+    var d = new Date(); var mon = d.toLocaleString("en-US", { month: "short" }).toLowerCase(); var yr = String(d.getFullYear());
+    for (var j = 0; j < finals.length; j++) { var lbl = String(hdr[finals[j]]).toLowerCase(); if (lbl.indexOf(mon) !== -1 && lbl.indexOf(yr) !== -1) return finals[j]; }
+    return -1;
+  }
+  function chooseTpFile() { if (tpFileRef.current) tpFileRef.current.click(); }
+  function onTpFile(e) {
+    var file = e.target.files && e.target.files[0];
+    if (!file) return;
+    e.target.value = "";
+    var reader = new FileReader();
+    reader.onload = function (ev) {
+      try {
+        var XLSX = require("xlsx");
+        var wb = XLSX.read(ev.target.result, { type: "array" });
+        // pick the sheet that has a "Product code" + "Location code" header (Report data)
+        var hdr = null, rws = null;
+        wb.SheetNames.forEach(function (nm) {
+          if (hdr) return;
+          var aoa = XLSX.utils.sheet_to_json(wb.Sheets[nm], { header: 1, defval: "", raw: true });
+          if (!aoa.length) return;
+          var h = aoa[0].map(function (x) { return String(x).trim(); });
+          var hasP = h.some(function (x) { return x.toLowerCase() === "product code"; });
+          var hasL = h.some(function (x) { return x.toLowerCase() === "location code"; });
+          if (hasP && hasL) { hdr = h; rws = aoa.slice(1).filter(function (r) { return r.some(function (c) { return String(c).trim() !== ""; }); }); }
+        });
+        if (!hdr) { toast(file.name + ": no 'Report data' sheet with Product/Location code found", "error"); return; }
+        var lCol = fcIdxExact(hdr, "Location code");
+        var seen = {}, whList = [];
+        rws.forEach(function (r) { var w = String(r[lCol] == null ? "" : r[lCol]).trim(); if (w && !seen[w]) { seen[w] = true; whList.push(w); } });
+        whList.sort();
+        if (!whList.length) { toast(file.name + ": no warehouses found in the Location code column", "error"); return; }
+        var picked = {}; whList.forEach(function (w) { picked[w] = true; });
+        setTpPending({ fileName: file.name, headers: hdr, rows: rws, warehouses: whList });
+        setTpPicked(picked);
+      } catch (err) { toast("Error reading " + file.name + ": " + err.message, "error"); }
+    };
+    reader.readAsArrayBuffer(file);
+  }
+  async function confirmTpPick() {
+    if (!tpPending) return;
+    var chosen = tpPending.warehouses.filter(function (w) { return tpPicked[w]; });
+    if (!chosen.length) { toast("Select at least one warehouse", "error"); return; }
+    if (!cred || !cred.username || !cred.password || !ok) { toast("Log in to Acumatica first, then Prepare", "error"); lp && lp(); return; }
+    var pending = tpPending;
+    var hdr = pending.headers, rows = pending.rows;
+    var pCol = fcIdxExact(hdr, "Product code"), lCol = fcIdxExact(hdr, "Location code"), cCol = fcIdxExact(hdr, "Class");
+    if (pCol < 0 || lCol < 0 || cCol < 0) { toast("Report is missing Product code / Location code / Class", "error"); return; }
+    var finalCol = tpDefaultFinal(hdr);
+    var keepBase = TP_KEEP.map(function (n) { return fcIdxExact(hdr, n); }).filter(function (i) { return i >= 0; });
+    var keep = finalCol >= 0 ? keepBase.concat([finalCol]) : keepBase;
+    setTpBusy(true);
+    try {
+      var whseRows = await fetchAcumatica("whse-replenish", null, cred.username, cred.password);
+      var newSessions = chosen.map(function (w) {
+        var allowed = {};
+        (whseRows || []).forEach(function (r) {
+          if (String(r.Warehouse || "").trim() !== w) return;
+          var cl = String(r.ReplenishmentClass || "").trim().toUpperCase();
+          if (cl !== "A" && cl !== "B" && cl !== "C") return;
+          if (String(r.ItemStatus || "").trim().toLowerCase() === "no purchases") return;
+          var id = String(r.InventoryID || "").trim();
+          if (!id || id.toUpperCase().indexOf("GEN-") === -1) return;
+          allowed[id] = true;
+        });
+        var kept = rows.filter(function (row) {
+          if (String(row[lCol] || "").trim() !== w) return false;
+          if (!allowed[String(row[pCol] || "").trim()]) return false;
+          var cl = String(row[cCol] || "").trim().toUpperCase();
+          return cl === "A" || cl === "B" || cl === "C";
+        }).map(function (row) { return keep.map(function (i) { return row[i]; }); });
+        var st = { input: rows.length, allowed: Object.keys(allowed).length, kept: kept.length, dropped: rows.length - kept.length, warehouse: w, at: Date.now() };
+        return { id: Date.now() + "-" + Math.random().toString(36).slice(2, 7) + "-" + w, fileName: pending.fileName, headers: hdr, rows: rows, finalCol: finalCol, warehouse: w, formatted: kept, stats: st, sort: null };
+      });
+      setTpSessions(function (prev) { var u = prev.concat(newSessions); setTpActive(prev.length); return u; });
+      setTpPending(null); setTpPicked({});
+      var total = newSessions.reduce(function (a, s) { return a + s.stats.kept; }, 0);
+      toast("Prepared " + newSessions.length + " tab" + (newSessions.length === 1 ? "" : "s") + " (" + total + " rows kept)");
+    } catch (err) {
+      toast("Prepare failed: " + (err && err.message ? err.message : err), "error");
+    } finally { setTpBusy(false); }
+  }
+  function changeTpFinal(idx) { setTpFinalCol(idx); }
+  function tpKeepIdx() {
+    var idxs = TP_KEEP.map(function (n) { return fcIdxExact(tpHeaders, n); }).filter(function (i) { return i >= 0; });
+    if (tpFinalCol >= 0) idxs.push(tpFinalCol);
+    return idxs;
+  }
+  async function prepareTp() {
+    if (!tpHeaders.length || !tpRows.length) { toast("Upload the TP Forecast report first", "error"); return; }
+    if (!tpWarehouse) { toast("Pick a warehouse first", "error"); return; }
+    if (!ok) { lp(); return; }
+    var pCol = fcIdxExact(tpHeaders, "Product code");    var lCol = fcIdxExact(tpHeaders, "Location code");
+    var cCol = fcIdxExact(tpHeaders, "Class");
+    if (pCol < 0 || lCol < 0 || cCol < 0) { toast("Report is missing Product code / Location code / Class", "error"); return; }
+    setTpBusy(true);
+    try {
+      var whseRows = await fetchAcumatica("whse-replenish", null, cred.username, cred.password);
+      var allowed = {};
+      (whseRows || []).forEach(function (r) {
+        if (String(r.Warehouse || "").trim() !== tpWarehouse) return;
+        var cl = String(r.ReplenishmentClass || "").trim().toUpperCase();
+        if (cl !== "A" && cl !== "B" && cl !== "C") return;
+        if (String(r.ItemStatus || "").trim().toLowerCase() === "no purchases") return;
+        var id = String(r.InventoryID || "").trim();
+        if (!id || id.toUpperCase().indexOf("GEN-") === -1) return;
+        allowed[id] = true;
+      });
+      var keep = tpKeepIdx();
+      var kept = tpRows.filter(function (row) {
+        if (String(row[lCol] || "").trim() !== tpWarehouse) return false;
+        if (!allowed[String(row[pCol] || "").trim()]) return false;
+        var cl = String(row[cCol] || "").trim().toUpperCase();
+        return cl === "A" || cl === "B" || cl === "C";
+      }).map(function (row) { return keep.map(function (i) { return row[i]; }); });
+      var st = { input: tpRows.length, allowed: Object.keys(allowed).length, kept: kept.length, dropped: tpRows.length - kept.length, warehouse: tpWarehouse, at: Date.now() };
+      patchTpSession({ formatted: kept, stats: st });
+      toast("Prepared " + kept.length + " of " + tpRows.length + " rows for " + tpWarehouse);
+    } catch (err) {
+      toast("Prepare failed: " + (err && err.message ? err.message : err), "error");
+    } finally { setTpBusy(false); }
+  }
+  function tpKeepIdxFor(hdr, finalCol) {
+    var idxs = TP_KEEP.map(function (n) { return fcIdxExact(hdr, n); }).filter(function (i) { return i >= 0; });
+    if (finalCol >= 0) idxs.push(finalCol);
+    return idxs;
+  }
+  function exportSessionData(sess) {
+    if (!sess || !sess.formatted || !sess.formatted.length) return false;
+    var XLSX = require("xlsx");
+    var keep = tpKeepIdxFor(sess.headers, sess.finalCol);
+    var keptHeaders = keep.map(function (i) { return sess.headers[i]; });
+    var ws = XLSX.utils.aoa_to_sheet([keptHeaders].concat(sess.formatted));
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Report data");
+    var _wh = sess.warehouse || "";
+    var whShort = _wh.indexOf("-") !== -1 ? _wh.split("-").pop() : _wh; if (!whShort) whShort = "all";
+    var _d = new Date();
+    var md = (_d.getMonth() + 1) + "." + _d.getDate();
+    XLSX.writeFile(wb, "TP Forecast - " + whShort + " " + md + ".xlsx");
+    return true;
+  }
+  function exportTp() {
+    if (!exportSessionData(tpAct)) { toast("Run Prepare first", "error"); }
+  }
+  async function exportAllTp() {
+    var ready = tpSessions.filter(function (s) { return s.formatted && s.formatted.length; });
+    if (!ready.length) { toast("No prepared tabs to export", "error"); return; }
+    for (var i = 0; i < ready.length; i++) {
+      exportSessionData(ready[i]);
+      await new Promise(function (r) { setTimeout(r, 350); }); // stagger so the browser doesn't drop downloads
+    }
+    toast("Exported " + ready.length + " file" + (ready.length === 1 ? "" : "s"));
+  }
+
+  // ── method engine ──
+  var growthMult = (function () { var g = parseFloat(growth); return isNaN(g) ? 1 : g; })();
+  var growthRelevant = globalMethod === "B" || globalMethod === "F" || Object.keys(rowMethod).some(function (k) { return rowMethod[k] === "B" || rowMethod[k] === "F"; });
+  // The "Fill these Upload month(s)" bar is only meaningful for strategy B (the
+  // one that can span multiple months). Show it when B is the global strategy or
+  // any single row overrides to B; every other strategy fills the current month only.
+  var monthBarActive = globalMethod === "B" || Object.keys(rowMethod).some(function (k) { return rowMethod[k] === "B"; });
+  // A forecast strategy is in play (global, or any per-row override) \u2014 used to
+  // show controls (Drop toggle) that only matter when something is being forecast.
+  var strategyActive = globalMethod !== "none" || Object.keys(rowMethod).some(function (k) { return rowMethod[k] && rowMethod[k] !== "none"; });
+  function methodValueForMonth(row, m, num, gm) {
+    if (gm == null) gm = growthMult;
+    if (m === "A") { if (num !== anchorNum) return null; var mtd = fcNum(row, anchors.mtd); if (mtd == null) return null; return (mtd / denom) * daysInMonth; }
+    if (m === "B") { var lm = fcNum(row, anchors.lastHist); if (lm == null) return null; var step = num - anchorNum + 1; if (step < 1) step = 1; return lm * Math.pow(gm, step); }
+    if (m === "C") { var fi = anchors.finals[num]; return fi == null ? null : fcNum(row, fi); }
+    if (m === "D") { var vals = anchors.trail3.map(function (i) { return fcNum(row, i); }).filter(function (v) { return v != null; }); if (!vals.length) return null; return vals.reduce(function (a, b) { return a + b; }, 0) / vals.length; }
+    if (m === "E") { var lg = fcNum(row, anchors.lastHist); return lg == null ? null : lg; }
+    if (m === "F") { var hv = anchors.trail3.map(function (i) { return fcNum(row, i); }).filter(function (v) { return v != null; }); if (!hv.length) return null; return Math.max.apply(null, hv) * gm; }
+    return null;
+  }
+  function rowKey(row) { return String(row[productCol] == null ? "" : row[productCol]); }
+  function computedForMonth(row, num) {
+    var rk = rowKey(row);
+    var rowM = rowMethod[rk];
+    var m = rowM || globalMethod;
+    if (!m || m === "none") return null;
+    var gm = growthMult;
+    if ((rowM === "B" || rowM === "F") && rowGrowth[rk] != null && rowGrowth[rk] !== "") { var pg = parseFloat(rowGrowth[rk]); if (!isNaN(pg)) gm = pg; }
+    var v = methodValueForMonth(row, m, num, gm); return v == null ? null : Math.round(v);
+  }
+  function effectiveForMonth(row, num) {
+    var key = rowKey(row) + "@" + num;
+    if (Object.prototype.hasOwnProperty.call(manualEdits, key)) {
+      var man = manualEdits[key];
+      if (man == null || String(man).trim() === "") return null;
+      var mv = parseFloat(man); return isNaN(mv) ? null : mv;
+    }
+    return computedForMonth(row, num);
+  }
+  function rowBelowFinal(row) {
+    if (!dropBelowFinal) return false;
+    for (var i = 0; i < targetCols.length; i++) {
+      var num = uploadNum(targetCols[i]); if (num == null) continue;
+      var man = manualEdits[rowKey(row) + "@" + num];
+      if (man != null && String(man).trim() !== "") continue;
+      var v = computedForMonth(row, num); if (v == null) continue;
+      var fi = anchors.finals[num]; if (fi == null) continue;
+      var fin = fcNum(row, fi); if (fin != null && v < fin) return true;
+    }
+    return false;
+  }
+  var sefActive = sefOnly && sefCodes && sefCodes.length > 0;
+  function inSef(row) { if (!sefActive) return true; return sefCodes.indexOf(String(row[productCol] == null ? "" : row[productCol]).trim().toUpperCase()) !== -1; }
+  function pctVsFinal(row, num) {
+    var v = effectiveForMonth(row, num); if (v == null) return null;
+    var fi = anchors.finals[num]; if (fi == null) return null;
+    var fin = fcNum(row, fi); if (fin == null || fin === 0) return null;
+    return ((v - fin) / fin) * 100;
+  }
+  // Trend across the trailing history months (blank = 0): "g" strictly increasing,
+  // "d" strictly decreasing, "flat" otherwise.
+  function fcTrend(row) { var t = anchors.trail3 || []; if (t.length < 2) return "flat"; var inc = true, dec = true; for (var i = 1; i < t.length; i++) { var p = fcNum(row, t[i - 1]); var c = fcNum(row, t[i]); p = (p == null ? 0 : p); c = (c == null ? 0 : c); if (!(p < c)) inc = false; if (!(p > c)) dec = false; } return inc ? "g" : dec ? "d" : "flat"; }
+  var FC_FILTER_OPTS = {
+    repl: [{ value: "A", label: "A" }, { value: "B", label: "B" }, { value: "C", label: "C" }, { value: "Other", label: "Other / blank" }],
+    strategy: FC_METHODS.map(function (m) { return { value: m.id, label: m.label }; }),
+    flag: [{ value: "SD", label: "SD (short-dating)" }, { value: "BO", label: "BO (backorder)" }, { value: "None", label: "No flag" }],
+    growing: [{ value: "g", label: "Growing" }, { value: "d", label: "Decreasing" }, { value: "flat", label: "Flat / mixed" }]
+  };
+  function fcReplCat(r) { var c = classCol >= 0 ? String(r[classCol] == null ? "" : r[classCol]).trim().toUpperCase() : ""; return (c === "A" || c === "B" || c === "C") ? c : "Other"; }
+  function fcStratCat(r) { return String(rowMethod[rowKey(r)] || globalMethod || "") || "none"; }
+  function toggleSort(key) {
+    var dir = (sortKey === key && sortDir === "asc") ? "desc" : "asc";
+    var base = sefActive ? (formatted || []).filter(inSef) : (formatted || []);
+    var d = dir === "asc" ? 1 : -1;
+    var ordered = base.slice().sort(function (a, b) {
+      var va = sortVal(a, key), vb = sortVal(b, key);
+      var na = va == null, nb = vb == null;
+      if (na && nb) return 0; if (na) return 1; if (nb) return -1;
+      if (typeof va === "number" && typeof vb === "number") return (va - vb) * d;
+      va = String(va).toLowerCase(); vb = String(vb).toLowerCase();
+      return va < vb ? -d : (va > vb ? d : 0);
+    });
+    setSortKey(key); setSortDir(dir); setSortOrder(ordered.map(function (r) { return rowKey(r); }));
+  }
+  function fcCellKey(e, ri, ci) {
+    var key = e.key, t = e.target, mv = null;
+    if (key === "ArrowDown" || key === "Enter") mv = [ri + 1, ci];
+    else if (key === "ArrowUp") mv = [ri - 1, ci];
+    else if (key === "ArrowRight") { if (t.selectionStart === t.value.length && t.selectionEnd === t.value.length) mv = [ri, ci + 1]; }
+    else if (key === "ArrowLeft") { if (t.selectionStart === 0 && t.selectionEnd === 0) mv = [ri, ci - 1]; }
+    if (!mv) return;
+    var sel = document.querySelector('[data-fc="' + mv[0] + '-' + mv[1] + '"]');
+    if (sel) { e.preventDefault(); sel.focus(); if (sel.select) sel.select(); }
+  }
+  function fcTh(key, label, align) {
+    var active = sortKey === key;
+    return <th key={key} onClick={function () { toggleSort(key); }} style={Object.assign({}, S.th, align === "right" ? { textAlign: "right" } : {}, { cursor: "pointer", userSelect: "none", whiteSpace: "nowrap", verticalAlign: "middle" })}>{label}{active ? (sortDir === "desc" ? " \u25BE" : " \u25B4") : ""}</th>;
+  }
+  function sortVal(row, key) {
+    if (key === "product") return String(row[productCol] == null ? "" : row[productCol]);
+    if (key === "desc") return String(descCol >= 0 ? (row[descCol] == null ? "" : row[descCol]) : "");
+    if (key === "mtd") return fcNum(row, anchors.mtd);
+    if (key === "growing") { var tr = fcTrend(row); return tr === "g" ? 2 : tr === "flat" ? 1 : 0; }
+    if (key === "repl") return String(classCol >= 0 ? (row[classCol] == null ? "" : row[classCol]) : "");
+    if (key === "flag") { var pc = String(row[productCol] == null ? "" : row[productCol]).trim(); if (sdInfo[pc]) return "1_" + (sdInfo[pc].BestKnownDating || ""); if (bkoInfo[pc]) return "2_" + (bkoInfo[pc].RecoveryDate || ""); return null; }
+    if (key === "final1") return fcNum(row, anchors.final1);
+    if (key === "strategy") return String(rowMethod[rowKey(row)] || globalMethod || "");
+    if (key === "pct") return pctVsFinal(row, anchorNum);
+    if (key.indexOf("hist:") === 0) return fcNum(row, parseInt(key.slice(5), 10));
+    if (key.indexOf("upload:") === 0) return effectiveForMonth(row, parseInt(key.slice(7), 10));
+    if (key === "uploadview") return effectiveForMonth(row, anchorNum);
+    return null;
+  }
+  function uploadNum(colIdx) { for (var i = 0; i < anchors.uploads.length; i++) { if (anchors.uploads[i].idx === colIdx) return anchors.uploads[i].num; } return null; }
+  function setManualM(k, num, v) { var key = k + "@" + num; var u = Object.assign({}, manualEdits); u[key] = (v == null ? "" : v); setManualEdits(u); }
+  function setRowM(k, v) { var u = Object.assign({}, rowMethod); if (!v) delete u[k]; else u[k] = v; setRowMethod(u); }
+  function setRowG(k, v) { var u = Object.assign({}, rowGrowth); if (v == null || v === "") delete u[k]; else u[k] = v; setRowGrowth(u); }
+  var anchorIdx = (function () {
+    var monShort = now.toLocaleString("en-US", { month: "short" });
+    var yr = String(now.getFullYear());
+    for (var i = 0; i < anchors.uploads.length; i++) { var l = anchors.uploads[i].label; if (l.indexOf(monShort) !== -1 && l.indexOf(yr) !== -1) return anchors.uploads[i].idx; }
+    return anchors.uploads.length ? anchors.uploads[0].idx : null;
+  })();
+  var anchorNum = (function () { for (var i = 0; i < anchors.uploads.length; i++) { if (anchors.uploads[i].idx === anchorIdx) return anchors.uploads[i].num; } return 1; })();
+  var maxSelectedNum = (function () { var ns = targetCols.map(uploadNum).filter(function (n) { return n != null; }); return ns.length ? Math.max.apply(null, ns) : (anchorNum - 1); })();
+  function selectThrough(num) {
+    if (globalMethod !== "B") { setTargetCols(anchorIdx != null ? [anchorIdx] : []); return; }
+    var idxs = anchors.uploads.filter(function (u) { return u.num >= anchorNum && u.num <= num; }).map(function (u) { return u.idx; }).sort(function (a, b) { return a - b; });
+    setTargetCols(idxs.length ? idxs : (anchorIdx != null ? [anchorIdx] : []));
+  }
+  function changeGlobalMethod(v) {
+    setGlobalMethod(v);
+    if (v !== "B") setTargetCols(anchorIdx != null ? [anchorIdx] : []);
+  }
+  function clearOverrides() { setRowMethod({}); setRowGrowth({}); setManualEdits({}); toast("Cleared per-row methods and manual edits"); }
+
+  function resetAll() {
+    var hasData = headers.length || rows.length || tpSessions.length || formatted || fileName;
+    if (hasData && !window.confirm("Reset the Forecasting tool? This clears the loaded file(s), results, and selections on both tabs.")) return;
+    setHeaders([]); setRows([]); setFileName(""); setDetectedWh(""); setWarehouse("");
+    setMode("non"); setFormatted(null); setStats(null); setBusy(false); setTab("forecast");
+    setGlobalMethod("none"); setGrowth("1.10"); setTargetCols([]); setRowMethod({}); setRowGrowth({}); setManualEdits({}); setDropBelowFinal(false);
+    setSefCodes([]); setSefFileName(""); setSefOnly(false);
+    setQuery(""); setColFilters({}); setSortOrder(null); setSortKey("");
+    setSdInfo({}); setBkoInfo({});
+    setTpSessions([]); setTpActive(0); setTpBusy(false); setTpPending(null); setTpPicked({});
+    idbDel("fc-input").catch(function () {}); idbDel("fc-result").catch(function () {}); idbDel("fc-forecast").catch(function () {}); idbDel("fc-sef").catch(function () {}); idbDel("fc-sdbko").catch(function () {});
+    idbDel("fc-tp-sessions").catch(function () {});
+    sDel("fc-mode"); sDel("fc-wh");
+    toast("Forecasting reset");
+  }
+
+  function clearTp() {
+    var hasTp = tpSessions.length;
+    if (hasTp && !window.confirm("Clear the TP Forecast tab? This removes all warehouse tabs and their results. The Forecast tab is not affected.")) return;
+    setTpSessions([]); setTpActive(0); setTpBusy(false); setTpPending(null); setTpPicked({});
+    idbDel("fc-tp-sessions").catch(function () {});
+    toast("TP Forecast tab cleared");
+  }
+
+  function exportForecast() {
+    if (!formatted || !formatted.length) { toast("Run Auto-format first", "error"); return; }
+    if (!targetCols.length) { toast("Pick at least one month to fill", "error"); return; }
+    var out = formatted.filter(function (row) { return inSef(row) && !rowBelowFinal(row); }).map(function (row) {
+      var r = row.slice();
+      targetCols.forEach(function (c) {
+        var num = uploadNum(c); if (num == null) return;
+        var v = effectiveForMonth(row, num);
+        if (v != null) r[c] = String(v);
+      });
+      return r;
+    });
+    fcDownload(fcToCSV(headers, out), "forecast_" + (warehouse || "all") + "_" + (mode === "gen" ? "generics" : mode === "all" ? "all" : "nongenerics") + "_forecasted.csv");
+  }
+
+  var filledCount = useMemo(function () {
+    if (!formatted) return 0;
+    return formatted.reduce(function (n, row) { return (inSef(row) && !rowBelowFinal(row) && effectiveForMonth(row, anchorNum) != null) ? n + 1 : n; }, 0);
+  }, [formatted, globalMethod, growth, rowMethod, manualEdits, anchorNum, dropBelowFinal, targetCols, sefActive, sefCodes]);
+
+  var keptCount = useMemo(function () {
+    if (!formatted) return stats ? stats.kept : 0;
+    return sefActive ? formatted.filter(inSef).length : formatted.length;
+  }, [formatted, stats, sefActive, sefCodes]);
+
+  var droppedCount = useMemo(function () {
+    if (!formatted) return 0;
+    return formatted.reduce(function (n, row) { return (inSef(row) && rowBelowFinal(row)) ? n + 1 : n; }, 0);
+  }, [formatted, globalMethod, growth, rowMethod, manualEdits, dropBelowFinal, targetCols, sefActive, sefCodes]);
+
+  var sortedRows = useMemo(function () {
+    if (!formatted) return [];
+    var base = sefActive ? formatted.filter(inSef) : formatted;
+    var q = query.trim().toLowerCase();
+    if (q) base = base.filter(function (r) { var pc = String(r[productCol] == null ? "" : r[productCol]).toLowerCase(); var d = descCol >= 0 ? String(r[descCol] == null ? "" : r[descCol]).toLowerCase() : ""; return pc.indexOf(q) !== -1 || d.indexOf(q) !== -1; });
+    var fPt = colFilters.productText;
+    if (fPt && fPt.text) { var pq = String(fPt.text).toLowerCase(); base = base.filter(function (r) { var pc = String(r[productCol] == null ? "" : r[productCol]).toLowerCase(); var hit = pc.indexOf(pq) !== -1; return fPt.mode === "excludes" ? !hit : hit; }); }
+    var fDt = colFilters.descText;
+    if (fDt && fDt.text && descCol >= 0) { var dq = String(fDt.text).toLowerCase(); base = base.filter(function (r) { var d = String(r[descCol] == null ? "" : r[descCol]).toLowerCase(); var hit = d.indexOf(dq) !== -1; return fDt.mode === "excludes" ? !hit : hit; }); }
+    var fRepl = colFilters.repl, fStrat = colFilters.strategy, fFlag = colFilters.flag, fGrow = colFilters.growing;
+    if (fRepl) base = base.filter(function (r) { return fRepl.indexOf(fcReplCat(r)) !== -1; });
+    if (fStrat) base = base.filter(function (r) { return fStrat.indexOf(fcStratCat(r)) !== -1; });
+    if (fFlag) base = base.filter(function (r) { var pc = String(r[productCol] == null ? "" : r[productCol]).trim(); var s = !!sdInfo[pc], b = !!bkoInfo[pc]; return (s && fFlag.indexOf("SD") !== -1) || (b && fFlag.indexOf("BO") !== -1) || (!s && !b && fFlag.indexOf("None") !== -1); });
+    if (fGrow) base = base.filter(function (r) { return fGrow.indexOf(fcTrend(r)) !== -1; });
+    if (hideDropped) base = base.filter(function (r) { return !rowBelowFinal(r); });
+    if (!sortOrder || !sortOrder.length) return base;
+    var pos = {}; for (var i = 0; i < sortOrder.length; i++) { if (!(sortOrder[i] in pos)) pos[sortOrder[i]] = i; }
+    return base.slice().sort(function (a, b) {
+      var ia = pos[rowKey(a)]; var ib = pos[rowKey(b)];
+      if (ia == null) ia = Infinity; if (ib == null) ib = Infinity;
+      return ia - ib;
+    });
+  }, [formatted, sefActive, sefCodes, sortOrder, query, colFilters, rowMethod, globalMethod, sdInfo, bkoInfo, anchors, hideDropped, dropBelowFinal, manualEdits, targetCols]);
+
+  var tpSortedRows = useMemo(function () {
+    if (!tpFormatted) return [];
+    if (!tpSort) return tpFormatted;
+    var col = tpSort.col, d = tpSort.dir === "asc" ? 1 : -1;
+    return tpFormatted.slice().sort(function (a, b) {
+      var va = a[col], vb = b[col];
+      var na = va == null || va === "", nb = vb == null || vb === "";
+      if (na && nb) return 0; if (na) return 1; if (nb) return -1;
+      var fa = parseFloat(String(va).replace(/,/g, "")), fb = parseFloat(String(vb).replace(/,/g, ""));
+      if (!isNaN(fa) && !isNaN(fb)) return (fa - fb) * d;
+      var sa = String(va).toLowerCase(), sb = String(vb).toLowerCase();
+      return sa < sb ? -d : (sa > sb ? d : 0);
+    });
+  }, [tpFormatted, tpSort, tpActive]);
+
+  var btnBlue = Object.assign({}, S.btn(), { border: "1px solid #0A8FCC" });
+  var btnSecondary = Object.assign({}, S.btn("ghost"), { background: "#F3F8FC", color: "#0B6FA8", border: "1px solid #C2DCEE" });
+  var PANEL_BG = "#EFF2F6", PANEL_BORDER = "#DBE2EA";
+
+  var lastMonthLabel = anchors.lastHist >= 0 ? String(headers[anchors.lastHist]).replace(/^hist:\s*/i, "") : "Last mo";
+
+  return <div>
+    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 20 }}>
+      <button onClick={function () { setTab("forecast"); }} style={S.pill(tab === "forecast", "#0EA5E9")}>Forecast</button>
+      <button onClick={function () { setTab("tp"); }} style={S.pill(tab === "tp", "#0EA5E9")}>Generic TP Forecasts</button>
+      <button onClick={function () { setTab("replenish"); }} style={S.pill(tab === "replenish", "#0EA5E9")}>Replenishment Update</button>
+      {tab !== "replenish" && <button onClick={tab === "tp" ? clearTp : resetAll} title={tab === "tp" ? "Clear the TP Forecast tab only (does not affect the Forecast tab)" : "Clear loaded files, results, and selections on both tabs"} style={Object.assign({}, S.btn("ghost"), { marginLeft: "auto", fontSize: 12, color: "#DC2626", borderColor: "#FCA5A5" })}>{tab === "tp" ? "Clear" : "Reset"}</button>}
+    </div>
+
+    {tab === "tp" && <div>
+      {tpSessions.length === 0 && <div style={S.card}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 600, color: "#1F2937", marginBottom: 4 }}>TP Forecast report (generics)</div>
+            <div style={{ fontSize: 13, color: "#6B7280" }}>Upload one Netstock TP Forecast report (.xlsx, 'Report data' sheet). You'll pick which warehouses to open as tabs.</div>
+          </div>
+          <div>
+            <input ref={tpFileRef} type="file" accept=".xlsx,.xls" onChange={onTpFile} style={{ display: "none" }} />
+            <button onClick={chooseTpFile} style={S.btn()}><IconUpload /> Upload report</button>
+          </div>
+        </div>
+      </div>}
+
+      {tpPending && <div onClick={function () { setTpPending(null); }} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+        <div onClick={function (e) { e.stopPropagation(); }} style={{ background: "#fff", borderRadius: 12, padding: 24, width: 420, maxWidth: "90vw", maxHeight: "80vh", display: "flex", flexDirection: "column" }}>
+          <div style={{ fontSize: 16, fontWeight: 600, color: "#1F2937", marginBottom: 4 }}>Select warehouses</div>
+          <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 14 }}>{tpPending.warehouses.length} warehouse{tpPending.warehouses.length === 1 ? "" : "s"} found in {tpPending.fileName}. Each one you pick opens as its own tab.</div>
+          <div style={{ display: "flex", gap: 12, marginBottom: 8 }}>
+            <button onClick={function () { var p = {}; tpPending.warehouses.forEach(function (w) { p[w] = true; }); setTpPicked(p); }} style={{ border: "none", background: "transparent", color: "#0B6FA8", fontSize: 12, fontWeight: 600, cursor: "pointer", padding: 0 }}>Select all</button>
+            <button onClick={function () { setTpPicked({}); }} style={{ border: "none", background: "transparent", color: "#6B7280", fontSize: 12, fontWeight: 600, cursor: "pointer", padding: 0 }}>Clear all</button>
+          </div>
+          <div style={{ overflow: "auto", flex: 1, border: "1px solid #F3F4F6", borderRadius: 8, padding: 4 }}>
+            {tpPending.warehouses.map(function (w) { var ck = !!tpPicked[w]; return <div key={w} onClick={function () { var p = Object.assign({}, tpPicked); if (p[w]) delete p[w]; else p[w] = true; setTpPicked(p); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: 6, cursor: "pointer", fontSize: 14, color: "#374151" }}>
+              <span style={{ width: 18, height: 18, borderRadius: 4, border: "1.5px solid " + (ck ? "#0EA5E9" : "#CBD5E1"), background: ck ? "#0EA5E9" : "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{ck && <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}</span>
+              <span style={{ fontWeight: 500 }}>{w}</span>
+            </div>; })}
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 16 }}>
+            <button onClick={function () { setTpPending(null); }} disabled={tpBusy} style={S.btn("ghost")}>Cancel</button>
+            <button onClick={confirmTpPick} disabled={tpBusy} style={Object.assign({}, S.btn(), tpBusy ? { opacity: 0.7, cursor: "wait" } : {})}>{tpBusy ? <><Spinner color="#fff" size={14} /> Preparing...</> : ("Prepare " + tpPending.warehouses.filter(function (w) { return tpPicked[w]; }).length + " tab" + (tpPending.warehouses.filter(function (w) { return tpPicked[w]; }).length === 1 ? "" : "s"))}</button>
+          </div>
+        </div>
+      </div>}
+
+      {tpSessions.length > 0 && <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
+          {tpSessions.map(function (s, i) { var on = i === tpActive; return <div key={s.id} onClick={function () { setTpActive(i); }} title={(s.warehouse || "(no warehouse)") + " \u2014 " + s.fileName} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 16px", borderRadius: "10px 10px 0 0", cursor: "pointer", fontSize: 12.5, fontWeight: 600, border: "1px solid " + (on ? "#0EA5E9" : "#E5E7EB"), background: on ? "#0EA5E9" : "#fff", color: on ? "#fff" : "#6B7280", whiteSpace: "nowrap", flexShrink: 0 }}>
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 180 }}>{s.warehouse || s.fileName}</span>
+            <span onClick={function (e) { e.stopPropagation(); closeTpSession(i); }} title="Close this tab" style={{ fontWeight: 700, lineHeight: 1, opacity: 0.6 }}>{"\u00D7"}</span>
+          </div>; })}
+        </div>
+        {tpSessions.length > 1 && <button onClick={exportAllTp} style={S.btn("ghost")}><IconDL /> Export all ({tpSessions.filter(function (s) { return s.formatted && s.formatted.length; }).length})</button>}
+      </div>}
+
+      {tpStats && <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
+        <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0, minWidth: 120 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Report rows</div><div style={{ fontSize: 24, fontWeight: 700, color: "#1F2937", marginTop: 4 }}>{tpStats.input}</div></div>
+        <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0, minWidth: 120 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Kept</div><div style={{ fontSize: 24, fontWeight: 700, color: "#0EA5E9", marginTop: 4 }}>{tpStats.kept}</div></div>
+        <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0, minWidth: 120 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Dropped</div><div style={{ fontSize: 24, fontWeight: 700, color: "#9CA3AF", marginTop: 4 }}>{tpStats.dropped}</div></div>
+        <div style={Object.assign({}, S.card, { flex: 1, padding: "16px 20px", marginBottom: 0, minWidth: 120 })}><div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Generics in {tpStats.warehouse}</div><div style={{ fontSize: 24, fontWeight: 700, color: "#1F2937", marginTop: 4 }}>{tpStats.allowed}</div></div>
+      </div>}
+
+      {tpFormatted && tpFormatted.length > 0 && <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden" })}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderBottom: "1px solid #F3F4F6" }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: "#1F2937" }}>{tpWarehouse}<span style={{ fontWeight: 400, color: "#9CA3AF" }}>{"  \u00B7  " + (tpStats ? tpStats.kept : tpFormatted.length) + " rows"}</span></div>
+          <button onClick={exportTp} style={S.btn("ghost")}><IconDL /> Export xlsx</button>
+        </div>
+        <div style={{ maxHeight: 520, overflow: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead><tr>{tpKeepIdx().map(function (i, ci) { var active = tpSort && tpSort.col === ci; return <th key={ci} onClick={function () { setTpSort(active ? (tpSort.dir === "desc" ? { col: ci, dir: "asc" } : null) : { col: ci, dir: "desc" }); }} style={Object.assign({}, S.th, ci >= 4 ? { textAlign: "right" } : {}, { cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" })}>{tpHeaders[i]}{active ? (tpSort.dir === "desc" ? " \u25BE" : " \u25B4") : ""}</th>; })}</tr></thead>
+            <tbody>
+              {tpSortedRows.slice(0, 500).map(function (row, ri) {
+                return <tr key={ri}>{row.map(function (cell, ci) { return <td key={ci} style={Object.assign({}, S.td, ci >= 4 ? { textAlign: "right", fontVariantNumeric: "tabular-nums" } : {}, ci === 0 ? { fontWeight: 500, whiteSpace: "nowrap" } : {})}>{String(cell == null ? "" : cell)}</td>; })}</tr>;
+              })}
+            </tbody>
+          </table>
+        </div>
+        {tpFormatted.length > 500 && <div style={{ padding: "10px 16px", fontSize: 12, color: "#9CA3AF", borderTop: "1px solid #F3F4F6" }}>Showing first 500 of {tpFormatted.length} rows. The export includes all of them.</div>}
+      </div>}
+
+      {tpSessions.length > 0 && tpStats && (!tpFormatted || tpFormatted.length === 0) && <div style={{ fontSize: 13, color: "#9CA3AF", padding: "8px 4px" }}>No generics stocked in {tpWarehouse} matched the report's A/B/C rows for this location.</div>}
+    </div>}
+
+    {tab === "replenish" && <div>
+      <ReplenishUpdate toast={toast} cred={cred} lp={lp} />
+    </div>}
+
+    {tab === "forecast" && <div>
+      {(!stats || !sefFileName) && <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 20 }}>
+        {!stats && <div onDragOver={function (e) { e.preventDefault(); setDragF(true); }} onDragLeave={function (e) { e.preventDefault(); setDragF(false); }} onDrop={function (e) { e.preventDefault(); setDragF(false); var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if (f) loadForecastFile(f); }} style={Object.assign({}, S.card, { flex: 1, minWidth: 320, marginBottom: 0 }, dragF ? { borderColor: "#0EA5E9", borderStyle: "dashed", background: "#F0F9FF" } : {})}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+            <div>
+              <div style={{ fontSize: 15, fontWeight: 600, color: "#1F2937", marginBottom: 4 }}>Netstock forecast file</div>
+              <div style={{ fontSize: 13, color: "#6B7280" }}>{fileName ? (fileName + "  -  " + rows.length + " rows") : "Drag a CSV here, or click Upload \u2014 the multi-forecast export from Netstock."}</div>
+            </div>
+            <div>
+              <input ref={fileRef} type="file" accept=".csv,text/csv" onChange={onFile} style={{ display: "none" }} />
+              <button onClick={chooseFile} style={S.btn()}><IconUpload /> {fileName ? "Replace file" : "Upload CSV"}</button>
+            </div>
+          </div>
+        </div>}
+        {!sefFileName && <div onDragOver={function (e) { e.preventDefault(); setDragS(true); }} onDragLeave={function (e) { e.preventDefault(); setDragS(false); }} onDrop={function (e) { e.preventDefault(); setDragS(false); var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if (f) loadSefFile(f); }} style={Object.assign({}, S.card, { flex: 1, minWidth: 320, marginBottom: 0 }, dragS ? { borderColor: "#0EA5E9", borderStyle: "dashed", background: "#F0F9FF" } : {})}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+            <div>
+              <div style={{ fontSize: 15, fontWeight: 600, color: "#1F2937", marginBottom: 4 }}>Sales exceeding forecast <span style={{ fontSize: 12, fontWeight: 500, color: "#9CA3AF" }}>(optional)</span></div>
+              <div style={{ fontSize: 13, color: "#6B7280" }}>Drag a CSV or Excel file here, or click Upload.</div>
+            </div>
+            <div>
+              <input ref={sefFileRef} type="file" accept=".csv,.xlsx,.xls,text/csv" onChange={onSefFile} style={{ display: "none" }} />
+              <button onClick={chooseSefFile} style={S.btn()}><IconUpload /> Upload file</button>
+            </div>
+          </div>
+        </div>}
+      </div>}
+
+      {headers.length > 0 && <div style={S.card}>
+        <div style={{ display: "flex", alignItems: "flex-end", gap: 20, flexWrap: "wrap" }}>
+          <div style={{ position: "relative" }}>
+            <label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 6 }}>Warehouse</label>
+            <select value={warehouse} onChange={function (e) { changeWarehouse(e.target.value); }} style={Object.assign({}, S.sel, { minWidth: 160 })}>
+              {warehouse === "" && <option value="">Select...</option>}
+              {(function () {
+                var list = FC_KNOWN_WAREHOUSES.slice();
+                if (warehouse && list.indexOf(warehouse) === -1) list.unshift(warehouse);
+                return list.map(function (w) { return <option key={w} value={w}>{w}</option>; });
+              })()}
+            </select>
+            {detectedWh ? <div style={{ fontSize: 11, color: "#9CA3AF", position: "absolute", top: "100%", left: 0, marginTop: 4, whiteSpace: "nowrap" }}>Detected from filename: {detectedWh}</div> : null}
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 6 }}>Mode</label>
+            <div style={{ display: "flex", gap: 6, background: "#F3F4F6", padding: 4, borderRadius: 10 }}>
+              <button onClick={function () { changeMode("non"); }} style={S.pill(mode === "non", "#0EA5E9")}>Non-generics</button>
+              <button onClick={function () { changeMode("gen"); }} style={S.pill(mode === "gen", "#0EA5E9")}>Generics</button>
+              <button onClick={function () { changeMode("all"); }} style={S.pill(mode === "all", "#0EA5E9")}>All</button>
+            </div>
+          </div>
+          <div style={{ flex: 1 }} />
+          {sefCodes && sefCodes.length > 0 ? <div style={{ alignSelf: "flex-end" }}>
+            <button onClick={function () { setSefOnly(!sefOnly); }} title="When on, only items that appear in the uploaded sales-exceeding-forecast file are kept in the table and export. Matched on Product code." style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 8, border: "1px solid " + (sefOnly ? "#0EA5E9" : "#E5E7EB"), background: sefOnly ? "#F0F9FF" : "#fff", color: sefOnly ? "#0369A1" : "#6B7280", fontSize: 12, fontWeight: 500, cursor: "pointer" }}>
+              <span style={{ width: 30, height: 16, borderRadius: 9, background: sefOnly ? "#0EA5E9" : "#D1D5DB", position: "relative", flexShrink: 0 }}><span style={{ position: "absolute", top: 2, left: sefOnly ? 16 : 2, width: 12, height: 12, borderRadius: "50%", background: "#fff", transition: "left 0.15s" }} /></span>
+              Only items exceeding forecast
+            </button>
+          </div> : null}
+          <div style={{ display: "flex", gap: 10 }}>
+            <button onClick={autoFormat} disabled={busy} style={Object.assign({}, btnSecondary, busy ? { opacity: 0.7, cursor: "wait" } : {})}>{busy ? <><Spinner color="#0B6FA8" size={14} /> Formatting...</> : <><IconFilter /> Auto-format</>}</button>
+            {formatted && formatted.length > 0 && <button onClick={exportFormatted} style={btnBlue}><IconDL /> Only Auto-Formatted CSV</button>}
+          </div>
+        </div>
+        {!ok && <div style={{ marginTop: 12, fontSize: 12, color: "#DC2626", display: "flex", alignItems: "center", gap: 6 }}><IconLock /> Log in to Acumatica to fetch warehouse data for auto-format.</div>}
+      </div>}
+
+      {stats && <div style={{ position: "sticky", top: 0, zIndex: 20, marginBottom: 20, display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap", padding: "10px 18px", background: "#FFFFFF", border: "0.5px solid " + PANEL_BORDER, borderRadius: 12, boxShadow: "0 1px 4px rgba(15,23,42,0.06)" }}>
+        <span style={{ fontSize: 12, color: "#6B7280" }}>Input <b style={{ color: "#1F2937", fontVariantNumeric: "tabular-nums" }}>{fcFmt(stats.input)}</b></span>
+        <span style={{ fontSize: 12, color: "#6B7280" }}>Kept <b style={{ color: "#0EA5E9", fontVariantNumeric: "tabular-nums" }}>{fcFmt(keptCount)}</b></span>
+        <span style={{ fontSize: 12, color: "#6B7280" }}>Forecasted <b style={{ color: "#059669", fontVariantNumeric: "tabular-nums" }}>{fcFmt(filledCount)}</b></span>
+        <span style={{ width: 1, height: 16, background: "#E5E7EB" }} />
+        <span style={{ fontSize: 12, color: "#6B7280" }}>Strategy <b style={{ color: "#1F2937" }}>{globalMethod === "none" ? "None" : ((FC_METHODS.filter(function (x) { return x.id === globalMethod; })[0] || {}).short || globalMethod)}</b></span>
+        {(function () { var d = new Date(); var t = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); var notToday = pullDate !== t; return <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "#6B7280", marginLeft: "auto" }} title="Date the Netstock forecast was last pulled \u2014 MTD run-rate divides by the days elapsed up to this date"><span>Netstock pulled</span><input type="date" value={pullDate} max={t} onChange={function (e) { setPullDate(e.target.value || t); }} style={{ fontSize: 12, padding: "3px 6px", borderRadius: 6, fontFamily: "inherit", color: notToday ? "#92400E" : "#1F2937", background: notToday ? "#FEF3C7" : "#fff", border: "1px solid " + (notToday ? "#FCD34D" : "#D1D5DB") }} />{notToday ? <span style={{ fontSize: 10, color: "#92400E", fontWeight: 700 }}>not today</span> : null}</span>; })()}
+        <span style={{ fontSize: 12, color: "#6B7280" }}>Filling <b style={{ color: "#1F2937" }}>{targetCols.map(function (c) { var u = anchors.uploads.filter(function (x) { return x.idx === c; })[0]; return u ? u.label : ""; }).filter(Boolean).join(", ") || "-"}</b></span>
+      </div>}
+
+      {formatted && formatted.length > 0 && <div style={Object.assign({}, S.card, { background: PANEL_BG, border: "0.5px solid " + PANEL_BORDER, borderBottom: "none", borderRadius: "14px 14px 0 0", marginBottom: 0 })}>
+        <div style={{ display: "flex", alignItems: "flex-end", gap: 20, flexWrap: "wrap", marginBottom: 26 }}>
+          <div>
+            <label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 6 }}>Strategy (all rows)</label>
+            <select value={globalMethod} onChange={function (e) { changeGlobalMethod(e.target.value); }} style={Object.assign({}, S.sel, { minWidth: 280 })}>
+              <option value="none">None</option>
+              {FC_METHODS.map(function (m) { return <option key={m.id} value={m.id}>{m.label}</option>; })}
+            </select>
+          </div>
+          {growthRelevant && <div style={{ position: "relative" }}>
+            <label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 6 }}>Growth (multiplier)</label>
+            <input value={growth} onChange={function (e) { setGrowth(e.target.value); }} style={Object.assign({}, S.inp, { width: 90 })} />
+            <div style={{ fontSize: 11, color: "#9CA3AF", position: "absolute", top: "100%", left: 0, marginTop: 4, whiteSpace: "nowrap" }}>1.10 = +10% (strategies B, F)</div>
+          </div>}
+          {strategyActive && <div style={{ alignSelf: "flex-end" }}>
+            <button onClick={function () { setDropBelowFinal(!dropBelowFinal); }} title="When on, any item whose computed value falls below that month's Netstock Final is removed entirely from the export (the whole row). Typed overrides are exempt." style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 8, border: "1px solid " + (dropBelowFinal ? "#0EA5E9" : "#E5E7EB"), background: dropBelowFinal ? "#F0F9FF" : "#fff", color: dropBelowFinal ? "#0369A1" : "#6B7280", fontSize: 12, fontWeight: 500, cursor: "pointer" }}>
+              <span style={{ width: 30, height: 16, borderRadius: 9, background: dropBelowFinal ? "#0EA5E9" : "#D1D5DB", position: "relative", transition: "background 0.15s", flexShrink: 0 }}><span style={{ position: "absolute", top: 2, left: dropBelowFinal ? 16 : 2, width: 12, height: 12, borderRadius: "50%", background: "#fff", transition: "left 0.15s" }} /></span>
+              Drop items below Netstock Final
+            </button>
+          </div>}
+          {strategyActive && dropBelowFinal && <div style={{ alignSelf: "flex-end" }}>
+            <button onClick={function () { setHideDropped(!hideDropped); }} title="When on, rows dropped below Netstock Final are hidden from this table entirely (not just greyed out). Export behaviour is unchanged." style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 8, border: "1px solid " + (hideDropped ? "#0EA5E9" : "#E5E7EB"), background: hideDropped ? "#F0F9FF" : "#fff", color: hideDropped ? "#0369A1" : "#6B7280", fontSize: 12, fontWeight: 500, cursor: "pointer" }}>
+              <span style={{ width: 30, height: 16, borderRadius: 9, background: hideDropped ? "#0EA5E9" : "#D1D5DB", position: "relative", transition: "background 0.15s", flexShrink: 0 }}><span style={{ position: "absolute", top: 2, left: hideDropped ? 16 : 2, width: 12, height: 12, borderRadius: "50%", background: "#fff", transition: "left 0.15s" }} /></span>
+              Hide dropped rows
+            </button>
+          </div>}
+          <div style={{ flex: 1 }} />
+          <div style={{ display: "flex", gap: 10 }}>
+            <button onClick={clearOverrides} style={btnSecondary}>Clear overrides</button>
+            <button onClick={exportForecast} style={btnBlue}><IconDL /> Forecasted CSV</button>
+          </div>
+        </div>
+
+        {monthBarActive && <>
+        <div style={{ marginBottom: 6, fontSize: 12, color: "#6B7280", fontWeight: 500 }}>Fill these Upload month(s):</div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+          {anchors.uploads.map(function (u) {
+            var on = targetCols.indexOf(u.idx) !== -1;
+            var enabled = globalMethod === "B" ? (u.num >= anchorNum && u.num <= maxSelectedNum + 1) : (u.num === anchorNum);
+            var disabled = !enabled;
+            return <button key={u.idx} disabled={disabled} onClick={function () { selectThrough(u.num); }} style={{ padding: "5px 10px", borderRadius: 8, border: "1px solid " + (on ? "#0EA5E9" : "#E5E7EB"), background: on ? "#0EA5E9" : "#fff", color: on ? "#fff" : (disabled ? "#D1D5DB" : "#6B7280"), fontSize: 12, fontWeight: 500, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.45 : 1 }}>{u.label}</button>;
+          })}
+        </div>
+        <div style={{ fontSize: 11, color: "#9CA3AF", marginBottom: 4 }}>Only strategy B can span multiple months &mdash; click forward one month at a time, each compounding the growth. A, C, D, E and F fill the current month only. A typed cell overrides that month; a per-row strategy overrides the global one.</div>
+        </>}
+      </div>}
+
+      {formatted && formatted.length > 0 && <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden", border: "0.5px solid " + PANEL_BORDER, borderRadius: "0 0 14px 14px" })}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderBottom: "1px solid #F3F4F6", flexWrap: "wrap" }}>
+          <input value={query} onChange={function (e) { setQuery(e.target.value); }} placeholder="Search product code or description..." style={Object.assign({}, S.inp, { flex: "1 1 240px", maxWidth: 360, padding: "8px 12px" })} />
+          <span style={{ fontSize: 11, color: "#9CA3AF", display: "inline-flex", alignItems: "center", gap: 5 }}><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>Filter via the icons in the Replenishment, Growing, SD/BO, and Strategy headers</span>
+          {(query.trim() || Object.keys(colFilters).length) ? <button onClick={function () { setQuery(""); setColFilters({}); }} style={{ padding: "5px 10px", borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: "pointer", color: "#6B7280", background: "#fff", border: "1px solid #E5E7EB" }}>Clear all filters</button> : null}
+          <div style={{ marginLeft: "auto", fontSize: 12, color: "#9CA3AF", fontVariantNumeric: "tabular-nums" }}>{sortedRows.length} shown</div>
+        </div>
+        <div style={{ maxHeight: 560, overflow: "auto" }}>
+          <style>{".fc-tbl tbody tr:hover > td{background:#EFF6FF;}"}</style>
+          <table className="fc-tbl" style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead><tr>
+              <FcTextFilter label="Product code" align="left" thStyle={S.th} value={colFilters.productText || null} onChange={function (n) { setColF("productText", n); }} sortActive={sortKey === "product"} sortDir={sortDir} onSort={function () { toggleSort("product"); }} />
+              <FcTextFilter label="Description" align="left" thStyle={S.th} value={colFilters.descText || null} onChange={function (n) { setColF("descText", n); }} sortActive={sortKey === "desc"} sortDir={sortDir} onSort={function () { toggleSort("desc"); }} />
+              {anchors.trail3.map(function (hi) { return fcTh("hist:" + hi, String(headers[hi]).replace(/^hist:\s*/i, ""), "right"); })}
+              {fcTh("mtd", "MTD", "right")}
+              <FcHeadFilter label="Growing" align="left" thStyle={S.th} options={FC_FILTER_OPTS.growing} sel={colFilters.growing || null} onSel={function (n) { setColF("growing", n); }} sortActive={sortKey === "growing"} sortDir={sortDir} onSort={function () { toggleSort("growing"); }} />
+              <FcHeadFilter label="Replenishment" align="left" thStyle={S.th} options={FC_FILTER_OPTS.repl} sel={colFilters.repl || null} onSel={function (n) { setColF("repl", n); }} sortActive={sortKey === "repl"} sortDir={sortDir} onSort={function () { toggleSort("repl"); }} />
+              <FcHeadFilter label="SD/BO" align="left" thStyle={S.th} options={FC_FILTER_OPTS.flag} sel={colFilters.flag || null} onSel={function (n) { setColF("flag", n); }} sortActive={sortKey === "flag"} sortDir={sortDir} onSort={function () { toggleSort("flag"); }} />
+              {fcTh("final1", "Final FC", "right")}
+              <FcHeadFilter label="Strategy" align="left" thStyle={S.th} options={FC_FILTER_OPTS.strategy} sel={colFilters.strategy || null} onSel={function (n) { setColF("strategy", n); }} sortActive={sortKey === "strategy"} sortDir={sortDir} onSort={function () { toggleSort("strategy"); }} />
+              {fcTh("pct", "Final FC/Upload FC % Diff", "right")}
+              {targetCols.map(function (c) { var u = anchors.uploads.filter(function (x) { return x.idx === c; })[0]; return fcTh("upload:" + uploadNum(c), u ? u.label : "Upload", "right"); })}
+              {fcTh("uploadview", "Upload", "right")}
+            </tr></thead>
+            <tbody>
+              {sortedRows.map(function (row, ri) {
+                var k = rowKey(row);
+                var dropRow = rowBelowFinal(row);
+                var pct = pctVsFinal(row, anchorNum);
+                return <tr key={ri} style={Object.assign({}, ri % 2 === 1 ? { background: "#FAFBFC" } : null, dropRow ? { opacity: 0.45 } : null)} title={dropRow ? "Below Netstock Final \u2014 excluded from export" : ""}>
+                  <td style={Object.assign({}, S.td, { fontWeight: 500, whiteSpace: "nowrap", textDecoration: dropRow ? "line-through" : "none" })}>{row[productCol]}</td>
+                  <td title={descCol >= 0 ? String(row[descCol] || "") : ""} style={Object.assign({}, S.td, { maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })}>{descCol >= 0 ? row[descCol] : ""}</td>
+                  {anchors.trail3.map(function (hi) { return <td key={hi} style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums", color: "#6B7280" })}>{fcFmt(row[hi])}</td>; })}
+                  <td style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums" })}>{fcFmt(row[anchors.mtd])}</td>
+                  <td style={Object.assign({}, S.td)}>{(function () { var tr = fcTrend(row); if (tr === "g") return <span title="Each of the last 3 months is higher than the previous" style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "2px 8px", borderRadius: 999, fontSize: 11, fontWeight: 600, color: "#065F46", background: "#D1FAE5" }}>{"\u2191"} Growing</span>; if (tr === "d") return <span title="Each of the last 3 months is lower than the previous" style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "2px 8px", borderRadius: 999, fontSize: 11, fontWeight: 600, color: "#6D28D9", background: "#EDE9FE" }}>{"\u2193"} Decreasing</span>; return <span style={{ color: "#D1D5DB" }}>{"\u2013"}</span>; })()}</td>
+                  <td style={Object.assign({}, S.td)}>{(function () { var cls = classCol >= 0 ? String(row[classCol] || "").trim().toUpperCase() : ""; if (!cls) return ""; var pal = { A: ["#065F46", "#D1FAE5"], B: ["#92400E", "#FEF3C7"], C: ["#475569", "#F1F5F9"] }[cls] || ["#475569", "#F1F5F9"]; return <span style={{ display: "inline-block", minWidth: 20, textAlign: "center", padding: "2px 8px", borderRadius: 999, fontSize: 11, fontWeight: 600, color: pal[0], background: pal[1] }}>{cls}</span>; })()}</td>
+                  <td style={Object.assign({}, S.td)}>{(function () {
+                    var pc = String(row[productCol] == null ? "" : row[productCol]).trim();
+                    var s = sdInfo[pc], b = bkoInfo[pc];
+                    if (!s && !b) return <span style={{ color: "#D1D5DB" }}>{"\u2013"}</span>;
+                    var out = [];
+                    if (s) out.push(<span key="sd" title="Short-dating" style={{ display: "inline-block", padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600, color: "#B91C1C", background: "#FEE2E2", whiteSpace: "nowrap" }}>{"SD" + (s.BestKnownDating ? " \u00B7 " + s.BestKnownDating : "")}</span>);
+                    if (b) out.push(<span key="bo" title="Backorder" style={{ display: "inline-block", padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600, color: "#92400E", background: "#FEF3C7", whiteSpace: "nowrap" }}>{"BO" + (b.RecoveryDate ? " \u00B7 " + b.RecoveryDate : "")}</span>);
+                    return <span style={{ display: "inline-flex", gap: 4, flexWrap: "wrap" }}>{out}</span>;
+                  })()}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums" })}>{anchors.final1 >= 0 ? fcFmt(row[anchors.final1]) : ""}</td>
+                  <td style={Object.assign({}, S.td, { padding: "6px 10px" })}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <select value={rowMethod[k] || ""} onChange={function (e) { setRowM(k, e.target.value); }} style={Object.assign({}, S.sel, { padding: "5px 8px", fontSize: 12 })}>
+                        <option value="">Use Global Strat</option>
+                        <option value="none">None (no strategy)</option>
+                        {FC_METHODS.map(function (m) { return <option key={m.id} value={m.id}>{m.id + " - " + m.short}</option>; })}
+                      </select>
+                      {(rowMethod[k] === "B" || rowMethod[k] === "F") ? <input type="number" step="0.05" min="0" value={rowGrowth[k] != null && rowGrowth[k] !== "" ? rowGrowth[k] : growth} onChange={function (e) { setRowG(k, e.target.value); }} title="Growth multiplier for this item (overrides the global rate)" style={{ width: 62, padding: "5px 6px", fontSize: 12, borderRadius: 6, border: "1px solid #C2DCEE", background: "#F3F8FC", color: "#0B6FA8", fontFamily: "inherit" }} /> : null}
+                    </div>
+                  </td>
+                  <td style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums", fontWeight: 500, color: pct == null ? "#9CA3AF" : (pct > 0 ? "#059669" : (pct < 0 ? "#DC2626" : "#6B7280")) })}>{pct == null ? "-" : (pct > 0 ? "+" : "") + pct.toFixed(0) + "%"}</td>
+                  {targetCols.map(function (c, ci) {
+                    var num = uploadNum(c);
+                    var mkey = k + "@" + num;
+                    var overridden = Object.prototype.hasOwnProperty.call(manualEdits, mkey);
+                    var man = overridden ? manualEdits[mkey] : null;
+                    var isManual = overridden && man != null && String(man).trim() !== "";
+                    var comp = computedForMonth(row, num);
+                    var cellVal = overridden ? (man == null ? "" : man) : (comp == null ? "" : comp);
+                    return <td key={c} style={Object.assign({}, S.td, { textAlign: "right", padding: "6px 10px" })}>
+                      <input data-fc={ri + "-" + ci} value={cellVal} onChange={function (e) { setManualM(k, num, e.target.value); }} onKeyDown={function (e) { fcCellKey(e, ri, ci); }} placeholder={comp == null ? "-" : ""} style={{ width: 84, textAlign: "right", padding: "6px 8px", borderRadius: 8, fontSize: 13, fontVariantNumeric: "tabular-nums", border: "1px solid " + (isManual ? "#0EA5E9" : "#E5E7EB"), background: isManual ? "#F0F9FF" : "#F9FAFB", color: "#1F2937", outline: "none" }} />
+                    </td>;
+                  })}
+                  <td style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums", fontWeight: 600, borderLeft: "1px solid #E5E7EB" })}>{(function () {
+                    if (dropRow || !inSef(row)) return <span style={{ color: "#D1D5DB", fontWeight: 400 }} title="Excluded from the export CSV">{"\u2014"}</span>;
+                    var parts = targetCols.map(function (c) { var num = uploadNum(c); var v = num == null ? null : effectiveForMonth(row, num); return v == null ? null : Math.round(v).toLocaleString(); }).filter(function (x) { return x != null; });
+                    if (!parts.length) return <span style={{ color: "#D1D5DB", fontWeight: 400 }} title="Nothing will be written for this row">{"\u2014"}</span>;
+                    return <span style={{ color: "#0B6FA8" }} title="Value written to the export CSV">{parts.join(" / ")}</span>;
+                  })()}</td>
+                </tr>;
+              })}
+            </tbody>
+          </table>
+        </div>
+        <div style={{ padding: "10px 16px", fontSize: 12, color: "#9CA3AF", borderTop: "1px solid #F3F4F6" }}>{formatted.length} items{(query.trim() || Object.keys(colFilters).length) ? " (showing " + sortedRows.length + ")" : ""} - {filledCount} forecasted across {targetCols.length} month{targetCols.length === 1 ? "" : "s"}{dropBelowFinal && droppedCount > 0 ? " \u00B7 " + droppedCount + " row" + (droppedCount === 1 ? "" : "s") + " below Netstock Final excluded" : ""}. Each cell exports into its own month column; blue cells are manual overrides.</div>
+      </div>}
+
+      {headers.length > 0 && (!formatted || !formatted.length) && stats === null && <div style={{ fontSize: 13, color: "#9CA3AF", padding: "8px 4px" }}>Pick a warehouse and mode, then Auto-format to filter the list down to the items worth forecasting.</div>}
+    </div>}
+  </div>;
+}
+
+
+function PoReconPage(props) {
+  var cred = props.cred, ok = props.ok, lp = props.lp, toast = props.toast;
+  var _busy = useState(false), busy = _busy[0], setBusy = _busy[1];
+  var _log = useState([]), log = _log[0], setLog = _log[1];
+  var _summary = useState(null), summary = _summary[0], setSummary = _summary[1];
+  var S = useMemo(function() { return makeStyles("#6366F1"); }, []);
+
+  var TRACKER_MAP = {
+    "TP-NY": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - BROOKLYN" },
+    "TP-OH": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - SEVEN HILLS" },
+    "TP-CA": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - HAYWARD" },
+    "TP-TX": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - DALLAS" },
+    "GGM-KY": { sheetId: "1dMZ_8VC6zaqLLWXQHFfuTXgxMfm0T4ip7To1CbXLfMk", tab: "RECEIVING - KY" },
+    "GGM-AZ": { sheetId: "1dMZ_8VC6zaqLLWXQHFfuTXgxMfm0T4ip7To1CbXLfMk", tab: "RECEIVING - AZ" },
+  };
+  function uomToPkgSize(u) { var m = String(u == null ? "" : u).match(/(\d+)\s*$/); return m ? Number(m[1]) : 1; }
+  function fmtDate(v) { if (!v) return ""; var s = String(v).trim(); var m = s.match(/^(\d{4})-(\d{2})-(\d{2})/); if (m) return Number(m[2]) + "/" + Number(m[3]) + "/" + m[1]; return s.slice(0, 10); }
+  function parseDate(v) { var s = String(v || "").trim(); var m = s.match(/^(\d{4})-(\d{2})-(\d{2})/); if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])); var m2 = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/); if (m2) return new Date(Number(m2[3]), Number(m2[1]) - 1, Number(m2[2])); return null; }
+  function addLog(msg, kind) { setLog(function (p) { return p.concat([{ msg: msg, kind: kind || "info" }]); }); }
+
+  async function readRefs(dest) {
+    var resp = await fetch("/api/tracker-read", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sheetId: dest.sheetId, tab: dest.tab }) });
     var data = await resp.json();
-    results.push({ tab: dest.tab, ok: !!(data && data.ok), added: (data && data.appended) || 0, pos: pw.refs, error: (data && data.error) || null });
+    if (!data || !data.ok) throw new Error(dest.tab + ": " + ((data && data.error) || "read failed"));
+    var set = {}; (data.refs || []).forEach(function (r) { set[String(r).trim()] = 1; }); return set;
   }
 
-  return { ok: true, date: new Date().toISOString().slice(0, 10), windowDays: lookback, pulled: rows.length, recentWindow: recent.length, skippedNoRef: skippedNoRef, tabsUpdated: results };
+  async function runRecon() {
+    if (!cred || !cred.username || !cred.password) { toast("Acumatica login required", "error"); lp && lp(); return; }
+    setBusy(true); setLog([]); setSummary(null);
+    try {
+      addLog("Pulling reconciliation feeds from Acumatica\u2026");
+      var tp = await fetchAcumatica("recon-tp", null, cred.username, cred.password);
+      var ggm = await fetchAcumatica("recon-ggm", null, cred.username, cred.password);
+      var rows = (tp || []).concat(ggm || []);
+      addLog("Pulled " + rows.length + " PO lines (TP " + (tp || []).length + ", GGM " + (ggm || []).length + ").");
+
+      var cutoff = new Date(); cutoff.setHours(0, 0, 0, 0); cutoff.setDate(cutoff.getDate() - 6);
+      var recent = rows.filter(function (r) { var d = parseDate(r.OrderDate); return d && d >= cutoff; });
+      addLog("Within last 6 days: " + recent.length + " lines.");
+
+      var groups = {}, skippedNoRef = 0;
+      recent.forEach(function (r) {
+        var wh = String(r.Warehouse || "").trim(), ref = String(r.VendorRef || "").trim();
+        if (!wh || !TRACKER_MAP[wh]) return;
+        if (!ref) { skippedNoRef++; return; }
+        var k = wh + "||" + ref; if (!groups[k]) groups[k] = { wh: wh, ref: ref, lines: [] }; groups[k].lines.push(r);
+      });
+      if (skippedNoRef) addLog("Skipped " + skippedNoRef + " line(s) with a blank Vendor Ref \u2014 not added.", "warn");
+      var whset = {}; Object.keys(groups).forEach(function (k) { whset[groups[k].wh] = 1; });
+      var whs = Object.keys(whset);
+      if (!whs.length) { addLog("No recent POs mapped to a tracker tab. Nothing to do.", "warn"); setBusy(false); return; }
+
+      var existing = {};
+      for (var wi = 0; wi < whs.length; wi++) {
+        var d0 = TRACKER_MAP[whs[wi]];
+        addLog("Reading existing POs in " + d0.tab + "\u2026");
+        existing[whs[wi]] = await readRefs(d0);
+      }
+
+      var perWh = {};
+      Object.keys(groups).forEach(function (k) {
+        var g = groups[k];
+        if (existing[g.wh][g.ref]) return;
+        if (!perWh[g.wh]) perWh[g.wh] = { rows: [], arrival: [], refs: [] };
+        g.lines.forEach(function (r) {
+          var ps = Number(r.BOHPackSize); if (!ps || isNaN(ps)) ps = uomToPkgSize(r.UOM);
+          var ndc = (r.SKUNDC && String(r.SKUNDC).trim()) ? String(r.SKUNDC).trim() : String(r.AltID || "").trim();
+          var sup = String(r.VendorName || "").toLowerCase();
+          var skipArrival = sup.indexOf("vetcove generics") >= 0 || sup.indexOf("bloodworth") >= 0;
+          perWh[g.wh].rows.push([r.VendorName || "", ndc, r.Description || "", ps, r.OrderQty != null ? r.OrderQty : "", "=INDEX(D:D,ROW())*INDEX(E:E,ROW())", g.ref, fmtDate(r.OrderDate)]);
+          perWh[g.wh].arrival.push(skipArrival ? "" : fmtDate(r.PromisedDate));
+        });
+        perWh[g.wh].refs.push(g.ref);
+      });
+
+      var missingWhs = Object.keys(perWh);
+      var totalMissingPOs = 0, totalRows = 0;
+      missingWhs.forEach(function (w) { totalMissingPOs += perWh[w].refs.length; totalRows += perWh[w].rows.length; });
+      if (!totalMissingPOs) { addLog("\u2713 Everything is already on the trackers. Nothing to add.", "ok"); setSummary({ added: 0, pos: 0, verified: true }); setBusy(false); return; }
+      addLog("Found " + totalMissingPOs + " PO(s) missing across " + missingWhs.length + " tab(s) \u2014 " + totalRows + " line(s). Adding\u2026");
+
+      var addedTotal = 0;
+      for (var mi = 0; mi < missingWhs.length; mi++) {
+        var w = missingWhs[mi], dest = TRACKER_MAP[w], pw = perWh[w];
+        var aResp = await fetch("/api/tracker-append", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sheetId: dest.sheetId, tab: dest.tab, rows: pw.rows, extraColumn: { header: "Expected Arrival", values: pw.arrival } }) });
+        var aData = await aResp.json();
+        if (aData && aData.ok) { addedTotal += aData.appended; addLog("Added " + aData.appended + " line(s) to " + dest.tab + " \u2014 PO(s): " + pw.refs.join(", "), "ok"); }
+        else { addLog("Failed to add to " + dest.tab + ": " + ((aData && aData.error) || "unknown"), "error"); }
+      }
+
+      addLog("Verifying\u2026");
+      var stillMissing = [];
+      for (var vi = 0; vi < missingWhs.length; vi++) {
+        var w2 = missingWhs[vi], dest2 = TRACKER_MAP[w2];
+        var after = await readRefs(dest2);
+        perWh[w2].refs.forEach(function (ref) { if (!after[ref]) stillMissing.push(dest2.tab + " / " + ref); });
+      }
+      if (stillMissing.length) addLog("\u26A0 Verification: still not found \u2014 " + stillMissing.join(", "), "error");
+      else addLog("\u2713 Verified \u2014 all added POs are present on the trackers.", "ok");
+      setSummary({ added: addedTotal, pos: totalMissingPOs, verified: stillMissing.length === 0 });
+    } catch (e) { addLog("Error: " + (e && e.message ? e.message : e), "error"); toast("Reconciliation failed", "error"); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <div>
+      <p style={{ color: "#6B7280", fontSize: 13, marginBottom: 20 }}>Catches POs created directly in Acumatica (not through the hub) that are missing from the FuzeRX / GGM receiving trackers. Pulls the last 6 days of POs, compares Vendor Ref against what's already logged, and auto-adds anything missing — then re-checks to confirm it landed.</p>
+      <div style={S.card}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <button onClick={runRecon} disabled={busy} style={Object.assign({}, S.btn(), { padding: "10px 20px", opacity: busy ? 0.7 : 1 })}>{busy ? "Reconciling\u2026" : "Check & sync trackers"}</button>
+          {summary && <span style={{ fontSize: 13, color: summary.verified === false ? "#DC2626" : "#059669", fontWeight: 600 }}>{summary.pos === 0 ? "Already in sync" : ("Added " + summary.added + " line(s) across " + summary.pos + " PO(s)" + (summary.verified ? " \u2713" : ""))}</span>}
+        </div>
+      </div>
+      {log.length > 0 && <div style={Object.assign({}, S.card, { fontFamily: "monospace", fontSize: 12, lineHeight: 1.6 })}>
+        {log.map(function (l, i) { return <div key={i} style={{ color: l.kind === "error" ? "#DC2626" : l.kind === "ok" ? "#059669" : l.kind === "warn" ? "#D97706" : "#374151" }}>{l.msg}</div>; })}
+      </div>}
+    </div>
+  );
 }
 
-export async function GET(request) {
-  try {
-    var days = null;
-    try { var u = new URL(request.url); var d = parseInt(u.searchParams.get("days"), 10); if (!isNaN(d) && d > 0) days = d; } catch (e) {}
-    return json(await run(days));
+export default function Hub() {
+  var _p = useState(function() {
+    if (typeof window !== "undefined") {
+      var qp = new URLSearchParams(window.location.search).get("page");
+      if (qp) return qp;
+    }
+    var s = sGet("active-page"); return s || "TP-NY";
+  }), page = _p[0], setPage = _p[1];
+  function setPagePersist(p) { setPage(p); sSet("active-page", p); }
+  var _c = useState({ username: "", password: "" }), cred = _c[0], setCred = _c[1];
+  var _ok = useState(false), ok = _ok[0], setOk = _ok[1];
+  var _sl = useState(false), showLogin = _sl[0], setShowLogin = _sl[1];
+  var _t = useState(null), toast = _t[0], setToast = _t[1];
+  var _cl = useState(true), credLoading = _cl[0], setCredLoading = _cl[1];
+  var _gm = useState(null), gmail = _gm[0], setGmail = _gm[1];
+  var _sr = useState(function() { var saved = sGet("shipping-rules-v2"); return saved || Object.assign({}, DEFAULT_SHIP_RULES); }), shipRules = _sr[0], setShipRules = _sr[1];
+  var _vc = useState(Object.assign({}, CONTACTS)), vendorContacts = _vc[0], setVendorContacts = _vc[1];
+  var _vch = useState({}), vendorChannels = _vch[0], setVendorChannels = _vch[1];
+  var _sideCol = useState(function() { return sGet("sidebar-collapsed") || {}; }), sideCollapsed = _sideCol[0], setSideCollapsed = _sideCol[1];
+  var _sideHide = useState(false), sidebarHidden = _sideHide[0], setSidebarHidden = _sideHide[1];
+  var _sdExempt = useState({ fuze: {}, ggm: {} }), sdExempt = _sdExempt[0], setSdExempt = _sdExempt[1];
+  function toggleSection(key) { var u = Object.assign({}, sideCollapsed); u[key] = !u[key]; setSideCollapsed(u); sSet("sidebar-collapsed", u); }
+  function updateShipRules(newRules) { setShipRules(newRules); sSet("shipping-rules-v2", newRules); kvPost("shipping-rules-v2", newRules).catch(function() {}); }
+  function updateVendorContacts(newContacts) { setVendorContacts(newContacts); kvPost("vendor-contacts", newContacts).catch(function() {}); }
+  function updateVendorChannels(newChannels) { setVendorChannels(newChannels); kvPost("vendor-channels", newChannels).catch(function() {}); }
+  // Short-dating exemptions, held here so all warehouse views share one live copy.
+  function toggleSdExempt(group, invId, meta) {
+    setSdExempt(function(prev) {
+      var groupMap = Object.assign({}, prev[group] || {});
+      if (groupMap[invId]) delete groupMap[invId]; else groupMap[invId] = meta || true;
+      kvPost("po-sd-exempt:" + group, Object.assign({}, groupMap, { _savedAt: Date.now() })).catch(function() {});
+      var next = Object.assign({}, prev); next[group] = groupMap; return next;
+    });
   }
-  catch (e) { return json({ ok: false, error: String((e && e.message) || e) }, 500); }
+  function clearSdExempt(group, invIds) {
+    setSdExempt(function(prev) {
+      var groupMap = Object.assign({}, prev[group] || {});
+      var changed = false;
+      (invIds || []).forEach(function(id) { if (groupMap[id]) { delete groupMap[id]; changed = true; } });
+      if (!changed) return prev;
+      kvPost("po-sd-exempt:" + group, Object.assign({}, groupMap, { _savedAt: Date.now() })).catch(function() {});
+      var next = Object.assign({}, prev); next[group] = groupMap; return next;
+    });
+  }
+  function backfillSdExemptMeta(group, metaByInv) {
+    setSdExempt(function(prev) {
+      var groupMap = Object.assign({}, prev[group] || {});
+      var changed = false;
+      Object.keys(metaByInv || {}).forEach(function(id) {
+        if (groupMap[id] === undefined) return; // only fill records that exist
+        var cur = groupMap[id];
+        var hasDesc = cur && typeof cur === "object" && cur.desc;
+        if (!hasDesc && metaByInv[id] && metaByInv[id].desc) { groupMap[id] = metaByInv[id]; changed = true; }
+      });
+      if (!changed) return prev;
+      kvPost("po-sd-exempt:" + group, Object.assign({}, groupMap, { _savedAt: Date.now() })).catch(function() {});
+      var next = Object.assign({}, prev); next[group] = groupMap; return next;
+    });
+  }
+
+  var showToast = useCallback(function(m, t) { setToast({ m: m, t: t || "success" }); setTimeout(function() { setToast(null); }, 3500); }, []);
+  useEffect(function() { var mt = true; (async function() { var s = sGet("user-credentials"); if (mt && s && s.username && s.password) { setCred(s); setOk(true); } var g = getGmailToken(); if (mt && g && g.token) { setGmail(g); } if (mt) setCredLoading(false); kvGet("vendor-contacts").then(function(r) { return r.ok ? r.json() : null; }).then(function(d) { if (mt && d && d.data && typeof d.data === "object" && Object.keys(d.data).length > 0) { setVendorContacts(d.data); } }).catch(function() {}); kvGet("vendor-channels").then(function(r) { return r.ok ? r.json() : null; }).then(function(d) { if (mt && d && d.data && typeof d.data === "object" && Object.keys(d.data).length > 0) { setVendorChannels(d.data); } }).catch(function() {}); kvGet("shipping-rules-v2").then(function(r) { return r.ok ? r.json() : null; }).then(function(d) { if (mt && d && d.data && typeof d.data === "object" && Object.keys(d.data).length > 0) { setShipRules(d.data); } }).catch(function() {}); })(); return function() { mt = false; }; }, []);
+
+  useEffect(function() {
+    var mt = true;
+    ["fuze", "ggm"].forEach(function(group) {
+      kvGet("po-sd-exempt:" + group).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+        if (!mt || !d || !d.data) return;
+        var ex = typeof d.data === "string" ? JSON.parse(d.data) : d.data;
+        delete ex._savedAt;
+        setSdExempt(function(prev) { var next = Object.assign({}, prev); next[group] = ex; return next; });
+      }).catch(function() {});
+    });
+    return function() { mt = false; };
+  }, []);
+
+  // Handle Gmail OAuth callback (reads token from URL hash)
+  useEffect(function() {
+    var hash = window.location.hash;
+    if (hash && hash.indexOf("gmail_token=") >= 0) {
+      var params = new URLSearchParams(hash.substring(1));
+      var token = params.get("gmail_token");
+      var email = params.get("gmail_email") || "";
+      if (token) {
+        setGmailToken(token, email);
+        setGmail({ token: token, email: email });
+        showToast("Gmail connected: " + email);
+      }
+      // Clean up the URL hash
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+  }, [showToast]);
+
+  var connectGmail = useCallback(function() {
+    var origin = window.location.origin;
+    window.location.href = "/api/gmail-auth?origin=" + encodeURIComponent(origin);
+  }, []);
+  var disconnectGmail = useCallback(function() {
+    clearGmailToken();
+    setGmail(null);
+    showToast("Gmail disconnected", "info");
+  }, [showToast]);
+  var _loginLoading = useState(false), loginLoading = _loginLoading[0], setLoginLoading = _loginLoading[1];
+  var login = useCallback(async function() {
+    if (!cred.username || !cred.password) { showToast("Enter both username and password", "error"); return; }
+    setLoginLoading(true);
+    try {
+      var resp = await fetch("/api/acumatica", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "ndc-lookup", username: cred.username, password: cred.password }),
+      });
+      var json = await resp.json();
+      if (!resp.ok || json.error) {
+        showToast("Login failed: " + (json.error || "Invalid credentials"), "error");
+        return;
+      }
+      sSet("user-credentials", cred); setOk(true); setShowLogin(false); showToast("Connected to Acumatica");
+    } catch (err) {
+      showToast("Login failed: " + err.message, "error");
+    } finally { setLoginLoading(false); }
+  }, [cred, showToast]);
+  var logout = useCallback(async function() { sDel("user-credentials"); setCred({ username: "", password: "" }); setOk(false); showToast("Logged out", "info"); }, [showToast]);
+  var promptLogin = useCallback(function() { setShowLogin(true); showToast("Please log in first", "info"); }, [showToast]);
+
+  var sdColumns = useMemo(function() { return [
+    { key: "ItemStatus", label: "Status", badgeFn: function(v) { return v.toLowerCase() === "active" ? "success" : "default"; } },
+    { key: "Description", label: "Description", copyable: true },
+    { key: "VendorName", label: "Vendor" },
+    { key: "InventoryID", label: "Inv. ID", mono: true },
+    { key: "SKUNDC", label: "SKU/NDC", mono: true },
+    { key: "BestKnownDating", label: "Best Dating", highlightColor: "#D97706", bold: true },
+    { key: "QtyOnHand", label: "Qty", align: "right" },
+    { key: "BaseUnit", label: "Unit" },
+    { key: "OpenQty", label: "Open", align: "right" },
+    { key: "NoteText", label: "Notes" },
+  ]; }, []);
+
+  var sdEmail = useMemo(function() { return {
+    title: "Generate Email Drafts", subtitle: "One draft per vendor \u2014 asking about better dating availability.", subjectPrefix: "Short-Dating Items \u2013 ",
+    buildTo: function(e) { return ["hd-purchaseorders@vetcove.com", e].filter(Boolean).join(", "); },
+    tableCols: [{ key: "#", label: "#" }, { key: "Description", label: "Product" }, { key: "InventoryID", label: "Inventory ID" }, { key: "SKUNDC", label: "TruePill SKU" }, { key: "BestKnownDating", label: "Best Known Dating", highlightColor: "#D97706" }],
+  }; }, []);
+
+  var bkoColumns = useMemo(function() { return [
+    { key: "ItemStatus", label: "Status", badgeFn: function(v) { return v.toLowerCase() === "active" ? "success" : "default"; } },
+    { key: "MovementClass", label: "Type", badgeFn: function(v) { return v.toLowerCase().indexOf("long-term") >= 0 ? "danger" : "warning"; } },
+    { key: "Description", label: "Description", copyable: true },
+    { key: "VendorName", label: "Vendor" },
+    { key: "InventoryID", label: "Inv. ID", mono: true },
+    { key: "SKUNDC", label: "SKU/NDC", mono: true },
+    { key: "BaseUnit", label: "Unit" },
+    { key: "QtyOnHand", label: "On Hand", align: "right" },
+    { key: "OpenQty", label: "Open Qty", align: "right", bold: true },
+    { key: "RecoveryDate", label: "Recovery Date", highlightColor: "#3B82F6", bold: true },
+  ]; }, []);
+
+  var bkoEmail = useMemo(function() { return {
+    title: "Generate Backorder Emails", subtitle: "One draft per vendor \u2014 asking for recovery ETA updates. CC: hd-purchaseorders@vetcove.com", subjectPrefix: "Backorder Item Status \u2013 ",
+    buildTo: function(e) { return e || ""; },
+    tableCols: [{ key: "#", label: "#" }, { key: "Description", label: "Product Description" }, { key: "InventoryID", label: "Inventory ID (Mfr No.)" }, { key: "RecoveryDate", label: "Recovery Date", highlightColor: "#3B82F6" }],
+  }; }, []);
+
+  if (credLoading) return <div style={{ fontFamily: "sans-serif", background: "#F8F9FB", color: "#374151", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}><Spinner color="#3B82F6" size={24} /><style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style></div>;
+
+  if (!ok) return (
+    <div style={{ fontFamily: "'Varela Round',sans-serif", background: "#F8F9FB", color: "#374151", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Varela+Round&display=swap');*{box-sizing:border-box;margin:0;padding:0}@keyframes spin{to{transform:rotate(360deg)}}@keyframes slideUp{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}button:hover{filter:brightness(1.12)}input:focus{border-color:#3B82F6!important;box-shadow:0 0 0 2px rgba(59,130,246,0.15)}`}</style>
+      <div style={{ background: "#FFFFFF", border: "1px solid #E5E7EB", borderRadius: 16, padding: 40, width: 420, textAlign: "center" }}>
+        <div style={{ width: 64, height: 64, borderRadius: 16, background: "rgba(59,130,246,0.15)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px" }}><IconKey /></div>
+        <h1 style={{ fontSize: 24, fontWeight: 700, color: "#1F2937", margin: "0 0 4px" }}>Procurement Hub</h1>
+        <p style={{ fontSize: 11, color: "#6B7280", fontWeight: 500, letterSpacing: "1.5px", textTransform: "uppercase", margin: "0 0 32px" }}>Vetcove Tools</p>
+        <div style={{ textAlign: "left", display: "flex", flexDirection: "column", gap: 14 }}>
+          <div><label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 6 }}>Acumatica Username</label><input style={{ background: "#F8F9FB", border: "1px solid #E5E7EB", borderRadius: 8, padding: "10px 14px", color: "#374151", fontSize: 14, outline: "none", width: "100%" }} value={cred.username} onChange={function(e) { setCred({ username: e.target.value, password: cred.password }); }} placeholder="your.username" /></div>
+          <div><label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 6 }}>Acumatica Password</label><input style={{ background: "#F8F9FB", border: "1px solid #E5E7EB", borderRadius: 8, padding: "10px 14px", color: "#374151", fontSize: 14, outline: "none", width: "100%" }} type="password" value={cred.password} onChange={function(e) { setCred({ username: cred.username, password: e.target.value }); }} placeholder={"\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"} onKeyDown={function(e) { if (e.key === "Enter") login(); }} /></div>
+          <button onClick={login} disabled={loginLoading} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", background: "#3B82F6", color: "#fff", border: "none", borderRadius: 8, padding: "12px 16px", fontSize: 14, fontWeight: 600, cursor: loginLoading ? "wait" : "pointer", marginTop: 8, opacity: loginLoading ? 0.7 : 1 }}>{loginLoading ? <><Spinner color="#fff" size={14} /> Verifying...</> : <><IconKey /> Sign In</>}</button>
+        </div>
+      </div>
+      {toast && <div style={{ position: "fixed", bottom: 24, right: 24, padding: "12px 20px", borderRadius: 10, fontSize: 13, fontWeight: 500, zIndex: 999, background: toast.t === "success" ? "#059669" : toast.t === "error" ? "#DC2626" : "#FFFFFF", color: toast.t === "success" || toast.t === "error" ? "#fff" : "#1F2937", border: "1px solid " + (toast.t === "success" ? "#059669" : toast.t === "error" ? "#DC2626" : "#E5E7EB"), boxShadow: "0 4px 20px rgba(44,40,37,0.12)", animation: "slideUp 0.3s ease" }}>{toast.m}</div>}
+    </div>
+  );
+
+  var isWH = page in WH;
+  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "backorder-resolver" ? "#14B8A6" : page === "po-import" ? "#06B6D4" : page === "cycle-count" ? "#14B8A6" : page === "fuze-tracker" ? "#F59E0B" : page === "ggm-tracker" ? "#8B5CF6" : page === "hills-pawtree" ? "#10B981" : page === "truckloader" ? "#D97706" : page === "oos-tracker" ? "#EF4444" : page === "vendor-settings" ? "#6366F1" : page === "po-recon" ? "#6366F1" : page === "forecasting" ? "#0EA5E9" : page === "how-to" ? "#6B7280" : "#3B82F6";
+  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "backorder-resolver" ? "Backorder Resolver" : page === "po-import" ? "Generic PO Translator" : page === "cycle-count" ? "Cycle Counting" : page === "fuze-tracker" ? "Fuze Tracker" : page === "ggm-tracker" ? "GGM Tracker" : page === "hills-pawtree" ? "Hills & Pawtree Tracker" : page === "truckloader" ? "Hills Truckloader" : page === "oos-tracker" ? "OOS Tracker" : page === "vendor-settings" ? "Vendor Settings" : page === "po-recon" ? "PO Reconciliation" : page === "forecasting" ? "Forecasting" : page === "how-to" ? "How-To Guide" : showLogin ? "Login" : "Vendor Settings";
+
+  function SideLink(p) {
+    var active = page === p.id && !showLogin;
+    return <div onClick={function() { setPagePersist(p.id); setShowLogin(false); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", margin: "1px 12px", fontSize: 13, cursor: "pointer", transition: "all 0.15s", fontWeight: active ? 500 : 400, color: active ? "#93bbfc" : "rgba(255,255,255,0.55)", background: active ? "rgba(96,165,250,0.15)" : "transparent", borderRadius: 8 }}><Dot color={p.color} />{p.label}</div>;
+  }
+
+  return (
+    <div style={{ fontFamily: "'Varela Round',sans-serif", background: "#F8F9FB", color: "#374151", minHeight: "100vh", display: "flex" }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Varela+Round&display=swap');*{box-sizing:border-box;margin:0;padding:0}::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:#F8F9FB}::-webkit-scrollbar-thumb{background:#E5E7EB;border-radius:3px}@keyframes spin{to{transform:rotate(360deg)}}@keyframes slideUp{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}button:hover{filter:brightness(1.08)}input:focus,select:focus{border-color:#3B82F6!important;box-shadow:0 0 0 2px rgba(59,130,246,0.12)}tr:hover td{background:rgba(59,130,246,0.02)}`}</style>
+
+      <div style={{ width: sidebarHidden ? 0 : 230, background: "#1A1F2E", display: "flex", flexDirection: "column", padding: sidebarHidden ? 0 : "20px 0", flexShrink: 0, overflow: "hidden", transition: "width 0.2s ease", position: "relative" }}>
+        <div style={{ padding: "0 20px 20px", borderBottom: "1px solid rgba(255,255,255,0.08)", marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div>
+            <p style={{ fontSize: 18, fontWeight: 700, letterSpacing: "-0.5px", color: "#FFFFFF", margin: 0 }}>Procurement Hub</p>
+            <p style={{ fontSize: 10, color: "rgba(255,255,255,0.35)", fontWeight: 500, letterSpacing: "1.5px", textTransform: "uppercase", marginTop: 4 }}>Vetcove Tools</p>
+          </div>
+          <button onClick={function() { setSidebarHidden(true); }} style={{ background: "rgba(255,255,255,0.06)", border: "none", borderRadius: 6, padding: "4px 6px", cursor: "pointer", color: "rgba(255,255,255,0.4)", display: "flex", alignItems: "center", justifyContent: "center" }} title="Collapse sidebar"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="11 17 6 12 11 7" /><polyline points="18 17 13 12 18 7" /></svg></button>
+        </div>
+        {(function() {
+          var sections = [
+            { key: "po", label: "PO Tools", items: Object.entries(WH).map(function(e) { return { id: e[0], label: e[1].full, color: e[1].color }; }) },
+            { key: "generic", label: "Generic PO Tools", items: [{ id: "po-import", label: "Generic PO Translator", color: "#06B6D4" }, { id: "cycle-count", label: "Cycle Counting", color: "#14B8A6" }] },
+            { key: "hills", label: "Hills Tools", items: [{ id: "hills-pawtree", label: "Hills & Pawtree", color: "#10B981" }, { id: "truckloader", label: "Hills Truckloader", color: "#D97706" }] },
+            { key: "oos", label: "OOS", items: [{ id: "oos-tracker", label: "OOS Tracker", color: "#EF4444" }] },
+            { key: "tracking", label: "Tracking", items: [{ id: "fuze-tracker", label: "Fuze Tracker", color: "#F59E0B" }, { id: "ggm-tracker", label: "GGM Tracker", color: "#8B5CF6" }] },
+            { key: "inventory", label: "Inventory Tools", items: [{ id: "forecasting", label: "Forecasting", color: "#0EA5E9" }, { id: "short-dating", label: "Short-Dating", color: "#E879F9" }, { id: "backorder", label: "Backorders", color: "#F97316" }, { id: "backorder-resolver", label: "Backorder Resolver", color: "#14B8A6" }] },
+          ];
+          return sections.map(function(sec, si) {
+            var hasActive = sec.items.some(function(item) { return page === item.id && !showLogin; });
+            var isCollapsed = sideCollapsed[sec.key] && !hasActive;
+            return <div key={sec.key} style={{ borderTop: si > 0 ? "1px solid rgba(255,255,255,0.06)" : "none", paddingTop: si > 0 ? 8 : 0 }}>
+              <div onClick={function() { toggleSection(sec.key); }} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 20px", cursor: "pointer", userSelect: "none" }}>
+                <span style={{ fontSize: 10, fontWeight: 500, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "1px" }}>{sec.label}</span>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.25)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ transition: "transform 0.2s", transform: isCollapsed ? "rotate(-90deg)" : "rotate(0deg)" }}><polyline points="6 9 12 15 18 9" /></svg>
+              </div>
+              {!isCollapsed && <div style={{ paddingBottom: 4 }}>{sec.items.map(function(item) { return <SideLink key={item.id} id={item.id} label={item.label} color={item.color} />; })}</div>}
+            </div>;
+          });
+        })()}
+        <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 8 }}>
+          <div style={{ padding: "8px 20px" }}><span style={{ fontSize: 10, fontWeight: 500, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "1px" }}>Settings</span></div>
+          <div onClick={function() { setPagePersist("vendor-settings"); setShowLogin(false); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", margin: "1px 12px", fontSize: 13, cursor: "pointer", fontWeight: page === "vendor-settings" && !showLogin ? 500 : 400, color: page === "vendor-settings" && !showLogin ? "#93bbfc" : "rgba(255,255,255,0.55)", background: page === "vendor-settings" && !showLogin ? "rgba(96,165,250,0.15)" : "transparent", borderRadius: 8 }}><IconMail /> Vendor Settings</div>
+          <div onClick={function() { setPagePersist("po-recon"); setShowLogin(false); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", margin: "1px 12px", fontSize: 13, cursor: "pointer", fontWeight: page === "po-recon" && !showLogin ? 500 : 400, color: page === "po-recon" && !showLogin ? "#93bbfc" : "rgba(255,255,255,0.55)", background: page === "po-recon" && !showLogin ? "rgba(96,165,250,0.15)" : "transparent", borderRadius: 8 }}><IconCSV /> PO Reconciliation</div>
+          <div onClick={function() { setPagePersist("how-to"); setShowLogin(false); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", margin: "1px 12px", fontSize: 13, cursor: "pointer", fontWeight: page === "how-to" && !showLogin ? 500 : 400, color: page === "how-to" && !showLogin ? "#93bbfc" : "rgba(255,255,255,0.55)", background: page === "how-to" && !showLogin ? "rgba(96,165,250,0.15)" : "transparent", borderRadius: 8 }}><IconCSV /> How-To Guide</div>
+        </div>
+        <div style={{ flex: 1 }} />
+        <div style={{ padding: "0 12px" }}>
+          <div style={{ padding: "12px 14px", background: ok ? "rgba(16,185,129,0.1)" : "rgba(239,68,68,0.1)", borderRadius: 10, border: "1px solid " + (ok ? "rgba(16,185,129,0.15)" : "rgba(239,68,68,0.15)") }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}><Dot color={ok ? "#34D399" : "#F87171"} /><span style={{ fontSize: 12, color: ok ? "#34D399" : "#F87171", fontWeight: 500 }}>{ok ? "Connected" : "Not Connected"}</span></div>
+            {ok && cred.username && <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 4, paddingLeft: 16 }}>{cred.username}</div>}
+            <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+              <button onClick={function() { setShowLogin(true); }} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, flex: 1, background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.6)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "4px 10px", fontSize: 11, fontWeight: 500, cursor: "pointer" }}><IconKey /> {ok ? "Update" : "Login"}</button>
+              {ok && <button onClick={logout} style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.6)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "4px 10px", fontSize: 11, fontWeight: 500, cursor: "pointer" }}>Logout</button>}
+            </div>
+          </div>
+          <div style={{ padding: "12px 14px", marginTop: 8, background: gmail ? "rgba(59,130,246,0.1)" : "rgba(100,116,139,0.08)", borderRadius: 10, border: "1px solid " + (gmail ? "rgba(59,130,246,0.15)" : "rgba(100,116,139,0.1)") }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}><IconGmail /><span style={{ fontSize: 12, color: gmail ? "#60A5FA" : "rgba(255,255,255,0.4)", fontWeight: 500 }}>{gmail ? "Gmail Connected" : "Gmail Not Connected"}</span></div>
+            {gmail && gmail.email && <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 4, paddingLeft: 22 }}>{gmail.email}</div>}
+            <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+              <button onClick={connectGmail} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, flex: 1, background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.6)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "4px 10px", fontSize: 11, fontWeight: 500, cursor: "pointer" }}><IconGmail /> {gmail ? "Reconnect" : "Connect"}</button>
+              {gmail && <button onClick={disconnectGmail} style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.6)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "4px 10px", fontSize: 11, fontWeight: 500, cursor: "pointer" }}>Disconnect</button>}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "auto" }}>
+        <div style={{ padding: "16px 32px", borderBottom: "0.5px solid #E5E7EB", display: "flex", alignItems: "center", justifyContent: "space-between", background: "#FFFFFF" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {sidebarHidden && <button onClick={function() { setSidebarHidden(false); }} style={{ background: "none", border: "none", cursor: "pointer", padding: "4px 6px", color: "#6B7280", display: "flex", alignItems: "center", justifyContent: "center", marginRight: 4 }} title="Show sidebar"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="18" x2="21" y2="18" /></svg></button>}
+            {!showLogin && <Dot color={activeColor} />}<span style={{ fontSize: 18, fontWeight: 500, color: "#1F2937" }}>{showLogin ? "Acumatica Login" : activeLabel}</span>{isWH && !showLogin && <span style={{ fontSize: 11, background: activeColor + "15", color: activeColor, padding: "3px 10px", borderRadius: 6, fontWeight: 500 }}>{page}</span>}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>{!ok && !showLogin && <span style={{ fontSize: 12, color: "#DC2626", display: "flex", alignItems: "center", gap: 4 }}><IconLock /> View only</span>}<span style={{ fontSize: 12, color: "#6B7280" }}>{new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</span></div>
+        </div>
+        <div style={{ padding: 32, flex: 1 }}>
+          {showLogin && <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: 400 }}><div style={{ background: "#FFFFFF", border: "1px solid #E5E7EB", borderRadius: 12, padding: 32, width: 400, textAlign: "center" }}><div style={{ width: 56, height: 56, borderRadius: 14, background: "rgba(59,130,246,0.15)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}><IconKey /></div><h2 style={{ fontSize: 20, fontWeight: 700, color: "#1F2937", margin: "0 0 4px" }}>Acumatica Login</h2><p style={{ color: "#9CA3AF", fontSize: 11, margin: "0 0 24px" }}>Shared across all tools</p><div style={{ textAlign: "left", display: "flex", flexDirection: "column", gap: 12 }}><div><label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 4 }}>Username</label><input style={{ background: "#F8F9FB", border: "1px solid #E5E7EB", borderRadius: 8, padding: "8px 12px", color: "#374151", fontSize: 13, outline: "none", width: "100%" }} value={cred.username} onChange={function(e) { setCred({ username: e.target.value, password: cred.password }); }} placeholder="your.username" /></div><div><label style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, display: "block", marginBottom: 4 }}>Password</label><input style={{ background: "#F8F9FB", border: "1px solid #E5E7EB", borderRadius: 8, padding: "8px 12px", color: "#374151", fontSize: 13, outline: "none", width: "100%" }} type="password" value={cred.password} onChange={function(e) { setCred({ username: cred.username, password: e.target.value }); }} placeholder="\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" /></div><button onClick={login} disabled={loginLoading} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, width: "100%", background: "#3B82F6", color: "#fff", border: "none", borderRadius: 8, padding: "10px 16px", fontSize: 13, fontWeight: 600, cursor: loginLoading ? "wait" : "pointer", marginTop: 8, opacity: loginLoading ? 0.7 : 1 }}>{loginLoading ? <><Spinner color="#fff" size={14} /> Verifying...</> : "Connect"}</button></div></div></div>}
+
+          {!showLogin && Object.entries(WH).map(function(e) { return <div key={e[0]} style={{ display: page === e[0] ? "block" : "none" }}><WHT whKey={e[0]} cfg={e[1]} toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} shipRules={shipRules} vendorChannels={vendorChannels} updateVendorChannels={updateVendorChannels} vendorContacts={vendorContacts} sdExempt={e[0].indexOf("GGM") === 0 ? sdExempt.ggm : sdExempt.fuze} onToggleExempt={toggleSdExempt} onClearExempt={clearSdExempt} onBackfillExempt={backfillSdExemptMeta} /></div>; })}
+          {!showLogin && page === "short-dating" && <TrackerTool toolKey="short-dating" toolLabel="Short-Dating Tracker" toolColor="#E879F9" demoData={SD_DEMO} columns={sdColumns} emailConfig={sdEmail} toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} contacts={vendorContacts} />}
+          {!showLogin && page === "backorder" && <TrackerTool toolKey="backorder" toolLabel="Backorder Tracker" toolColor="#F97316" demoData={BKO_DEMO} columns={bkoColumns} emailConfig={bkoEmail} skipVendors={BKO_SKIP} toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} contacts={vendorContacts} />}
+          {!showLogin && page === "po-import" && <POImportTool toast={showToast} cred={cred} ok={ok} lp={promptLogin} />}
+          {!showLogin && page === "cycle-count" && <CycleCountTool key="cc-standard" toast={showToast} cred={cred} />}
+          {!showLogin && page === "fuze-tracker" && <FuzeTracker toast={showToast} cred={cred} />}
+          {!showLogin && page === "ggm-tracker" && <GGMTracker toast={showToast} cred={cred} />}
+          {!showLogin && page === "hills-pawtree" && <HillsTracker toast={showToast} ok={ok} lp={promptLogin} cred={cred} />}
+          {!showLogin && page === "truckloader" && <TruckloaderTool toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} />}
+          {!showLogin && page === "oos-tracker" && <OOSTracker toast={showToast} cred={cred} />}
+          {!showLogin && page === "backorder-resolver" && <BackorderResolver toast={showToast} cred={cred} />}
+          {!showLogin && page === "forecasting" && <ForecastingTool toast={showToast} cred={cred} ok={ok} lp={promptLogin} />}
+          {!showLogin && (page === "vendor-settings" || page === "vendor-contacts" || page === "rules") && <VendorSettingsPage contacts={vendorContacts} updateContacts={updateVendorContacts} channels={vendorChannels} updateChannels={updateVendorChannels} shipRules={shipRules} updateShipRules={updateShipRules} toast={showToast} />}
+          {!showLogin && page === "po-recon" && <PoReconPage cred={cred} ok={ok} lp={promptLogin} toast={showToast} />}
+          {!showLogin && page === "how-to" && <HowToGuide toast={showToast} />}
+        </div>
+      </div>
+
+      {toast && <div style={{ position: "fixed", bottom: 24, right: 24, padding: "12px 20px", borderRadius: 10, fontSize: 13, fontWeight: 500, zIndex: 999, background: toast.t === "success" ? "#059669" : toast.t === "error" ? "#DC2626" : "#FFFFFF", color: toast.t === "success" || toast.t === "error" ? "#fff" : "#1F2937", border: "1px solid " + (toast.t === "success" ? "#059669" : toast.t === "error" ? "#DC2626" : "#E5E7EB"), boxShadow: "0 4px 20px rgba(44,40,37,0.12)", animation: "slideUp 0.3s ease" }}>{toast.m}</div>}
+    </div>
+  );
 }
-export async function POST(request) { return GET(request); }
