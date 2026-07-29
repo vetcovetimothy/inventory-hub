@@ -8761,6 +8761,7 @@ function PoReconPage(props) {
   var _busy = useState(false), busy = _busy[0], setBusy = _busy[1];
   var _log = useState([]), log = _log[0], setLog = _log[1];
   var _summary = useState(null), summary = _summary[0], setSummary = _summary[1];
+  var _days = useState(6), days = _days[0], setDays = _days[1];
   var S = useMemo(function() { return makeStyles("#6366F1"); }, []);
 
   var TRACKER_MAP = {
@@ -8793,9 +8794,10 @@ function PoReconPage(props) {
       var rows = (tp || []).concat(ggm || []);
       addLog("Pulled " + rows.length + " PO lines (TP " + (tp || []).length + ", GGM " + (ggm || []).length + ").");
 
-      var cutoff = new Date(); cutoff.setHours(0, 0, 0, 0); cutoff.setDate(cutoff.getDate() - 6);
+      var lookback = (typeof days === "number" && days > 0) ? days : 6;
+      var cutoff = new Date(); cutoff.setHours(0, 0, 0, 0); cutoff.setDate(cutoff.getDate() - lookback);
       var recent = rows.filter(function (r) { var d = parseDate(r.OrderDate); return d && d >= cutoff; });
-      addLog("Within last 6 days: " + recent.length + " lines.");
+      addLog("Within last " + lookback + " day(s): " + recent.length + " lines.");
 
       var groups = {}, skippedNoRef = 0;
       recent.forEach(function (r) {
@@ -8863,10 +8865,16 @@ function PoReconPage(props) {
 
   return (
     <div>
-      <p style={{ color: "#6B7280", fontSize: 13, marginBottom: 20 }}>Catches POs created directly in Acumatica (not through the hub) that are missing from the FuzeRX / GGM receiving trackers. Pulls the last 6 days of POs, compares Vendor Ref against what's already logged, and auto-adds anything missing — then re-checks to confirm it landed.</p>
+      <p style={{ color: "#6B7280", fontSize: 13, marginBottom: 20 }}>Catches POs created directly in Acumatica (not through the hub) that are missing from the FuzeRX / GGM receiving trackers. Pulls a recent window of POs (default 6 days \u2014 increase it below to catch backdated or duplicated POs), compares Vendor Ref against what's already logged, and auto-adds anything missing \u2014 then re-checks to confirm it landed.</p>
       <div style={S.card}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           <button onClick={runRecon} disabled={busy} style={Object.assign({}, S.btn(), { padding: "10px 20px", opacity: busy ? 0.7 : 1 })}>{busy ? "Reconciling\u2026" : "Check & sync trackers"}</button>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, color: "#374151" }}>
+            Look back
+            <input type="number" min="1" max="365" value={days} disabled={busy} onChange={function (e) { var v = parseInt(e.target.value, 10); setDays(isNaN(v) || v < 1 ? 1 : v); }} style={{ width: 64, padding: "6px 8px", border: "1px solid #D1D5DB", borderRadius: 6, fontSize: 13, textAlign: "center", fontFamily: "'Varela Round', sans-serif" }} />
+            days
+          </label>
+          {days !== 6 && !busy && <button onClick={function () { setDays(6); }} style={{ background: "transparent", border: "none", color: "#6366F1", fontSize: 12, cursor: "pointer", textDecoration: "underline", padding: 0 }}>reset to 6</button>}
           {summary && <span style={{ fontSize: 13, color: summary.verified === false ? "#DC2626" : "#059669", fontWeight: 600 }}>{summary.pos === 0 ? "Already in sync" : ("Added " + summary.added + " line(s) across " + summary.pos + " PO(s)" + (summary.verified ? " \u2713" : ""))}</span>}
         </div>
       </div>
