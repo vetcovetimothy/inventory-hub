@@ -43,7 +43,7 @@ async function readRefs(dest) {
   var set = {}; (data.refs || []).forEach(function (r) { set[String(r).trim()] = 1; }); return set;
 }
 
-async function run() {
+async function run(windowDays) {
   var user = process.env.ACUMATICA_CRON_USERNAME, pass = process.env.ACUMATICA_CRON_PASSWORD;
   if (!user || !pass) throw new Error("Missing ACUMATICA_CRON_USERNAME / ACUMATICA_CRON_PASSWORD");
 
@@ -51,7 +51,8 @@ async function run() {
   var ggm = await pullGI("recon-ggm", user, pass);
   var rows = tp.concat(ggm);
 
-  var cutoff = new Date(); cutoff.setHours(0, 0, 0, 0); cutoff.setDate(cutoff.getDate() - 6);
+  var lookback = (typeof windowDays === "number" && windowDays > 0) ? windowDays : 6;
+  var cutoff = new Date(); cutoff.setHours(0, 0, 0, 0); cutoff.setDate(cutoff.getDate() - lookback);
   var recent = rows.filter(function (r) { var d = parseDate(r.OrderDate); return d && d >= cutoff; });
 
   var groups = {}, skippedNoRef = 0;
@@ -92,11 +93,15 @@ async function run() {
     results.push({ tab: dest.tab, ok: !!(data && data.ok), added: (data && data.appended) || 0, pos: pw.refs, error: (data && data.error) || null });
   }
 
-  return { ok: true, date: new Date().toISOString().slice(0, 10), pulled: rows.length, recentWindow: recent.length, skippedNoRef: skippedNoRef, tabsUpdated: results };
+  return { ok: true, date: new Date().toISOString().slice(0, 10), windowDays: lookback, pulled: rows.length, recentWindow: recent.length, skippedNoRef: skippedNoRef, tabsUpdated: results };
 }
 
-export async function GET() {
-  try { return json(await run()); }
+export async function GET(request) {
+  try {
+    var days = null;
+    try { var u = new URL(request.url); var d = parseInt(u.searchParams.get("days"), 10); if (!isNaN(d) && d > 0) days = d; } catch (e) {}
+    return json(await run(days));
+  }
   catch (e) { return json({ ok: false, error: String((e && e.message) || e) }, 500); }
 }
-export async function POST() { return GET(); }
+export async function POST(request) { return GET(request); }
