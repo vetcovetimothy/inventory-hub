@@ -8865,7 +8865,7 @@ function PoReconPage(props) {
 
   return (
     <div>
-      <p style={{ color: "#6B7280", fontSize: 13, marginBottom: 20 }}>Catches POs created directly in Acumatica (not through the hub) that are missing from the FuzeRX / GGM receiving trackers. Pulls a recent window of POs (default 6 days \u2014 increase it below to catch backdated or duplicated POs), compares Vendor Ref against what's already logged, and auto-adds anything missing \u2014 then re-checks to confirm it landed.</p>
+      <p style={{ color: "#6B7280", fontSize: 13, marginBottom: 20 }}>Catches POs created directly in Acumatica (not through the hub) that are missing from the FuzeRX / GGM receiving trackers. Pulls a recent window of POs (default 6 days — increase it below to catch backdated or duplicated POs), compares Vendor Ref against what's already logged, and auto-adds anything missing — then re-checks to confirm it landed.</p>
       <div style={S.card}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           <button onClick={runRecon} disabled={busy} style={Object.assign({}, S.btn(), { padding: "10px 20px", opacity: busy ? 0.7 : 1 })}>{busy ? "Reconciling\u2026" : "Check & sync trackers"}</button>
