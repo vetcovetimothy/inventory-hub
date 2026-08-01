@@ -15,6 +15,10 @@
     {
       "path": "/api/cron/po-recon",
       "schedule": "0 4 * * *"
+    },
+    {
+      "path": "/api/cron/po-eod-clear",
+      "schedule": "0 8 * * *"
     }
   ]
 }
