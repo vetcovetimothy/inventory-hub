@@ -16,7 +16,7 @@ const KV_URL = process.env.KV_REST_API_URL;
 const KV_TOKEN = process.env.KV_REST_API_TOKEN;
 
 // Must match the WH keys in page.js
-var WH_KEYS = ["TP-NY", "TP-OH", "TP-CA", "TP-TX", "GGM-KY", "GGM-AZ"];
+var WH_KEYS = ["TP-NY", "TP-OH", "TP-CA", "TP-TX", "TP-LI", "TP-SD", "GGM-KY", "GGM-AZ"];
 
 async function kvGet(key) {
   if (!KV_URL || !KV_TOKEN) return null;
