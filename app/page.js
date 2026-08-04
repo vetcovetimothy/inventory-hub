@@ -186,6 +186,8 @@ const WH = {
   "TP-OH": { label: "Seven Hills", full: "Seven Hills, Ohio", color: "#059669", emailTo: "nigel.white@fuzehealth.com, anna.wilson@fuzehealth.com, trudie.selby@fuzehealth.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Ohio " + d; } },
   "TP-CA": { label: "Hayward", full: "Hayward, CA", color: "#D97706", emailTo: "nigel.white@fuzehealth.com, anna.wilson@fuzehealth.com, trudie.selby@fuzehealth.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Hayward " + d; } },
   "TP-TX": { label: "Dallas", full: "Dallas, TX", color: "#0891B2", emailTo: "nigel.white@fuzehealth.com, anna.wilson@fuzehealth.com, trudie.selby@fuzehealth.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Dallas " + d; } },
+  "TP-LI": { label: "Long Island", full: "Long Island, NY", color: "#14B8A6", emailTo: "nigel.white@fuzehealth.com, anna.wilson@fuzehealth.com, trudie.selby@fuzehealth.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Long Island " + d; } },
+  "TP-SD": { label: "San Diego", full: "San Diego, CA", color: "#F97316", emailTo: "nigel.white@fuzehealth.com, anna.wilson@fuzehealth.com, trudie.selby@fuzehealth.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "San Diego " + d; } },
   "GGM-KY": { label: "[GGM] Southgate", full: "[GGM] Southgate, KY", color: "#8B5CF6", emailTo: "p.pocsatko@gogomeds.com, m.shull@gogomeds.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Weekly Replenishment Orders " + d; } },
   "GGM-AZ": { label: "[GGM] Scottsdale", full: "[GGM] Scottsdale, AZ", color: "#EC4899", emailTo: "r.aldrich@gogomeds.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Weekly Replenishment Orders " + d; } },
 };
@@ -641,6 +643,8 @@ function WHT(props) {
     "TP-OH": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - SEVEN HILLS" },
     "TP-CA": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - HAYWARD" },
     "TP-TX": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - DALLAS" },
+    "TP-LI": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - LONG ISLAND" },
+    "TP-SD": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - SAN DIEGO" },
     "GGM-KY": { sheetId: "1dMZ_8VC6zaqLLWXQHFfuTXgxMfm0T4ip7To1CbXLfMk", tab: "RECEIVING - KY" },
     "GGM-AZ": { sheetId: "1dMZ_8VC6zaqLLWXQHFfuTXgxMfm0T4ip7To1CbXLfMk", tab: "RECEIVING - AZ" },
   };
@@ -2117,12 +2121,19 @@ function CycleCountTool(props) {
       // Build SFTP NDC → reported qty map (if SFTP mode)
       var sftpMap = {};
       if (isSftp && sftpRows) {
-        var sftpWhMap = { "TP-CA": "CA01", "TP-NY": "NY01", "TP-OH": "OH01", "TP-TX": "TX01", "TRUEPILL_BROOKLYN": "NY01", "TRUEPILL_SEVEN_HILLS": "OH01", "TRUEPILL_HAYWARD": "CA01" };
+        // NOTE: LI/SD codes (NY02/CA02) are best-guess following the NY01/CA01
+        // pattern and are UNVERIFIED. If SFTP qty overrides don't apply for Long
+        // Island / San Diego, check the actual warehouse code in the SFTP CSV and
+        // correct these two entries. A wrong code here only means no qty override
+        // for those lines (safe) \u2014 it does not misroute anything.
+        var sftpWhMap = { "TP-CA": "CA01", "TP-NY": "NY01", "TP-OH": "OH01", "TP-TX": "TX01", "TP-LI": "NY02", "TP-SD": "CA02", "TRUEPILL_BROOKLYN": "NY01", "TRUEPILL_SEVEN_HILLS": "OH01", "TRUEPILL_HAYWARD": "CA01" };
         var sftpWhCode = sftpWhMap[csvWhSelected] || sftpWhMap[wh] || "";
         if (!sftpWhCode) {
           // Try partial match
           var csvLower = (csvWhSelected || "").toLowerCase();
-          if (csvLower.indexOf("brooklyn") >= 0 || csvLower.indexOf("ny") >= 0) sftpWhCode = "NY01";
+          if (csvLower.indexOf("long island") >= 0) sftpWhCode = "NY02";
+          else if (csvLower.indexOf("san diego") >= 0) sftpWhCode = "CA02";
+          else if (csvLower.indexOf("brooklyn") >= 0 || csvLower.indexOf("ny") >= 0) sftpWhCode = "NY01";
           else if (csvLower.indexOf("seven") >= 0 || csvLower.indexOf("oh") >= 0) sftpWhCode = "OH01";
           else if (csvLower.indexOf("hayward") >= 0 || csvLower.indexOf("ca") >= 0) sftpWhCode = "CA01";
         }
@@ -2644,6 +2655,8 @@ function POImportTool(props) {
     "TP-OH": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - SEVEN HILLS" },
     "TP-CA": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - HAYWARD" },
     "TP-TX": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - DALLAS" },
+    "TP-LI": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - LONG ISLAND" },
+    "TP-SD": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - SAN DIEGO" },
     "GGM-KY": { sheetId: "1dMZ_8VC6zaqLLWXQHFfuTXgxMfm0T4ip7To1CbXLfMk", tab: "RECEIVING - KY" },
     "GGM-AZ": { sheetId: "1dMZ_8VC6zaqLLWXQHFfuTXgxMfm0T4ip7To1CbXLfMk", tab: "RECEIVING - AZ" },
   };
@@ -8848,6 +8861,8 @@ function PoReconPage(props) {
     "TP-OH": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - SEVEN HILLS" },
     "TP-CA": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - HAYWARD" },
     "TP-TX": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - DALLAS" },
+    "TP-LI": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - LONG ISLAND" },
+    "TP-SD": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - SAN DIEGO" },
     "GGM-KY": { sheetId: "1dMZ_8VC6zaqLLWXQHFfuTXgxMfm0T4ip7To1CbXLfMk", tab: "RECEIVING - KY" },
     "GGM-AZ": { sheetId: "1dMZ_8VC6zaqLLWXQHFfuTXgxMfm0T4ip7To1CbXLfMk", tab: "RECEIVING - AZ" },
   };
