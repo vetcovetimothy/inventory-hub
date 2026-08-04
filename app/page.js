@@ -8243,6 +8243,26 @@ function ForecastingTool(props) {
     if (m === "D") { var vals = anchors.trail3.map(function (i) { return fcNum(row, i); }).filter(function (v) { return v != null; }); if (!vals.length) return null; return vals.reduce(function (a, b) { return a + b; }, 0) / vals.length; }
     if (m === "E") { var lg = fcNum(row, anchors.lastHist); return lg == null ? null : lg; }
     if (m === "F") { var hv = anchors.trail3.map(function (i) { return fcNum(row, i); }).filter(function (v) { return v != null; }); if (!hv.length) return null; return Math.max.apply(null, hv) * gm; }
+    if (m === "G") {
+      // Avg month-over-month growth across the trailing months, applied once to
+      // last month. Current (anchor) month only; no compounding. Blank/zero
+      // prior months are skipped so a divide-by-zero can't poison the average.
+      if (num !== anchorNum) return null;
+      var t = anchors.trail3 || [];
+      if (t.length < 2) return null;
+      var ratios = [];
+      for (var gi = 1; gi < t.length; gi++) {
+        var pv = fcNum(row, t[gi - 1]);
+        var cv = fcNum(row, t[gi]);
+        if (pv == null || pv === 0 || cv == null) continue;
+        ratios.push(cv / pv);
+      }
+      if (!ratios.length) return null;
+      var avgRate = ratios.reduce(function (a, b) { return a + b; }, 0) / ratios.length;
+      var lm2 = fcNum(row, anchors.lastHist);
+      if (lm2 == null) return null;
+      return lm2 * avgRate;
+    }
     return null;
   }
   function rowKey(row) { return String(row[productCol] == null ? "" : row[productCol]); }
@@ -8289,7 +8309,7 @@ function ForecastingTool(props) {
   function fcTrend(row) { var t = anchors.trail3 || []; if (t.length < 2) return "flat"; var inc = true, dec = true; for (var i = 1; i < t.length; i++) { var p = fcNum(row, t[i - 1]); var c = fcNum(row, t[i]); p = (p == null ? 0 : p); c = (c == null ? 0 : c); if (!(p < c)) inc = false; if (!(p > c)) dec = false; } return inc ? "g" : dec ? "d" : "flat"; }
   var FC_FILTER_OPTS = {
     repl: [{ value: "A", label: "A" }, { value: "B", label: "B" }, { value: "C", label: "C" }, { value: "Other", label: "Other / blank" }],
-    strategy: FC_METHODS.map(function (m) { return { value: m.id, label: m.label }; }),
+    strategy: FC_METHODS.map(function (m) { return { value: m.id, label: m.label }; }).concat([{ value: "G", label: "G - 3-mo avg growth x last mo" }]),
     flag: [{ value: "SD", label: "SD (short-dating)" }, { value: "BO", label: "BO (backorder)" }, { value: "None", label: "No flag" }],
     growing: [{ value: "g", label: "Growing" }, { value: "d", label: "Decreasing" }, { value: "flat", label: "Flat / mixed" }]
   };
@@ -8719,6 +8739,7 @@ function ForecastingTool(props) {
                         <option value="">Use Global Strat</option>
                         <option value="none">None (no strategy)</option>
                         {FC_METHODS.map(function (m) { return <option key={m.id} value={m.id}>{m.id + " - " + m.short}</option>; })}
+                        {(function () { var tr = fcTrend(row); return (tr === "g" || tr === "d"); })() ? <option value="G">G - 3-mo avg growth x last mo</option> : null}
                       </select>
                       {(rowMethod[k] === "B" || rowMethod[k] === "F") ? <input type="number" step="0.05" min="0" value={rowGrowth[k] != null && rowGrowth[k] !== "" ? rowGrowth[k] : growth} onChange={function (e) { setRowG(k, e.target.value); }} title="Growth multiplier for this item (overrides the global rate)" style={{ width: 62, padding: "5px 6px", fontSize: 12, borderRadius: 6, border: "1px solid #C2DCEE", background: "#F3F8FC", color: "#0B6FA8", fontFamily: "inherit" }} /> : null}
                     </div>
