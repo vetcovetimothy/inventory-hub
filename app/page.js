@@ -2121,11 +2121,8 @@ function CycleCountTool(props) {
       // Build SFTP NDC → reported qty map (if SFTP mode)
       var sftpMap = {};
       if (isSftp && sftpRows) {
-        // NOTE: LI/SD codes (NY02/CA02) are best-guess following the NY01/CA01
-        // pattern and are UNVERIFIED. If SFTP qty overrides don't apply for Long
-        // Island / San Diego, check the actual warehouse code in the SFTP CSV and
-        // correct these two entries. A wrong code here only means no qty override
-        // for those lines (safe) \u2014 it does not misroute anything.
+        // Inbound SFTP "Warehouse Code" values per hub warehouse.
+        // TP-LI (Long Island) = NY02, TP-SD (San Diego) = CA02.
         var sftpWhMap = { "TP-CA": "CA01", "TP-NY": "NY01", "TP-OH": "OH01", "TP-TX": "TX01", "TP-LI": "NY02", "TP-SD": "CA02", "TRUEPILL_BROOKLYN": "NY01", "TRUEPILL_SEVEN_HILLS": "OH01", "TRUEPILL_HAYWARD": "CA01" };
         var sftpWhCode = sftpWhMap[csvWhSelected] || sftpWhMap[wh] || "";
         if (!sftpWhCode) {
