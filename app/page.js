@@ -3495,8 +3495,7 @@ function POImportTool(props) {
           return;
         }
         if (chk.existing && chk.existing.length) {
-          var lines = chk.existing.map(function (e) { return "\u2022 " + e.vendorRef + " already exists as Acumatica " + (e.orderNbr || "PO") + (e.status ? " (" + e.status + ")" : ""); });
-          setAcuCreateResult({ data: { ok: false, stage: "already-exists", failure: { stage: "duplicate-check", errorDetails: [{ message: "Blocked \u2014 nothing created. These POs already exist in Acumatica:\n" + lines.join("\n") }] }, succeeded: [] }, requested: posToCreate });
+          setAcuCreateResult({ data: { ok: false, stage: "already-exists", alreadyExists: chk.existing, succeeded: [] }, requested: posToCreate });
           toast(chk.existingRefs.length + " PO(s) already in Acumatica \u2014 batch blocked, nothing created", "error");
           setAcuCreateLoading(false);
           return;
@@ -3961,13 +3960,28 @@ function POImportTool(props) {
         var requested = acuCreateResult.requested || [];
         var succeeded = data.succeeded || [];
         var failure = data.failure || null;
+        var alreadyExists = data.alreadyExists || null;
         var allOk = data.ok === true && !failure;
         var failureRequested = failure ? requested[failure.poIndex] : null;
         var notAttempted = failure ? requested.slice(failure.poIndex + 1) : [];
         return <div onClick={function() { setAcuCreateResult(null); setDummyDelete(null); }} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
           <div onClick={function(e) { e.stopPropagation(); }} style={{ background: "#FFFFFF", borderRadius: 8, padding: 24, width: "min(720px, 92vw)", maxHeight: "85vh", overflow: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.2)" }}>
-            <div style={{ fontSize: 18, fontWeight: 700, color: allOk ? "#047857" : "#DC2626", marginBottom: 8 }}>{allOk ? "\u2713 All POs created" : "\u26A0 Stopped on failure"}</div>
-            <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 16 }}>{succeeded.length} created, {failure ? "1 failed" : "0 failed"}{notAttempted.length > 0 ? ", " + notAttempted.length + " not attempted" : ""}</div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: allOk ? "#047857" : "#DC2626", marginBottom: 8 }}>{allOk ? "\u2713 All POs created" : alreadyExists ? "\u26A0 Already in Acumatica \u2014 nothing created" : "\u26A0 Stopped on failure"}</div>
+            {!alreadyExists && <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 16 }}>{succeeded.length} created, {failure ? "1 failed" : "0 failed"}{notAttempted.length > 0 ? ", " + notAttempted.length + " not attempted" : ""}</div>}
+
+            {alreadyExists && <div style={{ background: "rgba(180,83,9,0.06)", border: "1px solid rgba(180,83,9,0.25)", borderRadius: 6, padding: 12, marginBottom: 16 }}>
+              <div style={{ fontSize: 13, color: "#374151", marginBottom: 10 }}>These POs already exist in Acumatica, so nothing was created. You can still add them to the receiving tracker below (any already on the tracker are skipped).</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {alreadyExists.map(function(e, i) {
+                  return <div key={i} style={{ fontSize: 12, background: "#FFFFFF", border: "1px solid #FED7AA", borderRadius: 6, padding: "8px 10px" }}>
+                    <span style={{ fontFamily: "monospace", fontWeight: 600, color: "#1F2937" }}>{e.vendorRef}</span>
+                    <span style={{ color: "#6B7280" }}>{" \u2192 exists as "}</span>
+                    <span style={{ fontFamily: "monospace", fontWeight: 600, color: "#B45309" }}>{e.orderNbr || "PO"}</span>
+                    {e.status ? <span style={{ color: "#6B7280" }}>{" (" + e.status + ")"}</span> : null}
+                  </div>;
+                })}
+              </div>
+            </div>}
 
             {succeeded.length > 0 && <div style={{ marginBottom: 16 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: "#047857", marginBottom: 8 }}>Created in Acumatica:</div>
@@ -4065,6 +4079,7 @@ function POImportTool(props) {
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
               <button onClick={function() { setAcuCreateResult(null); setDummyDelete(null); }} style={Object.assign({}, S.btn(), { padding: "8px 16px" })}>Close</button>
               {allOk && <button onClick={openTrackerPreview} style={Object.assign({}, S.btn(), { padding: "8px 16px", background: "#8B5CF6", border: "1px solid #8B5CF6", color: "#fff" })}>{"\u2192"} Add to tracker</button>}
+              {alreadyExists && <button onClick={function() { setAcuCreateResult(null); autoAddToTrackerAfterCreate(); }} style={Object.assign({}, S.btn(), { padding: "8px 16px", background: "#8B5CF6", border: "1px solid #8B5CF6", color: "#fff" })}>{"\u2192"} Add to tracker (skip duplicates)</button>}
             </div>
           </div>
         </div>;
