@@ -3556,12 +3556,14 @@ function POImportTool(props) {
         })
       });
       var data = await resp.json();
+      // Always open the result dialog and leave it open until the user closes it.
+      // It carries the new Acumatica PO number, the line-by-line NDC confirmation,
+      // and (for GGM) the dummy-cleanup result \u2014 worth keeping visible.
       setAcuCreateResult({ data: data, requested: posToCreate });
       if (data.ok) {
         toast("Created " + (data.succeeded ? data.succeeded.length : 0) + " PO(s) in Acumatica", "success");
       } else {
         var succ = data.succeeded ? data.succeeded.length : 0;
-        var attempted = succ + 1; // we stop on first failure
         toast(succ + "/" + posToCreate.length + " created \u2014 stopped on failure (see results)", "error");
       }
     } catch (err) {
@@ -3572,24 +3574,16 @@ function POImportTool(props) {
     }
     // GoGoMeds crossovers only: after a fully successful create, find and delete
     // the placeholder dummy PO(s). Gated on data.ok so a partial/failed batch never
-    // triggers deletes. Runs after the finally so the create result is already shown.
-    var dummyProblem = false;
+    // triggers deletes. The dummy result renders into the already-open dialog.
     if (vendor === "ggm-crossovers" && data && data.ok) {
-      var dres = await deleteDummyPOs(posToCreate);
-      dummyProblem = !!(dres && dres.problem);
+      await deleteDummyPOs(posToCreate);
     }
     // After a fully successful create, auto-add the created POs to their receiving
-    // tracker tabs (skipping any already present). Gated on data.ok so a partial or
-    // failed batch never touches the tracker. Runs last; tracker issues are toasted
-    // but never undo the successful Acumatica create.
+    // tracker tabs (skipping any already present). Non-blocking: tracker issues are
+    // toasted but never undo the successful Acumatica create. The dialog stays open
+    // until the user closes it.
     if (data && data.ok) {
       await addToTracker();
-    }
-    // Dialog policy: only keep the result dialog open when something needs a look
-    // \u2014 a create failure, or a GGM dummy-cleanup that didn't go cleanly. On a
-    // fully clean success the toasts already report what happened, so dismiss it.
-    if (data && data.ok && !dummyProblem) {
-      setAcuCreateResult(null);
     }
   }
 
