@@ -2738,6 +2738,51 @@ function POImportTool(props) {
     if (!targets.length) { toast("No lines map to a tracker tab (check the warehouse).", "error"); return; }
     setTrackerPreview({ targets: targets, unmapped: unmapped });
   }
+  // Called automatically after a fully successful Acumatica create. Appends the
+  // just-created POs to their receiving tracker tabs, but skips any PO already on
+  // its tab (matched by PO number / vendor ref) so a create+auto-add can't double
+  // up with a manual add. Non-blocking: tracker failures are surfaced via toast
+  // but never undo the successful Acumatica create.
+  async function autoAddToTrackerAfterCreate() {
+    var targets = buildTrackerTargets();
+    if (!targets.length) return;
+    try {
+      // Read each destination tab's existing refs so we can filter out rows for
+      // POs already present. tracker-append targets carry rows; we match each
+      // row's PO number against the tab's refs.
+      var okCount = 0, skipped = 0, failMsg = "", tabsUsed = {};
+      for (var i = 0; i < targets.length; i++) {
+        var t = targets[i];
+        var refSet = {};
+        try {
+          var rr = await fetch("/api/tracker-read", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sheetId: t.sheetId, tab: t.tab }) });
+          if (rr.ok) { var rd = await rr.json(); ((rd && rd.refs) || []).forEach(function (x) { refSet[String(x).trim()] = true; }); }
+        } catch (e) { /* read fail: fall through and append (fail-open on the read) */ }
+        // Filter this target's rows to those whose PO isn't already on the tab.
+        // Row layout comes from buildTrackerTargets(): PO number is at index 6.
+        var keepRows = t.rows.filter(function (row) {
+          var ref = Array.isArray(row) ? String(row[6] || "").trim() : "";
+          if (!ref) return true; // can't tell -> keep (fail-open)
+          if (refSet[ref]) { skipped++; return false; }
+          return true;
+        });
+        if (!keepRows.length) continue;
+        var resp = await fetch("/api/tracker-append", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sheetId: t.sheetId, tab: t.tab, rows: keepRows }) });
+        var data = await resp.json();
+        if (data && data.ok) { okCount += (data.appended || keepRows.length); tabsUsed[t.tab] = true; }
+        else { failMsg = t.tab + ": " + ((data && data.error) || "failed"); break; }
+      }
+      if (failMsg) { toast("Auto-add to tracker failed \u2014 " + failMsg, "error"); return; }
+      if (okCount > 0) {
+        setTrackerAdded({ count: okCount, tabs: Object.keys(tabsUsed).join(", "), at: Date.now() });
+        toast("Auto-added " + okCount + " row" + (okCount === 1 ? "" : "s") + " to the tracker" + (skipped ? " (" + skipped + " already there, skipped)" : "") + ".");
+      } else if (skipped > 0) {
+        toast("All created POs were already on the tracker \u2014 nothing to add.");
+      }
+    } catch (e) {
+      toast("Auto-add to tracker error: " + (e && e.message ? e.message : e), "error");
+    }
+  }
   async function confirmTrackerAppend() {
     if (!trackerPreview) return;
     setTrackerBusy(true);
@@ -3429,6 +3474,41 @@ function POImportTool(props) {
     setAcuCreateConfirm(null);
     setAcuCreateLoading(true);
     setDummyDelete(null);
+
+    // Pre-create guard: check whether any of these POs already exist in
+    // Acumatica (matched by VendorRef). If ANY do, block the whole batch and
+    // create nothing. If the check itself can't complete, we also block (fail
+    // closed) rather than risk creating a duplicate.
+    try {
+      var refsToCheck = posToCreate.map(function (p) { return p.vendorRef; }).filter(Boolean);
+      if (refsToCheck.length) {
+        var chkResp = await fetch("/api/acumatica-check-po", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: cred.username, password: cred.password, vendorRefs: refsToCheck })
+        });
+        var chk = await chkResp.json();
+        if (!chk.ok) {
+          setAcuCreateResult({ data: { ok: false, stage: "precheck-failed", failure: { stage: "precheck", errorDetails: [{ message: "Could not verify against Acumatica before creating (" + (chk.stage || "unknown") + "). Nothing was created \u2014 try again." }] }, succeeded: [] }, requested: posToCreate });
+          toast("Couldn't verify against Acumatica \u2014 nothing created", "error");
+          setAcuCreateLoading(false);
+          return;
+        }
+        if (chk.existing && chk.existing.length) {
+          var lines = chk.existing.map(function (e) { return "\u2022 " + e.vendorRef + " already exists as Acumatica " + (e.orderNbr || "PO") + (e.status ? " (" + e.status + ")" : ""); });
+          setAcuCreateResult({ data: { ok: false, stage: "already-exists", failure: { stage: "duplicate-check", errorDetails: [{ message: "Blocked \u2014 nothing created. These POs already exist in Acumatica:\n" + lines.join("\n") }] }, succeeded: [] }, requested: posToCreate });
+          toast(chk.existingRefs.length + " PO(s) already in Acumatica \u2014 batch blocked, nothing created", "error");
+          setAcuCreateLoading(false);
+          return;
+        }
+      }
+    } catch (err) {
+      setAcuCreateResult({ data: { ok: false, stage: "precheck-error", failure: { stage: "precheck", errorDetails: [{ message: "Pre-create check errored: " + String(err) + ". Nothing was created." }] }, succeeded: [] }, requested: posToCreate });
+      toast("Pre-create check failed \u2014 nothing created", "error");
+      setAcuCreateLoading(false);
+      return;
+    }
+
     try {
       var resp = await fetch("/api/acumatica-po-import-create", {
         method: "POST",
@@ -3467,6 +3547,13 @@ function POImportTool(props) {
     // triggers deletes. Runs after the finally so the create result is already shown.
     if (vendor === "ggm-crossovers" && data && data.ok) {
       await deleteDummyPOs(posToCreate);
+    }
+    // After a fully successful create, auto-add the created POs to their receiving
+    // tracker tabs (skipping any already present). Gated on data.ok so a partial or
+    // failed batch never touches the tracker. Runs last; tracker issues are toasted
+    // but never undo the successful Acumatica create.
+    if (data && data.ok) {
+      await autoAddToTrackerAfterCreate();
     }
   }
 
