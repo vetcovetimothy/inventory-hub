@@ -2604,8 +2604,11 @@ function POImportTool(props) {
   var _trackerPreview = useState(null), trackerPreview = _trackerPreview[0], setTrackerPreview = _trackerPreview[1];
   var _trackerBusy = useState(false), trackerBusy = _trackerBusy[0], setTrackerBusy = _trackerBusy[1];
   var _trackerAdded = useState(null), trackerAdded = _trackerAdded[0], setTrackerAdded = _trackerAdded[1];
-  var _trackerDup = useState(null), trackerDup = _trackerDup[0], setTrackerDup = _trackerDup[1];
-  var _trackerDupBusy = useState(false), trackerDupBusy = _trackerDupBusy[0], setTrackerDupBusy = _trackerDupBusy[1];
+  // Unified post-parse status: where each parsed PO already lives (tracker /
+  // Acumatica / both / neither). Drives the single adaptive action button.
+  var _poStatus = useState(null), poStatus = _poStatus[0], setPoStatus = _poStatus[1];
+  var _poStatusBusy = useState(false), poStatusBusy = _poStatusBusy[0], setPoStatusBusy = _poStatusBusy[1];
+  var _showAdvanced = useState(false), showAdvanced = _showAdvanced[0], setShowAdvanced = _showAdvanced[1];
 
   // ── Sub-tabs: the PO Translator vs. a one-off Price Check tool ──
   var _subTab = useState("translator"), subTab = _subTab[0], setSubTab = _subTab[1];
@@ -2658,55 +2661,90 @@ function POImportTool(props) {
     "GGM-AZ": { sheetId: "1dMZ_8VC6zaqLLWXQHFfuTXgxMfm0T4ip7To1CbXLfMk", tab: "RECEIVING - AZ" },
   };
   function uomToPkgSize(uom) { var m = String(uom == null ? "" : uom).match(/(\d+)\s*$/); return m ? Number(m[1]) : 1; }
-  // After a parse, check whether any parsed PO already exists on its destination
-  // tracker tab (matched by PO number / vendor ref, the same identity the
-  // reconciliator uses). If so, we surface a banner and lock the add/create
-  // buttons so the same PO can't be logged or created twice.
-  async function checkTrackerForDuplicates(rows) {
-    setTrackerDup(null);
+  // ── Unified post-parse status ────────────────────────────────────────────
+  // After a parse, determine where each PO already lives: on its receiving
+  // tracker, in Acumatica (by VendorRef), both, or neither. This single check
+  // replaces the old separate tracker-dup banner and the create-time Acumatica
+  // pre-check, so the whole picture is known upfront and one button can do the
+  // right thing. Fail-open per system: if a read fails we treat that system as
+  // "unknown/absent" rather than blocking, and note it.
+  async function computeBatchStatus(rows) {
+    setPoStatus(null);
     var list = rows || [];
     if (!list.length) return;
-    // Distinct (sheetId||tab) -> set of poNumbers headed there; plus a lookup of
-    // which tab each poNumber maps to for reporting.
-    var tabs = {};
-    var poToTab = {};
+
+    // Distinct PO numbers in this batch + their destination tab.
+    var poSet = {};
+    var tabsByKey = {};
     list.forEach(function (r) {
+      var po = String(r.poNumber || "").trim();
       var wh = String(r.warehouse || "").trim();
       var dest = TRACKER_MAP[wh];
-      var po = String(r.poNumber || "").trim();
-      if (!dest || !po) return;
-      var key = dest.sheetId + "||" + dest.tab;
-      if (!tabs[key]) tabs[key] = { sheetId: dest.sheetId, tab: dest.tab, pos: {} };
-      tabs[key].pos[po] = true;
-      poToTab[po] = dest.tab;
+      if (po) poSet[po] = true;
+      if (dest && po) {
+        var key = dest.sheetId + "||" + dest.tab;
+        if (!tabsByKey[key]) tabsByKey[key] = { sheetId: dest.sheetId, tab: dest.tab };
+      }
     });
-    var keys = Object.keys(tabs);
-    if (!keys.length) return;
-    setTrackerDupBusy(true);
+    var pos = Object.keys(poSet);
+    if (!pos.length) return;
+
+    setPoStatusBusy(true);
+    var onTracker = {};   // po -> tab
+    var inAcumatica = {}; // po -> {orderNbr,status}
+    var trackerReadFailed = false, acuCheckFailed = false;
+
     try {
-      var dupPos = {};
-      for (var i = 0; i < keys.length; i++) {
-        var t = tabs[keys[i]];
-        var resp = await fetch("/api/tracker-read", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sheetId: t.sheetId, tab: t.tab }) });
-        if (!resp.ok) continue;
-        var data = await resp.json();
-        var refs = (data && data.refs) || [];
-        var refSet = {};
-        refs.forEach(function (x) { refSet[String(x).trim()] = true; });
-        Object.keys(t.pos).forEach(function (po) { if (refSet[po]) dupPos[po] = t.tab; });
+      // 1) Tracker: read each destination tab's refs once.
+      var tabKeys = Object.keys(tabsByKey);
+      for (var i = 0; i < tabKeys.length; i++) {
+        var t = tabsByKey[tabKeys[i]];
+        try {
+          var rr = await fetch("/api/tracker-read", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sheetId: t.sheetId, tab: t.tab }) });
+          if (rr.ok) {
+            var rd = await rr.json();
+            var refSet = {};
+            ((rd && rd.refs) || []).forEach(function (x) { refSet[String(x).trim()] = true; });
+            pos.forEach(function (po) { if (refSet[po]) onTracker[po] = t.tab; });
+          } else { trackerReadFailed = true; }
+        } catch (e) { trackerReadFailed = true; }
       }
-      var dupList = Object.keys(dupPos);
-      if (dupList.length) {
-        var tabNames = {};
-        dupList.forEach(function (po) { tabNames[dupPos[po]] = true; });
-        setTrackerDup({ pos: dupList, tabs: Object.keys(tabNames).join(", "), at: Date.now() });
+
+      // 2) Acumatica: one call checks all PO refs by VendorRef.
+      if (ok && cred && cred.username) {
+        try {
+          var chkResp = await fetch("/api/acumatica-check-po", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: cred.username, password: cred.password, vendorRefs: pos }) });
+          var chk = await chkResp.json();
+          if (chk && chk.ok) {
+            (chk.existing || []).forEach(function (e) { if (e.vendorRef) inAcumatica[e.vendorRef] = { orderNbr: e.orderNbr, status: e.status }; });
+          } else { acuCheckFailed = true; }
+        } catch (e) { acuCheckFailed = true; }
+      } else {
+        acuCheckFailed = true; // not logged in -> can't verify Acumatica
       }
-    } catch (e) {
-      // Read failure is non-blocking: if we can't check, we don't lock the
-      // buttons (better to allow than to wrongly block a legitimate add).
     } finally {
-      setTrackerDupBusy(false);
+      setPoStatusBusy(false);
     }
+
+    // Classify each PO and roll up an overall batch state.
+    var perPo = pos.map(function (po) {
+      var tr = !!onTracker[po];
+      var ac = !!inAcumatica[po];
+      var state = tr && ac ? "synced" : ac ? "acu-only" : tr ? "tracker-only" : "new";
+      return { po: po, onTracker: tr, tab: onTracker[po] || null, inAcumatica: ac, acu: inAcumatica[po] || null, state: state };
+    });
+    // Overall: worst-case simple rule — if all synced -> synced; if any is new
+    // and none conflict, allow create+track; mixed states are reported per-PO.
+    var states = {};
+    perPo.forEach(function (p) { states[p.state] = (states[p.state] || 0) + 1; });
+    var overall;
+    if (states.synced === perPo.length) overall = "synced";
+    else if (states.new === perPo.length) overall = "new";
+    else if (states["acu-only"] === perPo.length) overall = "acu-only";
+    else if (states["tracker-only"] === perPo.length) overall = "tracker-only";
+    else overall = "mixed";
+
+    setPoStatus({ overall: overall, perPo: perPo, trackerReadFailed: trackerReadFailed, acuCheckFailed: acuCheckFailed, at: Date.now() });
   }
 
   function buildTrackerTargets() {
@@ -2732,56 +2770,47 @@ function POImportTool(props) {
     });
     return Object.keys(byTab).map(function(k) { return byTab[k]; });
   }
+
+  // ── Single tracker-add path ────────────────────────────────────────────────
+  // Always dedups against what's already on each tab (PO number at row index 6).
+  // Returns { okCount, skipped, failMsg, tabs } and updates trackerAdded on success.
+  // Used by the adaptive button and the Advanced menu alike — no other add path.
+  async function addToTracker() {
+    var targets = buildTrackerTargets();
+    if (!targets.length) { toast("No lines map to a tracker tab (check the warehouse).", "error"); return { okCount: 0, skipped: 0, failMsg: "no targets" }; }
+    var okCount = 0, skipped = 0, failMsg = "", tabsUsed = {};
+    for (var i = 0; i < targets.length; i++) {
+      var t = targets[i];
+      var refSet = {};
+      try {
+        var rr = await fetch("/api/tracker-read", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sheetId: t.sheetId, tab: t.tab }) });
+        if (rr.ok) { var rd = await rr.json(); ((rd && rd.refs) || []).forEach(function (x) { refSet[String(x).trim()] = true; }); }
+      } catch (e) { /* read fail: fall through and append (fail-open) */ }
+      var keepRows = t.rows.filter(function (row) {
+        var ref = Array.isArray(row) ? String(row[6] || "").trim() : "";
+        if (!ref) return true;
+        if (refSet[ref]) { skipped++; return false; }
+        return true;
+      });
+      if (!keepRows.length) continue;
+      try {
+        var resp = await fetch("/api/tracker-append", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sheetId: t.sheetId, tab: t.tab, rows: keepRows }) });
+        var data = await resp.json();
+        if (data && data.ok) { okCount += (data.appended || keepRows.length); tabsUsed[t.tab] = true; }
+        else { failMsg = t.tab + ": " + ((data && data.error) || "failed"); break; }
+      } catch (e) { failMsg = t.tab + ": " + String(e); break; }
+    }
+    if (failMsg) { toast("Tracker add failed \u2014 " + failMsg, "error"); }
+    else if (okCount > 0) { setTrackerAdded({ count: okCount, tabs: Object.keys(tabsUsed).join(", "), at: Date.now() }); toast("Added " + okCount + " row" + (okCount === 1 ? "" : "s") + " to the tracker" + (skipped ? " (" + skipped + " already there, skipped)" : "") + "."); }
+    else if (skipped > 0) { toast("All rows were already on the tracker \u2014 nothing to add."); }
+    return { okCount: okCount, skipped: skipped, failMsg: failMsg, tabs: Object.keys(tabsUsed).join(", ") };
+  }
+
   function openTrackerPreview() {
     var targets = buildTrackerTargets();
     var unmapped = (results || []).filter(function(r) { return !TRACKER_MAP[String(r.warehouse || "").trim()]; }).length;
     if (!targets.length) { toast("No lines map to a tracker tab (check the warehouse).", "error"); return; }
     setTrackerPreview({ targets: targets, unmapped: unmapped });
-  }
-  // Called automatically after a fully successful Acumatica create. Appends the
-  // just-created POs to their receiving tracker tabs, but skips any PO already on
-  // its tab (matched by PO number / vendor ref) so a create+auto-add can't double
-  // up with a manual add. Non-blocking: tracker failures are surfaced via toast
-  // but never undo the successful Acumatica create.
-  async function autoAddToTrackerAfterCreate() {
-    var targets = buildTrackerTargets();
-    if (!targets.length) return;
-    try {
-      // Read each destination tab's existing refs so we can filter out rows for
-      // POs already present. tracker-append targets carry rows; we match each
-      // row's PO number against the tab's refs.
-      var okCount = 0, skipped = 0, failMsg = "", tabsUsed = {};
-      for (var i = 0; i < targets.length; i++) {
-        var t = targets[i];
-        var refSet = {};
-        try {
-          var rr = await fetch("/api/tracker-read", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sheetId: t.sheetId, tab: t.tab }) });
-          if (rr.ok) { var rd = await rr.json(); ((rd && rd.refs) || []).forEach(function (x) { refSet[String(x).trim()] = true; }); }
-        } catch (e) { /* read fail: fall through and append (fail-open on the read) */ }
-        // Filter this target's rows to those whose PO isn't already on the tab.
-        // Row layout comes from buildTrackerTargets(): PO number is at index 6.
-        var keepRows = t.rows.filter(function (row) {
-          var ref = Array.isArray(row) ? String(row[6] || "").trim() : "";
-          if (!ref) return true; // can't tell -> keep (fail-open)
-          if (refSet[ref]) { skipped++; return false; }
-          return true;
-        });
-        if (!keepRows.length) continue;
-        var resp = await fetch("/api/tracker-append", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sheetId: t.sheetId, tab: t.tab, rows: keepRows }) });
-        var data = await resp.json();
-        if (data && data.ok) { okCount += (data.appended || keepRows.length); tabsUsed[t.tab] = true; }
-        else { failMsg = t.tab + ": " + ((data && data.error) || "failed"); break; }
-      }
-      if (failMsg) { toast("Auto-add to tracker failed \u2014 " + failMsg, "error"); return; }
-      if (okCount > 0) {
-        setTrackerAdded({ count: okCount, tabs: Object.keys(tabsUsed).join(", "), at: Date.now() });
-        toast("Auto-added " + okCount + " row" + (okCount === 1 ? "" : "s") + " to the tracker" + (skipped ? " (" + skipped + " already there, skipped)" : "") + ".");
-      } else if (skipped > 0) {
-        toast("All created POs were already on the tracker \u2014 nothing to add.");
-      }
-    } catch (e) {
-      toast("Auto-add to tracker error: " + (e && e.message ? e.message : e), "error");
-    }
   }
   async function confirmTrackerAppend() {
     if (!trackerPreview) return;
@@ -3134,7 +3163,7 @@ function POImportTool(props) {
   async function handleValidate() {
     if (pdfs.length === 0) { toast("Upload at least one PDF", "error"); return; }
     if (!ok) { lp(); return; }
-    setLoading(true); setError(null); setResults([]); setMckWarnings([]); setTrackerAdded(null); setTrackerDup(null);
+    setLoading(true); setError(null); setResults([]); setMckWarnings([]); setTrackerAdded(null); setPoStatus(null); setShowAdvanced(false);
     try {
       // Step 1: Parse each PDF separately to avoid text extraction state issues
       var pdfItems = [];
@@ -3268,7 +3297,7 @@ function POImportTool(props) {
       }
 
       setResults(matched);
-      checkTrackerForDuplicates(matched);
+      computeBatchStatus(matched);
       setStatedAmounts(function(prev) { return Object.assign({}, prev, newStatedAmounts); });
       // Auto-select first file tab for multi-PO vendors (other + GGM crossovers)
       if ((vendor === "other" || vendor === "ggm-crossovers") && matched.length > 0) {
@@ -3552,7 +3581,7 @@ function POImportTool(props) {
     // failed batch never touches the tracker. Runs last; tracker issues are toasted
     // but never undo the successful Acumatica create.
     if (data && data.ok) {
-      await autoAddToTrackerAfterCreate();
+      await addToTracker();
     }
   }
 
@@ -3827,10 +3856,30 @@ function POImportTool(props) {
           <span style={{ fontSize: 13, fontWeight: 600, color: "#047857" }}>{"\u2713 Added " + trackerAdded.count + " row" + (trackerAdded.count === 1 ? "" : "s") + " to " + trackerAdded.tabs}</span>
           <button onClick={function() { setTrackerAdded(null); }} style={{ background: "transparent", border: "none", color: "#047857", fontSize: 16, cursor: "pointer", lineHeight: 1 }}>{"\u00D7"}</button>
         </div>}
-        {trackerDup && <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#ECFDF5", border: "1px solid #A7F3D0", borderRadius: 8, padding: "10px 16px", marginBottom: 16 }}>
-          <span style={{ fontSize: 13, fontWeight: 600, color: "#047857" }}>{"\u2713 " + (trackerDup.pos.length === 1 ? "PO " + trackerDup.pos[0] + " is" : "POs " + trackerDup.pos.join(", ") + " are") + " already on " + trackerDup.tabs + " \u2014 add to tracker and create are locked to prevent duplicates."}</span>
-          <button onClick={function() { setTrackerDup(null); }} title="Dismiss and unlock the buttons" style={{ background: "transparent", border: "none", color: "#047857", fontSize: 16, cursor: "pointer", lineHeight: 1 }}>{"\u00D7"}</button>
-        </div>}
+        {(poStatusBusy || poStatus) && (function() {
+          if (poStatusBusy) return <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 8, padding: "10px 16px", marginBottom: 16, fontSize: 13, color: "#6B7280" }}><Spinner size={14} /> Checking tracker and Acumatica\u2026</div>;
+          var ov = poStatus.overall;
+          var meta = {
+            "new":          { bg: "#EFF6FF", bd: "#BFDBFE", fg: "#1D4ED8", icon: "\u2705", text: "New \u2014 not in Acumatica or on the tracker. Ready to create." },
+            "acu-only":     { bg: "#FFFBEB", bd: "#FDE68A", fg: "#B45309", icon: "\uD83D\uDCCB", text: "Already in Acumatica, not on the tracker. Add to tracker only \u2014 create is skipped." },
+            "tracker-only": { bg: "#FFFBEB", bd: "#FDE68A", fg: "#B45309", icon: "\uD83D\uDCC1", text: "On the tracker, not in Acumatica. Create in Acumatica only \u2014 tracker add is skipped." },
+            "synced":       { bg: "#ECFDF5", bd: "#A7F3D0", fg: "#047857", icon: "\u2714\uFE0F", text: "Fully synced \u2014 already in Acumatica and on the tracker. Nothing to do." },
+            "mixed":        { bg: "#FFFBEB", bd: "#FDE68A", fg: "#B45309", icon: "\u26A0", text: "Mixed \u2014 these POs are in different states. See per-PO detail below; use Advanced to act selectively." }
+          }[ov] || { bg: "#F9FAFB", bd: "#E5E7EB", fg: "#374151", icon: "", text: "" };
+          return <div style={{ background: meta.bg, border: "1px solid " + meta.bd, borderRadius: 8, padding: "10px 16px", marginBottom: 16 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: meta.fg }}>{meta.icon + " " + meta.text}</span>
+              <button onClick={function() { setPoStatus(null); }} title="Dismiss" style={{ background: "transparent", border: "none", color: meta.fg, fontSize: 16, cursor: "pointer", lineHeight: 1 }}>{"\u00D7"}</button>
+            </div>
+            {(ov === "mixed") && <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 3 }}>
+              {poStatus.perPo.map(function(p, i) {
+                var label = p.state === "synced" ? "in Acumatica " + (p.acu && p.acu.orderNbr ? "(" + p.acu.orderNbr + ") " : "") + "+ on tracker" : p.state === "acu-only" ? "in Acumatica " + (p.acu && p.acu.orderNbr ? "(" + p.acu.orderNbr + ") " : "") + "only" : p.state === "tracker-only" ? "on tracker only" : "new";
+                return <div key={i} style={{ fontSize: 11, color: "#78350F" }}><span style={{ fontFamily: "monospace", fontWeight: 600 }}>{p.po}</span>{" \u2014 " + label}</div>;
+              })}
+            </div>}
+            {(poStatus.acuCheckFailed || poStatus.trackerReadFailed) && <div style={{ marginTop: 6, fontSize: 11, color: "#92400E" }}>{"Note: could not fully verify " + [poStatus.acuCheckFailed ? "Acumatica" : null, poStatus.trackerReadFailed ? "tracker" : null].filter(Boolean).join(" and ") + " \u2014 status may be incomplete."}</div>}
+          </div>;
+        })()}
 
         <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto" })}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", borderBottom: "1px solid #E5E7EB" }}>
@@ -3840,8 +3889,39 @@ function POImportTool(props) {
               {perFileTabs && fileList.length > 1 && <button onClick={function() { downloadCSV(activeResults); }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}><IconCSV /> Download Tab</button>}
               {perFileTabs && fileList.length > 1 && <button onClick={function() { fileList.forEach(function(f, idx) { setTimeout(function() { downloadCSV(results.filter(function(r) { return r.sourceFile === f.name; })); }, idx * 300); }); }} style={Object.assign({}, S.btn(), { padding: "6px 14px", fontSize: 12 })}><IconCSV /> Download All ({fileList.length} files)</button>}
               {!(perFileTabs && fileList.length > 1) && <button onClick={function() { downloadCSV(results); }} style={Object.assign({}, S.btn(), { padding: "6px 14px", fontSize: 12 })}><IconCSV /> Download CSV</button>}
-              <button onClick={openTrackerPreview} disabled={!!trackerDup || trackerDupBusy} style={{ background: (!!trackerDup || trackerDupBusy) ? "#D1D5DB" : "#8B5CF6", color: "#FFFFFF", border: "none", padding: "6px 14px", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: (!!trackerDup || trackerDupBusy) ? "not-allowed" : "pointer", display: "inline-flex", alignItems: "center", gap: 6 }} title={trackerDup ? "Already on the tracker \u2014 dismiss the banner to override" : trackerDupBusy ? "Checking tracker\u2026" : "Append these lines to the receiving tracker"}>{"\u2192"} Add to tracker</button>
-              <button onClick={onCreatePOsClick} disabled={acuCreateLoading || !ok || !!trackerDup || trackerDupBusy} style={{ background: (acuCreateLoading || !ok || !!trackerDup || trackerDupBusy) ? "#D1D5DB" : "#047857", color: "#FFFFFF", border: "none", padding: "6px 14px", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: (acuCreateLoading || !ok || !!trackerDup || trackerDupBusy) ? "not-allowed" : "pointer", display: "inline-flex", alignItems: "center", gap: 6 }} title={trackerDup ? "Already on the tracker \u2014 dismiss the banner to override" : trackerDupBusy ? "Checking tracker\u2026" : !ok ? "Acumatica credentials required" : "Create the parsed POs in Acumatica"}>{acuCreateLoading ? <><Spinner /> Creating...</> : <>{"\u2192"} Create POs in Acumatica</>}</button>
+              {(function() {
+                var ov = poStatus ? poStatus.overall : null;
+                var busy = poStatusBusy || acuCreateLoading;
+                // Primary action label + handler by status.
+                var primary = null;
+                if (busy) {
+                  primary = { label: acuCreateLoading ? "Creating\u2026" : "Checking\u2026", disabled: true, spin: true, fn: function(){} };
+                } else if (!poStatus) {
+                  // Status not yet known (e.g. not logged in): fall back to create.
+                  primary = { label: "\u2192 Create PO + add to tracker", disabled: !ok, fn: onCreatePOsClick, title: !ok ? "Acumatica credentials required" : "" };
+                } else if (ov === "new") {
+                  primary = { label: "\u2192 Create PO + add to tracker", disabled: !ok, fn: onCreatePOsClick, title: !ok ? "Acumatica credentials required" : "Create in Acumatica, then add to the tracker" };
+                } else if (ov === "acu-only") {
+                  primary = { label: "\u2192 Add to tracker", disabled: false, fn: addToTracker, title: "Already in Acumatica \u2014 just add to the receiving tracker" };
+                } else if (ov === "tracker-only") {
+                  primary = { label: "\u2192 Create PO in Acumatica", disabled: !ok, fn: onCreatePOsClick, title: !ok ? "Acumatica credentials required" : "Already on the tracker \u2014 just create in Acumatica" };
+                } else if (ov === "synced") {
+                  primary = { label: "\u2713 Already complete", disabled: true, fn: function(){}, title: "This PO is already in Acumatica and on the tracker" };
+                } else { // mixed
+                  primary = { label: "\u2192 Create + add where needed", disabled: !ok, fn: onCreatePOsClick, title: "Acts per-PO; already-existing ones are skipped" };
+                }
+                return <>
+                  <button onClick={primary.fn} disabled={primary.disabled} title={primary.title || ""} style={{ background: primary.disabled ? "#D1D5DB" : "#047857", color: "#FFFFFF", border: "none", padding: "6px 14px", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: primary.disabled ? "not-allowed" : "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>{primary.spin ? <><Spinner /> {primary.label}</> : primary.label}</button>
+                  <div style={{ position: "relative", display: "inline-block" }}>
+                    <button onClick={function() { setShowAdvanced(!showAdvanced); }} title="Individual actions" style={{ background: "transparent", color: "#6B7280", border: "1px solid #E5E7EB", padding: "6px 10px", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Advanced {showAdvanced ? "\u25B4" : "\u25BE"}</button>
+                    {showAdvanced && <div style={{ position: "absolute", right: 0, top: "calc(100% + 4px)", background: "#FFFFFF", border: "1px solid #E5E7EB", borderRadius: 8, boxShadow: "0 6px 20px rgba(0,0,0,0.12)", padding: 6, zIndex: 50, minWidth: 220 }}>
+                      <button onClick={function() { setShowAdvanced(false); openTrackerPreview(); }} style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: "none", padding: "8px 10px", fontSize: 12, color: "#374151", cursor: "pointer", borderRadius: 6, fontFamily: "'Varela Round', sans-serif" }}>Add to tracker (preview first)</button>
+                      <button onClick={function() { setShowAdvanced(false); addToTracker(); }} style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: "none", padding: "8px 10px", fontSize: 12, color: "#374151", cursor: "pointer", borderRadius: 6, fontFamily: "'Varela Round', sans-serif" }}>Add to tracker (skip duplicates)</button>
+                      <button onClick={function() { setShowAdvanced(false); onCreatePOsClick(); }} disabled={!ok} style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: "none", padding: "8px 10px", fontSize: 12, color: ok ? "#374151" : "#9CA3AF", cursor: ok ? "pointer" : "not-allowed", borderRadius: 6, fontFamily: "'Varela Round', sans-serif" }}>Create in Acumatica only</button>
+                    </div>}
+                  </div>
+                </>;
+              })()}
             </div>
           </div>
           <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12, tableLayout: "auto" }}>
@@ -4079,7 +4159,7 @@ function POImportTool(props) {
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
               <button onClick={function() { setAcuCreateResult(null); setDummyDelete(null); }} style={Object.assign({}, S.btn(), { padding: "8px 16px" })}>Close</button>
               {allOk && <button onClick={openTrackerPreview} style={Object.assign({}, S.btn(), { padding: "8px 16px", background: "#8B5CF6", border: "1px solid #8B5CF6", color: "#fff" })}>{"\u2192"} Add to tracker</button>}
-              {alreadyExists && <button onClick={function() { setAcuCreateResult(null); autoAddToTrackerAfterCreate(); }} style={Object.assign({}, S.btn(), { padding: "8px 16px", background: "#8B5CF6", border: "1px solid #8B5CF6", color: "#fff" })}>{"\u2192"} Add to tracker (skip duplicates)</button>}
+              {alreadyExists && <button onClick={function() { setAcuCreateResult(null); addToTracker(); }} style={Object.assign({}, S.btn(), { padding: "8px 16px", background: "#8B5CF6", border: "1px solid #8B5CF6", color: "#fff" })}>{"\u2192"} Add to tracker (skip duplicates)</button>}
             </div>
           </div>
         </div>;
