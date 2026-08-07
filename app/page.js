@@ -3573,8 +3573,10 @@ function POImportTool(props) {
     // GoGoMeds crossovers only: after a fully successful create, find and delete
     // the placeholder dummy PO(s). Gated on data.ok so a partial/failed batch never
     // triggers deletes. Runs after the finally so the create result is already shown.
+    var dummyProblem = false;
     if (vendor === "ggm-crossovers" && data && data.ok) {
-      await deleteDummyPOs(posToCreate);
+      var dres = await deleteDummyPOs(posToCreate);
+      dummyProblem = !!(dres && dres.problem);
     }
     // After a fully successful create, auto-add the created POs to their receiving
     // tracker tabs (skipping any already present). Gated on data.ok so a partial or
@@ -3582,6 +3584,12 @@ function POImportTool(props) {
     // but never undo the successful Acumatica create.
     if (data && data.ok) {
       await addToTracker();
+    }
+    // Dialog policy: only keep the result dialog open when something needs a look
+    // \u2014 a create failure, or a GGM dummy-cleanup that didn't go cleanly. On a
+    // fully clean success the toasts already report what happened, so dismiss it.
+    if (data && data.ok && !dummyProblem) {
+      setAcuCreateResult(null);
     }
   }
 
@@ -3614,9 +3622,14 @@ function POImportTool(props) {
       var rs = (ddata && ddata.results) || [];
       var del = rs.filter(function(r) { return r.deleted; }).length;
       var prob = rs.length - del;
+      // "not-found" means there was simply no dummy to delete (e.g. a re-run) \u2014
+      // that's benign and shouldn't be treated as a problem that keeps the dialog
+      // open. A real problem is a found-but-failed or ambiguous delete.
+      var realProblem = rs.some(function(r) { return !r.deleted && r.reason !== "not-found"; });
       if (del > 0 && prob === 0) toast("Deleted " + del + " dummy PO(s)", "success");
       else if (del > 0) toast("Deleted " + del + " dummy PO(s), " + prob + " need attention", "error");
-      else toast("No dummy PO deleted \u2014 see results", "error");
+      else if (realProblem) toast("Dummy PO not deleted \u2014 see results", "error");
+      // (no toast when simply nothing to delete; the create toast already covers success)
       // Best-effort: check off the deleted dummy in the PO Tool's Shipping tab
       // for that warehouse. Non-fatal if it can't (the delete already succeeded).
       for (var mi = 0; mi < rs.length; mi++) {
@@ -3624,9 +3637,11 @@ function POImportTool(props) {
           await markDummyShippingDone(rs[mi].warehouse, rs[mi].orderNbr, (whRef[rs[mi].warehouse] || []).join(", "));
         }
       }
+      return { problem: realProblem };
     } catch (err) {
       setDummyDelete({ loading: false, data: { ok: false, results: [], error: String(err) } });
       toast("Dummy delete network error", "error");
+      return { problem: true };
     }
   }
 
@@ -4158,7 +4173,6 @@ function POImportTool(props) {
 
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
               <button onClick={function() { setAcuCreateResult(null); setDummyDelete(null); }} style={Object.assign({}, S.btn(), { padding: "8px 16px" })}>Close</button>
-              {allOk && <button onClick={openTrackerPreview} style={Object.assign({}, S.btn(), { padding: "8px 16px", background: "#8B5CF6", border: "1px solid #8B5CF6", color: "#fff" })}>{"\u2192"} Add to tracker</button>}
               {alreadyExists && <button onClick={function() { setAcuCreateResult(null); addToTracker(); }} style={Object.assign({}, S.btn(), { padding: "8px 16px", background: "#8B5CF6", border: "1px solid #8B5CF6", color: "#fff" })}>{"\u2192"} Add to tracker (skip duplicates)</button>}
             </div>
           </div>
