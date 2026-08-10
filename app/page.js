@@ -8326,12 +8326,36 @@ function ForecastingTool(props) {
     return out;
   }
   function tpDefaultFinal(hdr) {
+    // The exported forecast VALUE now comes from the "Maximum level" column
+    // (reorder ceiling = safety stock + lead time + replenishment cycle), not the
+    // raw "Final FC units" column. We still read the Final FC column's month to
+    // LABEL the output header (see tpForecastLabel).
     if (!hdr || !hdr.length) return -1;
-    var finals = []; for (var i = 0; i < hdr.length; i++) { if (/^final fc units/i.test(String(hdr[i]))) finals.push(i); }
-    if (!finals.length) return -1;
-    var d = new Date(); var mon = d.toLocaleString("en-US", { month: "short" }).toLowerCase(); var yr = String(d.getFullYear());
-    for (var j = 0; j < finals.length; j++) { var lbl = String(hdr[finals[j]]).toLowerCase(); if (lbl.indexOf(mon) !== -1 && lbl.indexOf(yr) !== -1) return finals[j]; }
+    for (var i = 0; i < hdr.length; i++) { if (String(hdr[i]).trim().toLowerCase() === "maximum level") return i; }
     return -1;
+  }
+  // Build the output header label "Forecast <Month Year>" using the month named in
+  // the report's "Final FC units <Mon Year>" column. Falls back to the current
+  // month if no Final FC column is present.
+  function tpForecastLabel(hdr) {
+    var MONTHS = { jan: "January", feb: "February", mar: "March", apr: "April", may: "May", jun: "June", jul: "July", aug: "August", sep: "September", oct: "October", nov: "November", dec: "December" };
+    if (hdr && hdr.length) {
+      var d0 = new Date(); var curMon = d0.toLocaleString("en-US", { month: "short" }).toLowerCase(); var curYr = String(d0.getFullYear());
+      var pick = null, first = null;
+      for (var i = 0; i < hdr.length; i++) {
+        var h = String(hdr[i]);
+        var m = h.match(/^final fc units\s+([a-z]{3})\w*\s+(\d{4})/i);
+        if (m) {
+          var mon3 = m[1].toLowerCase().slice(0, 3), yr = m[2];
+          if (!first) first = { mon3: mon3, yr: yr };
+          if (mon3 === curMon && yr === curYr) pick = { mon3: mon3, yr: yr };
+        }
+      }
+      var chosen = pick || first;
+      if (chosen && MONTHS[chosen.mon3]) return "Forecast " + MONTHS[chosen.mon3] + " " + chosen.yr;
+    }
+    var d = new Date();
+    return "Forecast " + d.toLocaleString("en-US", { month: "long" }) + " " + d.getFullYear();
   }
   function chooseTpFile() { if (tpFileRef.current) tpFileRef.current.click(); }
   function onTpFile(e) {
@@ -8377,6 +8401,7 @@ function ForecastingTool(props) {
     var pCol = fcIdxExact(hdr, "Product code"), lCol = fcIdxExact(hdr, "Location code"), cCol = fcIdxExact(hdr, "Class");
     if (pCol < 0 || lCol < 0 || cCol < 0) { toast("Report is missing Product code / Location code / Class", "error"); return; }
     var finalCol = tpDefaultFinal(hdr);
+    if (finalCol < 0) { toast("No 'Maximum level' column found in this report \u2014 the forecast value column will be missing. Re-export from Netstock with Maximum level included.", "error"); }
     var keepBase = TP_KEEP.map(function (n) { return fcIdxExact(hdr, n); }).filter(function (i) { return i >= 0; });
     var keep = finalCol >= 0 ? keepBase.concat([finalCol]) : keepBase;
     setTpBusy(true);
@@ -8400,7 +8425,7 @@ function ForecastingTool(props) {
           return cl === "A" || cl === "B" || cl === "C";
         }).map(function (row) { return keep.map(function (i) { return row[i]; }); });
         var st = { input: rows.length, allowed: Object.keys(allowed).length, kept: kept.length, dropped: rows.length - kept.length, warehouse: w, at: Date.now() };
-        return { id: Date.now() + "-" + Math.random().toString(36).slice(2, 7) + "-" + w, fileName: pending.fileName, headers: hdr, rows: rows, finalCol: finalCol, warehouse: w, formatted: kept, stats: st, sort: null };
+        return { id: Date.now() + "-" + Math.random().toString(36).slice(2, 7) + "-" + w, fileName: pending.fileName, headers: hdr, rows: rows, finalCol: finalCol, forecastLabel: tpForecastLabel(hdr), warehouse: w, formatted: kept, stats: st, sort: null };
       });
       setTpSessions(function (prev) { var u = prev.concat(newSessions); setTpActive(prev.length); return u; });
       setTpPending(null); setTpPicked({});
@@ -8460,6 +8485,11 @@ function ForecastingTool(props) {
     var XLSX = require("xlsx");
     var keep = tpKeepIdxFor(sess.headers, sess.finalCol);
     var keptHeaders = keep.map(function (i) { return sess.headers[i]; });
+    // Rename the exported value column (Maximum level) to "Forecast <Month Year>".
+    if (sess.finalCol >= 0) {
+      var lastPos = keep.lastIndexOf(sess.finalCol);
+      if (lastPos >= 0) keptHeaders[lastPos] = sess.forecastLabel || "Forecast";
+    }
     var ws = XLSX.utils.aoa_to_sheet([keptHeaders].concat(sess.formatted));
     var wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Report data");
