@@ -2601,6 +2601,10 @@ function POImportTool(props) {
   var _acuCreateLoading = useState(false), acuCreateLoading = _acuCreateLoading[0], setAcuCreateLoading = _acuCreateLoading[1];
   var _acuCreateConfirm = useState(null), acuCreateConfirm = _acuCreateConfirm[0], setAcuCreateConfirm = _acuCreateConfirm[1];
   var _acuCreateResult = useState(null), acuCreateResult = _acuCreateResult[0], setAcuCreateResult = _acuCreateResult[1];
+  // True once the current parsed batch has been successfully created in Acumatica,
+  // so the primary "Create" button can't fire a second time and make duplicates.
+  // Reset on a fresh parse or Clear.
+  var _createdDone = useState(false), createdDone = _createdDone[0], setCreatedDone = _createdDone[1];
   var _trackerPreview = useState(null), trackerPreview = _trackerPreview[0], setTrackerPreview = _trackerPreview[1];
   var _trackerBusy = useState(false), trackerBusy = _trackerBusy[0], setTrackerBusy = _trackerBusy[1];
   var _trackerAdded = useState(null), trackerAdded = _trackerAdded[0], setTrackerAdded = _trackerAdded[1];
@@ -3163,7 +3167,7 @@ function POImportTool(props) {
   async function handleValidate() {
     if (pdfs.length === 0) { toast("Upload at least one PDF", "error"); return; }
     if (!ok) { lp(); return; }
-    setLoading(true); setError(null); setResults([]); setMckWarnings([]); setTrackerAdded(null); setPoStatus(null); setShowAdvanced(false);
+    setLoading(true); setError(null); setResults([]); setMckWarnings([]); setTrackerAdded(null); setPoStatus(null); setShowAdvanced(false); setCreatedDone(false);
     try {
       // Step 1: Parse each PDF separately to avoid text extraction state issues
       var pdfItems = [];
@@ -3561,6 +3565,7 @@ function POImportTool(props) {
       // and (for GGM) the dummy-cleanup result \u2014 worth keeping visible.
       setAcuCreateResult({ data: data, requested: posToCreate });
       if (data.ok) {
+        setCreatedDone(true);
         toast("Created " + (data.succeeded ? data.succeeded.length : 0) + " PO(s) in Acumatica", "success");
       } else {
         var succ = data.succeeded ? data.succeeded.length : 0;
@@ -3905,6 +3910,10 @@ function POImportTool(props) {
                 var primary = null;
                 if (busy) {
                   primary = { label: acuCreateLoading ? "Creating\u2026" : "Checking\u2026", disabled: true, spin: true, fn: function(){} };
+                } else if (createdDone) {
+                  // Already created this batch \u2014 lock the button so a second click
+                  // can't create duplicates. Clear or re-parse to start over.
+                  primary = { label: "\u2713 Created", disabled: true, fn: function(){}, title: "Already created in Acumatica this session \u2014 Clear or re-parse to create again" };
                 } else if (!poStatus) {
                   // Status not yet known (e.g. not logged in): fall back to create.
                   primary = { label: "\u2192 Create PO + add to tracker", disabled: !ok, fn: onCreatePOsClick, title: !ok ? "Acumatica credentials required" : "" };
@@ -3926,7 +3935,7 @@ function POImportTool(props) {
                     {showAdvanced && <div style={{ position: "absolute", right: 0, top: "calc(100% + 4px)", background: "#FFFFFF", border: "1px solid #E5E7EB", borderRadius: 8, boxShadow: "0 6px 20px rgba(0,0,0,0.12)", padding: 6, zIndex: 50, minWidth: 220 }}>
                       <button onClick={function() { setShowAdvanced(false); openTrackerPreview(); }} style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: "none", padding: "8px 10px", fontSize: 12, color: "#374151", cursor: "pointer", borderRadius: 6, fontFamily: "'Varela Round', sans-serif" }}>Add to tracker (preview first)</button>
                       <button onClick={function() { setShowAdvanced(false); addToTracker(); }} style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: "none", padding: "8px 10px", fontSize: 12, color: "#374151", cursor: "pointer", borderRadius: 6, fontFamily: "'Varela Round', sans-serif" }}>Add to tracker (skip duplicates)</button>
-                      <button onClick={function() { setShowAdvanced(false); onCreatePOsClick(); }} disabled={!ok} style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: "none", padding: "8px 10px", fontSize: 12, color: ok ? "#374151" : "#9CA3AF", cursor: ok ? "pointer" : "not-allowed", borderRadius: 6, fontFamily: "'Varela Round', sans-serif" }}>Create in Acumatica only</button>
+                      <button onClick={function() { if (createdDone) return; setShowAdvanced(false); onCreatePOsClick(); }} disabled={!ok || createdDone} title={createdDone ? "Already created this batch" : ""} style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: "none", padding: "8px 10px", fontSize: 12, color: (ok && !createdDone) ? "#374151" : "#9CA3AF", cursor: (ok && !createdDone) ? "pointer" : "not-allowed", borderRadius: 6, fontFamily: "'Varela Round', sans-serif" }}>Create in Acumatica only</button>
                     </div>}
                   </div>
                 </>;
