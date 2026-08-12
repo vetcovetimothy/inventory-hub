@@ -2601,10 +2601,11 @@ function POImportTool(props) {
   var _acuCreateLoading = useState(false), acuCreateLoading = _acuCreateLoading[0], setAcuCreateLoading = _acuCreateLoading[1];
   var _acuCreateConfirm = useState(null), acuCreateConfirm = _acuCreateConfirm[0], setAcuCreateConfirm = _acuCreateConfirm[1];
   var _acuCreateResult = useState(null), acuCreateResult = _acuCreateResult[0], setAcuCreateResult = _acuCreateResult[1];
-  // True once the current parsed batch has been successfully created in Acumatica,
-  // so the primary "Create" button can't fire a second time and make duplicates.
-  // Reset on a fresh parse or Clear.
-  var _createdDone = useState(false), createdDone = _createdDone[0], setCreatedDone = _createdDone[1];
+  // Tracks what has completed for the current parsed batch, so the primary button
+  // locks after its action runs (whether that was a create, a tracker-add, or
+  // both) and the result popup can report tracker outcome + errors. Reset on a
+  // fresh parse or Clear.
+  var _batchDone = useState(null), batchDone = _batchDone[0], setBatchDone = _batchDone[1];
   var _trackerPreview = useState(null), trackerPreview = _trackerPreview[0], setTrackerPreview = _trackerPreview[1];
   var _trackerBusy = useState(false), trackerBusy = _trackerBusy[0], setTrackerBusy = _trackerBusy[1];
   var _trackerAdded = useState(null), trackerAdded = _trackerAdded[0], setTrackerAdded = _trackerAdded[1];
@@ -2807,7 +2808,14 @@ function POImportTool(props) {
     if (failMsg) { toast("Tracker add failed \u2014 " + failMsg, "error"); }
     else if (okCount > 0) { setTrackerAdded({ count: okCount, tabs: Object.keys(tabsUsed).join(", "), at: Date.now() }); toast("Added " + okCount + " row" + (okCount === 1 ? "" : "s") + " to the tracker" + (skipped ? " (" + skipped + " already there, skipped)" : "") + "."); }
     else if (skipped > 0) { toast("All rows were already on the tracker \u2014 nothing to add."); }
-    return { okCount: okCount, skipped: skipped, failMsg: failMsg, tabs: Object.keys(tabsUsed).join(", ") };
+    var outcome = { okCount: okCount, skipped: skipped, failMsg: failMsg, tabs: Object.keys(tabsUsed).join(", ") };
+    // Record tracker outcome on the batch (merging with any create info already set)
+    // so the primary button locks and the result popup can report it.
+    setBatchDone(function (prev) {
+      var b = prev || {};
+      return Object.assign({}, b, { tracker: { ok: !failMsg, count: okCount, skipped: skipped, fail: failMsg || null, tabs: outcome.tabs } });
+    });
+    return outcome;
   }
 
   function openTrackerPreview() {
@@ -3167,7 +3175,7 @@ function POImportTool(props) {
   async function handleValidate() {
     if (pdfs.length === 0) { toast("Upload at least one PDF", "error"); return; }
     if (!ok) { lp(); return; }
-    setLoading(true); setError(null); setResults([]); setMckWarnings([]); setTrackerAdded(null); setPoStatus(null); setShowAdvanced(false); setCreatedDone(false);
+    setLoading(true); setError(null); setResults([]); setMckWarnings([]); setTrackerAdded(null); setPoStatus(null); setShowAdvanced(false); setBatchDone(null);
     try {
       // Step 1: Parse each PDF separately to avoid text extraction state issues
       var pdfItems = [];
@@ -3565,7 +3573,10 @@ function POImportTool(props) {
       // and (for GGM) the dummy-cleanup result \u2014 worth keeping visible.
       setAcuCreateResult({ data: data, requested: posToCreate });
       if (data.ok) {
-        setCreatedDone(true);
+        setBatchDone(function (prev) {
+          var po = (data.succeeded && data.succeeded[0] && data.succeeded[0].orderNbr) ? data.succeeded[0].orderNbr : null;
+          return Object.assign({}, prev || {}, { created: true, createdCount: data.succeeded ? data.succeeded.length : 0, createdPO: po });
+        });
         toast("Created " + (data.succeeded ? data.succeeded.length : 0) + " PO(s) in Acumatica", "success");
       } else {
         var succ = data.succeeded ? data.succeeded.length : 0;
@@ -3906,28 +3917,40 @@ function POImportTool(props) {
               {(function() {
                 var ov = poStatus ? poStatus.overall : null;
                 var busy = poStatusBusy || acuCreateLoading;
+                var bd = batchDone || {};
+                var didCreate = !!bd.created;
+                var didTracker = !!(bd.tracker && bd.tracker.ok);
                 // Primary action label + handler by status.
                 var primary = null;
                 if (busy) {
                   primary = { label: acuCreateLoading ? "Creating\u2026" : "Checking\u2026", disabled: true, spin: true, fn: function(){} };
-                } else if (createdDone) {
-                  // Already created this batch \u2014 lock the button so a second click
-                  // can't create duplicates. Clear or re-parse to start over.
-                  primary = { label: "\u2713 Created", disabled: true, fn: function(){}, title: "Already created in Acumatica this session \u2014 Clear or re-parse to create again" };
                 } else if (!poStatus) {
-                  // Status not yet known (e.g. not logged in): fall back to create.
-                  primary = { label: "\u2192 Create PO + add to tracker", disabled: !ok, fn: onCreatePOsClick, title: !ok ? "Acumatica credentials required" : "" };
+                  primary = didCreate
+                    ? { label: "\u2713 Done", disabled: true, fn: function(){}, title: "Completed this batch \u2014 Clear or re-parse to run again" }
+                    : { label: "\u2192 Create PO + add to tracker", disabled: !ok, fn: onCreatePOsClick, title: !ok ? "Acumatica credentials required" : "" };
                 } else if (ov === "new") {
-                  primary = { label: "\u2192 Create PO + add to tracker", disabled: !ok, fn: onCreatePOsClick, title: !ok ? "Acumatica credentials required" : "Create in Acumatica, then add to the tracker" };
+                  // Needs create (+ auto tracker). Locks once created.
+                  primary = didCreate
+                    ? { label: "\u2713 Created + added", disabled: true, fn: function(){}, title: "Created in Acumatica and added to tracker \u2014 Clear or re-parse to run again" }
+                    : { label: "\u2192 Create PO + add to tracker", disabled: !ok, fn: onCreatePOsClick, title: !ok ? "Acumatica credentials required" : "Create in Acumatica, then add to the tracker" };
                 } else if (ov === "acu-only") {
-                  primary = { label: "\u2192 Add to tracker", disabled: false, fn: addToTracker, title: "Already in Acumatica \u2014 just add to the receiving tracker" };
+                  // Already in Acumatica; action is tracker-add only. Locks once tracked.
+                  primary = didTracker
+                    ? { label: "\u2713 Added to tracker", disabled: true, fn: function(){}, title: "Added to the receiving tracker \u2014 Clear or re-parse to run again" }
+                    : { label: "\u2192 Add to tracker", disabled: false, fn: function() { addToTracker().then(function() { setAcuCreateResult({ data: { ok: true, succeeded: [], trackerOnly: true }, requested: [] }); }); }, title: "Already in Acumatica \u2014 just add to the receiving tracker" };
                 } else if (ov === "tracker-only") {
-                  primary = { label: "\u2192 Create PO in Acumatica", disabled: !ok, fn: onCreatePOsClick, title: !ok ? "Acumatica credentials required" : "Already on the tracker \u2014 just create in Acumatica" };
+                  // Already on tracker; action is create only. Locks once created.
+                  primary = didCreate
+                    ? { label: "\u2713 Created", disabled: true, fn: function(){}, title: "Created in Acumatica \u2014 Clear or re-parse to run again" }
+                    : { label: "\u2192 Create PO in Acumatica", disabled: !ok, fn: onCreatePOsClick, title: !ok ? "Acumatica credentials required" : "Already on the tracker \u2014 just create in Acumatica" };
                 } else if (ov === "synced") {
                   primary = { label: "\u2713 Already complete", disabled: true, fn: function(){}, title: "This PO is already in Acumatica and on the tracker" };
                 } else { // mixed
-                  primary = { label: "\u2192 Create + add where needed", disabled: !ok, fn: onCreatePOsClick, title: "Acts per-PO; already-existing ones are skipped" };
+                  primary = (didCreate || didTracker)
+                    ? { label: "\u2713 Done", disabled: true, fn: function(){}, title: "Completed this batch \u2014 Clear or re-parse to run again" }
+                    : { label: "\u2192 Create + add where needed", disabled: !ok, fn: onCreatePOsClick, title: "Acts per-PO; already-existing ones are skipped" };
                 }
+                var lockCreate = didCreate; // for the Advanced "create only" item
                 return <>
                   <button onClick={primary.fn} disabled={primary.disabled} title={primary.title || ""} style={{ background: primary.disabled ? "#D1D5DB" : "#047857", color: "#FFFFFF", border: "none", padding: "6px 14px", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: primary.disabled ? "not-allowed" : "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>{primary.spin ? <><Spinner /> {primary.label}</> : primary.label}</button>
                   <div style={{ position: "relative", display: "inline-block" }}>
@@ -3935,7 +3958,7 @@ function POImportTool(props) {
                     {showAdvanced && <div style={{ position: "absolute", right: 0, top: "calc(100% + 4px)", background: "#FFFFFF", border: "1px solid #E5E7EB", borderRadius: 8, boxShadow: "0 6px 20px rgba(0,0,0,0.12)", padding: 6, zIndex: 50, minWidth: 220 }}>
                       <button onClick={function() { setShowAdvanced(false); openTrackerPreview(); }} style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: "none", padding: "8px 10px", fontSize: 12, color: "#374151", cursor: "pointer", borderRadius: 6, fontFamily: "'Varela Round', sans-serif" }}>Add to tracker (preview first)</button>
                       <button onClick={function() { setShowAdvanced(false); addToTracker(); }} style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: "none", padding: "8px 10px", fontSize: 12, color: "#374151", cursor: "pointer", borderRadius: 6, fontFamily: "'Varela Round', sans-serif" }}>Add to tracker (skip duplicates)</button>
-                      <button onClick={function() { if (createdDone) return; setShowAdvanced(false); onCreatePOsClick(); }} disabled={!ok || createdDone} title={createdDone ? "Already created this batch" : ""} style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: "none", padding: "8px 10px", fontSize: 12, color: (ok && !createdDone) ? "#374151" : "#9CA3AF", cursor: (ok && !createdDone) ? "pointer" : "not-allowed", borderRadius: 6, fontFamily: "'Varela Round', sans-serif" }}>Create in Acumatica only</button>
+                      <button onClick={function() { if (lockCreate) return; setShowAdvanced(false); onCreatePOsClick(); }} disabled={!ok || lockCreate} title={lockCreate ? "Already created this batch" : ""} style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: "none", padding: "8px 10px", fontSize: 12, color: (ok && !lockCreate) ? "#374151" : "#9CA3AF", cursor: (ok && !lockCreate) ? "pointer" : "not-allowed", borderRadius: 6, fontFamily: "'Varela Round', sans-serif" }}>Create in Acumatica only</button>
                     </div>}
                   </div>
                 </>;
@@ -4062,10 +4085,11 @@ function POImportTool(props) {
         var allOk = data.ok === true && !failure;
         var failureRequested = failure ? requested[failure.poIndex] : null;
         var notAttempted = failure ? requested.slice(failure.poIndex + 1) : [];
+        var trackerOnly = data.trackerOnly === true;
         return <div onClick={function() { setAcuCreateResult(null); setDummyDelete(null); }} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
           <div onClick={function(e) { e.stopPropagation(); }} style={{ background: "#FFFFFF", borderRadius: 8, padding: 24, width: "min(720px, 92vw)", maxHeight: "85vh", overflow: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.2)" }}>
-            <div style={{ fontSize: 18, fontWeight: 700, color: allOk ? "#047857" : "#DC2626", marginBottom: 8 }}>{allOk ? "\u2713 All POs created" : alreadyExists ? "\u26A0 Already in Acumatica \u2014 nothing created" : "\u26A0 Stopped on failure"}</div>
-            {!alreadyExists && <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 16 }}>{succeeded.length} created, {failure ? "1 failed" : "0 failed"}{notAttempted.length > 0 ? ", " + notAttempted.length + " not attempted" : ""}</div>}
+            <div style={{ fontSize: 18, fontWeight: 700, color: (allOk || trackerOnly) ? "#047857" : "#DC2626", marginBottom: 8 }}>{trackerOnly ? "\u2713 Tracker updated" : allOk ? "\u2713 All POs created" : alreadyExists ? "\u26A0 Already in Acumatica \u2014 nothing created" : "\u26A0 Stopped on failure"}</div>
+            {!alreadyExists && !trackerOnly && <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 16 }}>{succeeded.length} created, {failure ? "1 failed" : "0 failed"}{notAttempted.length > 0 ? ", " + notAttempted.length + " not attempted" : ""}</div>}
 
             {alreadyExists && <div style={{ background: "rgba(180,83,9,0.06)", border: "1px solid rgba(180,83,9,0.25)", borderRadius: 6, padding: 12, marginBottom: 16 }}>
               <div style={{ fontSize: 13, color: "#374151", marginBottom: 10 }}>These POs already exist in Acumatica, so nothing was created. You can still add them to the receiving tracker below (any already on the tracker are skipped).</div>
@@ -4172,6 +4196,19 @@ function POImportTool(props) {
             {notAttempted.length > 0 && <div style={{ background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 6, padding: 12, marginBottom: 16 }}>
               <div style={{ fontSize: 12, fontWeight: 600, color: "#6B7280", marginBottom: 6 }}>Not attempted ({notAttempted.length}):</div>
               <div style={{ fontSize: 11, color: "#6B7280" }}>{notAttempted.map(function(p, i) { return <span key={i} style={{ fontFamily: "monospace", marginRight: 12 }}>{p.vendorRef}</span>; })}</div>
+            </div>}
+
+            {batchDone && batchDone.tracker && <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 8 }}>Tracker:</div>
+              {batchDone.tracker.ok
+                ? <div style={{ background: "#ECFDF5", border: "1px solid #A7F3D0", borderRadius: 6, padding: "8px 12px", fontSize: 12, color: "#047857" }}>
+                    {batchDone.tracker.count > 0
+                      ? "\u2713 Added " + batchDone.tracker.count + " row" + (batchDone.tracker.count === 1 ? "" : "s") + (batchDone.tracker.tabs ? " to " + batchDone.tracker.tabs : "") + (batchDone.tracker.skipped ? " (" + batchDone.tracker.skipped + " already on tracker, skipped)" : "")
+                      : "\u2713 Nothing to add \u2014 all rows were already on the tracker" + (batchDone.tracker.skipped ? " (" + batchDone.tracker.skipped + " skipped)" : "")}
+                  </div>
+                : <div style={{ background: "rgba(220,38,38,0.04)", border: "1px solid rgba(220,38,38,0.2)", borderRadius: 6, padding: "8px 12px", fontSize: 12, color: "#DC2626" }}>
+                    {"\u26A0 Tracker add failed \u2014 " + (batchDone.tracker.fail || "unknown error") + ". The Acumatica PO was still created; use Advanced \u2192 Add to tracker to retry."}
+                  </div>}
             </div>}
 
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
