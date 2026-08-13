@@ -837,18 +837,37 @@ function WHT(props) {
 
         var now = new Date().toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
         var who = cred && cred.username ? cred.username : "You";
-        // Carry over existing shipNotes to new data — EXACT MATCH ONLY.
-        // We used to fall back to vendor-name matching when the PO number had
-        // changed, but that caused yesterday's vendor refs to get carried onto
-        // today's brand-new POs. A vendor ref is PO-specific — never inherit
-        // one across PO numbers. If the user re-enters a vendor ref tomorrow,
-        // that's a feature, not a bug.
+        // Carry over existing shipNotes to new data.
+        // 1) Exact (Vendor || PO) matches keep their full note as-is.
+        // 2) For a new key whose exact match is gone (PO number changed on
+        //    re-fetch), we still carry the Vendor Reference (notes) and PO field
+        //    forward from the SAME VENDOR's most-recent prior note, so a ref the
+        //    user already entered isn't lost just because the PO number changed.
+        //    We deliberately do NOT carry the `done`/`addedToTracker` flags across
+        //    a PO change \u2014 only the human-entered reference text \u2014 so a changed
+        //    PO still gets re-processed, but the ref the user typed survives.
         var prevNotes = Object.assign({}, sGet("ship-notes-" + whKey) || {}, shipNotes);
+        // Index prior notes per vendor. Only carry a reference forward when the
+        // vendor had exactly ONE prior PO \u2014 if a vendor had multiple concurrent
+        // POs we can't know which ref belongs to which new PO, so we don't guess
+        // (avoids mis-assigning one PO's ref to another).
+        var prevByVendor = {};
+        Object.keys(prevNotes).forEach(function(oldKey) {
+          var vend = oldKey.split(" || ")[0];
+          var n = prevNotes[oldKey] || {};
+          var ref = (typeof n.notes === "string" && n.notes.trim() !== "") ? n.notes : (n.po || "");
+          if (!prevByVendor[vend]) prevByVendor[vend] = { count: 0, notes: "", po: "" };
+          prevByVendor[vend].count++;
+          if (ref) { prevByVendor[vend].notes = n.notes || ""; prevByVendor[vend].po = n.po || ""; }
+        });
         var newGroups = {};
         rows.forEach(function(r) { var k = r.VendorName + " || " + (r.OrderNbr || ""); newGroups[k] = 1; });
         var carried = {};
         Object.keys(newGroups).forEach(function(newKey) {
-          if (prevNotes[newKey]) { carried[newKey] = prevNotes[newKey]; }
+          if (prevNotes[newKey]) { carried[newKey] = prevNotes[newKey]; return; }
+          var vend = newKey.split(" || ")[0];
+          var pv = prevByVendor[vend];
+          if (pv && pv.count === 1 && (pv.notes || pv.po)) { carried[newKey] = { notes: pv.notes || "", po: pv.po || "" }; }
         });
         setData(rows); setRunBy(who); setRunTime(now); setLoading(false); setSubPage("data"); setShipNotes(carried); setDismissed({}); persist(rows, false, who, now, carried); toast(cfg.label + ": Fetched " + rows.length + " lines");
       } catch (err) {
