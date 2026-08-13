@@ -46,14 +46,16 @@ async function kvSet(key, value) {
   return json;
 }
 
-// A warehouse is "fully done" when it has at least one vendor group and every
-// vendor key in shipNotes is marked done. shipNotes is keyed by "Vendor || PO".
+// A warehouse is "fully done" when every vendor group present in the data has
+// been resolved on the Shipping tab. A group counts as resolved if EITHER its
+// done checkmark is set OR it has a Vendor Reference filled in (shipNotes.notes)
+// \u2014 because the real workflow is "fill in the Vendor Reference and hit Process
+// All POs", not the checkmark. shipNotes is keyed by "Vendor || PO".
 function isFullyDone(payload) {
   if (!payload || !Array.isArray(payload.data) || payload.data.length === 0) return false;
   var notes = payload.shipNotes || {};
-  var keys = Object.keys(notes);
   // Derive the set of vendor groups actually present in the data, so we don't
-  // clear a warehouse where a vendor exists in data but was never checked.
+  // clear a warehouse where a vendor exists in data but was never resolved.
   var groupsInData = {};
   payload.data.forEach(function (r) {
     var v = String((r && r.VendorName) || "").trim();
@@ -62,10 +64,13 @@ function isFullyDone(payload) {
   });
   var groupKeys = Object.keys(groupsInData);
   if (groupKeys.length === 0) return false;
-  // Every vendor group present in the data must have a done note.
+  // Every vendor group present in the data must be resolved: done checkmark set,
+  // OR a non-empty Vendor Reference (notes) recorded for it.
   for (var i = 0; i < groupKeys.length; i++) {
-    var g = groupKeys[i];
-    if (!notes[g] || notes[g].done !== true) return false;
+    var n = notes[groupKeys[i]];
+    if (!n) return false;
+    var hasRef = typeof n.notes === "string" && n.notes.trim() !== "";
+    if (n.done !== true && !hasRef) return false;
   }
   return true;
 }
