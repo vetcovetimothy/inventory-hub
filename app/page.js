@@ -7390,24 +7390,15 @@ function BackorderResolver(props) {
 
   return <div>
     {/* Stat cards */}
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 20 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 14, marginBottom: 20 }}>
       <div style={Object.assign({}, S.statCard, { background: "#FEF2F2" })}><div style={{ fontSize: 11, color: "#B5736B", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>Total Backordered</div><div style={{ fontSize: 28, fontWeight: 500, color: "#DC2626", marginTop: 6 }}>{backTotal}</div></div>
       <div style={Object.assign({}, S.statCard, { background: "#F0FDFA" })}><div style={{ fontSize: 11, color: "#6B9CA0", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>Resolved (No Open PO)</div><div style={{ fontSize: 28, fontWeight: 500, color: "#0D9488", marginTop: 6 }}>{resolved.length}</div></div>
-      <div style={Object.assign({}, S.statCard, { background: "#FEF3C7" })}><div style={{ fontSize: 11, color: "#A1804A", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>In Review</div><div style={{ fontSize: 28, fontWeight: 500, color: "#A16207", marginTop: 6 }}>{resolved.filter(function(r) { return statusMap[r.InventoryID] === "review"; }).length}</div></div>
-      <div style={Object.assign({}, S.statCard, { background: "#DBEAFE" })}><div style={{ fontSize: 11, color: "#6B85B5", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>Ordered</div><div style={{ fontSize: 28, fontWeight: 500, color: "#1D4ED8", marginTop: 6 }}>{resolved.filter(function(r) { return statusMap[r.InventoryID] === "ordered"; }).length}</div></div>
     </div>
 
     {/* Toolbar */}
     <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
       <input style={Object.assign({}, S.inp, { maxWidth: 260 })} placeholder="Search by ID, NDC, description, vendor..." value={search} onChange={function(e) { setSearch(e.target.value); }} />
       <select style={S.sel} value={vendorFilter} onChange={function(e) { setVendorFilter(e.target.value); }}><option value="all">All Vendors</option>{vendors.map(function(v) { return <option key={v} value={v}>{v}</option>; })}</select>
-      <select style={S.sel} value={statusFilter} onChange={function(e) { setStatusFilter(e.target.value); }}>
-        <option value="all">All Statuses</option>
-        <option value="new">New</option>
-        <option value="review">In Review</option>
-        <option value="ordered">Ordered</option>
-        <option value="ignored">Ignored</option>
-      </select>
       <div style={{ flex: 1 }} />
       <span style={{ fontSize: 12, color: "#6B7280" }}>{filtered.length}/{resolved.length}</span>
       <CacheStatus lastFetchedAt={lastFetched} cacheHit={cacheHit} refreshing={loading} color={TOOL_COLOR} onRefresh={function() { fetchAll(true); }} />
@@ -7419,7 +7410,6 @@ function BackorderResolver(props) {
     {resolved.length > 0 ? <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto", maxHeight: "calc(100vh - 360px)" })}>
       <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
         <thead><tr>
-          <th style={Object.assign({}, S.th, { minWidth: 110 })}>Status</th>
           {sortHeader("id", "Inventory ID")}
           {sortHeader("desc", "Description", { minWidth: 200 })}
           {sortHeader("vendor", "Vendor")}
@@ -7428,16 +7418,8 @@ function BackorderResolver(props) {
           <th style={Object.assign({}, S.th, { minWidth: 200 })}>Notes</th>
         </tr></thead>
         <tbody>{filtered.map(function(r, i) {
-          var id = r.InventoryID; var st = statusMap[id] || "new";
+          var id = r.InventoryID;
           return <tr key={id + ":" + i}>
-            <td style={S.td}>
-              <select value={st} onChange={function(e) { updateStatus(id, e.target.value); }} style={{ background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 6, padding: "4px 8px", fontSize: 11, color: "#374151", outline: "none", fontFamily: "'Varela Round', sans-serif", width: "100%" }}>
-                <option value="new">New</option>
-                <option value="review">In Review</option>
-                <option value="ordered">Ordered</option>
-                <option value="ignored">Ignored</option>
-              </select>
-            </td>
             <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontWeight: 600, color: "#0D9488" })}>{id}</td>
             <td style={Object.assign({}, S.td, { color: "#374151" })}>{r.Description}</td>
             <td style={S.td}>{r.VendorName}</td>
