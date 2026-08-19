@@ -45,6 +45,7 @@ const COLUMN_MAP = {
     { label: "LeadTime",      keys: ["LeadTime", "LeadTimeDays", "VendorLeadTimeDays"] },
     { label: "MinOrderQty",   keys: ["MinOrderQty"] },
     { label: "QtyAvailable",  keys: ["QtyAvailable", "QtyAvail"] },
+    { label: "OnHandQty",     keys: ["OnHandQty", "OnHand", "QtyOnHand", "OnHandQuantity", "OnHandQty_2"] },
     { label: "Price",         keys: ["Price", "UnitCost", "LastCost"] },
     { label: "MovementClass", keys: ["MovementClass", "MovementClassDescr"] },
     { label: "InventoryID",   keys: ["InventoryID", "InventoryID_2", "InventoryId", "InventoryCD", "InventoryCd"] },
