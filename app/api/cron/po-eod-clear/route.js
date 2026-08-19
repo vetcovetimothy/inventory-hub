@@ -47,10 +47,10 @@ async function kvSet(key, value) {
 }
 
 // A warehouse is "fully done" when every vendor group present in the data has
-// been resolved on the Shipping tab. A group counts as resolved if EITHER its
-// done checkmark is set OR it has a Vendor Reference filled in (shipNotes.notes)
-// \u2014 because the real workflow is "fill in the Vendor Reference and hit Process
-// All POs", not the checkmark. shipNotes is keyed by "Vendor || PO".
+// been fully resolved on the Shipping tab: BOTH its done checkmark is set AND it
+// has a Vendor Reference filled in (shipNotes.notes). When that's true for every
+// group, the nightly job clears the whole warehouse (same as the manual Clear
+// button). shipNotes is keyed by "Vendor || PO".
 function isFullyDone(payload) {
   if (!payload || !Array.isArray(payload.data) || payload.data.length === 0) return false;
   var notes = payload.shipNotes || {};
@@ -64,13 +64,13 @@ function isFullyDone(payload) {
   });
   var groupKeys = Object.keys(groupsInData);
   if (groupKeys.length === 0) return false;
-  // Every vendor group present in the data must be resolved: done checkmark set,
-  // OR a non-empty Vendor Reference (notes) recorded for it.
+  // Every vendor group must have BOTH the done checkmark AND a non-empty Vendor
+  // Reference. If either is missing for any group, the warehouse is not done.
   for (var i = 0; i < groupKeys.length; i++) {
     var n = notes[groupKeys[i]];
     if (!n) return false;
     var hasRef = typeof n.notes === "string" && n.notes.trim() !== "";
-    if (n.done !== true && !hasRef) return false;
+    if (n.done !== true || !hasRef) return false;
   }
   return true;
 }
@@ -86,13 +86,12 @@ async function run() {
       if (!payload || !Array.isArray(payload.data) || payload.data.length === 0) {
         entry.reason = "no data";
       } else if (isFullyDone(payload)) {
-        // New-day reset: KEEP the warehouse's PO data and run metadata, and only
-        // reset the per-PO shipping state \u2014 uncheck all done checkmarks and clear
-        // all Vendor Reference fields. Both live in shipNotes, so emptying it does
-        // both at once. Also reset emailSent so the day starts fresh.
-        await kvSet(key, { data: payload.data, emailSent: false, runBy: payload.runBy || null, runTime: payload.runTime || null, shipNotes: {} });
-        entry.action = "reset";
-        entry.reason = payload.data.length + " lines: shipping state reset (unchecked + refs cleared), data kept";
+        // Everything is done (every vendor checkmarked AND referenced) \u2014 clear
+        // the whole warehouse, exactly like pressing the manual Clear button:
+        // write an empty object to the KV key so the warehouse resets to empty.
+        await kvSet(key, {});
+        entry.action = "cleared";
+        entry.reason = payload.data.length + " lines: all checkmarked + referenced, warehouse cleared";
       } else {
         entry.reason = "open items remain";
       }
@@ -102,7 +101,7 @@ async function run() {
     }
     results.push(entry);
   }
-  return { ok: true, ranAt: new Date().toISOString(), reset: results.filter(function (r) { return r.action === "reset"; }).map(function (r) { return r.wh; }), detail: results };
+  return { ok: true, ranAt: new Date().toISOString(), cleared: results.filter(function (r) { return r.action === "cleared"; }).map(function (r) { return r.wh; }), detail: results };
 }
 
 export async function GET() {
