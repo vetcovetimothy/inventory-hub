@@ -56,12 +56,23 @@ function generateXlsx(columns, rows) {
   return Buffer.from(buf).toString("base64");
 }
 
+// Email headers must be ASCII. If the subject contains any non-ASCII character
+// (em/en dash, curly quotes, accented letters, etc.), encode it per RFC 2047 as
+// a UTF-8 Base64 "encoded-word" so mail clients render it correctly instead of
+// showing mojibake like "â€"". Plain-ASCII subjects are left as-is for
+// readability in the raw MIME.
+function encodeHeaderValue(value) {
+  var s = String(value == null ? "" : value);
+  if (/^[\x00-\x7F]*$/.test(s)) return s; // pure ASCII, no encoding needed
+  return "=?UTF-8?B?" + Buffer.from(s, "utf8").toString("base64") + "?=";
+}
+
 function buildMimeMessage({ to, cc, subject, htmlBody, attachments }) {
   const boundary = "boundary_" + Date.now();
   const lines = [
     `To: ${to}`,
     cc ? `Cc: ${cc}` : null,
-    `Subject: ${subject}`,
+    `Subject: ${encodeHeaderValue(subject)}`,
     "MIME-Version: 1.0",
     `Content-Type: multipart/mixed; boundary="${boundary}"`,
     "",
