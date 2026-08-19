@@ -86,9 +86,13 @@ async function run() {
       if (!payload || !Array.isArray(payload.data) || payload.data.length === 0) {
         entry.reason = "no data";
       } else if (isFullyDone(payload)) {
-        await kvSet(key, { data: [], emailSent: false, runBy: null, runTime: null, shipNotes: {} });
-        entry.action = "cleared";
-        entry.reason = payload.data.length + " lines were all done";
+        // New-day reset: KEEP the warehouse's PO data and run metadata, and only
+        // reset the per-PO shipping state \u2014 uncheck all done checkmarks and clear
+        // all Vendor Reference fields. Both live in shipNotes, so emptying it does
+        // both at once. Also reset emailSent so the day starts fresh.
+        await kvSet(key, { data: payload.data, emailSent: false, runBy: payload.runBy || null, runTime: payload.runTime || null, shipNotes: {} });
+        entry.action = "reset";
+        entry.reason = payload.data.length + " lines: shipping state reset (unchecked + refs cleared), data kept";
       } else {
         entry.reason = "open items remain";
       }
@@ -98,7 +102,7 @@ async function run() {
     }
     results.push(entry);
   }
-  return { ok: true, ranAt: new Date().toISOString(), cleared: results.filter(function (r) { return r.action === "cleared"; }).map(function (r) { return r.wh; }), detail: results };
+  return { ok: true, ranAt: new Date().toISOString(), reset: results.filter(function (r) { return r.action === "reset"; }).map(function (r) { return r.wh; }), detail: results };
 }
 
 export async function GET() {
