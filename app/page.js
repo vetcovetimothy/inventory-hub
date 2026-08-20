@@ -719,10 +719,12 @@ function WHT(props) {
     var m = true;
     (async function() {
       var loaded = false;
+      var kvResponded = false; // true if KV fetch succeeded (even if it returned empty)
       // Try KV first
       try {
         var resp = await kvGet(kvKey);
         var json = await resp.json();
+        kvResponded = true;
         if (m && json.data && json.data.data && json.data.data.length > 0) {
           setData(json.data.data); setEmailSent(json.data.emailSent || false); setRunBy(json.data.runBy || null); setRunTime(json.data.runTime || null); setSubPage("data");
           // Load shipNotes: prefer separate storage, fall back to KV bundled notes
@@ -736,8 +738,19 @@ function WHT(props) {
           if (m) setKvStatus("kv-empty(" + dbg + ")");
         }
       } catch (e) { if (m) setKvStatus("kv-error:" + e.message); }
-      // Fall back to localStorage if KV had nothing
-      if (!loaded && m) {
+      // KV is the source of truth. If KV RESPONDED but had no data (e.g. the
+      // nightly clear emptied it), purge the stale localStorage copy instead of
+      // falling back to it \u2014 otherwise a cleared warehouse would still show old
+      // POs from this browser's cache. Only fall back to localStorage when KV
+      // could NOT be reached (network error), so a transient hiccup doesn't wipe
+      // a user's local data.
+      if (!loaded && m && kvResponded) {
+        sDel("wh-data-" + whKey);
+        sDel("ship-notes-" + whKey);
+        setData([]); setShipNotes({}); setRunBy(null); setRunTime(null); setEmailSent(false); setSubPage("overview");
+        if (m) setKvStatus("no-data");
+      } else if (!loaded && m) {
+        // KV unreachable \u2014 fall back to localStorage as a last resort.
         var s = sGet("wh-data-" + whKey);
         if (s && s.data && s.data.length > 0) {
           setData(s.data); setEmailSent(s.emailSent || false); setRunBy(s.runBy || null); setRunTime(s.runTime || null); setSubPage("data");
@@ -760,8 +773,20 @@ function WHT(props) {
       try {
         var resp = await kvGet(kvKey);
         var json = await resp.json();
-        if (!m || !json.data) return;
+        if (!m) return;
         var remote = json.data;
+        // KV cleared out (e.g. nightly auto-clear emptied it) while this tab is
+        // open: reflect that here so the warehouse visibly clears without a manual
+        // reload, and drop the stale localStorage copy.
+        var remoteEmpty = !remote || !remote.data || remote.data.length === 0;
+        if (remoteEmpty) {
+          if (data && data.length > 0) {
+            sDel("wh-data-" + whKey); sDel("ship-notes-" + whKey);
+            setData([]); setShipNotes({}); setRunBy(null); setRunTime(null); setEmailSent(false); setSubPage("overview");
+            setKvStatus("no-data");
+          }
+          return;
+        }
         // Only update if remote is newer (different runTime)
         if (remote.runTime && remote.runTime !== runTime) {
           setData(remote.data || []); setEmailSent(remote.emailSent || false); setRunBy(remote.runBy || null); setRunTime(remote.runTime || null); setShipNotes(remote.shipNotes || {});
@@ -773,7 +798,7 @@ function WHT(props) {
       } catch (e) {}
     }, 8000);
     return function() { m = false; clearInterval(poll); };
-  }, [kvKey, runTime, shipNotes, emailSent]);
+  }, [kvKey, runTime, shipNotes, emailSent, data]);
 
   var _kvSt = useState(""), kvStatus = _kvSt[0], setKvStatus = _kvSt[1];
 
