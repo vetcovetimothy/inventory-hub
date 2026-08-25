@@ -1224,11 +1224,13 @@ function WHT(props) {
         if ((updatedNotes[p.key] || {}).addedToTracker) return;
         var lines = vendorGroups[p.key] || [];
         lines.forEach(function(ln) {
+          var _ps = packSizeFromMap(uomConvMap, ln.InventoryID, ln.UOM);
+          console.log("[WHT tracker row]", "invId:", JSON.stringify(ln.InventoryID), "uom:", JSON.stringify(ln.UOM), "-> packSize:", _ps, "| mapHasItem:", !!(uomConvMap && uomConvMap[String(ln.InventoryID||"").trim()]), "mapKeys:", uomConvMap && uomConvMap[String(ln.InventoryID||"").trim()] ? Object.keys(uomConvMap[String(ln.InventoryID||"").trim()]) : null);
           trackerRows.push([
             ln.VendorName || "",
             ln.SKUNDC || "",
             ln.Description || "",
-            packSizeFromMap(uomConvMap, ln.InventoryID, ln.UOM),
+            _ps,
             ln.OrderQty != null ? ln.OrderQty : "",
             "=INDEX(D:D,ROW())*INDEX(E:E,ROW())",
             p.vendorRef || ln.OrderNbr || "",
