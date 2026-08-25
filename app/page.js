@@ -137,6 +137,30 @@ const DEFAULT_SHIP_RULES = {
   "Zoetis US LLC": "min:400; message:Free Shipping; else: $12 Shipping Fee",
 };
 
+// ── Pack size resolution ──────────────────────────────────────────────────
+// Two ways to get an item's pack size (units per purchase UOM):
+//   packSizeFromString(uom)         : trailing-number heuristic, e.g. "BT500" -> 500.
+//                                     Falls back to 1 when the code has no number.
+//   packSizeFromMap(map, invId, uom): the REAL conversion factor from GI649963
+//                                     (the uom-conversions map), falling back to
+//                                     the string heuristic when the map has no
+//                                     entry for that item/UOM. This is accurate
+//                                     even when the pack size isn't in the code
+//                                     (e.g. "BAG", "BOTTLE").
+function packSizeFromString(uom) {
+  var m = String(uom == null ? "" : uom).match(/(\d+)\s*$/);
+  return m ? Number(m[1]) : 1;
+}
+function packSizeFromMap(convMap, invId, uom) {
+  var u = String(uom == null ? "" : uom).trim().toUpperCase();
+  var id = String(invId == null ? "" : invId).trim();
+  var entry = convMap && convMap[id] && convMap[id][u];
+  if (entry && entry.factor > 0) {
+    return entry.op === "Divide" ? (1 / entry.factor) : entry.factor;
+  }
+  return packSizeFromString(uom);
+}
+
 function evalShip(rule, total) {
   if (!rule || !rule.trim()) return "Free Shipping";
   const parts = rule.split(";").map(p => p.trim());
@@ -658,6 +682,7 @@ function WHT(props) {
   }
   var _sp = useState("overview"), subPage = _sp[0], setSubPage = _sp[1];
   var _d = useState([]), data = _d[0], setData = _d[1];
+  var _ucm = useState({}), uomConvMap = _ucm[0], setUomConvMap = _ucm[1];
   var _ld = useState(false), loading = _ld[0], setLoading = _ld[1];
   var _q = useState(""), search = _q[0], setSearch = _q[1];
   var _vf = useState("all"), vendorFilter = _vf[0], setVendorFilter = _vf[1];
@@ -831,6 +856,26 @@ function WHT(props) {
         var raw;
         if (cred && cred.username && cred.password) {
           raw = await fetchAcumatica(isGGM ? "po-ggm" : "po", whKey, cred.username, cred.password);
+          // Also pull the UOM conversion map (GI649963) so the receiving-tracker
+          // pack size uses the real conversion factor, not a guess off the UOM
+          // code. Non-blocking: if it fails, the tracker falls back to the string
+          // heuristic. Built into the same load so it's fresh with the data.
+          try {
+            var convRaw = await fetchAcumatica("uom-conversions", null, cred.username, cred.password);
+            var cmap = {};
+            (convRaw || []).forEach(function(cr) {
+              var cid = String(cr.InventoryID || cr.InventoryCD || "").trim();
+              if (!cid) return;
+              var tu = String(cr.ToUnit || "").trim().toUpperCase();
+              var fac = parseFloat(cr.ConversionFactor);
+              if (!tu || isNaN(fac) || fac <= 0) return;
+              var mdv = String(cr.MultiplyDivide || "Multiply");
+              var cop = mdv.toLowerCase().indexOf("div") >= 0 ? "Divide" : "Multiply";
+              if (!cmap[cid]) cmap[cid] = {};
+              cmap[cid][tu] = { factor: fac, op: cop };
+            });
+            setUomConvMap(cmap);
+          } catch (e) { /* fall back to string heuristic in tracker builder */ }
         } else {
           raw = PO_DEMO[whKey] || [];
         }
@@ -1180,7 +1225,7 @@ function WHT(props) {
             ln.VendorName || "",
             ln.SKUNDC || "",
             ln.Description || "",
-            uomToPkgSize(ln.UOM),
+            packSizeFromMap(uomConvMap, ln.InventoryID, ln.UOM),
             ln.OrderQty != null ? ln.OrderQty : "",
             "=INDEX(D:D,ROW())*INDEX(E:E,ROW())",
             p.vendorRef || ln.OrderNbr || "",
@@ -2807,7 +2852,7 @@ function POImportTool(props) {
         supplier,
         r.ndc || "",
         r.acumaticaDesc || r.drugName || "",
-        uomToPkgSize(r.uom),
+        (r.uomConvFactor && r.uomConvFactor > 0) ? r.uomConvFactor : packSizeFromString(r.uom),
         r.qty != null ? r.qty : "",
         "=INDEX(D:D,ROW())*INDEX(E:E,ROW())",
         r.poNumber || "",
