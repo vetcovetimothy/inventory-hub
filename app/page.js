@@ -863,22 +863,19 @@ function WHT(props) {
           try {
             var convRaw = await fetchAcumatica("uom-conversions", null, cred.username, cred.password);
             var cmap = {};
-            var _kept = 0, _skipped = 0;
             (convRaw || []).forEach(function(cr) {
               var cid = String(cr.InventoryID || cr.InventoryCD || "").trim();
-              if (!cid) { _skipped++; return; }
+              if (!cid) return;
               var tu = String(cr.ToUnit || "").trim().toUpperCase();
               var fac = parseFloat(cr.ConversionFactor);
-              if (!tu || isNaN(fac) || fac <= 0) { _skipped++; return; }
+              if (!tu || isNaN(fac) || fac <= 0) return;
               var mdv = String(cr.MultiplyDivide || "Multiply");
               var cop = mdv.toLowerCase().indexOf("div") >= 0 ? "Divide" : "Multiply";
               if (!cmap[cid]) cmap[cid] = {};
               cmap[cid][tu] = { factor: fac, op: cop };
-              _kept++;
             });
-            console.log("[WHT uom-conv]", whKey, "rawRows:", (convRaw || []).length, "kept:", _kept, "skipped:", _skipped, "items:", Object.keys(cmap).length, "| sample 10000323:", JSON.stringify(cmap["10000323"] || null));
             setUomConvMap(cmap);
-          } catch (e) { console.log("[WHT uom-conv] ERROR", whKey, String(e)); /* fall back to string heuristic in tracker builder */ }
+          } catch (e) { /* fall back to string heuristic in tracker builder */ }
         } else {
           raw = PO_DEMO[whKey] || [];
         }
@@ -1224,13 +1221,11 @@ function WHT(props) {
         if ((updatedNotes[p.key] || {}).addedToTracker) return;
         var lines = vendorGroups[p.key] || [];
         lines.forEach(function(ln) {
-          var _ps = packSizeFromMap(uomConvMap, ln.InventoryID, ln.UOM);
-          console.log("[WHT tracker row]", "invId:", JSON.stringify(ln.InventoryID), "uom:", JSON.stringify(ln.UOM), "-> packSize:", _ps, "| mapHasItem:", !!(uomConvMap && uomConvMap[String(ln.InventoryID||"").trim()]), "mapKeys:", uomConvMap && uomConvMap[String(ln.InventoryID||"").trim()] ? Object.keys(uomConvMap[String(ln.InventoryID||"").trim()]) : null);
           trackerRows.push([
             ln.VendorName || "",
             ln.SKUNDC || "",
             ln.Description || "",
-            _ps,
+            packSizeFromMap(uomConvMap, ln.InventoryID, ln.UOM),
             ln.OrderQty != null ? ln.OrderQty : "",
             "=INDEX(D:D,ROW())*INDEX(E:E,ROW())",
             p.vendorRef || ln.OrderNbr || "",
