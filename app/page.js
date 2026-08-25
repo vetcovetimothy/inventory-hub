@@ -863,19 +863,22 @@ function WHT(props) {
           try {
             var convRaw = await fetchAcumatica("uom-conversions", null, cred.username, cred.password);
             var cmap = {};
+            var _kept = 0, _skipped = 0;
             (convRaw || []).forEach(function(cr) {
               var cid = String(cr.InventoryID || cr.InventoryCD || "").trim();
-              if (!cid) return;
+              if (!cid) { _skipped++; return; }
               var tu = String(cr.ToUnit || "").trim().toUpperCase();
               var fac = parseFloat(cr.ConversionFactor);
-              if (!tu || isNaN(fac) || fac <= 0) return;
+              if (!tu || isNaN(fac) || fac <= 0) { _skipped++; return; }
               var mdv = String(cr.MultiplyDivide || "Multiply");
               var cop = mdv.toLowerCase().indexOf("div") >= 0 ? "Divide" : "Multiply";
               if (!cmap[cid]) cmap[cid] = {};
               cmap[cid][tu] = { factor: fac, op: cop };
+              _kept++;
             });
+            console.log("[WHT uom-conv]", whKey, "rawRows:", (convRaw || []).length, "kept:", _kept, "skipped:", _skipped, "items:", Object.keys(cmap).length, "| sample 10000323:", JSON.stringify(cmap["10000323"] || null));
             setUomConvMap(cmap);
-          } catch (e) { /* fall back to string heuristic in tracker builder */ }
+          } catch (e) { console.log("[WHT uom-conv] ERROR", whKey, String(e)); /* fall back to string heuristic in tracker builder */ }
         } else {
           raw = PO_DEMO[whKey] || [];
         }
