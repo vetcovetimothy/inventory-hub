@@ -4140,7 +4140,7 @@ function POImportTool(props) {
           <button onClick={function() { setTrackerAdded(null); }} style={{ background: "transparent", border: "none", color: "#047857", fontSize: 16, cursor: "pointer", lineHeight: 1 }}>{"\u00D7"}</button>
         </div>}
         {(poStatusBusy || poStatus) && (function() {
-          if (poStatusBusy) return <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 8, padding: "10px 16px", marginBottom: 16, fontSize: 13, color: "#6B7280" }}><Spinner size={14} /> Checking tracker and Acumatica\u2026</div>;
+          if (poStatusBusy) return <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 8, padding: "10px 16px", marginBottom: 16, fontSize: 13, color: "#6B7280" }}><Spinner size={14} /> Checking tracker and Acumatica…</div>;
           var ov = poStatus.overall;
           var meta = {
             "new":          { bg: "#EFF6FF", bd: "#BFDBFE", fg: "#1D4ED8", icon: "\u2705", text: "New \u2014 not in Acumatica or on the tracker. Ready to create." },
