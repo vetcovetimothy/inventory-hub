@@ -876,6 +876,11 @@ function WHT(props) {
             });
             setUomConvMap(cmap);
           } catch (e) { /* fall back to string heuristic in tracker builder */ }
+          // Also pull the Pack Size Reference (BOHPKSIZE) so the tracker's Pkg
+          // Size column prefers the maintained attribute over the conversion
+          // factor. Non-blocking: if it fails, resolvePackSize falls back to the
+          // UOM conversion factor, then the string heuristic.
+          try { await fetchPackSizeRefMap(); } catch (e) { /* fall back handled downstream */ }
         } else {
           raw = PO_DEMO[whKey] || [];
         }
@@ -1225,7 +1230,7 @@ function WHT(props) {
             ln.VendorName || "",
             ln.SKUNDC || "",
             ln.Description || "",
-            packSizeFromMap(uomConvMap, ln.InventoryID, ln.UOM),
+            resolvePackSize(ln.SKUNDC, ln.InventoryID, ln.UOM, pkgSizeRefMap, uomConvMap),
             ln.OrderQty != null ? ln.OrderQty : "",
             "=INDEX(D:D,ROW())*INDEX(E:E,ROW())",
             p.vendorRef || ln.OrderNbr || "",
@@ -2684,6 +2689,7 @@ function POImportTool(props) {
   var _statedAmts = useState({}), statedAmounts = _statedAmts[0], setStatedAmounts = _statedAmts[1];
   var _ndcMap = useState(null), ndcMap = _ndcMap[0], setNdcMap = _ndcMap[1];
   var _ndcLoading = useState(false), ndcLoading = _ndcLoading[0], setNdcLoading = _ndcLoading[1];
+  var _pkgSizeRefMap = useState(null), pkgSizeRefMap = _pkgSizeRefMap[0], setPkgSizeRefMap = _pkgSizeRefMap[1];
   var _activeFileTab = useState(null), activeFileTab = _activeFileTab[0], setActiveFileTab = _activeFileTab[1];
   var _flagThreshold = useState(40), flagThreshold = _flagThreshold[0], setFlagThreshold = _flagThreshold[1];
   // Acumatica auto-create state
@@ -3258,6 +3264,50 @@ function POImportTool(props) {
     var vars = ndcVariants(ndc);
     for (var k = 0; k < vars.length; k++) { if (map[vars[k]]) return map[vars[k]]; }
     return null;
+  }
+
+  // Pack Size Reference map (PURCH - Pack Size Reference GI). Keyed by NDC using
+  // the same variant/normalize logic as the NDC map, so a PO line's NDC resolves
+  // the same way. Value is the BOHPKSIZE attribute — the "units per pack" the
+  // receiving tracker's Pkg Size column (col D) expects.
+  var fetchPackSizeRefMap = useCallback(async function(force) {
+    if (!cred || !cred.username || !cred.password) return null;
+    try {
+      var resp = await fetch("/api/acumatica" + (force ? "?refresh=1" : ""), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "pack-size-ref", username: cred.username, password: cred.password }),
+      });
+      var json = await resp.json();
+      if (!resp.ok) return null;
+      var data = json.data || [];
+      var map = {};
+      data.forEach(function(row) {
+        var ndc = (row.NDC || "").trim();
+        var ps  = row.PackSize;
+        if (!ndc || ps == null || ps === "") return;
+        var packNum = parseFloat(String(ps).replace(/[^0-9.]/g, ""));
+        if (isNaN(packNum) || packNum <= 0) return;
+        var entry = { packSize: packNum, inventoryId: (row.InventoryID || "").trim(), description: row.Description || "" };
+        var variants = ndcVariants(ndc);
+        variants.forEach(function(v) { map[v] = entry; });
+        map[normalizeNdc(ndc)] = entry;
+      });
+      setPkgSizeRefMap(map);
+      return map;
+    } catch (err) { return null; }
+  }, [cred]);
+
+  // Resolve a pack size for a tracker row, preferring the Pack Size Reference GI
+  // (BOHPKSIZE), then falling back to the real UOM conversion factor, then the
+  // trailing-number UOM heuristic. This is strictly >= the old behavior: if the
+  // reference has no row for this NDC, we degrade to exactly what ran before.
+  function resolvePackSize(ndc, invId, uom, refMap, convMap) {
+    if (refMap) {
+      var hit = lookupNdc(ndc, refMap);
+      if (hit && hit.packSize) return hit.packSize;
+    }
+    return packSizeFromMap(convMap, invId, uom);
   }
 
 
@@ -3880,7 +3930,7 @@ function POImportTool(props) {
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
             <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 500 }}>Vendor Type</div>
             <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 12, color: "#6B7280" }}>
-              <button onClick={function() { Promise.all([fetchNdcMap(true), fetchUomConversionMap(true)]).then(function(r) { if (r && r[0]) toast("NDC + UOM maps refreshed from Acumatica"); }); }} disabled={ndcLoading} title="Force re-fetch the Generic NDCs and UOM conversion maps from Acumatica, bypassing cache. Use this after you've just added or changed a generic or its pack sizes in Acumatica." style={{ background: "transparent", border: "1px solid #E5E7EB", borderRadius: 6, padding: "5px 10px", fontSize: 11, color: TOOL_COLOR, cursor: ndcLoading ? "not-allowed" : "pointer", fontFamily: "'Varela Round', sans-serif", display: "inline-flex", alignItems: "center", gap: 5 }}>{ndcLoading ? "Refreshing\u2026" : "\u21BB Refresh NDC map"}</button>
+              <button onClick={function() { Promise.all([fetchNdcMap(true), fetchUomConversionMap(true), fetchPackSizeRefMap(true)]).then(function(r) { if (r && r[0]) toast("NDC + UOM + Pack Size maps refreshed from Acumatica"); }); }} disabled={ndcLoading} title="Force re-fetch the Generic NDCs, UOM conversion, and Pack Size Reference maps from Acumatica, bypassing cache. Use this after you've just added or changed a generic or its pack sizes in Acumatica." style={{ background: "transparent", border: "1px solid #E5E7EB", borderRadius: 6, padding: "5px 10px", fontSize: 11, color: TOOL_COLOR, cursor: ndcLoading ? "not-allowed" : "pointer", fontFamily: "'Varela Round', sans-serif", display: "inline-flex", alignItems: "center", gap: 5 }}>{ndcLoading ? "Refreshing\u2026" : "\u21BB Refresh NDC map"}</button>
               <span style={{ fontWeight: 500 }}>{"\u0394% Unit Cost Threshold"}</span>
               <input type="number" min="1" step="1" value={flagThreshold} onChange={function(e) { updateFlagThreshold(e.target.value); }} style={{ width: 64, padding: "5px 8px", border: "1px solid #E5E7EB", borderRadius: 6, fontSize: 12, color: "#374151", outline: "none", textAlign: "center", fontFamily: "'Varela Round', sans-serif", background: "#F9FAFB" }} />
               <span>%</span>
