@@ -705,6 +705,7 @@ function WHT(props) {
   var _sp = useState("overview"), subPage = _sp[0], setSubPage = _sp[1];
   var _d = useState([]), data = _d[0], setData = _d[1];
   var _ucm = useState({}), uomConvMap = _ucm[0], setUomConvMap = _ucm[1];
+  var _psr = useState(null), pkgSizeRefMap = _psr[0], setPkgSizeRefMap = _psr[1];
   var _ld = useState(false), loading = _ld[0], setLoading = _ld[1];
   var _q = useState(""), search = _q[0], setSearch = _q[1];
   var _vf = useState("all"), vendorFilter = _vf[0], setVendorFilter = _vf[1];
@@ -871,6 +872,39 @@ function WHT(props) {
       }
     } catch (e) { setKvStatus("save-error:" + e.message); }
   }, [kvKey, whKey]);
+
+  // Pack Size Reference (PURCH - Pack Size Reference GI). Keyed by NDC (TPSKU),
+  // value is the BOHPKSIZE attribute. Preferred source for the receiving-tracker
+  // Pkg Size column; resolvePackSize falls back to the UOM factor if a row is
+  // missing. Non-blocking — a failure just leaves the map null.
+  var fetchPackSizeRefMap = useCallback(async function(force) {
+    if (!cred || !cred.username || !cred.password) return null;
+    try {
+      var resp = await fetch("/api/acumatica" + (force ? "?refresh=1" : ""), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "pack-size-ref", username: cred.username, password: cred.password }),
+      });
+      var json = await resp.json();
+      if (!resp.ok) return null;
+      var rows = json.data || [];
+      var map = {};
+      rows.forEach(function(row) {
+        var ndc = (row.NDC || "").trim();
+        var ps  = row.PackSize;
+        if (!ndc || ps == null || ps === "") return;
+        var packNum = parseFloat(String(ps).replace(/[^0-9.]/g, ""));
+        if (isNaN(packNum) || packNum <= 0) return;
+        var entry = { packSize: packNum, inventoryId: (row.InventoryID || "").trim(), description: row.Description || "" };
+        var variants = ndcVariants(ndc);
+        variants.forEach(function(v) { map[v] = entry; });
+        map[normalizeNdc(ndc)] = entry;
+      });
+      setPkgSizeRefMap(map);
+      return map;
+    } catch (err) { return null; }
+  }, [cred]);
+
   var fetchData = useCallback(function() {
     if (!ok) { lp(); return; } setLoading(true); setEmailSent(false); setConfirmClear(false);
     (async function() {
