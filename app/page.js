@@ -9391,6 +9391,25 @@ function PoReconPage(props) {
       addLog("Pulling reconciliation feeds from Acumatica\u2026");
       var tp = await fetchAcumatica("recon-tp", null, cred.username, cred.password);
       var ggm = await fetchAcumatica("recon-ggm", null, cred.username, cred.password);
+      // Pack Size Reference (PURCH - Pack Size Reference): the maintained BOHPKSIZE
+      // pack size keyed by NDC. Preferred over the recon GI's own BOHPackSize
+      // attribute (often blank), then over the UOM string heuristic. Non-blocking:
+      // if it fails, resolvePackSize falls back exactly to the old behavior.
+      var pkgRefMap = {};
+      try {
+        var pkgRows = await fetchAcumatica("pack-size-ref", null, cred.username, cred.password);
+        (pkgRows || []).forEach(function (row) {
+          var ndc = (row.NDC || "").trim();
+          var psv = row.PackSize;
+          if (!ndc || psv == null || psv === "") return;
+          var packNum = parseFloat(String(psv).replace(/[^0-9.]/g, ""));
+          if (isNaN(packNum) || packNum <= 0) return;
+          var entry = { packSize: packNum };
+          ndcVariants(ndc).forEach(function (v) { pkgRefMap[v] = entry; });
+          pkgRefMap[normalizeNdc(ndc)] = entry;
+        });
+        addLog("Loaded pack sizes for " + Object.keys(pkgRefMap).length + " NDC key(s) from PURCH - Pack Size Reference.");
+      } catch (e) { addLog("Pack Size Reference fetch failed \u2014 falling back to BOHPackSize/UOM.", "warn"); }
       var rows = (tp || []).concat(ggm || []);
       addLog("Pulled " + rows.length + " PO lines (TP " + (tp || []).length + ", GGM " + (ggm || []).length + ").");
 
@@ -9424,8 +9443,13 @@ function PoReconPage(props) {
         if (existing[g.wh][g.ref]) return;
         if (!perWh[g.wh]) perWh[g.wh] = { rows: [], arrival: [], refs: [] };
         g.lines.forEach(function (r) {
-          var ps = Number(r.BOHPackSize); if (!ps || isNaN(ps)) ps = uomToPkgSize(r.UOM);
           var ndc = (r.SKUNDC && String(r.SKUNDC).trim()) ? String(r.SKUNDC).trim() : String(r.AltID || "").trim();
+          // Prefer the maintained Pack Size Reference (by NDC); then the recon GI's
+          // BOHPackSize attribute; then the UOM trailing-number heuristic.
+          var ps;
+          var refHit = lookupPackSizeInRef(ndc, pkgRefMap);
+          if (refHit && refHit.packSize) { ps = refHit.packSize; }
+          else { ps = Number(r.BOHPackSize); if (!ps || isNaN(ps)) ps = uomToPkgSize(r.UOM); }
           var sup = String(r.VendorName || "").toLowerCase();
           var skipArrival = sup.indexOf("vetcove generics") >= 0 || sup.indexOf("bloodworth") >= 0;
           perWh[g.wh].rows.push([r.VendorName || "", ndc, r.Description || "", ps, r.OrderQty != null ? r.OrderQty : "", "=INDEX(D:D,ROW())*INDEX(E:E,ROW())", g.ref, fmtDate(r.OrderDate)]);
