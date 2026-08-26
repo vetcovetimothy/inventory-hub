@@ -29,6 +29,7 @@ const ENDPOINTS = {
   "open-po-lines": "Open%20PO%20Lines",
   "recon-tp":      "HD%20PO%20Tracker%20-%20TP",
   "recon-ggm":     "HD%20PO%20Tracker%20-%20GGM",
+  "pack-size-ref": "PURCH%20-%20Pack%20Size%20Reference",
 };
 
 // Which columns to extract for each type (keyGroup = possible OData field names)
@@ -77,6 +78,16 @@ const COLUMN_MAP = {
     { label: "AlternateID",   keys: ["AlternateID", "AlternateId", "NDC", "Ndc", "SKUNDC", "SkuNDC", "UsrSKUNDC", "SKU_NDC"] },
     { label: "Description",   keys: ["Description", "Descr", "ItemDescription"] },
     { label: "UOM",           keys: ["UOM", "Uom", "BaseUnit", "BaseUOM"] },
+  ],
+  // PURCH - Pack Size Reference: item-master GI, one row per active item, keyed
+  // by NDC (TPSKU attribute). PackSize is the BOHPKSIZE attribute — the manually-
+  // maintained "units per purchase pack" the receiving trackers expect in col D.
+  "pack-size-ref": [
+    { label: "InventoryID",   keys: ["InventoryID", "InventoryId", "InventoryCd", "InventoryCD", "Inventory ID"] },
+    { label: "Description",   keys: ["Description", "Descr", "ItemDescription"] },
+    { label: "NDC",           keys: ["TPSKU", "TPSKU_Attributes", "TPSKUNDC", "TPSKU / NDC", "SKUNDC", "SkuNDC", "NDC", "Ndc"] },
+    { label: "PackSize",      keys: ["BOHPKSIZE", "BOHPKSIZE_Attributes", "BOHPackSize", "BOH Pack Size", "Pack Size", "PackSize"] },
+    { label: "BaseUOM",       keys: ["BaseUnit", "Base UOM", "BaseUOM", "UOM", "Uom"] },
   ],
   "item-xref": [
     { label: "InventoryID",   keys: ["InventoryID", "InventoryId", "InventoryCd", "InventoryCD", "Inventory ID"] },
@@ -225,6 +236,7 @@ const COLUMN_MAP = {
 // because users expect them to reflect current Acumatica state.
 const CACHE_TTL = {
   "ndc-lookup":       6 * 60 * 60 * 1000,  // 6h — generic NDCs change slowly
+  "pack-size-ref":    6 * 60 * 60 * 1000,  // 6h — BOHPKSIZE attribute changes slowly
   "stock-cross-ref":  6 * 60 * 60 * 1000,  // 6h — formulary cross-ref changes slowly
   "item-xref":        6 * 60 * 60 * 1000,  // 6h — item cross-ref changes slowly
   "uom-conversions": 24 * 60 * 60 * 1000,  // 24h — UOM conversions basically never change
@@ -270,7 +282,7 @@ export async function POST(request) {
     const { type, warehouse, username, password, useServiceAccount } = body;
 
     if (!type || !ENDPOINTS[type]) {
-      return Response.json({ error: "Invalid type. Use: po, po-ggm, ndc-lookup, item-xref, short-dating, backorder, hills-pawtree, replenishment-needs, whse-replenish, gen-pricing, gen-pricing-3prx, uom-conversions, stock-cross-ref, open-po-lines" }, { status: 400 });
+      return Response.json({ error: "Invalid type. Use: po, po-ggm, ndc-lookup, item-xref, short-dating, backorder, hills-pawtree, replenishment-needs, whse-replenish, gen-pricing, gen-pricing-3prx, uom-conversions, stock-cross-ref, open-po-lines, pack-size-ref" }, { status: 400 });
     }
 
     // Check cache before doing anything expensive (skip if ?refresh=1 in URL)
@@ -328,6 +340,11 @@ export async function POST(request) {
     // For cross reference, get all records
     if (type === "item-xref") {
       url += `?$top=10000`;
+    }
+
+    // For pack size reference, fetch all rows (item-master, a few thousand rows).
+    if (type === "pack-size-ref") {
+      url += `?$top=50000`;
     }
 
     // For UOM conversions, fetch all (no warehouse filter; many rows per item, so
