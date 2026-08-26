@@ -161,6 +161,28 @@ function packSizeFromMap(convMap, invId, uom) {
   return packSizeFromString(uom);
 }
 
+// Resolve a pack size for a tracker row, preferring the Pack Size Reference GI
+// (BOHPKSIZE), then falling back to the real UOM conversion factor, then the
+// trailing-number UOM heuristic. Strictly >= the old behavior: if the reference
+// has no row for this NDC, we degrade to exactly what ran before. Top-level so
+// it's in scope for processAllPOs. NDC matching mirrors lookupNdc, reusing the
+// hoisted normalizeNdc / ndcVariants helpers.
+function lookupPackSizeInRef(ndc, refMap) {
+  if (!refMap) return null;
+  var norm = normalizeNdc(ndc);
+  if (refMap[norm]) return refMap[norm];
+  if (refMap[ndc]) return refMap[ndc];
+  var vars = ndcVariants(ndc);
+  for (var k = 0; k < vars.length; k++) { if (refMap[vars[k]]) return refMap[vars[k]]; }
+  return null;
+}
+function resolvePackSize(ndc, invId, uom, refMap, convMap) {
+  var hit = lookupPackSizeInRef(ndc, refMap);
+  if (hit && hit.packSize) return hit.packSize;
+  return packSizeFromMap(convMap, invId, uom);
+}
+
+
 function evalShip(rule, total) {
   if (!rule || !rule.trim()) return "Free Shipping";
   const parts = rule.split(";").map(p => p.trim());
@@ -3297,19 +3319,6 @@ function POImportTool(props) {
       return map;
     } catch (err) { return null; }
   }, [cred]);
-
-  // Resolve a pack size for a tracker row, preferring the Pack Size Reference GI
-  // (BOHPKSIZE), then falling back to the real UOM conversion factor, then the
-  // trailing-number UOM heuristic. This is strictly >= the old behavior: if the
-  // reference has no row for this NDC, we degrade to exactly what ran before.
-  function resolvePackSize(ndc, invId, uom, refMap, convMap) {
-    if (refMap) {
-      var hit = lookupNdc(ndc, refMap);
-      if (hit && hit.packSize) return hit.packSize;
-    }
-    return packSizeFromMap(convMap, invId, uom);
-  }
-
 
   async function handleValidate() {
     if (pdfs.length === 0) { toast("Upload at least one PDF", "error"); return; }
