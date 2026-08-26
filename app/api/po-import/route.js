@@ -211,16 +211,24 @@ function parsePdfText(text) {
       // that also carries the vendor name ("12 80.28 0.67 Vetcove - ..."), so strip
       // the vendor tail first, then take the leading numbers.
       if (nums.length < 2) {
-        for (var g = i + 1; g < Math.min(lines.length, i + 6) && nums.length < 3; g++) {
+        for (var g = i + 1; g < Math.min(lines.length, i + 6) && nums.length < 4; g++) {
           var gl = lines[g].trim();
           if (!gl) continue;
           if (/\d{4,5}-\d{3,4}-\d{1,2}/.test(gl)) break; // reached the next line item
           var glClean = gl.replace(/Vetcove\s*-.*$/i, "").trim();
           var gnums = glClean.match(/[\d.]+/g);
-          if (gnums) { for (var gi = 0; gi < gnums.length && nums.length < 3; gi++) nums.push(gnums[gi]); }
+          if (gnums) { for (var gi = 0; gi < gnums.length && nums.length < 4; gi++) nums.push(gnums[gi]); }
           if (/vetcove/i.test(gl)) break; // vendor tail marks the end of this item's numbers
           if (!gnums) break;              // a non-numeric, non-vendor line ends the item
         }
+      }
+
+      // Some store-format POs (e.g. Bloodworth) repeat the PO number as an
+      // "Actual PO#" column between the NDC and the quantity. That leading value
+      // is not the qty, so drop it when it matches the header PO number. Guarded
+      // on an exact PO# match, so formats without that column are untouched.
+      if (poNumber && nums.length >= 1 && String(nums[0]) === String(poNumber)) {
+        nums = nums.slice(1);
       }
 
       var qty = nums && nums.length >= 1 ? parseInt(nums[0]) : null;
