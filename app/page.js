@@ -9396,6 +9396,7 @@ function PoReconPage(props) {
       // attribute (often blank), then over the UOM string heuristic. Non-blocking:
       // if it fails, resolvePackSize falls back exactly to the old behavior.
       var pkgRefMap = {};
+      var pkgRefDigits = {};   // digits-only NDC -> entry (format-proof fallback)
       try {
         var pkgRows = await fetchAcumatica("pack-size-ref", null, cred.username, cred.password);
         (pkgRows || []).forEach(function (row) {
@@ -9407,8 +9408,10 @@ function PoReconPage(props) {
           var entry = { packSize: packNum };
           ndcVariants(ndc).forEach(function (v) { pkgRefMap[v] = entry; });
           pkgRefMap[normalizeNdc(ndc)] = entry;
+          var digits = ndc.replace(/\D/g, "");
+          if (digits) pkgRefDigits[digits] = entry;
         });
-        addLog("Loaded pack sizes for " + Object.keys(pkgRefMap).length + " NDC key(s) from PURCH - Pack Size Reference.");
+        addLog("Loaded pack sizes for " + Object.keys(pkgRefDigits).length + " NDC key(s) from PURCH - Pack Size Reference.");
       } catch (e) { addLog("Pack Size Reference fetch failed \u2014 falling back to BOHPackSize/UOM.", "warn"); }
       var rows = (tp || []).concat(ggm || []);
       addLog("Pulled " + rows.length + " PO lines (TP " + (tp || []).length + ", GGM " + (ggm || []).length + ").");
@@ -9448,6 +9451,7 @@ function PoReconPage(props) {
           // BOHPackSize attribute; then the UOM trailing-number heuristic.
           var ps;
           var refHit = lookupPackSizeInRef(ndc, pkgRefMap);
+          if (!refHit) { var dig = String(ndc).replace(/\D/g, ""); if (dig && pkgRefDigits[dig]) refHit = pkgRefDigits[dig]; }
           if (refHit && refHit.packSize) { ps = refHit.packSize; }
           else { ps = Number(r.BOHPackSize); if (!ps || isNaN(ps)) ps = uomToPkgSize(r.UOM); }
           var sup = String(r.VendorName || "").toLowerCase();
