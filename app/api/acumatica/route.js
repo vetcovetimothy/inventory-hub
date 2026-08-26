@@ -410,6 +410,18 @@ export async function POST(request) {
     const json = await resp.json();
     let rawRows = json.value || [];
 
+    // Debug passthrough: ?debug=1 returns the raw OData field names and the first
+    // row untouched, so we can see exactly what a GI exposes over OData (the field
+    // names are the schema names, which don't always match the grid captions).
+    if (url0.searchParams.get("debug") === "1") {
+      return Response.json({
+        type,
+        rowCount: rawRows.length,
+        rawKeys: rawRows.length ? Object.keys(rawRows[0]) : [],
+        firstRow: rawRows.length ? rawRows[0] : null,
+      });
+    }
+
     // For PO fetches, filter to today's date only and exclude certain vendors
     if ((type === "po" || type === "po-ggm") && rawRows.length > 0) {
       // Get today in US Eastern time (Acumatica's likely timezone)
