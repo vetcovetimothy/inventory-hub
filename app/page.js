@@ -2903,12 +2903,22 @@ function POImportTool(props) {
     setPoStatus({ overall: overall, perPo: perPo, trackerReadFailed: trackerReadFailed, acuCheckFailed: acuCheckFailed, at: Date.now() });
   }
 
-  function buildTrackerTargets() {
+  // Build tracker targets from parsed results, grouped by destination tab.
+  // allowRefs (optional): a Set/object of PO numbers that are known to exist in
+  // Acumatica (created this batch or already present). When provided, any result
+  // row whose PO number is NOT in the set is held back — this is what prevents a
+  // phantom tracker row for a PO that failed to create. Held-back PO numbers are
+  // returned in .heldRefs so the caller can report them. When allowRefs is null
+  // (pure tracker-only / preview use before any create), nothing is held back.
+  function buildTrackerTargets(allowRefs) {
     var byTab = {};
+    var held = {};
     (results || []).forEach(function(r) {
       var wh = String(r.warehouse || "").trim();
       var dest = TRACKER_MAP[wh];
       if (!dest) return;
+      var poNum = String(r.poNumber || "").trim();
+      if (allowRefs && poNum && !allowRefs[poNum]) { held[poNum] = true; return; }
       var supplier = vendor === "ggm-crossovers" ? "Bloodworth" : (r.vendorSource || "");
       var row = [
         supplier,
@@ -2924,24 +2934,58 @@ function POImportTool(props) {
       if (!byTab[key]) byTab[key] = { sheetId: dest.sheetId, tab: dest.tab, warehouse: wh, rows: [] };
       byTab[key].rows.push(row);
     });
-    return Object.keys(byTab).map(function(k) { return byTab[k]; });
+    var targets = Object.keys(byTab).map(function(k) { return byTab[k]; });
+    targets.heldRefs = Object.keys(held);
+    return targets;
   }
 
   // ── Single tracker-add path ────────────────────────────────────────────────
   // Always dedups against what's already on each tab (PO number at row index 6).
   // Returns { okCount, skipped, failMsg, tabs } and updates trackerAdded on success.
   // Used by the adaptive button and the Advanced menu alike — no other add path.
-  async function addToTracker() {
-    var targets = buildTrackerTargets();
-    if (!targets.length) { toast("No lines map to a tracker tab (check the warehouse).", "error"); return { okCount: 0, skipped: 0, failMsg: "no targets" }; }
+  // Compute the set of PO numbers confirmed to exist in Acumatica right now,
+  // for gating tracker writes so a failed-to-create PO never gets a phantom row.
+  // Sources: the last status check (poStatus.perPo[].inAcumatica) and the PO just
+  // created this batch (batchDone.createdPO / succeeded refs on acuCreateResult).
+  // Returns null when we have NO create/status context at all — in that case the
+  // caller writes everything (old behavior), since there's nothing to gate against.
+  function allowRefsFromState() {
+    var allow = {};
+    var have = false;
+    if (poStatus && Array.isArray(poStatus.perPo)) {
+      poStatus.perPo.forEach(function (p) { if (p.inAcumatica && p.po) { allow[String(p.po).trim()] = true; have = true; } });
+      // A completed status check is itself context: even if nothing is in Acumatica,
+      // we know that, so gate on it (holds back everything, correctly).
+      if (poStatus.perPo.length) have = true;
+    }
+    var acr = acuCreateResult && acuCreateResult.data;
+    if (acr) {
+      (acr.succeeded || []).forEach(function (s) { if (s.vendorRef) { allow[String(s.vendorRef).trim()] = true; have = true; } });
+      (acr.alreadyExists || []).forEach(function (e) { if (e.vendorRef) { allow[String(e.vendorRef).trim()] = true; have = true; } });
+    }
+    return have ? allow : null;
+  }
+
+  async function addToTracker(allowRefs) {
+    var targets = buildTrackerTargets(allowRefs || null);
+    var heldRefs = targets.heldRefs || [];
+    if (!targets.length) {
+      if (heldRefs.length) { toast(heldRefs.length + " PO(s) not written \u2014 not in Acumatica: " + heldRefs.join(", "), "error"); return { okCount: 0, skipped: 0, failMsg: "", heldRefs: heldRefs }; }
+      toast("No lines map to a tracker tab (check the warehouse).", "error"); return { okCount: 0, skipped: 0, failMsg: "no targets", heldRefs: heldRefs };
+    }
     var okCount = 0, skipped = 0, failMsg = "", tabsUsed = {};
     for (var i = 0; i < targets.length; i++) {
       var t = targets[i];
       var refSet = {};
+      // Fail-CLOSED dedup: must know what's already on the tab before appending. If
+      // the read fails, stop this tab and report it rather than appending blind (a
+      // blind append on a transient read error double-posts every row).
       try {
         var rr = await fetch("/api/tracker-read", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sheetId: t.sheetId, tab: t.tab }) });
-        if (rr.ok) { var rd = await rr.json(); ((rd && rd.refs) || []).forEach(function (x) { refSet[String(x).trim()] = true; }); }
-      } catch (e) { /* read fail: fall through and append (fail-open) */ }
+        if (!rr.ok) { failMsg = t.tab + ": couldn't read existing rows (dedup unsafe) \u2014 not appended"; break; }
+        var rd = await rr.json();
+        ((rd && rd.refs) || []).forEach(function (x) { refSet[String(x).trim()] = true; });
+      } catch (e) { failMsg = t.tab + ": couldn't read existing rows (" + String(e) + ") \u2014 not appended"; break; }
       var keepRows = t.rows.filter(function (row) {
         var ref = Array.isArray(row) ? String(row[6] || "").trim() : "";
         if (!ref) return true;
@@ -2956,41 +3000,69 @@ function POImportTool(props) {
         else { failMsg = t.tab + ": " + ((data && data.error) || "failed"); break; }
       } catch (e) { failMsg = t.tab + ": " + String(e); break; }
     }
+    var heldNote = heldRefs.length ? " \u2014 " + heldRefs.length + " PO(s) skipped (not in Acumatica: " + heldRefs.join(", ") + ")" : "";
     if (failMsg) { toast("Tracker add failed \u2014 " + failMsg, "error"); }
-    else if (okCount > 0) { setTrackerAdded({ count: okCount, tabs: Object.keys(tabsUsed).join(", "), at: Date.now() }); toast("Added " + okCount + " row" + (okCount === 1 ? "" : "s") + " to the tracker" + (skipped ? " (" + skipped + " already there, skipped)" : "") + "."); }
-    else if (skipped > 0) { toast("All rows were already on the tracker \u2014 nothing to add."); }
-    var outcome = { okCount: okCount, skipped: skipped, failMsg: failMsg, tabs: Object.keys(tabsUsed).join(", ") };
+    else if (okCount > 0) { setTrackerAdded({ count: okCount, tabs: Object.keys(tabsUsed).join(", "), at: Date.now() }); toast("Added " + okCount + " row" + (okCount === 1 ? "" : "s") + " to the tracker" + (skipped ? " (" + skipped + " already there, skipped)" : "") + heldNote + "."); }
+    else if (skipped > 0) { toast("All rows were already on the tracker \u2014 nothing to add" + heldNote + "."); }
+    else if (heldRefs.length) { toast(heldRefs.length + " PO(s) not written \u2014 not in Acumatica: " + heldRefs.join(", "), "error"); }
+    var outcome = { okCount: okCount, skipped: skipped, failMsg: failMsg, tabs: Object.keys(tabsUsed).join(", "), heldRefs: heldRefs };
     // Record tracker outcome on the batch (merging with any create info already set)
     // so the primary button locks and the result popup can report it.
     setBatchDone(function (prev) {
       var b = prev || {};
-      return Object.assign({}, b, { tracker: { ok: !failMsg, count: okCount, skipped: skipped, fail: failMsg || null, tabs: outcome.tabs } });
+      return Object.assign({}, b, { tracker: { ok: !failMsg, count: okCount, skipped: skipped, fail: failMsg || null, tabs: outcome.tabs, held: heldRefs } });
     });
     return outcome;
   }
 
   function openTrackerPreview() {
-    var targets = buildTrackerTargets();
+    // Same phantom-row gating as the direct add: only preview rows for POs known
+    // in Acumatica (when we have that context). heldRefs are surfaced in the modal.
+    var allow = allowRefsFromState();
+    var targets = buildTrackerTargets(allow);
     var unmapped = (results || []).filter(function(r) { return !TRACKER_MAP[String(r.warehouse || "").trim()]; }).length;
-    if (!targets.length) { toast("No lines map to a tracker tab (check the warehouse).", "error"); return; }
-    setTrackerPreview({ targets: targets, unmapped: unmapped });
+    var heldRefs = targets.heldRefs || [];
+    if (!targets.length) {
+      if (heldRefs.length) { toast(heldRefs.length + " PO(s) not shown \u2014 not in Acumatica: " + heldRefs.join(", "), "error"); return; }
+      toast("No lines map to a tracker tab (check the warehouse).", "error"); return;
+    }
+    setTrackerPreview({ targets: targets, unmapped: unmapped, heldRefs: heldRefs });
   }
   async function confirmTrackerAppend() {
     if (!trackerPreview) return;
     setTrackerBusy(true);
-    var okCount = 0, failMsg = "";
+    var okCount = 0, skipped = 0, failMsg = "";
     try {
       for (var i = 0; i < trackerPreview.targets.length; i++) {
         var t = trackerPreview.targets[i];
-        var resp = await fetch("/api/tracker-append", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sheetId: t.sheetId, tab: t.tab, rows: t.rows }) });
+        // Fail-CLOSED dedup, same as addToTracker: read existing refs first and skip
+        // duplicates; if the read fails, stop rather than double-posting.
+        var refSet = {};
+        try {
+          var rr = await fetch("/api/tracker-read", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sheetId: t.sheetId, tab: t.tab }) });
+          if (!rr.ok) { failMsg = t.tab + ": couldn't read existing rows (dedup unsafe) \u2014 not appended"; break; }
+          var rd = await rr.json();
+          ((rd && rd.refs) || []).forEach(function (x) { refSet[String(x).trim()] = true; });
+        } catch (e) { failMsg = t.tab + ": couldn't read existing rows (" + String(e) + ") \u2014 not appended"; break; }
+        var keepRows = t.rows.filter(function (row) {
+          var ref = Array.isArray(row) ? String(row[6] || "").trim() : "";
+          if (!ref) return true;
+          if (refSet[ref]) { skipped++; return false; }
+          return true;
+        });
+        if (!keepRows.length) continue;
+        var resp = await fetch("/api/tracker-append", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sheetId: t.sheetId, tab: t.tab, rows: keepRows }) });
         var data = await resp.json();
-        if (data && data.ok) okCount += (data.appended || t.rows.length);
+        if (data && data.ok) okCount += (data.appended || keepRows.length);
         else { failMsg = t.tab + ": " + ((data && data.error) || "failed"); break; }
       }
+      var held = (trackerPreview.heldRefs || []);
+      var heldNote = held.length ? " \u2014 " + held.length + " PO(s) skipped (not in Acumatica: " + held.join(", ") + ")" : "";
       if (failMsg) toast("Tracker add failed \u2014 " + failMsg, "error");
       else {
         var tabNames = trackerPreview.targets.map(function(t) { return t.tab; }).join(", ");
-        toast("Added " + okCount + " row" + (okCount === 1 ? "" : "s") + " to the tracker.");
+        if (okCount > 0) toast("Added " + okCount + " row" + (okCount === 1 ? "" : "s") + " to the tracker" + (skipped ? " (" + skipped + " already there, skipped)" : "") + heldNote + ".");
+        else toast("All rows were already on the tracker \u2014 nothing to add" + heldNote + ".");
         setTrackerAdded({ count: okCount, tabs: tabNames, at: Date.now() });
         setTrackerPreview(null);
         setAcuCreateResult(null);
@@ -3781,7 +3853,11 @@ function POImportTool(props) {
     // toasted but never undo the successful Acumatica create. The dialog stays open
     // until the user closes it.
     if (data && data.ok) {
-      await addToTracker();
+      // Gate the tracker write to exactly the POs Acumatica confirmed created, so
+      // a partial success can never write a phantom row for a PO that didn't post.
+      var createdAllow = {};
+      (data.succeeded || []).forEach(function (s) { if (s.vendorRef) createdAllow[String(s.vendorRef).trim()] = true; });
+      await addToTracker(Object.keys(createdAllow).length ? createdAllow : null);
     }
   }
 
@@ -4119,7 +4195,7 @@ function POImportTool(props) {
                   // Already in Acumatica; action is tracker-add only. Locks once tracked.
                   primary = didTracker
                     ? { label: "\u2713 Added to tracker", disabled: true, fn: function(){}, title: "Added to the receiving tracker \u2014 Clear or re-parse to run again" }
-                    : { label: "\u2192 Add to tracker", disabled: false, fn: function() { addToTracker().then(function() { setAcuCreateResult({ data: { ok: true, succeeded: [], trackerOnly: true }, requested: [] }); }); }, title: "Already in Acumatica \u2014 just add to the receiving tracker" };
+                    : { label: "\u2192 Add to tracker", disabled: false, fn: function() { addToTracker(allowRefsFromState()).then(function() { setAcuCreateResult({ data: { ok: true, succeeded: [], trackerOnly: true }, requested: [] }); }); }, title: "Already in Acumatica \u2014 just add to the receiving tracker" };
                 } else if (ov === "tracker-only") {
                   // Already on tracker; action is create only. Locks once created.
                   primary = didCreate
@@ -4139,7 +4215,7 @@ function POImportTool(props) {
                     <button onClick={function() { setShowAdvanced(!showAdvanced); }} title="Individual actions" style={{ background: "transparent", color: "#6B7280", border: "1px solid #E5E7EB", padding: "6px 10px", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Advanced {showAdvanced ? "\u25B4" : "\u25BE"}</button>
                     {showAdvanced && <div style={{ position: "absolute", right: 0, top: "calc(100% + 4px)", background: "#FFFFFF", border: "1px solid #E5E7EB", borderRadius: 8, boxShadow: "0 6px 20px rgba(0,0,0,0.12)", padding: 6, zIndex: 50, minWidth: 220 }}>
                       <button onClick={function() { setShowAdvanced(false); openTrackerPreview(); }} style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: "none", padding: "8px 10px", fontSize: 12, color: "#374151", cursor: "pointer", borderRadius: 6, fontFamily: "'Varela Round', sans-serif" }}>Add to tracker (preview first)</button>
-                      <button onClick={function() { setShowAdvanced(false); addToTracker(); }} style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: "none", padding: "8px 10px", fontSize: 12, color: "#374151", cursor: "pointer", borderRadius: 6, fontFamily: "'Varela Round', sans-serif" }}>Add to tracker (skip duplicates)</button>
+                      <button onClick={function() { setShowAdvanced(false); addToTracker(allowRefsFromState()); }} style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: "none", padding: "8px 10px", fontSize: 12, color: "#374151", cursor: "pointer", borderRadius: 6, fontFamily: "'Varela Round', sans-serif" }}>Add to tracker (skip duplicates)</button>
                       <button onClick={function() { if (lockCreate) return; setShowAdvanced(false); onCreatePOsClick(); }} disabled={!ok || lockCreate} title={lockCreate ? "Already created this batch" : ""} style={{ display: "block", width: "100%", textAlign: "left", background: "transparent", border: "none", padding: "8px 10px", fontSize: 12, color: (ok && !lockCreate) ? "#374151" : "#9CA3AF", cursor: (ok && !lockCreate) ? "pointer" : "not-allowed", borderRadius: 6, fontFamily: "'Varela Round', sans-serif" }}>Create in Acumatica only</button>
                     </div>}
                   </div>
@@ -4391,11 +4467,14 @@ function POImportTool(props) {
                 : <div style={{ background: "rgba(220,38,38,0.04)", border: "1px solid rgba(220,38,38,0.2)", borderRadius: 6, padding: "8px 12px", fontSize: 12, color: "#DC2626" }}>
                     {"\u26A0 Tracker add failed \u2014 " + (batchDone.tracker.fail || "unknown error") + ". The Acumatica PO was still created; use Advanced \u2192 Add to tracker to retry."}
                   </div>}
+              {batchDone.tracker.held && batchDone.tracker.held.length > 0 && <div style={{ marginTop: 8, background: "rgba(180,83,9,0.06)", border: "1px solid rgba(180,83,9,0.25)", borderRadius: 6, padding: "8px 12px", fontSize: 12, color: "#B45309" }}>
+                {"\u26A0 " + batchDone.tracker.held.length + " PO(s) not written to the tracker \u2014 not created in Acumatica: " + batchDone.tracker.held.join(", ") + ". Re-parse and create these before adding them."}
+              </div>}
             </div>}
 
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
               <button onClick={function() { setAcuCreateResult(null); setDummyDelete(null); }} style={Object.assign({}, S.btn(), { padding: "8px 16px" })}>Close</button>
-              {alreadyExists && <button onClick={function() { setAcuCreateResult(null); addToTracker(); }} style={Object.assign({}, S.btn(), { padding: "8px 16px", background: "#8B5CF6", border: "1px solid #8B5CF6", color: "#fff" })}>{"\u2192"} Add to tracker (skip duplicates)</button>}
+              {alreadyExists && <button onClick={function() { var a = allowRefsFromState(); setAcuCreateResult(null); addToTracker(a); }} style={Object.assign({}, S.btn(), { padding: "8px 16px", background: "#8B5CF6", border: "1px solid #8B5CF6", color: "#fff" })}>{"\u2192"} Add to tracker (skip duplicates)</button>}
             </div>
           </div>
         </div>;
