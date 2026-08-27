@@ -9415,6 +9415,11 @@ function PoReconPage(props) {
       } catch (e) { addLog("Pack Size Reference fetch failed \u2014 falling back to BOHPackSize/UOM.", "warn"); }
       var rows = (tp || []).concat(ggm || []);
       addLog("Pulled " + rows.length + " PO lines (TP " + (tp || []).length + ", GGM " + (ggm || []).length + ").");
+      // TEMP DIAGNOSTIC: dump a few sample map keys so we can eyeball the format.
+      try {
+        var sampleKeys = Object.keys(pkgRefDigits).slice(0, 5);
+        addLog("PKGMAP total=" + Object.keys(pkgRefDigits).length + " sampleDigitsKeys=" + JSON.stringify(sampleKeys));
+      } catch (e) {}
 
       var lookback = (typeof days === "number" && days > 0) ? days : 6;
       var cutoff = new Date(); cutoff.setHours(0, 0, 0, 0); cutoff.setDate(cutoff.getDate() - lookback);
