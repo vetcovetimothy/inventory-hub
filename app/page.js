@@ -9415,11 +9415,6 @@ function PoReconPage(props) {
       } catch (e) { addLog("Pack Size Reference fetch failed \u2014 falling back to BOHPackSize/UOM.", "warn"); }
       var rows = (tp || []).concat(ggm || []);
       addLog("Pulled " + rows.length + " PO lines (TP " + (tp || []).length + ", GGM " + (ggm || []).length + ").");
-      // TEMP DIAGNOSTIC: dump a few sample map keys so we can eyeball the format.
-      try {
-        var sampleKeys = Object.keys(pkgRefDigits).slice(0, 5);
-        addLog("PKGMAP total=" + Object.keys(pkgRefDigits).length + " sampleDigitsKeys=" + JSON.stringify(sampleKeys));
-      } catch (e) {}
 
       var lookback = (typeof days === "number" && days > 0) ? days : 6;
       var cutoff = new Date(); cutoff.setHours(0, 0, 0, 0); cutoff.setDate(cutoff.getDate() - lookback);
@@ -9459,12 +9454,6 @@ function PoReconPage(props) {
           if (!refHit) { var dig = String(ndc).replace(/\D/g, ""); if (dig && pkgRefDigits[dig]) refHit = pkgRefDigits[dig]; }
           if (refHit && refHit.packSize) { ps = refHit.packSize; }
           else { ps = Number(r.BOHPackSize); if (!ps || isNaN(ps)) ps = uomToPkgSize(r.UOM); }
-          // TEMP DIAGNOSTIC: log how pack size resolved for the first few lines.
-          if (window.__reconPkgDbg == null) window.__reconPkgDbg = 0;
-          if (window.__reconPkgDbg < 8) {
-            window.__reconPkgDbg++;
-            addLog("PKGDBG ndc=[" + ndc + "] digits=[" + String(ndc).replace(/\D/g, "") + "] mapHit=" + (refHit ? ("YES(" + refHit.packSize + ")") : "NO") + " BOHPackSize=[" + r.BOHPackSize + "] UOM=[" + r.UOM + "] -> ps=" + ps + " | mapSize=" + Object.keys(pkgRefDigits).length);
-          }
           var sup = String(r.VendorName || "").toLowerCase();
           var skipArrival = sup.indexOf("vetcove generics") >= 0 || sup.indexOf("bloodworth") >= 0;
           perWh[g.wh].rows.push([r.VendorName || "", ndc, r.Description || "", ps, r.OrderQty != null ? r.OrderQty : "", "=INDEX(D:D,ROW())*INDEX(E:E,ROW())", g.ref, fmtDate(r.OrderDate)]);
