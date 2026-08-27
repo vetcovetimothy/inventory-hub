@@ -9454,6 +9454,12 @@ function PoReconPage(props) {
           if (!refHit) { var dig = String(ndc).replace(/\D/g, ""); if (dig && pkgRefDigits[dig]) refHit = pkgRefDigits[dig]; }
           if (refHit && refHit.packSize) { ps = refHit.packSize; }
           else { ps = Number(r.BOHPackSize); if (!ps || isNaN(ps)) ps = uomToPkgSize(r.UOM); }
+          // TEMP DIAGNOSTIC: log how pack size resolved for the first few lines.
+          if (window.__reconPkgDbg == null) window.__reconPkgDbg = 0;
+          if (window.__reconPkgDbg < 8) {
+            window.__reconPkgDbg++;
+            addLog("PKGDBG ndc=[" + ndc + "] digits=[" + String(ndc).replace(/\D/g, "") + "] mapHit=" + (refHit ? ("YES(" + refHit.packSize + ")") : "NO") + " BOHPackSize=[" + r.BOHPackSize + "] UOM=[" + r.UOM + "] -> ps=" + ps + " | mapSize=" + Object.keys(pkgRefDigits).length);
+          }
           var sup = String(r.VendorName || "").toLowerCase();
           var skipArrival = sup.indexOf("vetcove generics") >= 0 || sup.indexOf("bloodworth") >= 0;
           perWh[g.wh].rows.push([r.VendorName || "", ndc, r.Description || "", ps, r.OrderQty != null ? r.OrderQty : "", "=INDEX(D:D,ROW())*INDEX(E:E,ROW())", g.ref, fmtDate(r.OrderDate)]);
