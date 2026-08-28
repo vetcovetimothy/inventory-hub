@@ -1332,19 +1332,22 @@ function WHT(props) {
       }
 
       var trackerRows = [], trackerArrival = [], addedKeys = [], skippedLines = 0;
+      var trackerStatus = {}; // orderNbr -> { added, skipped }
       resp.results.forEach(function(r, i) {
         if (!r.ok) return;
         var p = processable[i];
         if (!p || !p.key) return;
         var lines = vendorGroups[p.key] || [];
         var poRef = String(p.vendorRef || "").trim();
+        var onbr = String(p.orderNbr || r.orderNbr || "").trim();
+        if (onbr && !trackerStatus[onbr]) trackerStatus[onbr] = { added: 0, skipped: 0 };
         lines.forEach(function(ln) {
           var ndcDigits = String(ln.SKUNDC || "").replace(/\D/g, "");
           var poForRow = poRef || String(ln.OrderNbr || "").trim();
           // Skip if this exact PO+line is already on the tab (or PO-level match on
           // tabs without an NDC column).
-          if (poForRow && ndcDigits && existingPairs[poForRow + "||" + ndcDigits]) { skippedLines++; return; }
-          if (poForRow && existingPairs["POONLY||" + poForRow]) { skippedLines++; return; }
+          if (poForRow && ndcDigits && existingPairs[poForRow + "||" + ndcDigits]) { skippedLines++; if (onbr) trackerStatus[onbr].skipped++; return; }
+          if (poForRow && existingPairs["POONLY||" + poForRow]) { skippedLines++; if (onbr) trackerStatus[onbr].skipped++; return; }
           trackerRows.push([
             ln.VendorName || "",
             ln.SKUNDC || "",
@@ -1356,6 +1359,7 @@ function WHT(props) {
             fmtTrackerDate(ln.OrderDate),
           ]);
           trackerArrival.push(fmtTrackerDate(ln.PromisedDate));
+          if (onbr) trackerStatus[onbr].added++;
         });
         addedKeys.push(p.key);
       });
@@ -1363,6 +1367,9 @@ function WHT(props) {
       if (dedupReadFailed) {
         toast("Tracker not updated \u2014 couldn't read existing rows to avoid duplicates. Try again.", "error");
       } else if (trackerRows.length) {
+      var trackerOutcome = "none"; // none | ok | failed | read-failed
+      if (dedupReadFailed) { trackerOutcome = "read-failed"; }
+      else if (trackerRows.length) {
         if (dest) {
           try {
             var tResp = await fetch("/api/tracker-append", {
@@ -1372,19 +1379,29 @@ function WHT(props) {
             });
             var tData = await tResp.json();
             if (tData && tData.ok) {
+              trackerOutcome = "ok";
               toast("Added " + tData.appended + " row" + (tData.appended === 1 ? "" : "s") + " to " + dest.tab + (skippedLines ? " (" + skippedLines + " already there, skipped)" : ""), "success");
               addedKeys.forEach(function(k) { updatedNotes[k] = Object.assign({}, updatedNotes[k] || {}, { addedToTracker: true }); });
               changed = true;
             } else {
+              trackerOutcome = "failed";
               toast("Tracker add failed: " + ((tData && tData.error) || "unknown"), "error");
             }
-          } catch (e) { toast("Tracker add error: " + (e && e.message ? e.message : e), "error"); }
+          } catch (e) { trackerOutcome = "failed"; toast("Tracker add error: " + (e && e.message ? e.message : e), "error"); }
         }
       } else if (skippedLines > 0) {
+        trackerOutcome = "ok"; // everything already present counts as "on the tracker"
         toast("All " + skippedLines + " line(s) already on " + (dest ? dest.tab : "the tracker") + " \u2014 nothing to add", "success");
         addedKeys.forEach(function(k) { updatedNotes[k] = Object.assign({}, updatedNotes[k] || {}, { addedToTracker: true }); });
         changed = true;
       }
+
+      // Attach per-PO tracker status to the results so the popup can show, for each
+      // PO, whether its lines were added, already present, or not written.
+      setAcuProcResult(function(prev) {
+        if (!prev) return prev;
+        return Object.assign({}, prev, { trackerStatus: trackerStatus, trackerOutcome: trackerOutcome, trackerTab: dest ? dest.tab : null });
+      });
 
       if (changed) {
         setShipNotes(updatedNotes);
@@ -1686,7 +1703,7 @@ function WHT(props) {
             </div>
             <div style={{ border: "1px solid #E5E7EB", borderRadius: 8, overflow: "auto", maxHeight: "55vh" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-                <thead><tr style={{ background: "#F9FAFB", position: "sticky", top: 0 }}><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>PO #</th><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>Vendor Ref</th><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>Channel</th><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>Result</th></tr></thead>
+                <thead><tr style={{ background: "#F9FAFB", position: "sticky", top: 0 }}><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>PO #</th><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>Vendor Ref</th><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>Channel</th><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>Result</th><th style={{ padding: "8px 12px", textAlign: "left", borderBottom: "1px solid #E5E7EB", color: "#6B7280", fontWeight: 600 }}>Tracker</th></tr></thead>
                 <tbody>{rs.map(function(row, i) {
                   var resultText, resultColor;
                   if (row.ok && row.emailed) { resultText = "\u2713 Released + Emailed"; resultColor = "#059669"; }
@@ -1697,7 +1714,18 @@ function WHT(props) {
                   else if (row.stage === "status-check") { resultText = "\u2717 Skipped: " + (row.currentStatus || "not on hold"); resultColor = "#DC2626"; }
                   else if (row.stage === "read-po") { resultText = "\u2717 PO not found"; resultColor = "#DC2626"; }
                   else { resultText = "\u2717 " + (row.error || row.stage || "unknown error"); resultColor = "#DC2626"; }
-                  return <tr key={i} style={{ borderBottom: "1px solid #F3F4F6" }}><td style={{ padding: "6px 12px", color: "#1F2937", fontFamily: "monospace" }}>{row.orderNbr}</td><td style={{ padding: "6px 12px", color: "#374151", fontFamily: "monospace" }}>{row.requestedVendorRef || ""}</td><td style={{ padding: "6px 12px", color: "#6B7280", fontSize: 11 }}>{row.channel || ""}</td><td style={{ padding: "6px 12px", color: resultColor, fontWeight: 600 }}>{resultText}{row.emailError && row.emailError.errorDetails ? <div style={{ fontSize: 10, color: "#9CA3AF", fontWeight: 400, marginTop: 2 }}>{row.emailError.errorDetails.map(function(e) { return e.message; }).join("; ")}</div> : null}</td></tr>;
+                  var ts = (acuProcResult.trackerStatus || {})[String(row.orderNbr || "").trim()];
+                  var tOutcome = acuProcResult.trackerOutcome;
+                  var trackerText = "", trackerColor = "#9CA3AF";
+                  if (!row.ok) { trackerText = "\u2014"; }
+                  else if (tOutcome === "read-failed") { trackerText = "\u26A0 not written (read failed)"; trackerColor = "#DC2626"; }
+                  else if (!ts) { trackerText = "\u2014"; }
+                  else if (tOutcome === "failed") { trackerText = "\u26A0 add failed"; trackerColor = "#DC2626"; }
+                  else if (ts.added > 0 && ts.skipped > 0) { trackerText = "\u2713 " + ts.added + " added, " + ts.skipped + " already there"; trackerColor = "#059669"; }
+                  else if (ts.added > 0) { trackerText = "\u2713 " + ts.added + " added"; trackerColor = "#059669"; }
+                  else if (ts.skipped > 0) { trackerText = "\u2713 already on tracker"; trackerColor = "#059669"; }
+                  else { trackerText = "\u2014"; }
+                  return <tr key={i} style={{ borderBottom: "1px solid #F3F4F6" }}><td style={{ padding: "6px 12px", color: "#1F2937", fontFamily: "monospace" }}>{row.orderNbr}</td><td style={{ padding: "6px 12px", color: "#374151", fontFamily: "monospace" }}>{row.requestedVendorRef || ""}</td><td style={{ padding: "6px 12px", color: "#6B7280", fontSize: 11 }}>{row.channel || ""}</td><td style={{ padding: "6px 12px", color: resultColor, fontWeight: 600 }}>{resultText}{row.emailError && row.emailError.errorDetails ? <div style={{ fontSize: 10, color: "#9CA3AF", fontWeight: 400, marginTop: 2 }}>{row.emailError.errorDetails.map(function(e) { return e.message; }).join("; ")}</div> : null}</td><td style={{ padding: "6px 12px", color: trackerColor, fontWeight: 600, fontSize: 11 }}>{trackerText}</td></tr>;
                 })}</tbody>
               </table>
             </div>
