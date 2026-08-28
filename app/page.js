@@ -1364,11 +1364,8 @@ function WHT(props) {
         addedKeys.push(p.key);
       });
 
-      if (dedupReadFailed) {
-        toast("Tracker not updated \u2014 couldn't read existing rows to avoid duplicates. Try again.", "error");
-      } else if (trackerRows.length) {
       var trackerOutcome = "none"; // none | ok | failed | read-failed
-      if (dedupReadFailed) { trackerOutcome = "read-failed"; }
+      if (dedupReadFailed) { trackerOutcome = "read-failed"; toast("Tracker not updated \u2014 couldn't read existing rows to avoid duplicates. Try again.", "error"); }
       else if (trackerRows.length) {
         if (dest) {
           try {
