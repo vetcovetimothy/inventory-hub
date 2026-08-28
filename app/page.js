@@ -1271,33 +1271,98 @@ function WHT(props) {
       });
 
       // ─── Add successfully-processed POs to the receiving tracker ───
-      // Build 8-col rows (+ Expected Arrival by header) for each PO that just
-      // processed OK and hasn't already been added. addedToTracker guards against
-      // re-adding if the same PO is processed again later.
-      var trackerRows = [], trackerArrival = [], addedKeys = [];
+      // Two reliability fixes here:
+      //  1. Pack size: fetch the Pack Size Reference GI FRESH inline (like PO
+      //     Recon), rather than relying on state that may be null/stale on a
+      //     re-run. Build a digits-only NDC index so format quirks can't miss.
+      //  2. Dedup: read existing PO+NDC pairs from the tab and skip any exact
+      //     PO+line already present, so re-processing never double-adds. Genuinely
+      //     new lines for a PO still get added.
+      var dest = TRACKER_MAP[whKey];
+
+      // (1) Fresh pack-size map, inline.
+      var freshPkgMap = {}, freshPkgDigits = {};
+      try {
+        var pkgRows = await fetchAcumatica("pack-size-ref", null, cred.username, cred.password);
+        (pkgRows || []).forEach(function(row) {
+          var ndc = (row.NDC || "").trim();
+          var psv = row.PackSize;
+          if (!ndc || psv == null || psv === "") return;
+          var packNum = parseFloat(String(psv).replace(/[^0-9.]/g, ""));
+          if (isNaN(packNum) || packNum <= 0) return;
+          var entry = { packSize: packNum };
+          ndcVariants(ndc).forEach(function(v) { freshPkgMap[v] = entry; });
+          freshPkgMap[normalizeNdc(ndc)] = entry;
+          var dg = ndc.replace(/\D/g, ""); if (dg) freshPkgDigits[dg] = entry;
+        });
+        setPkgSizeRefMap(freshPkgMap); // keep state in sync for other readers
+      } catch (e) { freshPkgMap = pkgSizeRefMap || {}; freshPkgDigits = {}; }
+      function resolvePkgFresh(ndc, invId, uom) {
+        var hit = lookupPackSizeInRef(ndc, freshPkgMap);
+        if (!hit) { var dg = String(ndc || "").replace(/\D/g, ""); if (dg && freshPkgDigits[dg]) hit = freshPkgDigits[dg]; }
+        if (hit && hit.packSize) return hit.packSize;
+        return resolvePackSize(ndc, invId, uom, pkgSizeRefMap, uomConvMap);
+      }
+
+      // (2) Existing PO+line pairs on the tab, for line-level dedup. Fail-closed:
+      // if the read fails, skip the whole append rather than risk duplicates.
+      var existingPairs = {};   // key: PO||ndcDigits -> true
+      var dedupReadFailed = false;
+      if (dest) {
+        try {
+          var rr = await fetch("/api/tracker-read", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sheetId: dest.sheetId, tab: dest.tab, withLines: true }),
+          });
+          if (!rr.ok) { dedupReadFailed = true; }
+          else {
+            var rd = await rr.json();
+            if (rd && rd.ok && Array.isArray(rd.pairs)) {
+              rd.pairs.forEach(function(pr) {
+                var po = String(pr.po || "").trim();
+                var dg = String(pr.ndcDigits || "").trim();
+                if (po && dg) existingPairs[po + "||" + dg] = true;
+              });
+            } else if (rd && rd.ok && !rd.ndcFound) {
+              // Tab has no NDC column — fall back to PO-level dedup on refs.
+              (rd.refs || []).forEach(function(x) { existingPairs["POONLY||" + String(x).trim()] = true; });
+            }
+          }
+        } catch (e) { dedupReadFailed = true; }
+      }
+
+      var trackerRows = [], trackerArrival = [], addedKeys = [], skippedLines = 0;
       resp.results.forEach(function(r, i) {
         if (!r.ok) return;
         var p = processable[i];
         if (!p || !p.key) return;
-        if ((updatedNotes[p.key] || {}).addedToTracker) return;
         var lines = vendorGroups[p.key] || [];
+        var poRef = String(p.vendorRef || "").trim();
         lines.forEach(function(ln) {
+          var ndcDigits = String(ln.SKUNDC || "").replace(/\D/g, "");
+          var poForRow = poRef || String(ln.OrderNbr || "").trim();
+          // Skip if this exact PO+line is already on the tab (or PO-level match on
+          // tabs without an NDC column).
+          if (poForRow && ndcDigits && existingPairs[poForRow + "||" + ndcDigits]) { skippedLines++; return; }
+          if (poForRow && existingPairs["POONLY||" + poForRow]) { skippedLines++; return; }
           trackerRows.push([
             ln.VendorName || "",
             ln.SKUNDC || "",
             ln.Description || "",
-            resolvePackSize(ln.SKUNDC, ln.InventoryID, ln.UOM, pkgSizeRefMap, uomConvMap),
+            resolvePkgFresh(ln.SKUNDC, ln.InventoryID, ln.UOM),
             ln.OrderQty != null ? ln.OrderQty : "",
             "=INDEX(D:D,ROW())*INDEX(E:E,ROW())",
-            p.vendorRef || ln.OrderNbr || "",
+            poForRow,
             fmtTrackerDate(ln.OrderDate),
           ]);
           trackerArrival.push(fmtTrackerDate(ln.PromisedDate));
         });
         addedKeys.push(p.key);
       });
-      if (trackerRows.length) {
-        var dest = TRACKER_MAP[whKey];
+
+      if (dedupReadFailed) {
+        toast("Tracker not updated \u2014 couldn't read existing rows to avoid duplicates. Try again.", "error");
+      } else if (trackerRows.length) {
         if (dest) {
           try {
             var tResp = await fetch("/api/tracker-append", {
@@ -1307,7 +1372,7 @@ function WHT(props) {
             });
             var tData = await tResp.json();
             if (tData && tData.ok) {
-              toast("Added " + tData.appended + " row" + (tData.appended === 1 ? "" : "s") + " to " + dest.tab, "success");
+              toast("Added " + tData.appended + " row" + (tData.appended === 1 ? "" : "s") + " to " + dest.tab + (skippedLines ? " (" + skippedLines + " already there, skipped)" : ""), "success");
               addedKeys.forEach(function(k) { updatedNotes[k] = Object.assign({}, updatedNotes[k] || {}, { addedToTracker: true }); });
               changed = true;
             } else {
@@ -1315,6 +1380,10 @@ function WHT(props) {
             }
           } catch (e) { toast("Tracker add error: " + (e && e.message ? e.message : e), "error"); }
         }
+      } else if (skippedLines > 0) {
+        toast("All " + skippedLines + " line(s) already on " + (dest ? dest.tab : "the tracker") + " \u2014 nothing to add", "success");
+        addedKeys.forEach(function(k) { updatedNotes[k] = Object.assign({}, updatedNotes[k] || {}, { addedToTracker: true }); });
+        changed = true;
       }
 
       if (changed) {
