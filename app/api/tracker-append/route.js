@@ -95,32 +95,42 @@ export async function POST(request) {
     var writeResp = await fetch(url, { method: "PUT", headers: authHeaders, body: JSON.stringify({ values: rows }) });
     if (!writeResp.ok) return json({ ok: false, stage: "write", error: await writeResp.text() }, 502);
 
-    // Optional: write one more column (e.g. "Expected Arrival") located BY HEADER NAME,
-    // so it lands in the right column even though its position varies between tabs and
-    // isn't part of the fixed A-H block. Silently skipped if the header isn't found.
-    var extra = body.extraColumn;
+    // Optional: write additional columns located BY HEADER NAME, so each lands in
+    // the right column even though positions vary between tabs and aren't part of
+    // the fixed A-H block. Accepts either `extraColumn` (single, legacy) or
+    // `extraColumns` (array). Each: { header, values:[...] }. Headers not found on
+    // the tab are silently skipped and noted.
+    var extraList = [];
+    if (body.extraColumn && body.extraColumn.header) extraList.push(body.extraColumn);
+    if (Array.isArray(body.extraColumns)) extraList = extraList.concat(body.extraColumns);
     var extraNote = null;
-    if (extra && extra.header && Array.isArray(extra.values) && extra.values.length) {
+    if (extraList.length) {
       var hdrResp = await fetch(base + "/values/" + encodeURIComponent(tab + "!A1:BZ8"), { headers: authHeaders });
       if (hdrResp.ok) {
         var hdrRows = (await hdrResp.json()).values || [];
-        var want = String(extra.header).replace(/\s+/g, " ").trim().toLowerCase();
-        var targetIdx = -1;
-        for (var h = 0; h < hdrRows.length && targetIdx < 0; h++) {
-          var rr = hdrRows[h] || [];
-          for (var c = 0; c < rr.length; c++) {
-            if (String(rr[c] == null ? "" : rr[c]).replace(/\s+/g, " ").trim().toLowerCase() === want) { targetIdx = c; break; }
+        var notFound = [];
+        for (var ex = 0; ex < extraList.length; ex++) {
+          var extra = extraList[ex];
+          if (!extra || !extra.header || !Array.isArray(extra.values) || !extra.values.length) continue;
+          var want = String(extra.header).replace(/\s+/g, " ").trim().toLowerCase();
+          var targetIdx = -1;
+          for (var h = 0; h < hdrRows.length && targetIdx < 0; h++) {
+            var rr = hdrRows[h] || [];
+            for (var c = 0; c < rr.length; c++) {
+              if (String(rr[c] == null ? "" : rr[c]).replace(/\s+/g, " ").trim().toLowerCase() === want) { targetIdx = c; break; }
+            }
+          }
+          if (targetIdx >= 0) {
+            var letter = colLetter(targetIdx);
+            var colVals = extra.values.map(function (v) { return [v == null ? "" : v]; });
+            var eurl = base + "/values/" + encodeURIComponent(tab + "!" + letter + nextRow) + "?valueInputOption=USER_ENTERED";
+            var eResp = await fetch(eurl, { method: "PUT", headers: authHeaders, body: JSON.stringify({ values: colVals }) });
+            if (!eResp.ok) notFound.push(extra.header + " (write failed)");
+          } else {
+            notFound.push(extra.header + " (header not found)");
           }
         }
-        if (targetIdx >= 0) {
-          var letter = colLetter(targetIdx);
-          var colVals = extra.values.map(function (v) { return [v == null ? "" : v]; });
-          var eurl = base + "/values/" + encodeURIComponent(tab + "!" + letter + nextRow) + "?valueInputOption=USER_ENTERED";
-          var eResp = await fetch(eurl, { method: "PUT", headers: authHeaders, body: JSON.stringify({ values: colVals }) });
-          if (!eResp.ok) extraNote = "extra-column write failed: " + (await eResp.text());
-        } else {
-          extraNote = "header '" + extra.header + "' not found; skipped that column";
-        }
+        if (notFound.length) extraNote = "skipped: " + notFound.join("; ");
       }
     }
 
