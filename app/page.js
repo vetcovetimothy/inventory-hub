@@ -9546,7 +9546,7 @@ function PoReconPage(props) {
       Object.keys(groups).forEach(function (k) {
         var g = groups[k];
         if (existing[g.wh][g.ref]) return;
-        if (!perWh[g.wh]) perWh[g.wh] = { rows: [], arrival: [], refs: [] };
+        if (!perWh[g.wh]) perWh[g.wh] = { rows: [], arrival: [], ndcUnf: [], invId: [], refs: [] };
         g.lines.forEach(function (r) {
           var ndc = (r.SKUNDC && String(r.SKUNDC).trim()) ? String(r.SKUNDC).trim() : String(r.AltID || "").trim();
           // Prefer the maintained Pack Size Reference (by NDC); then the recon GI's
@@ -9560,6 +9560,8 @@ function PoReconPage(props) {
           var skipArrival = sup.indexOf("vetcove generics") >= 0 || sup.indexOf("bloodworth") >= 0;
           perWh[g.wh].rows.push([r.VendorName || "", ndc, r.Description || "", ps, r.OrderQty != null ? r.OrderQty : "", "=INDEX(D:D,ROW())*INDEX(E:E,ROW())", g.ref, fmtDate(r.OrderDate)]);
           perWh[g.wh].arrival.push(skipArrival ? "" : fmtDate(r.PromisedDate));
+          perWh[g.wh].ndcUnf.push(String(ndc).replace(/\D/g, ""));        // Column P: NDC unformatted
+          perWh[g.wh].invId.push(String(r.InventoryID || "").trim());     // Column Q: Inventory ID
         });
         perWh[g.wh].refs.push(g.ref);
       });
@@ -9573,7 +9575,7 @@ function PoReconPage(props) {
       var addedTotal = 0;
       for (var mi = 0; mi < missingWhs.length; mi++) {
         var w = missingWhs[mi], dest = TRACKER_MAP[w], pw = perWh[w];
-        var aResp = await fetch("/api/tracker-append", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sheetId: dest.sheetId, tab: dest.tab, rows: pw.rows, extraColumn: { header: "Expected Arrival", values: pw.arrival } }) });
+        var aResp = await fetch("/api/tracker-append", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sheetId: dest.sheetId, tab: dest.tab, rows: pw.rows, extraColumns: [{ header: "Expected Arrival", values: pw.arrival }, { header: "NDC unformatted", values: pw.ndcUnf }, { header: "Inventory ID", values: pw.invId }] }) });
         var aData = await aResp.json();
         if (aData && aData.ok) { addedTotal += aData.appended; addLog("Added " + aData.appended + " line(s) to " + dest.tab + " \u2014 PO(s): " + pw.refs.join(", "), "ok"); }
         else { addLog("Failed to add to " + dest.tab + ": " + ((aData && aData.error) || "unknown"), "error"); }
