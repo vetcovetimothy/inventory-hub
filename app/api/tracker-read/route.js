@@ -57,22 +57,26 @@ export async function POST(request) {
   try {
     var body = await request.json();
     var sheetId = body.sheetId, tab = body.tab;
+    var withLines = !!body.withLines; // also return [{po, ndc}] pairs for line-level dedup
     if (!sheetId || !tab) return json({ ok: false, error: "Missing sheetId/tab" }, 400);
 
     var token = await getServiceAccountToken();
     var base = "https://sheets.googleapis.com/v4/spreadsheets/" + sheetId;
     var authHeaders = { Authorization: "Bearer " + token };
 
-    // Find the header row + the PO column within the first several rows.
+    // Find the header row + the PO column within the first several rows. When
+    // withLines is set, also locate the NDC column so we can return PO+NDC pairs.
     var hdrResp = await fetch(base + "/values/" + encodeURIComponent(tab + "!A1:BZ8"), { headers: authHeaders });
     if (!hdrResp.ok) return json({ ok: false, stage: "read-header", error: await hdrResp.text() }, 502);
     var hdrRows = (await hdrResp.json()).values || [];
     var PO_HEADERS = ["pono", "ponumber", "ponbr"];
-    var poIdx = -1, poHeader = null, headerRowNum = 0;
+    var NDC_HEADERS = ["ndc", "skundc", "skundcs"];
+    var poIdx = -1, poHeader = null, headerRowNum = 0, ndcIdx = -1;
     for (var h = 0; h < hdrRows.length && poIdx < 0; h++) {
       var rr = hdrRows[h] || [];
       for (var c = 0; c < rr.length; c++) {
-        if (PO_HEADERS.indexOf(norm(rr[c])) !== -1) { poIdx = c; poHeader = rr[c]; headerRowNum = h + 1; break; }
+        if (PO_HEADERS.indexOf(norm(rr[c])) !== -1) { poIdx = c; poHeader = rr[c]; headerRowNum = h + 1; }
+        if (withLines && ndcIdx < 0 && NDC_HEADERS.indexOf(norm(rr[c])) !== -1) { ndcIdx = c; }
       }
     }
     if (poIdx < 0) return json({ ok: false, stage: "po-column", error: "No 'PO No.' / 'PO Number' column found in tab '" + tab + "'." }, 400);
@@ -86,7 +90,27 @@ export async function POST(request) {
       var v = col[i] && col[i][0] != null ? String(col[i][0]).trim() : "";
       if (v && !seen[v]) { seen[v] = 1; refs.push(v); }
     }
-    return json({ ok: true, tab: tab, poHeader: poHeader, refs: refs });
+
+    // Optional: PO+NDC pairs for line-level dedup. Reads the NDC column alongside
+    // the PO column, row-aligned, and returns digits-only NDC keyed to its PO.
+    var pairs = null;
+    if (withLines && ndcIdx >= 0) {
+      var ndcLetter = colLetter(ndcIdx);
+      var ndcResp = await fetch(base + "/values/" + encodeURIComponent(tab + "!" + ndcLetter + ":" + ndcLetter), { headers: authHeaders });
+      if (ndcResp.ok) {
+        var ndcCol = ((await ndcResp.json()).values) || [];
+        pairs = [];
+        var maxLen = Math.max(col.length, ndcCol.length);
+        for (var j = headerRowNum; j < maxLen; j++) {
+          var pov = col[j] && col[j][0] != null ? String(col[j][0]).trim() : "";
+          var ndcv = ndcCol[j] && ndcCol[j][0] != null ? String(ndcCol[j][0]).trim() : "";
+          if (!pov && !ndcv) continue;
+          pairs.push({ po: pov, ndc: ndcv, ndcDigits: ndcv.replace(/\D/g, "") });
+        }
+      }
+    }
+
+    return json({ ok: true, tab: tab, poHeader: poHeader, refs: refs, pairs: pairs, ndcFound: ndcIdx >= 0 });
   } catch (e) {
     return json({ ok: false, error: String((e && e.message) || e) }, 500);
   }
