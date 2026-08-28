@@ -1331,7 +1331,7 @@ function WHT(props) {
         } catch (e) { dedupReadFailed = true; }
       }
 
-      var trackerRows = [], trackerArrival = [], addedKeys = [], skippedLines = 0;
+      var trackerRows = [], trackerArrival = [], trackerNdcUnf = [], trackerInvId = [], addedKeys = [], skippedLines = 0;
       var trackerStatus = {}; // orderNbr -> { added, skipped }
       resp.results.forEach(function(r, i) {
         if (!r.ok) return;
@@ -1359,6 +1359,8 @@ function WHT(props) {
             fmtTrackerDate(ln.OrderDate),
           ]);
           trackerArrival.push(fmtTrackerDate(ln.PromisedDate));
+          trackerNdcUnf.push(ndcDigits);                              // Column P: NDC unformatted
+          trackerInvId.push(String(ln.InventoryID || "").trim());     // Column Q: Inventory ID
           if (onbr) trackerStatus[onbr].added++;
         });
         addedKeys.push(p.key);
@@ -1372,7 +1374,7 @@ function WHT(props) {
             var tResp = await fetch("/api/tracker-append", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ sheetId: dest.sheetId, tab: dest.tab, rows: trackerRows, extraColumn: { header: "Expected Arrival", values: trackerArrival } }),
+              body: JSON.stringify({ sheetId: dest.sheetId, tab: dest.tab, rows: trackerRows, extraColumns: [{ header: "Expected Arrival", values: trackerArrival }, { header: "NDC unformatted", values: trackerNdcUnf }, { header: "Inventory ID", values: trackerInvId }] }),
             });
             var tData = await tResp.json();
             if (tData && tData.ok) {
@@ -3025,8 +3027,10 @@ function POImportTool(props) {
         r.orderDate || "",
       ];
       var key = dest.sheetId + "||" + dest.tab;
-      if (!byTab[key]) byTab[key] = { sheetId: dest.sheetId, tab: dest.tab, warehouse: wh, rows: [] };
+      if (!byTab[key]) byTab[key] = { sheetId: dest.sheetId, tab: dest.tab, warehouse: wh, rows: [], ndcUnf: [], invId: [] };
       byTab[key].rows.push(row);
+      byTab[key].ndcUnf.push(String(r.ndc || "").replace(/\D/g, ""));   // Column P: NDC unformatted
+      byTab[key].invId.push(String(r.inventoryId || "").trim());         // Column Q: Inventory ID
     });
     var targets = Object.keys(byTab).map(function(k) { return byTab[k]; });
     targets.heldRefs = Object.keys(held);
@@ -3080,15 +3084,17 @@ function POImportTool(props) {
         var rd = await rr.json();
         ((rd && rd.refs) || []).forEach(function (x) { refSet[String(x).trim()] = true; });
       } catch (e) { failMsg = t.tab + ": couldn't read existing rows (" + String(e) + ") \u2014 not appended"; break; }
-      var keepRows = t.rows.filter(function (row) {
+      var keepRows = [], keepNdcUnf = [], keepInvId = [];
+      t.rows.forEach(function (row, ri) {
         var ref = Array.isArray(row) ? String(row[6] || "").trim() : "";
-        if (!ref) return true;
-        if (refSet[ref]) { skipped++; return false; }
-        return true;
+        if (ref && refSet[ref]) { skipped++; return; }
+        keepRows.push(row);
+        keepNdcUnf.push((t.ndcUnf || [])[ri] || "");
+        keepInvId.push((t.invId || [])[ri] || "");
       });
       if (!keepRows.length) continue;
       try {
-        var resp = await fetch("/api/tracker-append", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sheetId: t.sheetId, tab: t.tab, rows: keepRows }) });
+        var resp = await fetch("/api/tracker-append", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sheetId: t.sheetId, tab: t.tab, rows: keepRows, extraColumns: [{ header: "NDC unformatted", values: keepNdcUnf }, { header: "Inventory ID", values: keepInvId }] }) });
         var data = await resp.json();
         if (data && data.ok) { okCount += (data.appended || keepRows.length); tabsUsed[t.tab] = true; }
         else { failMsg = t.tab + ": " + ((data && data.error) || "failed"); break; }
@@ -3138,14 +3144,16 @@ function POImportTool(props) {
           var rd = await rr.json();
           ((rd && rd.refs) || []).forEach(function (x) { refSet[String(x).trim()] = true; });
         } catch (e) { failMsg = t.tab + ": couldn't read existing rows (" + String(e) + ") \u2014 not appended"; break; }
-        var keepRows = t.rows.filter(function (row) {
+        var keepRows = [], keepNdcUnf = [], keepInvId = [];
+        t.rows.forEach(function (row, ri) {
           var ref = Array.isArray(row) ? String(row[6] || "").trim() : "";
-          if (!ref) return true;
-          if (refSet[ref]) { skipped++; return false; }
-          return true;
+          if (ref && refSet[ref]) { skipped++; return; }
+          keepRows.push(row);
+          keepNdcUnf.push((t.ndcUnf || [])[ri] || "");
+          keepInvId.push((t.invId || [])[ri] || "");
         });
         if (!keepRows.length) continue;
-        var resp = await fetch("/api/tracker-append", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sheetId: t.sheetId, tab: t.tab, rows: keepRows }) });
+        var resp = await fetch("/api/tracker-append", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sheetId: t.sheetId, tab: t.tab, rows: keepRows, extraColumns: [{ header: "NDC unformatted", values: keepNdcUnf }, { header: "Inventory ID", values: keepInvId }] }) });
         var data = await resp.json();
         if (data && data.ok) okCount += (data.appended || keepRows.length);
         else { failMsg = t.tab + ": " + ((data && data.error) || "failed"); break; }
