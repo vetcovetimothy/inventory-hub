@@ -1298,6 +1298,16 @@ function WHT(props) {
         setPkgSizeRefMap(freshPkgMap); // keep state in sync for other readers
       } catch (e) { freshPkgMap = pkgSizeRefMap || {}; freshPkgDigits = {}; }
       function resolvePkgFresh(ndc, invId, uom) {
+        // GEN- items can share one InventoryID across multiple NDCs with different
+        // real pack sizes (e.g. BT120 vs BT500). The item-level BOHPKSIZE attribute
+        // can only hold one value, so the reference GI can't tell them apart. For
+        // GEN- only, the per-line UOM trailing number is the reliable pack size, so
+        // trust it first. Non-GEN items keep the normal GI-first chain.
+        var id = String(invId || "").trim().toUpperCase();
+        if (id.indexOf("GEN-") === 0) {
+          var m = String(uom == null ? "" : uom).match(/(\d+)\s*$/);
+          if (m) return Number(m[1]);
+        }
         var hit = lookupPackSizeInRef(ndc, freshPkgMap);
         if (!hit) { var dg = String(ndc || "").replace(/\D/g, ""); if (dg && freshPkgDigits[dg]) hit = freshPkgDigits[dg]; }
         if (hit && hit.packSize) return hit.packSize;
@@ -3016,11 +3026,16 @@ function POImportTool(props) {
       var poNum = String(r.poNumber || "").trim();
       if (allowRefs && poNum && !allowRefs[poNum]) { held[poNum] = true; return; }
       var supplier = vendor === "ggm-crossovers" ? "Bloodworth" : (r.vendorSource || "");
+      // GEN- items may share one InventoryID across several NDCs with different pack
+      // sizes; for GEN- the per-line UOM trailing number is the reliable pack size.
+      var genId = String(r.inventoryId || "").trim().toUpperCase().indexOf("GEN-") === 0;
+      var genUomM = genId ? String(r.uom == null ? "" : r.uom).match(/(\d+)\s*$/) : null;
+      var pkgSizeVal = genUomM ? Number(genUomM[1]) : ((r.uomConvFactor && r.uomConvFactor > 0) ? r.uomConvFactor : packSizeFromString(r.uom));
       var row = [
         supplier,
         r.ndc || "",
         r.acumaticaDesc || r.drugName || "",
-        (r.uomConvFactor && r.uomConvFactor > 0) ? r.uomConvFactor : packSizeFromString(r.uom),
+        pkgSizeVal,
         r.qty != null ? r.qty : "",
         "=INDEX(D:D,ROW())*INDEX(E:E,ROW())",
         r.poNumber || "",
@@ -9551,11 +9566,20 @@ function PoReconPage(props) {
           var ndc = (r.SKUNDC && String(r.SKUNDC).trim()) ? String(r.SKUNDC).trim() : String(r.AltID || "").trim();
           // Prefer the maintained Pack Size Reference (by NDC); then the recon GI's
           // BOHPackSize attribute; then the UOM trailing-number heuristic.
+          // Exception: GEN- items can share one InventoryID across several NDCs with
+          // different pack sizes (BT120 vs BT500); the item-level BOHPKSIZE can't
+          // distinguish them, so for GEN- the per-line UOM number wins first.
           var ps;
-          var refHit = lookupPackSizeInRef(ndc, pkgRefMap);
-          if (!refHit) { var dig = String(ndc).replace(/\D/g, ""); if (dig && pkgRefDigits[dig]) refHit = pkgRefDigits[dig]; }
-          if (refHit && refHit.packSize) { ps = refHit.packSize; }
-          else { ps = Number(r.BOHPackSize); if (!ps || isNaN(ps)) ps = uomToPkgSize(r.UOM); }
+          var invIdU = String(r.InventoryID || "").trim().toUpperCase();
+          var genUomMatch = invIdU.indexOf("GEN-") === 0 ? String(r.UOM == null ? "" : r.UOM).match(/(\d+)\s*$/) : null;
+          if (genUomMatch) {
+            ps = Number(genUomMatch[1]);
+          } else {
+            var refHit = lookupPackSizeInRef(ndc, pkgRefMap);
+            if (!refHit) { var dig = String(ndc).replace(/\D/g, ""); if (dig && pkgRefDigits[dig]) refHit = pkgRefDigits[dig]; }
+            if (refHit && refHit.packSize) { ps = refHit.packSize; }
+            else { ps = Number(r.BOHPackSize); if (!ps || isNaN(ps)) ps = uomToPkgSize(r.UOM); }
+          }
           var sup = String(r.VendorName || "").toLowerCase();
           var skipArrival = sup.indexOf("vetcove generics") >= 0 || sup.indexOf("bloodworth") >= 0;
           perWh[g.wh].rows.push([r.VendorName || "", ndc, r.Description || "", ps, r.OrderQty != null ? r.OrderQty : "", "=INDEX(D:D,ROW())*INDEX(E:E,ROW())", g.ref, fmtDate(r.OrderDate)]);
