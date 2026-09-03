@@ -76,7 +76,13 @@ async function run(windowDays) {
     if (existing[g.wh][g.ref]) return;
     if (!perWh[g.wh]) perWh[g.wh] = { rows: [], arrival: [], refs: [] };
     g.lines.forEach(function (r) {
-      var ps = Number(r.BOHPackSize); if (!ps || isNaN(ps)) ps = uomToPkgSize(r.UOM);
+      // GEN- items may share one InventoryID across several NDCs with different pack
+      // sizes; for GEN- the per-line UOM trailing number is the reliable pack size.
+      var ps;
+      var invIdU = String(r.InventoryID || "").trim().toUpperCase();
+      var genM = invIdU.indexOf("GEN-") === 0 ? String(r.UOM == null ? "" : r.UOM).match(/(\d+)\s*$/) : null;
+      if (genM) { ps = Number(genM[1]); }
+      else { ps = Number(r.BOHPackSize); if (!ps || isNaN(ps)) ps = uomToPkgSize(r.UOM); }
       var ndc = (r.SKUNDC && String(r.SKUNDC).trim()) ? String(r.SKUNDC).trim() : String(r.AltID || "").trim();
       var sup = String(r.VendorName || "").toLowerCase();
       var skipArrival = sup.indexOf("vetcove generics") >= 0 || sup.indexOf("bloodworth") >= 0;
