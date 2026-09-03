@@ -122,18 +122,19 @@ export async function POST(request) {
           }
           if (targetIdx >= 0) {
             var letter = colLetter(targetIdx);
-            // Preserve leading zeros for text-like numeric columns (e.g. an NDC
-            // "00054329446" that Sheets would otherwise store as 54329446). Under
-            // USER_ENTERED, a leading apostrophe forces the cell to text and the
-            // apostrophe itself doesn't display. Applied when the caller marks the
-            // column asText, or when the header is the NDC-unformatted column.
-            var forceText = extra.asText === true || want === "ndc unformatted";
+            // Preserve leading zeros for the NDC-unformatted column. Only values
+            // that actually START WITH 0 need the apostrophe (Sheets would strip
+            // their zeros by coercing to a number); everything else is written
+            // unchanged. Under USER_ENTERED the apostrophe forces text and does
+            // not display. Callers can also force this for a whole column via asText.
+            var forceText = extra.asText === true;
+            var zeroSafe = want === "ndc unformatted";
             var colVals = extra.values.map(function (v) {
               if (v == null || v === "") return [""];
-              if (forceText) {
-                var s = String(v);
-                return [s.charAt(0) === "'" ? s : "'" + s];
-              }
+              var s = String(v);
+              if (s.charAt(0) === "'") return [s];
+              if (forceText) return ["'" + s];
+              if (zeroSafe && s.charAt(0) === "0") return ["'" + s];
               return [v];
             });
             var eurl = base + "/values/" + encodeURIComponent(tab + "!" + letter + nextRow) + "?valueInputOption=USER_ENTERED";
