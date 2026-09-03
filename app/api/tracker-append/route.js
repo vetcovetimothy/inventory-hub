@@ -122,7 +122,20 @@ export async function POST(request) {
           }
           if (targetIdx >= 0) {
             var letter = colLetter(targetIdx);
-            var colVals = extra.values.map(function (v) { return [v == null ? "" : v]; });
+            // Preserve leading zeros for text-like numeric columns (e.g. an NDC
+            // "00054329446" that Sheets would otherwise store as 54329446). Under
+            // USER_ENTERED, a leading apostrophe forces the cell to text and the
+            // apostrophe itself doesn't display. Applied when the caller marks the
+            // column asText, or when the header is the NDC-unformatted column.
+            var forceText = extra.asText === true || want === "ndc unformatted";
+            var colVals = extra.values.map(function (v) {
+              if (v == null || v === "") return [""];
+              if (forceText) {
+                var s = String(v);
+                return [s.charAt(0) === "'" ? s : "'" + s];
+              }
+              return [v];
+            });
             var eurl = base + "/values/" + encodeURIComponent(tab + "!" + letter + nextRow) + "?valueInputOption=USER_ENTERED";
             var eResp = await fetch(eurl, { method: "PUT", headers: authHeaders, body: JSON.stringify({ values: colVals }) });
             if (!eResp.ok) notFound.push(extra.header + " (write failed)");
