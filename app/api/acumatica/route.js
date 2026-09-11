@@ -30,6 +30,7 @@ const ENDPOINTS = {
   "recon-tp":      "HD%20PO%20Tracker%20-%20TP",
   "recon-ggm":     "HD%20PO%20Tracker%20-%20GGM",
   "pack-size-ref": "PURCH%20-%20Pack%20Size%20Reference",
+  "net-new":       "PURCH%20-%20Net%20New%20Item%20List",
 };
 
 // Which columns to extract for each type (keyGroup = possible OData field names)
@@ -88,6 +89,15 @@ const COLUMN_MAP = {
     { label: "NDC",           keys: ["TPSKU", "TPSKU_Attributes", "TPSKUNDC", "TPSKU / NDC", "SKUNDC", "SkuNDC", "NDC", "Ndc"] },
     { label: "PackSize",      keys: ["BOHPKSIZE", "BOHPKSIZE_Attributes", "BOHPackSize", "BOH Pack Size", "Pack Size", "PackSize"] },
     { label: "BaseUOM",       keys: ["BaseUnit", "Base UOM", "BaseUOM", "UOM", "Uom"] },
+  ],
+  // PURCH - Net New Item List: items flagged as newly added (ABC Code "New Item").
+  // Used by the Generic PO Translator to flag GEN- items that are brand new.
+  "net-new": [
+    { label: "ItemStatus",    keys: ["Item Status", "ItemStatus"] },
+    { label: "InventoryID",   keys: ["Inventory ID", "InventoryID", "InventoryCD", "InventoryCd"] },
+    { label: "Description",   keys: ["Description", "Descr", "ItemDescription"] },
+    { label: "BaseUOM",       keys: ["Base Unit", "BaseUnit", "BaseUOM", "UOM"] },
+    { label: "ABCCode",       keys: ["ABC Code", "ABCCode", "MovementClass", "ABC"] },
   ],
   "item-xref": [
     { label: "InventoryID",   keys: ["InventoryID", "InventoryId", "InventoryCd", "InventoryCD", "Inventory ID"] },
@@ -237,6 +247,7 @@ const COLUMN_MAP = {
 const CACHE_TTL = {
   "ndc-lookup":       6 * 60 * 60 * 1000,  // 6h — generic NDCs change slowly
   "pack-size-ref":    6 * 60 * 60 * 1000,  // 6h — BOHPKSIZE attribute changes slowly
+  "net-new":          30 * 60 * 1000,       // 30m — new-item list changes as items are set up
   "stock-cross-ref":  6 * 60 * 60 * 1000,  // 6h — formulary cross-ref changes slowly
   "item-xref":        6 * 60 * 60 * 1000,  // 6h — item cross-ref changes slowly
   "uom-conversions": 24 * 60 * 60 * 1000,  // 24h — UOM conversions basically never change
