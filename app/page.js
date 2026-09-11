@@ -2876,6 +2876,13 @@ function POImportTool(props) {
 
   // ── Sub-tabs: the PO Translator vs. a one-off Price Check tool ──
   var _subTab = useState("translator"), subTab = _subTab[0], setSubTab = _subTab[1];
+  // ── Net New items list: GEN- items found on PURCH - Net New Item List at parse
+  // time. Persisted in KV so the running list survives reloads and is shared. Each
+  // entry: { inventoryId, ndc, description, addedAt }. User copies a Slack message
+  // then clicks Done to remove it.
+  var _netNew = useState([]), netNewList = _netNew[0], setNetNewList = _netNew[1];
+  var _netNewFlash = useState(null), netNewFlash = _netNewFlash[0], setNetNewFlash = _netNewFlash[1];
+  var NETNEW_KV = "netnew-flagged-items";
   var _pcMode = useState("ndc"), pcMode = _pcMode[0], setPcMode = _pcMode[1];   // "ndc" | "mfr"
   var _pcQuery = useState(""), pcQuery = _pcQuery[0], setPcQuery = _pcQuery[1];
   var _pcBusy = useState(false), pcBusy = _pcBusy[0], setPcBusy = _pcBusy[1];
@@ -3202,6 +3209,19 @@ function POImportTool(props) {
     }).catch(function() {});
     return function() { mt = false; };
   }, []);
+  // Load the persisted Net New flagged-items list on mount.
+  useEffect(function() {
+    var mt = true;
+    kvGet(NETNEW_KV).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+      if (mt && d && Array.isArray(d.data)) setNetNewList(d.data);
+    }).catch(function() {});
+    return function() { mt = false; };
+  }, []);
+  function saveNetNew(list) { setNetNewList(list); kvPost(NETNEW_KV, list).catch(function() {}); }
+  function removeNetNew(invId) {
+    var next = (netNewList || []).filter(function(x) { return x.inventoryId !== invId; });
+    saveNetNew(next);
+  }
   function updateFlagThreshold(v) {
     var n = parseFloat(v);
     if (isNaN(n) || n <= 0) return;
@@ -3684,6 +3704,34 @@ function POImportTool(props) {
 
       setResults(matched);
       computeBatchStatus(matched);
+      // Net New check: flag any GEN- item that appears on PURCH - Net New Item List.
+      // Adds new matches to the persisted running list and pops a notice. Non-blocking.
+      (async function() {
+        try {
+          if (!cred || !cred.username || !cred.password) return;
+          var genItems = (matched || []).filter(function(r) { return String(r.inventoryId || "").trim().toUpperCase().indexOf("GEN-") === 0; });
+          if (!genItems.length) return;
+          var nnRows = await fetchAcumatica("net-new", null, cred.username, cred.password);
+          var nnSet = {};
+          (nnRows || []).forEach(function(row) { var id = String(row.InventoryID || "").trim().toUpperCase(); if (id) nnSet[id] = true; });
+          var existing = {};
+          (netNewList || []).forEach(function(x) { existing[String(x.inventoryId || "").trim().toUpperCase()] = true; });
+          var added = [];
+          genItems.forEach(function(r) {
+            var idU = String(r.inventoryId || "").trim().toUpperCase();
+            if (nnSet[idU] && !existing[idU]) {
+              existing[idU] = true; // guard against dupes within this same parse
+              added.push({ inventoryId: String(r.inventoryId).trim(), ndc: r.ndc || "", description: r.acumaticaDesc || r.drugName || "", addedAt: Date.now() });
+            }
+          });
+          if (added.length) {
+            var next = (netNewList || []).concat(added);
+            saveNetNew(next);
+            setNetNewFlash({ items: added, at: Date.now() });
+            toast(added.length + " net-new item" + (added.length === 1 ? "" : "s") + " flagged \u2014 see the Net New tab", "success");
+          }
+        } catch (e) { /* non-blocking: net-new check failure never breaks parsing */ }
+      })();
       setStatedAmounts(function(prev) { return Object.assign({}, prev, newStatedAmounts); });
       // Auto-select first file tab for multi-PO vendors (other + GGM crossovers)
       if ((vendor === "other" || vendor === "ggm-crossovers") && matched.length > 0) {
@@ -4109,7 +4157,7 @@ function POImportTool(props) {
   return (
     <div>
       <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
-        {[["translator", "PO Translator"], ["check", "Price Check"]].map(function(t) { var on = subTab === t[0]; return <button key={t[0]} onClick={function() { setSubTab(t[0]); }} style={{ padding: "8px 18px", borderRadius: 8, border: "1px solid " + (on ? TOOL_COLOR : "#E5E7EB"), background: on ? TOOL_COLOR : "#fff", color: on ? "#fff" : "#6B7280", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>{t[1]}</button>; })}
+        {[["translator", "PO Translator"], ["check", "Price Check"], ["netnew", "Net New" + ((netNewList && netNewList.length) ? " (" + netNewList.length + ")" : "")]].map(function(t) { var on = subTab === t[0]; return <button key={t[0]} onClick={function() { setSubTab(t[0]); }} style={{ padding: "8px 18px", borderRadius: 8, border: "1px solid " + (on ? TOOL_COLOR : "#E5E7EB"), background: on ? TOOL_COLOR : "#fff", color: on ? "#fff" : "#6B7280", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>{t[1]}</button>; })}
       </div>
 
       {subTab === "check" && <div>
@@ -4159,6 +4207,30 @@ function POImportTool(props) {
             </div>
           </div>
         </div>}
+      </div>}
+
+      {subTab === "netnew" && <div>
+        <p style={{ color: "#6B7280", fontSize: 13, marginBottom: 16 }}>GEN- items found on the Acumatica <strong>Net New Item List</strong> when you parsed a PO. Copy the message, send it in Slack, then click <strong>Done</strong> to clear it.</p>
+        {(!netNewList || netNewList.length === 0) ? (
+          <div style={{ padding: "32px 16px", textAlign: "center", color: "#9CA3AF", fontSize: 14, border: "1px dashed #E5E7EB", borderRadius: 10 }}>No net-new items flagged. Parse a PO with a brand-new GEN- item and it'll show up here.</div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {netNewList.slice().sort(function(a, b) { return (b.addedAt || 0) - (a.addedAt || 0); }).map(function(it) {
+              var msg = "New item on the Net New list:\n\u2022 Inventory ID: " + it.inventoryId + "\n\u2022 NDC: " + (it.ndc || "\u2014") + "\n\u2022 Description: " + (it.description || "\u2014");
+              return <div key={it.inventoryId} style={{ border: "1px solid #E5E7EB", borderRadius: 10, padding: "12px 14px", background: "#fff", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+                <div style={{ fontSize: 13, lineHeight: 1.6 }}>
+                  <div><span style={{ color: "#6B7280" }}>Inventory ID:</span> <strong style={{ color: "#1F2937" }}>{it.inventoryId}</strong></div>
+                  <div><span style={{ color: "#6B7280" }}>NDC:</span> <span style={{ color: "#1F2937", fontFamily: "monospace" }}>{it.ndc || "\u2014"}</span></div>
+                  <div><span style={{ color: "#6B7280" }}>Description:</span> <span style={{ color: "#1F2937" }}>{it.description || "\u2014"}</span></div>
+                </div>
+                <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                  <button onClick={function() { if (navigator.clipboard) { navigator.clipboard.writeText(msg).then(function() { toast("Message copied \u2014 paste into Slack", "success"); }).catch(function() { toast("Copy failed", "error"); }); } }} style={{ padding: "6px 14px", borderRadius: 6, border: "1px solid " + TOOL_COLOR, background: "#fff", color: TOOL_COLOR, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Copy</button>
+                  <button onClick={function() { removeNetNew(it.inventoryId); toast("Cleared " + it.inventoryId, "success"); }} style={{ padding: "6px 14px", borderRadius: 6, border: "1px solid #059669", background: "#059669", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Done</button>
+                </div>
+              </div>;
+            })}
+          </div>
+        )}
       </div>}
 
       {subTab === "translator" && <>
