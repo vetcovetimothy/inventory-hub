@@ -4215,10 +4215,12 @@ function POImportTool(props) {
           <div style={{ padding: "32px 16px", textAlign: "center", color: "#9CA3AF", fontSize: 14, border: "1px dashed #E5E7EB", borderRadius: 10 }}>No net-new items flagged. Parse a PO with a brand-new GEN- item and it'll show up here.</div>
         ) : (() => {
           var sorted = netNewList.slice().sort(function(a, b) { return (b.addedAt || 0) - (a.addedAt || 0); });
-          var header = sorted.length === 1 ? "New item on the Net New list:" : (sorted.length + " new items on the Net New list:");
-          var combinedMsg = header + "\n\n" + sorted.map(function(it) {
-            return "\u2022 Inventory ID: " + it.inventoryId + "\n  NDC: " + (it.ndc || "\u2014") + "\n  Description: " + (it.description || "\u2014");
-          }).join("\n\n");
+          // Tab-separated rows (a header row + one row per item). Slack detects
+          // tab-delimited text with newlines on paste and offers to render it as a
+          // table attachment \u2014 the same behavior as pasting from Google Sheets.
+          var combinedMsg = ["Inventory ID\tNDC\tDescription"].concat(sorted.map(function(it) {
+            return it.inventoryId + "\t" + (it.ndc || "") + "\t" + (it.description || "");
+          })).join("\n");
           var th = { textAlign: "left", padding: "10px 14px", fontSize: 11, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.03em", borderBottom: "1px solid #E5E7EB", whiteSpace: "nowrap" };
           var td = { padding: "10px 14px", fontSize: 13, color: "#1F2937", borderBottom: "1px solid #F3F4F6", verticalAlign: "top" };
           return <div>
