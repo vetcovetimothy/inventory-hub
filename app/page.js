@@ -4210,27 +4210,46 @@ function POImportTool(props) {
       </div>}
 
       {subTab === "netnew" && <div>
-        <p style={{ color: "#6B7280", fontSize: 13, marginBottom: 16 }}>GEN- items found on the Acumatica <strong>Net New Item List</strong> when you parsed a PO. Copy the message, send it in Slack, then click <strong>Done</strong> to clear it.</p>
+        <p style={{ color: "#6B7280", fontSize: 13, marginBottom: 16 }}>GEN- items found on the Acumatica <strong>Net New Item List</strong> when you parsed a PO. Copy the whole message, send it in Slack, then click <strong>Done</strong> on each row once it's handled.</p>
         {(!netNewList || netNewList.length === 0) ? (
           <div style={{ padding: "32px 16px", textAlign: "center", color: "#9CA3AF", fontSize: 14, border: "1px dashed #E5E7EB", borderRadius: 10 }}>No net-new items flagged. Parse a PO with a brand-new GEN- item and it'll show up here.</div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {netNewList.slice().sort(function(a, b) { return (b.addedAt || 0) - (a.addedAt || 0); }).map(function(it) {
-              var msg = "New item on the Net New list:\n\u2022 Inventory ID: " + it.inventoryId + "\n\u2022 NDC: " + (it.ndc || "\u2014") + "\n\u2022 Description: " + (it.description || "\u2014");
-              return <div key={it.inventoryId} style={{ border: "1px solid #E5E7EB", borderRadius: 10, padding: "12px 14px", background: "#fff", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
-                <div style={{ fontSize: 13, lineHeight: 1.6 }}>
-                  <div><span style={{ color: "#6B7280" }}>Inventory ID:</span> <strong style={{ color: "#1F2937" }}>{it.inventoryId}</strong></div>
-                  <div><span style={{ color: "#6B7280" }}>NDC:</span> <span style={{ color: "#1F2937", fontFamily: "monospace" }}>{it.ndc || "\u2014"}</span></div>
-                  <div><span style={{ color: "#6B7280" }}>Description:</span> <span style={{ color: "#1F2937" }}>{it.description || "\u2014"}</span></div>
-                </div>
-                <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-                  <button onClick={function() { if (navigator.clipboard) { navigator.clipboard.writeText(msg).then(function() { toast("Message copied \u2014 paste into Slack", "success"); }).catch(function() { toast("Copy failed", "error"); }); } }} style={{ padding: "6px 14px", borderRadius: 6, border: "1px solid " + TOOL_COLOR, background: "#fff", color: TOOL_COLOR, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Copy</button>
-                  <button onClick={function() { removeNetNew(it.inventoryId); toast("Cleared " + it.inventoryId, "success"); }} style={{ padding: "6px 14px", borderRadius: 6, border: "1px solid #059669", background: "#059669", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Done</button>
-                </div>
-              </div>;
-            })}
-          </div>
-        )}
+        ) : (() => {
+          var sorted = netNewList.slice().sort(function(a, b) { return (b.addedAt || 0) - (a.addedAt || 0); });
+          var header = sorted.length === 1 ? "New item on the Net New list:" : (sorted.length + " new items on the Net New list:");
+          var combinedMsg = header + "\n\n" + sorted.map(function(it) {
+            return "\u2022 Inventory ID: " + it.inventoryId + "\n  NDC: " + (it.ndc || "\u2014") + "\n  Description: " + (it.description || "\u2014");
+          }).join("\n\n");
+          var th = { textAlign: "left", padding: "10px 14px", fontSize: 11, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.03em", borderBottom: "1px solid #E5E7EB", whiteSpace: "nowrap" };
+          var td = { padding: "10px 14px", fontSize: 13, color: "#1F2937", borderBottom: "1px solid #F3F4F6", verticalAlign: "top" };
+          return <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, padding: "10px 14px", background: "#F0F9FF", border: "1px solid #BAE6FD", borderRadius: 10 }}>
+              <span style={{ fontSize: 13, color: "#0C4A6E", fontWeight: 600 }}>{sorted.length} item{sorted.length === 1 ? "" : "s"} in this message</span>
+              <button onClick={function() { if (navigator.clipboard) { navigator.clipboard.writeText(combinedMsg).then(function() { toast("Message copied \u2014 paste into Slack", "success"); }).catch(function() { toast("Copy failed", "error"); }); } }} style={{ padding: "8px 20px", borderRadius: 6, border: "1px solid " + TOOL_COLOR, background: TOOL_COLOR, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Copy message</button>
+            </div>
+            <div style={{ border: "1px solid #E5E7EB", borderRadius: 10, overflow: "hidden" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff" }}>
+                <thead><tr style={{ background: "#F9FAFB" }}>
+                  <th style={th}>Inventory ID</th>
+                  <th style={th}>NDC</th>
+                  <th style={th}>Description</th>
+                  <th style={Object.assign({}, th, { textAlign: "right" })}>Action</th>
+                </tr></thead>
+                <tbody>
+                  {sorted.map(function(it) {
+                    return <tr key={it.inventoryId}>
+                      <td style={Object.assign({}, td, { fontWeight: 600, whiteSpace: "nowrap" })}>{it.inventoryId}</td>
+                      <td style={Object.assign({}, td, { fontFamily: "monospace", whiteSpace: "nowrap" })}>{it.ndc || "\u2014"}</td>
+                      <td style={td}>{it.description || "\u2014"}</td>
+                      <td style={Object.assign({}, td, { textAlign: "right", whiteSpace: "nowrap" })}>
+                        <button onClick={function() { removeNetNew(it.inventoryId); toast("Cleared " + it.inventoryId, "success"); }} style={{ padding: "5px 14px", borderRadius: 6, border: "1px solid #059669", background: "#059669", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Done</button>
+                      </td>
+                    </tr>;
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>;
+        })()}
       </div>}
 
       {subTab === "translator" && <>
