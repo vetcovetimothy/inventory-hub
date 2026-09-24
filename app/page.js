@@ -995,12 +995,19 @@ function WHT(props) {
         });
         var newGroups = {};
         rows.forEach(function(r) { var k = r.VendorName + " || " + (r.OrderNbr || ""); newGroups[k] = 1; });
+        // Count POs per vendor in the NEW data. Only carry a ref forward by vendor
+        // when the vendor has exactly ONE PO in BOTH the old and new data \u2014 otherwise
+        // we could copy one PO's ref onto a sibling PO that was intentionally left
+        // blank (the bug: typing a ref on one of two same-vendor POs, then a refresh
+        // filling both). With multiple POs, require an exact Vendor||PO match.
+        var newCountByVendor = {};
+        Object.keys(newGroups).forEach(function(k) { var vend = k.split(" || ")[0]; newCountByVendor[vend] = (newCountByVendor[vend] || 0) + 1; });
         var carried = {};
         Object.keys(newGroups).forEach(function(newKey) {
           if (prevNotes[newKey]) { carried[newKey] = prevNotes[newKey]; return; }
           var vend = newKey.split(" || ")[0];
           var pv = prevByVendor[vend];
-          if (pv && pv.count === 1 && (pv.notes || pv.po)) { carried[newKey] = { notes: pv.notes || "", po: pv.po || "" }; }
+          if (pv && pv.count === 1 && newCountByVendor[vend] === 1 && (pv.notes || pv.po)) { carried[newKey] = { notes: pv.notes || "", po: pv.po || "" }; }
         });
         setData(rows); setRunBy(who); setRunTime(now); setLoading(false); setSubPage("data"); setShipNotes(carried); setDismissed({}); persist(rows, false, who, now, carried); toast(cfg.label + ": Fetched " + rows.length + " lines");
       } catch (err) {
@@ -1442,6 +1449,27 @@ function WHT(props) {
   var vendorGroups = useMemo(function() { var g = {}; data.forEach(function(r) { var key = r.VendorName + " || " + (r.OrderNbr || ""); if (!g[key]) g[key] = []; g[key].push(r); }); return g; }, [data]);
   var vendorTotals = useMemo(function() { var t = {}; Object.entries(vendorGroups).forEach(function(e) { t[e[0]] = e[1].reduce(function(s, r) { return s + r.TotalPrice; }, 0); }); return t; }, [vendorGroups]);
   var uniqueVendors = useMemo(function() { return Array.from(new Set(data.map(function(r) { return r.VendorName; }))).sort(); }, [data]);
+  // Per-PO attachment groups for the email: one attachment per vendor+OrderNbr, so
+  // a vendor with two POs produces two separate files. key is the selection id;
+  // label is what shows in the UI; filename distinguishes same-vendor POs by PO #.
+  var poGroups = useMemo(function() {
+    var seen = {}, groups = [];
+    data.forEach(function(r) {
+      var vname = r.VendorName || "";
+      var onbr = String(r.OrderNbr || "").trim();
+      var key = vname + "||" + onbr;
+      if (!seen[key]) { seen[key] = true; groups.push({ key: key, vendor: vname, orderNbr: onbr }); }
+    });
+    var vendorCount = {};
+    groups.forEach(function(g) { vendorCount[g.vendor] = (vendorCount[g.vendor] || 0) + 1; });
+    groups.forEach(function(g) {
+      var multi = vendorCount[g.vendor] > 1 && g.orderNbr;
+      g.filename = g.vendor + (multi ? " " + g.orderNbr : "") + " PO Data - " + whKey + ".xlsx";
+      g.label = g.vendor + (multi ? " (" + g.orderNbr + ")" : "");
+    });
+    groups.sort(function(a, b) { return a.label.localeCompare(b.label); });
+    return groups;
+  }, [data, whKey]);
   var totalVal = useMemo(function() { return data.reduce(function(s, r) { return s + r.TotalPrice; }, 0); }, [data]);
   var flags = useMemo(function() { var f = { s: [], so: [] }; data.forEach(function(r, i) { var mc = (r.MovementClass || "").toLowerCase().trim(); if (mc === "short-dating" && !sdExempt[String(r.InventoryID || "").trim()]) f.s.push(i); if (mc === "sell-off item") f.so.push(i); }); return f; }, [data, sdExempt]);
   var flagCount = flags.s.length + flags.so.length;
@@ -1919,14 +1947,14 @@ function WHT(props) {
         </div>
         <div style={{ marginTop: 20, borderTop: "1px solid #E5E7EB", paddingTop: 16 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-            <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, textTransform: "uppercase" }}>Attachments ({(function() { var sel = emailSelected || {}; var count = uniqueVendors.filter(function(v) { return emailSelected === null || sel[v] !== false; }).length; return count; })()}/{uniqueVendors.length})</div>
-            <button onClick={function() { var allSelected = emailSelected === null || uniqueVendors.every(function(v) { return emailSelected[v] !== false; }); var updated = {}; uniqueVendors.forEach(function(v) { updated[v] = allSelected ? false : true; }); setEmailSelected(allSelected ? updated : null); }} style={Object.assign({}, S.btn("ghost"), { padding: "4px 12px", fontSize: 11 })}>{emailSelected === null || uniqueVendors.every(function(v) { return emailSelected[v] !== false; }) ? "Deselect All" : "Select All"}</button>
+            <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, textTransform: "uppercase" }}>Attachments ({(function() { var sel = emailSelected || {}; var count = poGroups.filter(function(g) { return emailSelected === null || sel[g.key] !== false; }).length; return count; })()}/{poGroups.length})</div>
+            <button onClick={function() { var allSelected = emailSelected === null || poGroups.every(function(g) { return emailSelected[g.key] !== false; }); var updated = {}; poGroups.forEach(function(g) { updated[g.key] = allSelected ? false : true; }); setEmailSelected(allSelected ? updated : null); }} style={Object.assign({}, S.btn("ghost"), { padding: "4px 12px", fontSize: 11 })}>{emailSelected === null || poGroups.every(function(g) { return emailSelected[g.key] !== false; }) ? "Deselect All" : "Select All"}</button>
           </div>
-          {uniqueVendors.map(function(v) { var count = data.filter(function(r) { return r.VendorName === v; }).length; var isChecked = emailSelected === null || emailSelected[v] !== false; return <div key={v} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: isChecked ? "#F8F9FB" : "transparent", borderRadius: 8, marginBottom: 4, border: isChecked ? "1px solid #E5E7EB" : "1px solid transparent", transition: "all 0.15s", opacity: isChecked ? 1 : 0.5 }}>
-            <div onClick={function() { var updated = Object.assign({}, emailSelected || {}); if (emailSelected === null) { uniqueVendors.forEach(function(uv) { updated[uv] = true; }); } updated[v] = !isChecked; setEmailSelected(updated); }} style={{ width: 18, height: 18, borderRadius: 4, border: isChecked ? "2px solid " + cfg.color : "2px solid #D1D5DB", background: isChecked ? cfg.color : "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, transition: "all 0.15s", cursor: "pointer" }}>
+          {poGroups.map(function(g) { var count = data.filter(function(r) { return r.VendorName === g.vendor && String(r.OrderNbr || "").trim() === g.orderNbr; }).length; var isChecked = emailSelected === null || emailSelected[g.key] !== false; return <div key={g.key} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: isChecked ? "#F8F9FB" : "transparent", borderRadius: 8, marginBottom: 4, border: isChecked ? "1px solid #E5E7EB" : "1px solid transparent", transition: "all 0.15s", opacity: isChecked ? 1 : 0.5 }}>
+            <div onClick={function() { var updated = Object.assign({}, emailSelected || {}); if (emailSelected === null) { poGroups.forEach(function(gg) { updated[gg.key] = true; }); } updated[g.key] = !isChecked; setEmailSelected(updated); }} style={{ width: 18, height: 18, borderRadius: 4, border: isChecked ? "2px solid " + cfg.color : "2px solid #D1D5DB", background: isChecked ? cfg.color : "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, transition: "all 0.15s", cursor: "pointer" }}>
               {isChecked && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}
             </div>
-            <span onClick={function(e) { e.stopPropagation(); try { var XLSX = require("xlsx"); var xlsCols = isGGM ? ["Inventory ID", "SKU", "Description", "Qty", "Vendor", "UOM", "Price", "Total"] : ["Inventory ID", "SKU", "Description", "Qty", "Vendor", "PO #", "Reorder", "Max", "Lead", "Min", "On Hand", "Avail", "UOM", "Price", "Total"]; var rows = data.filter(function(r) { return r.VendorName === v; }).map(function(r) { return isGGM ? [r.InventoryID, r.SKUNDC, r.Description, r.OrderQty, r.VendorName, r.UOM, r.Price, r.TotalPrice] : [r.InventoryID, r.SKUNDC, r.Description, r.OrderQty, r.VendorName, r.OrderNbr, r.ReorderPoint, r.MaxQty, r.LeadTime, r.MinOrderQty, r.OnHandQty, r.QtyAvailable, r.UOM, r.Price, r.TotalPrice]; }); var ws = XLSX.utils.aoa_to_sheet([xlsCols].concat(rows)); var wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "PO Data"); XLSX.writeFile(wb, v + " PO Data - " + whKey + ".xlsx"); toast("Downloaded " + v + " (" + rows.length + " rows)"); } catch (err) { toast("Download error: " + err.message, "error"); } }} style={{ cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color: "#3B82F6", background: "rgba(59,130,246,0.1)", borderRadius: 6, padding: 4 }} title="Download this file"><IconDL /></span><span onClick={function() { var updated = Object.assign({}, emailSelected || {}); if (emailSelected === null) { uniqueVendors.forEach(function(uv) { updated[uv] = true; }); } updated[v] = !isChecked; setEmailSelected(updated); }} style={{ fontSize: 12, color: isChecked ? "#4B5563" : "#9CA3AF", cursor: "pointer", flex: 1 }}>{v} PO Data - {whKey}.xlsx</span>
+            <span onClick={function(e) { e.stopPropagation(); try { var XLSX = require("xlsx"); var xlsCols = isGGM ? ["Inventory ID", "SKU", "Description", "Qty", "Vendor", "UOM", "Price", "Total"] : ["Inventory ID", "SKU", "Description", "Qty", "Vendor", "PO #", "Reorder", "Max", "Lead", "Min", "On Hand", "Avail", "UOM", "Price", "Total"]; var rows = data.filter(function(r) { return r.VendorName === g.vendor && String(r.OrderNbr || "").trim() === g.orderNbr; }).map(function(r) { return isGGM ? [r.InventoryID, r.SKUNDC, r.Description, r.OrderQty, r.VendorName, r.UOM, r.Price, r.TotalPrice] : [r.InventoryID, r.SKUNDC, r.Description, r.OrderQty, r.VendorName, r.OrderNbr, r.ReorderPoint, r.MaxQty, r.LeadTime, r.MinOrderQty, r.OnHandQty, r.QtyAvailable, r.UOM, r.Price, r.TotalPrice]; }); var ws = XLSX.utils.aoa_to_sheet([xlsCols].concat(rows)); var wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "PO Data"); XLSX.writeFile(wb, g.filename); toast("Downloaded " + g.label + " (" + rows.length + " rows)"); } catch (err) { toast("Download error: " + err.message, "error"); } }} style={{ cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color: "#3B82F6", background: "rgba(59,130,246,0.1)", borderRadius: 6, padding: 4 }} title="Download this file"><IconDL /></span><span onClick={function() { var updated = Object.assign({}, emailSelected || {}); if (emailSelected === null) { poGroups.forEach(function(gg) { updated[gg.key] = true; }); } updated[g.key] = !isChecked; setEmailSelected(updated); }} style={{ fontSize: 12, color: isChecked ? "#4B5563" : "#9CA3AF", cursor: "pointer", flex: 1 }}>{g.filename}</span>
             <span style={{ fontSize: 11, color: "#9CA3AF", minWidth: 50, textAlign: "right" }}>{count} rows</span>
           </div>; })}
         </div>
@@ -1935,8 +1963,8 @@ function WHT(props) {
           <Gate ok={ok} prompt={lp} style={Object.assign({}, S.btn(), { padding: "10px 24px", opacity: (emailSent || emailLoading || emailBlocked) ? 0.5 : 1, cursor: emailBlocked ? "not-allowed" : undefined })} onClick={async function() {
             if (emailBlocked) { toast("Remove all flagged items (short-dating / sell-off) before sending email", "error"); return; }
             if (!gmail || !gmail.token) { toast("Please connect your Gmail account first (bottom-left)", "error"); return; }
-            var selectedVendors = uniqueVendors.filter(function(v) { return emailSelected === null || emailSelected[v] !== false; });
-            if (selectedVendors.length === 0) { toast("Select at least one vendor attachment", "error"); return; }
+            var selectedGroups = poGroups.filter(function(g) { return emailSelected === null || emailSelected[g.key] !== false; });
+            if (selectedGroups.length === 0) { toast("Select at least one attachment", "error"); return; }
             setEmailLoading(true);
             try {
               var toLine = emailTo;
@@ -1944,16 +1972,16 @@ function WHT(props) {
               var safeBody = fillTemplate(emailBody || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
               var htmlBody = "<p>" + safeBody.replace(/\n\n+/g, "</p><p>").replace(/\n/g, "<br>") + "</p>";
               var xlsCols = ["Inventory ID", "SKU", "Description", "Qty", "Vendor", "PO #", "Reorder", "Max", "Lead", "Min", "On Hand", "Avail", "UOM", "Price", "Total"];
-              var attachments = selectedVendors.map(function(v) {
-                var rows = data.filter(function(r) { return r.VendorName === v; }).map(function(r) {
+              var attachments = selectedGroups.map(function(g) {
+                var rows = data.filter(function(r) { return r.VendorName === g.vendor && String(r.OrderNbr || "").trim() === g.orderNbr; }).map(function(r) {
                   return [r.InventoryID, r.SKUNDC, r.Description, r.OrderQty, r.VendorName, r.OrderNbr, r.ReorderPoint, r.MaxQty, r.LeadTime, r.MinOrderQty, r.OnHandQty, r.QtyAvailable, r.UOM, r.Price, r.TotalPrice];
                 });
-                return { filename: v + " PO Data - " + whKey + ".xlsx", columns: xlsCols, rows: rows };
+                return { filename: g.filename, columns: xlsCols, rows: rows };
               });
               var draftPayloads = [{ to: toLine, cc: emailCc, subject: subject, htmlBody: htmlBody, attachments: attachments }];
               var result = await postGmailDrafts(draftPayloads, gmail.token);
               if (result.failed > 0) throw new Error("Some drafts failed to create");
-              setEmailSent(true); persist(data, true, runBy, runTime, shipNotes); toast(cfg.label + ": Draft created with " + selectedVendors.length + " attachment" + (selectedVendors.length > 1 ? "s" : ""));
+              setEmailSent(true); persist(data, true, runBy, runTime, shipNotes); toast(cfg.label + ": Draft created with " + selectedGroups.length + " attachment" + (selectedGroups.length > 1 ? "s" : ""));
             } catch (err) {
               toast("Gmail error: " + err.message, "error");
             } finally { setEmailLoading(false); }
