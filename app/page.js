@@ -7287,7 +7287,7 @@ function OOSTracker(props) {
     return function() { clearInterval(iv); };
   }, []);
 
-  var WH_MAP = { "TRUEPILL_BROOKLYN": "Brooklyn", "TRUEPILL_OHIO": "Ohio", "TRUEPILL_HAYWARD": "Hayward", "GOGOMEDS_KY": "Kentucky", "GOGOMEDS_AZ": "Arizona", "GOGOMEDS_KENTUCKY": "Kentucky", "GOGOMEDS_ARIZONA": "Arizona", "HILLS_CGP_WAREHOUSE_CA": "Hills CA", "HILLS_CGP_WAREHOUSE_NJ": "Hills NJ", "HILLS_CGP_WAREHOUSE_FL": "Hills FL", "HILLS_CGP_WAREHOUSE_TX": "Hills TX" };
+  var WH_MAP = { "TRUEPILL_BROOKLYN": "Brooklyn", "TRUEPILL_OHIO": "Ohio", "TRUEPILL_HAYWARD": "Hayward", "TRUEPILL_OHIO_FAIRFIELD": "Firebird", "TRUEPILL_DALLAS": "Dallas", "TRUEPILL_TEXAS": "Dallas", "TRUEPILL_LONG_ISLAND": "Long Island", "TRUEPILL_NEW_YORK_LONG_ISLAND": "Long Island", "TRUEPILL_SAN_DIEGO": "San Diego", "TRUEPILL_CALIFORNIA_SAN_DIEGO": "San Diego", "GOGOMEDS_KY": "Kentucky", "GOGOMEDS_AZ": "Arizona", "GOGOMEDS_KENTUCKY": "Kentucky", "GOGOMEDS_ARIZONA": "Arizona", "HILLS_CGP_WAREHOUSE_CA": "Hills CA", "HILLS_CGP_WAREHOUSE_NJ": "Hills NJ", "HILLS_CGP_WAREHOUSE_FL": "Hills FL", "HILLS_CGP_WAREHOUSE_TX": "Hills TX" };
   function mapWH(slug) { return WH_MAP[slug] || slug || "\u2014"; }
   function splitList(s) { return String(s == null ? "" : s).split(",").map(function(x) { return x.trim(); }).filter(Boolean); }
   function deriveOOS(r) {
@@ -7342,8 +7342,8 @@ function OOSTracker(props) {
     return { fuze: fuze, ggm: ggm, cgp: cgp };
   }
   function whStyle(d) {
-    var bg = d === "Brooklyn" ? "#EFF6FF" : d === "Ohio" ? "#ECFDF5" : d === "Hayward" ? "#FFF7ED" : d === "Kentucky" ? "#F5F3FF" : d === "Arizona" ? "#FDF2F8" : d === "Hills CA" ? "#FEF9C3" : d === "Hills NJ" ? "#E0F2FE" : d === "Hills FL" ? "#FFE4E6" : d === "Hills TX" ? "#CCFBF1" : "#F3F4F6";
-    var color = d === "Brooklyn" ? "#2563EB" : d === "Ohio" ? "#059669" : d === "Hayward" ? "#D97706" : d === "Kentucky" ? "#7C3AED" : d === "Arizona" ? "#DB2777" : d === "Hills CA" ? "#A16207" : d === "Hills NJ" ? "#0369A1" : d === "Hills FL" ? "#BE123C" : d === "Hills TX" ? "#0F766E" : "#6B7280";
+    var bg = d === "Brooklyn" ? "#EFF6FF" : d === "Ohio" ? "#ECFDF5" : d === "Hayward" ? "#FFF7ED" : d === "Dallas" ? "#ECFEFF" : d === "Long Island" ? "#EEF2FF" : d === "San Diego" ? "#FFF7ED" : d === "Firebird" ? "#F5F3FF" : d === "Kentucky" ? "#F5F3FF" : d === "Arizona" ? "#FDF2F8" : d === "Hills CA" ? "#FEF9C3" : d === "Hills NJ" ? "#E0F2FE" : d === "Hills FL" ? "#FFE4E6" : d === "Hills TX" ? "#CCFBF1" : "#F3F4F6";
+    var color = d === "Brooklyn" ? "#2563EB" : d === "Ohio" ? "#059669" : d === "Hayward" ? "#D97706" : d === "Dallas" ? "#0891B2" : d === "Long Island" ? "#6366F1" : d === "San Diego" ? "#F97316" : d === "Firebird" ? "#7C3AED" : d === "Kentucky" ? "#7C3AED" : d === "Arizona" ? "#DB2777" : d === "Hills CA" ? "#A16207" : d === "Hills NJ" ? "#0369A1" : d === "Hills FL" ? "#BE123C" : d === "Hills TX" ? "#0F766E" : "#6B7280";
     return { bg: bg, color: color };
   }
 
@@ -7627,7 +7627,7 @@ function OOSTracker(props) {
               <td style={S.td}><div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>{(r._whs || []).map(function(w, wi) { var st = whStyle(w); return <span key={wi} style={{ fontSize: 11, padding: "2px 8px", borderRadius: 6, fontWeight: 500, background: st.bg, color: st.color }}>{w}</span>; })}</div></td>
               <td style={S.td}>{(function() {
                 // Map OOS row's display warehouse to Acumatica warehouse codes
-                var OOS_TO_ACU = { "Brooklyn": ["TP-NY"], "Ohio": ["TP-OH"], "Hayward": ["TP-CA"], "Dallas": ["TP-TX"], "Kentucky": ["GGM-KY"], "Arizona": ["GGM-AZ"], "Hills CA": ["HILL-CP-CA"], "Hills NJ": ["HILL-CP-NJ"], "Hills FL": ["HILL-CP-FL"], "Hills TX": ["HILL-CP-TX"] };
+                var OOS_TO_ACU = { "Brooklyn": ["TP-NY"], "Ohio": ["TP-OH"], "Hayward": ["TP-CA"], "Dallas": ["TP-TX"], "Long Island": ["TP-LI"], "San Diego": ["TP-SD"], "Firebird": ["TP-OTC"], "Kentucky": ["GGM-KY"], "Arizona": ["GGM-AZ"], "Hills CA": ["HILL-CP-CA"], "Hills NJ": ["HILL-CP-NJ"], "Hills FL": ["HILL-CP-FL"], "Hills TX": ["HILL-CP-TX"] };
                 var allowed = []; (r._whs || []).forEach(function(dn) { (OOS_TO_ACU[dn] || []).forEach(function(c) { if (allowed.indexOf(c) < 0) allowed.push(c); }); }); if (allowed.length === 0) allowed = null;
                 var allMatches = orderMap[String(r.MANUFACTURER_NO)] || [];
                 var matches = allowed ? allMatches.filter(function(m) { return allowed.indexOf((m.wh || "").trim().toUpperCase()) >= 0; }) : allMatches;
