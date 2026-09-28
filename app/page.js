@@ -5127,7 +5127,7 @@ function FuzeTracker(props) {
     return { total: total, received: received, landed: landed, pending: pending };
   }, [data]);
 
-  var whTabs = [{ id: "TP-NY", label: "Brooklyn" }, { id: "TP-OH", label: "Seven Hills" }, { id: "TP-CA", label: "Hayward" }, { id: "TP-TX", label: "Dallas" }];
+  var whTabs = [{ id: "TP-NY", label: "Brooklyn" }, { id: "TP-OH", label: "Seven Hills" }, { id: "TP-CA", label: "Hayward" }, { id: "TP-TX", label: "Dallas" }, { id: "TP-LI", label: "Long Island" }, { id: "TP-SD", label: "San Diego" }, { id: "TP-OTC", label: "Firebird" }];
 
   return <div>
     {/* Warehouse tabs */}
