@@ -6935,7 +6935,7 @@ function OOSTracker(props) {
   var _orderMapCacheHit = useState(false), orderMapCacheHit = _orderMapCacheHit[0], setOrderMapCacheHit = _orderMapCacheHit[1];
   function normalizeNdc(s) { return (s || "").replace(/\D/g, ""); }
   // Which Acumatica warehouses (and which Google Sheets) are relevant per OOS tab
-  var TAB_WAREHOUSES = { fuzerx: ["TP-NY", "TP-OH", "TP-CA"], gogomeds: ["GGM-KY", "GGM-AZ"], cgp: [] };
+  var TAB_WAREHOUSES = { fuzerx: ["TP-NY", "TP-OH", "TP-CA", "TP-TX", "TP-LI", "TP-SD", "TP-OTC"], gogomeds: ["GGM-KY", "GGM-AZ"], cgp: [] };
   function loadOrderMap(forceFresh) {
     var whsForTab = TAB_WAREHOUSES[tab] || [];
     setOrderMapLoading(true);
