@@ -2889,12 +2889,45 @@ function POImportTool(props) {
   // Live progress tracker for the Create PO + add to tracker flow. Shape:
   // { steps: [{ id, label, status: "pending"|"active"|"done"|"failed"|"skipped", detail }], items: [...], itemsOpen: bool }
   var _createProgress = useState(null), createProgress = _createProgress[0], setCreateProgress = _createProgress[1];
+  var _ndcSecOpen = useState(false), ndcSecOpen = _ndcSecOpen[0], setNdcSecOpen = _ndcSecOpen[1];
   function progStep(id, status, detail) {
     setCreateProgress(function(prev) {
       if (!prev) return prev;
       var steps = prev.steps.map(function(s) { return s.id === id ? Object.assign({}, s, { status: status, detail: detail != null ? detail : s.detail }) : s; });
       return Object.assign({}, prev, { steps: steps });
     });
+  }
+  // Renders the live step tracker (used inside the create results modal). Shows each
+  // step with a spinner (active) / checkmark (done) / x (failed) / dash (skipped).
+  function renderProgressSteps(TOOL_COLOR) {
+    if (!createProgress) return null;
+    var steps = createProgress.steps || [];
+    var allDone = steps.every(function(s) { return s.status === "done" || s.status === "skipped" || s.status === "failed"; });
+    var anyFailed = steps.some(function(s) { return s.status === "failed"; });
+    return <div style={{ marginBottom: 16, border: "1px solid #E5E7EB", borderRadius: 8, padding: "14px 16px", background: "#FbFcFd" }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: "#1F2937", marginBottom: 10 }}>{allDone ? (anyFailed ? "Finished with issues" : "All steps complete") : "Working\u2026"}</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+        {steps.map(function(s) {
+          var icon, iconColor;
+          if (s.status === "done") { icon = "\u2713"; iconColor = "#059669"; }
+          else if (s.status === "failed") { icon = "\u2715"; iconColor = "#DC2626"; }
+          else if (s.status === "skipped") { icon = "\u2013"; iconColor = "#9CA3AF"; }
+          else if (s.status === "active") { icon = "spin"; iconColor = TOOL_COLOR; }
+          else { icon = "\u25CB"; iconColor = "#D1D5DB"; }
+          return <div key={s.id} style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+            <div style={{ width: 18, height: 18, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", marginTop: 1 }}>
+              {icon === "spin"
+                ? <div style={{ width: 14, height: 14, border: "2px solid " + TOOL_COLOR, borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />
+                : <span style={{ color: iconColor, fontSize: 14, fontWeight: 700, lineHeight: 1 }}>{icon}</span>}
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 12.5, fontWeight: s.status === "active" ? 700 : 500, color: s.status === "pending" ? "#9CA3AF" : "#1F2937" }}>{s.label}</div>
+              {s.detail && <div style={{ fontSize: 11, color: s.status === "failed" ? "#DC2626" : "#6B7280", marginTop: 1 }}>{s.detail}</div>}
+            </div>
+          </div>;
+        })}
+      </div>
+    </div>;
   }
   var _acuCreateConfirm = useState(null), acuCreateConfirm = _acuCreateConfirm[0], setAcuCreateConfirm = _acuCreateConfirm[1];
   var _acuCreateResult = useState(null), acuCreateResult = _acuCreateResult[0], setAcuCreateResult = _acuCreateResult[1];
@@ -4613,61 +4646,7 @@ function POImportTool(props) {
         </div>;
       })()}
 
-      {/* ── Create PO + tracker: live step progress ─────────────────────── */}
-      {createProgress && (function() {
-        var steps = createProgress.steps || [];
-        var allDone = steps.every(function(s) { return s.status === "done" || s.status === "skipped" || s.status === "failed"; });
-        var anyFailed = steps.some(function(s) { return s.status === "failed"; });
-        return <div style={{ marginTop: 16, border: "1px solid #E5E7EB", borderRadius: 12, padding: "16px 18px", background: "#fff" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: "#1F2937" }}>{allDone ? (anyFailed ? "Finished with issues" : "All steps complete") : "Working\u2026"}</div>
-            {allDone && <button onClick={function() { setCreateProgress(null); }} style={{ background: "transparent", border: "1px solid #E5E7EB", borderRadius: 6, padding: "4px 12px", fontSize: 12, color: "#6B7280", cursor: "pointer", fontFamily: "'Varela Round', sans-serif" }}>Dismiss</button>}
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {steps.map(function(s) {
-              var icon, iconColor;
-              if (s.status === "done") { icon = "\u2713"; iconColor = "#059669"; }
-              else if (s.status === "failed") { icon = "\u2715"; iconColor = "#DC2626"; }
-              else if (s.status === "skipped") { icon = "\u2013"; iconColor = "#9CA3AF"; }
-              else if (s.status === "active") { icon = "spin"; iconColor = TOOL_COLOR; }
-              else { icon = "\u25CB"; iconColor = "#D1D5DB"; }
-              return <div key={s.id} style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
-                <div style={{ width: 20, height: 20, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", marginTop: 1 }}>
-                  {icon === "spin"
-                    ? <div style={{ width: 15, height: 15, border: "2px solid " + TOOL_COLOR, borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />
-                    : <span style={{ color: iconColor, fontSize: 15, fontWeight: 700, lineHeight: 1 }}>{icon}</span>}
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 13, fontWeight: s.status === "active" ? 700 : 500, color: s.status === "pending" ? "#9CA3AF" : "#1F2937" }}>{s.label}</div>
-                  {s.detail && <div style={{ fontSize: 11, color: s.status === "failed" ? "#DC2626" : "#6B7280", marginTop: 2 }}>{s.detail}</div>}
-                </div>
-              </div>;
-            })}
-          </div>
-          {createProgress.items && createProgress.items.length > 0 && <div style={{ marginTop: 14, borderTop: "1px solid #F3F4F6", paddingTop: 12 }}>
-            <button onClick={function() { setCreateProgress(function(prev) { return prev ? Object.assign({}, prev, { itemsOpen: !prev.itemsOpen }) : prev; }); }} style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: "#4B5563", fontFamily: "'Varela Round', sans-serif" }}>
-              <span style={{ fontSize: 10, transform: createProgress.itemsOpen ? "rotate(90deg)" : "none", transition: "transform 0.15s" }}>{"\u25B6"}</span>
-              {createProgress.items.length} item{createProgress.items.length === 1 ? "" : "s"} being added
-            </button>
-            {createProgress.itemsOpen && <div style={{ marginTop: 8, maxHeight: 220, overflowY: "auto", border: "1px solid #F3F4F6", borderRadius: 8 }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-                <thead><tr style={{ background: "#F9FAFB" }}>
-                  <th style={{ textAlign: "left", padding: "6px 10px", color: "#6B7280", fontWeight: 600, borderBottom: "1px solid #F3F4F6" }}>Inventory ID</th>
-                  <th style={{ textAlign: "left", padding: "6px 10px", color: "#6B7280", fontWeight: 600, borderBottom: "1px solid #F3F4F6" }}>NDC</th>
-                  <th style={{ textAlign: "right", padding: "6px 10px", color: "#6B7280", fontWeight: 600, borderBottom: "1px solid #F3F4F6" }}>Qty</th>
-                </tr></thead>
-                <tbody>
-                  {createProgress.items.map(function(it, i) { return <tr key={i}>
-                    <td style={{ padding: "6px 10px", color: "#1F2937", fontWeight: 600, borderBottom: "1px solid #F9FAFB" }}>{it.inventoryId || "\u2014"}</td>
-                    <td style={{ padding: "6px 10px", color: "#374151", fontFamily: "monospace", borderBottom: "1px solid #F9FAFB" }}>{it.ndc || "\u2014"}</td>
-                    <td style={{ padding: "6px 10px", color: "#374151", textAlign: "right", borderBottom: "1px solid #F9FAFB" }}>{it.qty}</td>
-                  </tr>; })}
-                </tbody>
-              </table>
-            </div>}
-          </div>}
-        </div>;
-      })()}
+      {/* Live step progress now renders INSIDE the results modal (see renderProgressSteps) */}
 
       {/* ── Acumatica auto-create: results modal ───────────────────────── */}
       {acuCreateResult && (function() {
@@ -4680,10 +4659,12 @@ function POImportTool(props) {
         var failureRequested = failure ? requested[failure.poIndex] : null;
         var notAttempted = failure ? requested.slice(failure.poIndex + 1) : [];
         var trackerOnly = data.trackerOnly === true;
-        return <div onClick={function() { setAcuCreateResult(null); setDummyDelete(null); }} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+        return <div onClick={function() { setAcuCreateResult(null); setDummyDelete(null); setCreateProgress(null); }} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
           <div onClick={function(e) { e.stopPropagation(); }} style={{ background: "#FFFFFF", borderRadius: 8, padding: 24, width: "min(720px, 92vw)", maxHeight: "85vh", overflow: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.2)" }}>
             <div style={{ fontSize: 18, fontWeight: 700, color: (allOk || trackerOnly) ? "#047857" : "#DC2626", marginBottom: 8 }}>{trackerOnly ? "\u2713 Tracker updated" : allOk ? "\u2713 All POs created" : alreadyExists ? "\u26A0 Already in Acumatica \u2014 nothing created" : "\u26A0 Stopped on failure"}</div>
             {!alreadyExists && !trackerOnly && <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 16 }}>{succeeded.length} created, {failure ? "1 failed" : "0 failed"}{notAttempted.length > 0 ? ", " + notAttempted.length + " not attempted" : ""}</div>}
+
+            {renderProgressSteps(TOOL_COLOR)}
 
             {alreadyExists && <div style={{ background: "rgba(180,83,9,0.06)", border: "1px solid rgba(180,83,9,0.25)", borderRadius: 6, padding: 12, marginBottom: 16 }}>
               <div style={{ fontSize: 13, color: "#374151", marginBottom: 10 }}>These POs already exist in Acumatica, so nothing was created. You can still add them to the receiving tracker below (any already on the tracker are skipped).</div>
@@ -4741,8 +4722,11 @@ function POImportTool(props) {
             </div>}
 
             {succeeded.length > 0 && <div style={{ marginBottom: 16 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 8 }}>Line NDCs (Alternate ID) as created:</div>
-              {succeeded.map(function(s, si) {
+              <button onClick={function() { setNdcSecOpen(!ndcSecOpen); }} style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 8, fontFamily: "'Varela Round', sans-serif" }}>
+                <span style={{ fontSize: 10, transform: ndcSecOpen ? "rotate(90deg)" : "none", transition: "transform 0.15s" }}>{"\u25B6"}</span>
+                Line NDCs (Alternate ID) as created
+              </button>
+              {ndcSecOpen && succeeded.map(function(s, si) {
                 var lr = s.lineResults || [];
                 return <div key={si} style={{ marginBottom: 10, border: "1px solid #E5E7EB", borderRadius: 6, overflow: "hidden" }}>
                   <div style={{ background: "#F9FAFB", borderBottom: "1px solid #E5E7EB", padding: "6px 10px", fontSize: 11, color: "#6B7280" }}>
@@ -4809,7 +4793,7 @@ function POImportTool(props) {
             </div>}
 
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-              <button onClick={function() { setAcuCreateResult(null); setDummyDelete(null); }} style={Object.assign({}, S.btn(), { padding: "8px 16px" })}>Close</button>
+              <button onClick={function() { setAcuCreateResult(null); setDummyDelete(null); setCreateProgress(null); }} style={Object.assign({}, S.btn(), { padding: "8px 16px" })}>Close</button>
               {alreadyExists && <button onClick={function() { var a = allowRefsFromState(); setAcuCreateResult(null); addToTracker(a); }} style={Object.assign({}, S.btn(), { padding: "8px 16px", background: "#8B5CF6", border: "1px solid #8B5CF6", color: "#fff" })}>{"\u2192"} Add to tracker (skip duplicates)</button>}
             </div>
           </div>
