@@ -2886,6 +2886,16 @@ function POImportTool(props) {
   var _flagThreshold = useState(40), flagThreshold = _flagThreshold[0], setFlagThreshold = _flagThreshold[1];
   // Acumatica auto-create state
   var _acuCreateLoading = useState(false), acuCreateLoading = _acuCreateLoading[0], setAcuCreateLoading = _acuCreateLoading[1];
+  // Live progress tracker for the Create PO + add to tracker flow. Shape:
+  // { steps: [{ id, label, status: "pending"|"active"|"done"|"failed"|"skipped", detail }], items: [...], itemsOpen: bool }
+  var _createProgress = useState(null), createProgress = _createProgress[0], setCreateProgress = _createProgress[1];
+  function progStep(id, status, detail) {
+    setCreateProgress(function(prev) {
+      if (!prev) return prev;
+      var steps = prev.steps.map(function(s) { return s.id === id ? Object.assign({}, s, { status: status, detail: detail != null ? detail : s.detail }) : s; });
+      return Object.assign({}, prev, { steps: steps });
+    });
+  }
   var _acuCreateConfirm = useState(null), acuCreateConfirm = _acuCreateConfirm[0], setAcuCreateConfirm = _acuCreateConfirm[1];
   var _acuCreateResult = useState(null), acuCreateResult = _acuCreateResult[0], setAcuCreateResult = _acuCreateResult[1];
   // Tracks what has completed for the current parsed batch, so the primary button
@@ -3965,6 +3975,17 @@ function POImportTool(props) {
     setAcuCreateConfirm(null);
     setAcuCreateLoading(true);
     setDummyDelete(null);
+    // Build the live step list. The dummy-cleanup step only applies to GGM crossovers.
+    var isGGMx = vendor === "ggm-crossovers";
+    var progItems = [];
+    posToCreate.forEach(function(p) { (p.lines || []).forEach(function(ln) { progItems.push({ inventoryId: ln.inventoryID || ln.InventoryID || ln.inventoryId || "", ndc: ln.ndc || ln.NDC || "", qty: ln.orderQty != null ? ln.orderQty : (ln.OrderQty != null ? ln.OrderQty : ""), vendorRef: p.vendorRef || "" }); }); });
+    var steps = [
+      { id: "verify", label: "Verify against Acumatica (no duplicates)", status: "active", detail: "" },
+      { id: "create", label: "Create PO" + (posToCreate.length === 1 ? "" : "s") + " in Acumatica", status: "pending", detail: "" },
+    ];
+    if (isGGMx) steps.push({ id: "dummy", label: "Clean up placeholder PO(s)", status: "pending", detail: "" });
+    steps.push({ id: "tracker", label: "Add to receiving tracker", status: "pending", detail: "" });
+    setCreateProgress({ steps: steps, items: progItems, itemsOpen: false });
 
     // Pre-create guard: check whether any of these POs already exist in
     // Acumatica (matched by VendorRef). If ANY do, block the whole batch and
@@ -3980,12 +4001,14 @@ function POImportTool(props) {
         });
         var chk = await chkResp.json();
         if (!chk.ok) {
+          progStep("verify", "failed", "Couldn't verify against Acumatica");
           setAcuCreateResult({ data: { ok: false, stage: "precheck-failed", failure: { stage: "precheck", errorDetails: [{ message: "Could not verify against Acumatica before creating (" + (chk.stage || "unknown") + "). Nothing was created \u2014 try again." }] }, succeeded: [] }, requested: posToCreate });
           toast("Couldn't verify against Acumatica \u2014 nothing created", "error");
           setAcuCreateLoading(false);
           return;
         }
         if (chk.existing && chk.existing.length) {
+          progStep("verify", "failed", chk.existingRefs.length + " already in Acumatica \u2014 batch blocked");
           setAcuCreateResult({ data: { ok: false, stage: "already-exists", alreadyExists: chk.existing, succeeded: [] }, requested: posToCreate });
           toast(chk.existingRefs.length + " PO(s) already in Acumatica \u2014 batch blocked, nothing created", "error");
           setAcuCreateLoading(false);
@@ -3993,11 +4016,15 @@ function POImportTool(props) {
         }
       }
     } catch (err) {
+      progStep("verify", "failed", "Pre-create check errored");
       setAcuCreateResult({ data: { ok: false, stage: "precheck-error", failure: { stage: "precheck", errorDetails: [{ message: "Pre-create check errored: " + String(err) + ". Nothing was created." }] }, succeeded: [] }, requested: posToCreate });
       toast("Pre-create check failed \u2014 nothing created", "error");
       setAcuCreateLoading(false);
       return;
     }
+    // Verify passed; move to create.
+    progStep("verify", "done", "No duplicates found");
+    progStep("create", "active");
 
     try {
       var resp = await fetch("/api/acumatica-po-import-create", {
@@ -4023,6 +4050,7 @@ function POImportTool(props) {
       // and (for GGM) the dummy-cleanup result \u2014 worth keeping visible.
       setAcuCreateResult({ data: data, requested: posToCreate });
       if (data.ok) {
+        progStep("create", "done", (data.succeeded ? data.succeeded.length : 0) + " PO(s) created");
         setBatchDone(function (prev) {
           var po = (data.succeeded && data.succeeded[0] && data.succeeded[0].orderNbr) ? data.succeeded[0].orderNbr : null;
           return Object.assign({}, prev || {}, { created: true, createdCount: data.succeeded ? data.succeeded.length : 0, createdPO: po });
@@ -4030,9 +4058,11 @@ function POImportTool(props) {
         toast("Created " + (data.succeeded ? data.succeeded.length : 0) + " PO(s) in Acumatica", "success");
       } else {
         var succ = data.succeeded ? data.succeeded.length : 0;
+        progStep("create", "failed", succ + "/" + posToCreate.length + " created \u2014 stopped on failure");
         toast(succ + "/" + posToCreate.length + " created \u2014 stopped on failure (see results)", "error");
       }
     } catch (err) {
+      progStep("create", "failed", "Network error");
       setAcuCreateResult({ data: { ok: false, stage: "fetch-error", failure: { stage: "fetch", errorDetails: [{ message: String(err) }] }, succeeded: [] }, requested: posToCreate });
       toast("Network error \u2014 see results", "error");
     } finally {
@@ -4042,18 +4072,27 @@ function POImportTool(props) {
     // the placeholder dummy PO(s). Gated on data.ok so a partial/failed batch never
     // triggers deletes. The dummy result renders into the already-open dialog.
     if (vendor === "ggm-crossovers" && data && data.ok) {
+      progStep("dummy", "active");
       await deleteDummyPOs(posToCreate);
+      progStep("dummy", "done");
+    } else if (isGGMx) {
+      progStep("dummy", "skipped", "Skipped (create did not fully succeed)");
     }
     // After a fully successful create, auto-add the created POs to their receiving
     // tracker tabs (skipping any already present). Non-blocking: tracker issues are
     // toasted but never undo the successful Acumatica create. The dialog stays open
     // until the user closes it.
     if (data && data.ok) {
+      progStep("tracker", "active");
       // Gate the tracker write to exactly the POs Acumatica confirmed created, so
       // a partial success can never write a phantom row for a PO that didn't post.
       var createdAllow = {};
       (data.succeeded || []).forEach(function (s) { if (s.vendorRef) createdAllow[String(s.vendorRef).trim()] = true; });
-      await addToTracker(Object.keys(createdAllow).length ? createdAllow : null);
+      var trackerOutcome = await addToTracker(Object.keys(createdAllow).length ? createdAllow : null);
+      if (trackerOutcome && trackerOutcome.failMsg) progStep("tracker", "failed", trackerOutcome.failMsg);
+      else { var addedN = trackerOutcome ? trackerOutcome.okCount : 0; var skipN = trackerOutcome ? trackerOutcome.skipped : 0; progStep("tracker", "done", addedN + " added" + (skipN ? ", " + skipN + " already there" : "")); }
+    } else {
+      progStep("tracker", "skipped", "Skipped (create did not fully succeed)");
     }
   }
 
@@ -4571,6 +4610,62 @@ function POImportTool(props) {
               {posList.length > 0 && <button onClick={function() { executeCreatePOs(posList); }} style={{ background: "#047857", color: "#FFFFFF", border: "none", padding: "8px 16px", borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Create {posList.length} PO{posList.length === 1 ? "" : "s"}</button>}
             </div>
           </div>
+        </div>;
+      })()}
+
+      {/* ── Create PO + tracker: live step progress ─────────────────────── */}
+      {createProgress && (function() {
+        var steps = createProgress.steps || [];
+        var allDone = steps.every(function(s) { return s.status === "done" || s.status === "skipped" || s.status === "failed"; });
+        var anyFailed = steps.some(function(s) { return s.status === "failed"; });
+        return <div style={{ marginTop: 16, border: "1px solid #E5E7EB", borderRadius: 12, padding: "16px 18px", background: "#fff" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#1F2937" }}>{allDone ? (anyFailed ? "Finished with issues" : "All steps complete") : "Working\u2026"}</div>
+            {allDone && <button onClick={function() { setCreateProgress(null); }} style={{ background: "transparent", border: "1px solid #E5E7EB", borderRadius: 6, padding: "4px 12px", fontSize: 12, color: "#6B7280", cursor: "pointer", fontFamily: "'Varela Round', sans-serif" }}>Dismiss</button>}
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {steps.map(function(s) {
+              var icon, iconColor;
+              if (s.status === "done") { icon = "\u2713"; iconColor = "#059669"; }
+              else if (s.status === "failed") { icon = "\u2715"; iconColor = "#DC2626"; }
+              else if (s.status === "skipped") { icon = "\u2013"; iconColor = "#9CA3AF"; }
+              else if (s.status === "active") { icon = "spin"; iconColor = TOOL_COLOR; }
+              else { icon = "\u25CB"; iconColor = "#D1D5DB"; }
+              return <div key={s.id} style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                <div style={{ width: 20, height: 20, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", marginTop: 1 }}>
+                  {icon === "spin"
+                    ? <div style={{ width: 15, height: 15, border: "2px solid " + TOOL_COLOR, borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />
+                    : <span style={{ color: iconColor, fontSize: 15, fontWeight: 700, lineHeight: 1 }}>{icon}</span>}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 13, fontWeight: s.status === "active" ? 700 : 500, color: s.status === "pending" ? "#9CA3AF" : "#1F2937" }}>{s.label}</div>
+                  {s.detail && <div style={{ fontSize: 11, color: s.status === "failed" ? "#DC2626" : "#6B7280", marginTop: 2 }}>{s.detail}</div>}
+                </div>
+              </div>;
+            })}
+          </div>
+          {createProgress.items && createProgress.items.length > 0 && <div style={{ marginTop: 14, borderTop: "1px solid #F3F4F6", paddingTop: 12 }}>
+            <button onClick={function() { setCreateProgress(function(prev) { return prev ? Object.assign({}, prev, { itemsOpen: !prev.itemsOpen }) : prev; }); }} style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: "#4B5563", fontFamily: "'Varela Round', sans-serif" }}>
+              <span style={{ fontSize: 10, transform: createProgress.itemsOpen ? "rotate(90deg)" : "none", transition: "transform 0.15s" }}>{"\u25B6"}</span>
+              {createProgress.items.length} item{createProgress.items.length === 1 ? "" : "s"} being added
+            </button>
+            {createProgress.itemsOpen && <div style={{ marginTop: 8, maxHeight: 220, overflowY: "auto", border: "1px solid #F3F4F6", borderRadius: 8 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <thead><tr style={{ background: "#F9FAFB" }}>
+                  <th style={{ textAlign: "left", padding: "6px 10px", color: "#6B7280", fontWeight: 600, borderBottom: "1px solid #F3F4F6" }}>Inventory ID</th>
+                  <th style={{ textAlign: "left", padding: "6px 10px", color: "#6B7280", fontWeight: 600, borderBottom: "1px solid #F3F4F6" }}>NDC</th>
+                  <th style={{ textAlign: "right", padding: "6px 10px", color: "#6B7280", fontWeight: 600, borderBottom: "1px solid #F3F4F6" }}>Qty</th>
+                </tr></thead>
+                <tbody>
+                  {createProgress.items.map(function(it, i) { return <tr key={i}>
+                    <td style={{ padding: "6px 10px", color: "#1F2937", fontWeight: 600, borderBottom: "1px solid #F9FAFB" }}>{it.inventoryId || "\u2014"}</td>
+                    <td style={{ padding: "6px 10px", color: "#374151", fontFamily: "monospace", borderBottom: "1px solid #F9FAFB" }}>{it.ndc || "\u2014"}</td>
+                    <td style={{ padding: "6px 10px", color: "#374151", textAlign: "right", borderBottom: "1px solid #F9FAFB" }}>{it.qty}</td>
+                  </tr>; })}
+                </tbody>
+              </table>
+            </div>}
+          </div>}
         </div>;
       })()}
 
