@@ -6,6 +6,10 @@ const SHEET_URLS = {
   "TP-NY": process.env.TRACKER_SHEET_URL_NY,
   "TP-OH": process.env.TRACKER_SHEET_URL_OH,
   "TP-CA": process.env.TRACKER_SHEET_URL_CA,
+  "TP-TX": process.env.TRACKER_SHEET_URL_TX,
+  "TP-LI": process.env.TRACKER_SHEET_URL_LI,
+  "TP-SD": process.env.TRACKER_SHEET_URL_SD,
+  "TP-OTC": process.env.TRACKER_SHEET_URL_OTC,
   "GGM-KY": process.env.TRACKER_SHEET_URL_GGM_KY,
   "GGM-AZ": process.env.TRACKER_SHEET_URL_GGM_AZ,
 };
@@ -59,7 +63,7 @@ export async function GET(request) {
     const { searchParams } = new URL(request.url);
     const wh = searchParams.get("wh");
     if (!wh || !SHEET_URLS[wh]) {
-      return Response.json({ error: "Invalid warehouse. Use: TP-NY, TP-OH, TP-CA, GGM-KY, GGM-AZ" }, { status: 400 });
+      return Response.json({ error: "Invalid warehouse. Use: TP-NY, TP-OH, TP-CA, TP-TX, TP-LI, TP-SD, TP-OTC, GGM-KY, GGM-AZ" }, { status: 400 });
     }
 
     const url = SHEET_URLS[wh];
