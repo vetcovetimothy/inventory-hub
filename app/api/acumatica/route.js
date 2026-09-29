@@ -31,7 +31,25 @@ const ENDPOINTS = {
   "recon-ggm":     "HD%20PO%20Tracker%20-%20GGM",
   "pack-size-ref": "PURCH%20-%20Pack%20Size%20Reference",
   "net-new":       "PURCH%20-%20Net%20New%20Item%20List",
+  "disc-fuze":     "PURCH%20-%20DiscontinuedSupersession%20Item%20List%20Fuze",
+  "disc-ggm":      "PURCH%20-%20DiscontinuedSupersession%20Item%20List%20GGM",
+  "disc-cgp":      "PURCH%20-%20DiscontinuedSupersession%20Item%20List%20CGP",
+  "disc-ct":       "PURCH%20-%20DiscontinuedSupersession%20Item%20List%20CT",
+  "supersessions": "ITEM%20-%20End%20Item%20Supersessions",
 };
+
+// Shared column shape for the 4 discontinued/supersession item-list GIs.
+function DISC_COLS() {
+  return [
+    { label: "InventoryID",   keys: ["Inventory ID", "InventoryID", "InventoryCD", "InventoryCd"] },
+    { label: "NDC",           keys: ["NDC", "Ndc", "AlternateID", "SKUNDC", "TPSKU"] },
+    { label: "Description",   keys: ["Description", "Descr", "ItemDescription"] },
+    { label: "ItemStatus",    keys: ["Item Status", "ItemStatus"] },
+    { label: "ABCCode",       keys: ["ABC Code", "ABCCode", "ABC"] },
+    { label: "BaseUOM",       keys: ["Base Unit", "BaseUnit", "BaseUOM", "UOM"] },
+    { label: "MovementClass", keys: ["Movement Class", "MovementClass"] },
+  ];
+}
 
 // Which columns to extract for each type (keyGroup = possible OData field names)
 const COLUMN_MAP = {
@@ -98,6 +116,22 @@ const COLUMN_MAP = {
     { label: "Description",   keys: ["Description", "Descr", "ItemDescription"] },
     { label: "BaseUOM",       keys: ["Base Unit", "BaseUnit", "BaseUOM", "UOM"] },
     { label: "ABCCode",       keys: ["ABC Code", "ABCCode", "MovementClass", "ABC"] },
+  ],
+  // Discontinued/Supersession item lists (one GI per vendor, identical columns):
+  // Inventory ID, NDC, Description, Item Status, ABC Code, Base Unit, Movement Class.
+  "disc-fuze": DISC_COLS(),
+  "disc-ggm":  DISC_COLS(),
+  "disc-cgp":  DISC_COLS(),
+  "disc-ct":   DISC_COLS(),
+  // End Item Supersessions: Inventory ID = the NEW item; Old Item = the discontinued
+  // item it replaces. So to find "what replaced X", match X against OldItem and
+  // return InventoryID + its Description.
+  "supersessions": [
+    { label: "NewItemID",     keys: ["Inventory ID", "InventoryID", "InventoryCD", "InventoryCd"] },
+    { label: "NewItemDesc",   keys: ["Description", "Descr"] },
+    { label: "AlternateType", keys: ["Alternate Type", "AlternateType"] },
+    { label: "OldItem",       keys: ["Old Item", "OldItem", "OldInventoryID", "AlternateID"] },
+    { label: "SupersessionDesc", keys: ["Description2", "Description 2", "Alternate Description"] },
   ],
   "item-xref": [
     { label: "InventoryID",   keys: ["InventoryID", "InventoryId", "InventoryCd", "InventoryCD", "Inventory ID"] },
@@ -248,6 +282,11 @@ const CACHE_TTL = {
   "ndc-lookup":       6 * 60 * 60 * 1000,  // 6h — generic NDCs change slowly
   "pack-size-ref":    6 * 60 * 60 * 1000,  // 6h — BOHPKSIZE attribute changes slowly
   "net-new":          30 * 60 * 1000,       // 30m — new-item list changes as items are set up
+  "disc-fuze":        60 * 60 * 1000,       // 1h — discontinued lists change slowly
+  "disc-ggm":         60 * 60 * 1000,
+  "disc-cgp":         60 * 60 * 1000,
+  "disc-ct":          60 * 60 * 1000,
+  "supersessions":    6 * 60 * 60 * 1000,   // 6h — supersession map is fairly static
   "stock-cross-ref":  6 * 60 * 60 * 1000,  // 6h — formulary cross-ref changes slowly
   "item-xref":        6 * 60 * 60 * 1000,  // 6h — item cross-ref changes slowly
   "uom-conversions": 24 * 60 * 60 * 1000,  // 24h — UOM conversions basically never change
@@ -355,6 +394,11 @@ export async function POST(request) {
 
     // For pack size reference, fetch all rows (item-master, a few thousand rows).
     if (type === "pack-size-ref") {
+      url += `?$top=50000`;
+    }
+
+    // Discontinued lists and the supersession map can be large; fetch all rows.
+    if (type === "disc-fuze" || type === "disc-ggm" || type === "disc-cgp" || type === "disc-ct" || type === "supersessions") {
       url += `?$top=50000`;
     }
 
