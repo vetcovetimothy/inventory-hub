@@ -7004,6 +7004,155 @@ function DownloadMenu(props) {
   </div>;
 }
 
+function DiscontinuedTool(props) {
+  var toast = props.toast, cred = props.cred;
+  var VENDOR_TABS = [
+    { id: "disc-fuze", label: "Fuze" },
+    { id: "disc-ggm",  label: "GGM" },
+    { id: "disc-cgp",  label: "CGP" },
+    { id: "disc-ct",   label: "CT" },
+  ];
+  var _tab = useState("disc-fuze"), tab = _tab[0], setTab = _tab[1];
+  var _rows = useState({}), rowsByTab = _rows[0], setRowsByTab = _rows[1];   // { tabId: [items] }
+  var _loading = useState(false), loading = _loading[0], setLoading = _loading[1];
+  var _err = useState(""), err = _err[0], setErr = _err[1];
+  var _search = useState(""), search = _search[0], setSearch = _search[1];
+  var _superMap = useState(null), superMap = _superMap[0], setSuperMap = _superMap[1]; // OldItem -> {newId, newDesc}
+  var _dates = useState({}), discDates = _dates[0], setDiscDates = _dates[1];          // "vendor||invId" -> "YYYY-MM-DD"
+  var _lastPull = useState({}), lastPull = _lastPull[0], setLastPull = _lastPull[1];
+
+  var DATES_KV = "discontinued-dates";
+  function todayISO() { var d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
+  function fmtDate(iso) { if (!iso) return "\u2014"; var p = String(iso).split("-"); return p.length === 3 ? (p[1] + "/" + p[2] + "/" + p[0]) : iso; }
+
+  // Load persisted discontinue dates once on mount.
+  useEffect(function() {
+    var mt = true;
+    kvGet(DATES_KV).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+      if (mt && d && d.data && typeof d.data === "object") setDiscDates(d.data);
+    }).catch(function() {});
+    return function() { mt = false; };
+  }, []);
+
+  function saveDates(next) { setDiscDates(next); kvPost(DATES_KV, next).catch(function() {}); }
+
+  // Fetch a vendor tab's discontinued GI (+ the shared supersession map, once).
+  async function loadTab(tabId, force) {
+    if (!cred || !cred.username || !cred.password) { setErr("Acumatica credentials required."); return; }
+    setLoading(true); setErr("");
+    try {
+      // Supersession map (shared across tabs) \u2014 fetch once unless forcing.
+      var sMap = superMap;
+      if (!sMap || force) {
+        var sRows = await fetchAcumatica("supersessions", null, cred.username, cred.password);
+        sMap = {};
+        (sRows || []).forEach(function(r) {
+          var oldId = String(r.OldItem || "").trim();
+          if (oldId) sMap[oldId] = { newId: String(r.NewItemID || "").trim(), newDesc: String(r.NewItemDesc || "").trim() };
+        });
+        setSuperMap(sMap);
+      }
+      var rows = await fetchAcumatica(tabId, null, cred.username, cred.password);
+      rows = (rows || []).map(function(r) { return {
+        inventoryId: String(r.InventoryID || "").trim(),
+        ndc: String(r.NDC || "").trim(),
+        description: String(r.Description || "").trim(),
+        itemStatus: String(r.ItemStatus || "").trim(),
+        abcCode: String(r.ABCCode || "").trim(),
+        baseUOM: String(r.BaseUOM || "").trim(),
+      }; });
+      // Assign a permanent discontinue date to any item we haven't seen before
+      // (for this vendor). Existing dates are never changed.
+      var vend = tabId;
+      var nextDates = Object.assign({}, discDates);
+      var changed = false;
+      rows.forEach(function(r) {
+        if (!r.inventoryId) return;
+        var key = vend + "||" + r.inventoryId;
+        if (!nextDates[key]) { nextDates[key] = todayISO(); changed = true; }
+      });
+      if (changed) saveDates(nextDates);
+      setRowsByTab(function(prev) { return Object.assign({}, prev, { [tabId]: rows }); });
+      setLastPull(function(prev) { return Object.assign({}, prev, { [tabId]: Date.now() }); });
+    } catch (e) {
+      setErr(String((e && e.message) || e));
+      toast("Failed to load discontinued list: " + String((e && e.message) || e), "error");
+    } finally { setLoading(false); }
+  }
+
+  // Load the active tab on first view / tab switch if not already loaded.
+  useEffect(function() {
+    if (!rowsByTab[tab] && cred && cred.username) loadTab(tab, false);
+  }, [tab, cred]);
+
+  var rows = rowsByTab[tab] || [];
+  var filtered = rows.filter(function(r) {
+    if (!search) return true;
+    var q = search.toLowerCase();
+    return (r.inventoryId + " " + r.ndc + " " + r.description).toLowerCase().indexOf(q) >= 0;
+  });
+
+  var th = { textAlign: "left", padding: "8px 12px", fontSize: 11, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.03em", borderBottom: "1px solid #E5E7EB", whiteSpace: "nowrap", position: "sticky", top: 0, background: "#F9FAFB" };
+  var td = { padding: "8px 12px", fontSize: 12.5, color: "#1F2937", borderBottom: "1px solid #F3F4F6", verticalAlign: "top" };
+  var TOOL = "#DC2626";
+
+  return <div>
+    <p style={{ color: "#6B7280", fontSize: 13, marginBottom: 16 }}>Discontinued / supersession items per vendor, from Acumatica. Each item's <strong>Discontinued Date</strong> is set the first time it appears here and stays fixed. <strong>Replaced By</strong> comes from the End Item Supersessions list.</p>
+
+    {/* Vendor sub-tabs */}
+    <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+      {VENDOR_TABS.map(function(t) { var on = tab === t.id; return <button key={t.id} onClick={function() { setTab(t.id); }} style={{ padding: "8px 20px", borderRadius: 8, border: "1px solid " + (on ? TOOL : "#E5E7EB"), background: on ? TOOL : "#fff", color: on ? "#fff" : "#6B7280", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "'Varela Round', sans-serif" }}>{t.label}</button>; })}
+    </div>
+
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, gap: 12, flexWrap: "wrap" }}>
+      <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search ID, NDC, description\u2026" style={{ flex: 1, minWidth: 220, padding: "8px 12px", border: "1px solid #E5E7EB", borderRadius: 8, fontSize: 13, fontFamily: "'Varela Round', sans-serif" }} />
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <span style={{ fontSize: 12, color: "#9CA3AF" }}>{filtered.length} of {rows.length} item{rows.length === 1 ? "" : "s"}{lastPull[tab] ? " \u00B7 pulled " + new Date(lastPull[tab]).toLocaleTimeString() : ""}</span>
+        <button onClick={function() { loadTab(tab, true); }} disabled={loading} style={{ padding: "6px 14px", borderRadius: 6, border: "1px solid " + TOOL, background: "#fff", color: TOOL, fontSize: 12, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", fontFamily: "'Varela Round', sans-serif" }}>{loading ? "Loading\u2026" : "\u21BB Refresh"}</button>
+      </div>
+    </div>
+
+    {err && <div style={{ background: "rgba(220,38,38,0.05)", border: "1px solid rgba(220,38,38,0.2)", borderRadius: 8, padding: "10px 14px", fontSize: 13, color: "#DC2626", marginBottom: 12 }}>{err}</div>}
+
+    {loading && rows.length === 0 ? (
+      <div style={{ padding: "40px 16px", textAlign: "center", color: "#9CA3AF", fontSize: 14 }}><Spinner color={TOOL} size={20} /> Loading discontinued items\u2026</div>
+    ) : rows.length === 0 ? (
+      <div style={{ padding: "32px 16px", textAlign: "center", color: "#9CA3AF", fontSize: 14, border: "1px dashed #E5E7EB", borderRadius: 10 }}>No discontinued items for this vendor.</div>
+    ) : (
+      <div style={{ border: "1px solid #E5E7EB", borderRadius: 10, overflow: "auto", maxHeight: "70vh" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff" }}>
+          <thead><tr>
+            <th style={th}>Inventory ID</th>
+            <th style={th}>NDC</th>
+            <th style={th}>Description</th>
+            <th style={th}>Item Status</th>
+            <th style={th}>ABC Code</th>
+            <th style={th}>Base UOM</th>
+            <th style={th}>Discontinued Date</th>
+            <th style={th}>Replaced By</th>
+          </tr></thead>
+          <tbody>
+            {filtered.map(function(r) {
+              var dKey = tab + "||" + r.inventoryId;
+              var sup = superMap && superMap[r.inventoryId];
+              return <tr key={r.inventoryId}>
+                <td style={Object.assign({}, td, { fontWeight: 600, fontFamily: "monospace", whiteSpace: "nowrap" })}>{r.inventoryId}</td>
+                <td style={Object.assign({}, td, { fontFamily: "monospace", whiteSpace: "nowrap" })}>{r.ndc || "\u2014"}</td>
+                <td style={td}>{r.description || "\u2014"}</td>
+                <td style={Object.assign({}, td, { whiteSpace: "nowrap" })}>{r.itemStatus || "\u2014"}</td>
+                <td style={Object.assign({}, td, { whiteSpace: "nowrap" })}>{r.abcCode || "\u2014"}</td>
+                <td style={Object.assign({}, td, { whiteSpace: "nowrap" })}>{r.baseUOM || "\u2014"}</td>
+                <td style={Object.assign({}, td, { whiteSpace: "nowrap", fontWeight: 600 })}>{fmtDate(discDates[dKey])}</td>
+                <td style={td}>{sup && sup.newId ? <span><span style={{ fontFamily: "monospace", fontWeight: 600, color: "#047857" }}>{sup.newId}</span>{sup.newDesc ? <span style={{ color: "#6B7280" }}>{" \u2014 " + sup.newDesc}</span> : null}</span> : <span style={{ color: "#9CA3AF" }}>{"\u2014"}</span>}</td>
+              </tr>;
+            })}
+          </tbody>
+        </table>
+      </div>
+    )}
+  </div>;
+}
+
 function OOSTracker(props) {
   var toast = props.toast, cred = props.cred;
   var TOOL_COLOR = "#EF4444";
@@ -10028,8 +10177,8 @@ export default function Hub() {
   );
 
   var isWH = page in WH;
-  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "backorder-resolver" ? "#14B8A6" : page === "po-import" ? "#06B6D4" : page === "cycle-count" ? "#14B8A6" : page === "fuze-tracker" ? "#F59E0B" : page === "ggm-tracker" ? "#8B5CF6" : page === "hills-pawtree" ? "#10B981" : page === "truckloader" ? "#D97706" : page === "oos-tracker" ? "#EF4444" : page === "vendor-settings" ? "#6366F1" : page === "po-recon" ? "#6366F1" : page === "forecasting" ? "#0EA5E9" : page === "how-to" ? "#6B7280" : "#3B82F6";
-  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "backorder-resolver" ? "Backorder Resolver" : page === "po-import" ? "Generic PO Translator" : page === "cycle-count" ? "Cycle Counting" : page === "fuze-tracker" ? "Fuze Tracker" : page === "ggm-tracker" ? "GGM Tracker" : page === "hills-pawtree" ? "Hills & Pawtree Tracker" : page === "truckloader" ? "Hills Truckloader" : page === "oos-tracker" ? "OOS Tracker" : page === "vendor-settings" ? "Vendor Settings" : page === "po-recon" ? "PO Reconciliation" : page === "forecasting" ? "Forecasting" : page === "how-to" ? "How-To Guide" : showLogin ? "Login" : "Vendor Settings";
+  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "backorder-resolver" ? "#14B8A6" : page === "po-import" ? "#06B6D4" : page === "cycle-count" ? "#14B8A6" : page === "fuze-tracker" ? "#F59E0B" : page === "ggm-tracker" ? "#8B5CF6" : page === "hills-pawtree" ? "#10B981" : page === "truckloader" ? "#D97706" : page === "oos-tracker" ? "#EF4444" : page === "vendor-settings" ? "#6366F1" : page === "po-recon" ? "#6366F1" : page === "forecasting" ? "#0EA5E9" : page === "how-to" ? "#6B7280" : page === "discontinued" ? "#DC2626" : "#3B82F6";
+  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "backorder-resolver" ? "Backorder Resolver" : page === "po-import" ? "Generic PO Translator" : page === "cycle-count" ? "Cycle Counting" : page === "fuze-tracker" ? "Fuze Tracker" : page === "ggm-tracker" ? "GGM Tracker" : page === "hills-pawtree" ? "Hills & Pawtree Tracker" : page === "truckloader" ? "Hills Truckloader" : page === "oos-tracker" ? "OOS Tracker" : page === "vendor-settings" ? "Vendor Settings" : page === "po-recon" ? "PO Reconciliation" : page === "forecasting" ? "Forecasting" : page === "how-to" ? "How-To Guide" : page === "discontinued" ? "Discontinued Items" : showLogin ? "Login" : "Vendor Settings";
 
   function SideLink(p) {
     var active = page === p.id && !showLogin;
@@ -10055,7 +10204,7 @@ export default function Hub() {
             { key: "hills", label: "Hills Tools", items: [{ id: "hills-pawtree", label: "Hills & Pawtree", color: "#10B981" }, { id: "truckloader", label: "Hills Truckloader", color: "#D97706" }] },
             { key: "oos", label: "OOS", items: [{ id: "oos-tracker", label: "OOS Tracker", color: "#EF4444" }] },
             { key: "tracking", label: "Tracking", items: [{ id: "fuze-tracker", label: "Fuze Tracker", color: "#F59E0B" }, { id: "ggm-tracker", label: "GGM Tracker", color: "#8B5CF6" }] },
-            { key: "inventory", label: "Inventory Tools", items: [{ id: "forecasting", label: "Forecasting", color: "#0EA5E9" }, { id: "short-dating", label: "Short-Dating", color: "#E879F9" }, { id: "backorder", label: "Backorders", color: "#F97316" }, { id: "backorder-resolver", label: "Backorder Resolver", color: "#14B8A6" }] },
+            { key: "inventory", label: "Inventory Tools", items: [{ id: "forecasting", label: "Forecasting", color: "#0EA5E9" }, { id: "short-dating", label: "Short-Dating", color: "#E879F9" }, { id: "backorder", label: "Backorders", color: "#F97316" }, { id: "backorder-resolver", label: "Backorder Resolver", color: "#14B8A6" }, { id: "discontinued", label: "Discontinued", color: "#DC2626" }] },
           ];
           return sections.map(function(sec, si) {
             var hasActive = sec.items.some(function(item) { return page === item.id && !showLogin; });
@@ -10117,6 +10266,7 @@ export default function Hub() {
           {!showLogin && page === "truckloader" && <TruckloaderTool toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} />}
           {!showLogin && page === "oos-tracker" && <OOSTracker toast={showToast} cred={cred} />}
           {!showLogin && page === "backorder-resolver" && <BackorderResolver toast={showToast} cred={cred} />}
+          {!showLogin && page === "discontinued" && <DiscontinuedTool toast={showToast} cred={cred} />}
           {!showLogin && page === "forecasting" && <ForecastingTool toast={showToast} cred={cred} ok={ok} lp={promptLogin} />}
           {!showLogin && (page === "vendor-settings" || page === "vendor-contacts" || page === "rules") && <VendorSettingsPage contacts={vendorContacts} updateContacts={updateVendorContacts} channels={vendorChannels} updateChannels={updateVendorChannels} shipRules={shipRules} updateShipRules={updateShipRules} toast={showToast} />}
           {!showLogin && page === "po-recon" && <PoReconPage cred={cred} ok={ok} lp={promptLogin} toast={showToast} />}
