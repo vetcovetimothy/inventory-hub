@@ -332,7 +332,7 @@ export async function POST(request) {
     const { type, warehouse, username, password, useServiceAccount } = body;
 
     if (!type || !ENDPOINTS[type]) {
-      return Response.json({ error: "Invalid type. Use: po, po-ggm, ndc-lookup, item-xref, short-dating, backorder, hills-pawtree, replenishment-needs, whse-replenish, gen-pricing, gen-pricing-3prx, uom-conversions, stock-cross-ref, open-po-lines, pack-size-ref" }, { status: 400 });
+      return Response.json({ error: "Invalid type. Use: " + Object.keys(ENDPOINTS).join(", ") }, { status: 400 });
     }
 
     // Check cache before doing anything expensive (skip if ?refresh=1 in URL)
