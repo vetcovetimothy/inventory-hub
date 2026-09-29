@@ -7018,6 +7018,7 @@ function DiscontinuedTool(props) {
   var _err = useState(""), err = _err[0], setErr = _err[1];
   var _search = useState(""), search = _search[0], setSearch = _search[1];
   var _sort = useState({ col: "inventoryId", dir: "asc" }), sortState = _sort[0], setSortState = _sort[1];
+  function toggleSort(col) { setSortState(function(prev) { if (prev.col === col) return { col: col, dir: prev.dir === "asc" ? "desc" : "asc" }; return { col: col, dir: "asc" }; }); }
   var _superMap = useState(null), superMap = _superMap[0], setSuperMap = _superMap[1]; // OldItem -> {newId, newDesc}
   var _dates = useState({}), discDates = _dates[0], setDiscDates = _dates[1];          // "vendor||invId" -> "YYYY-MM-DD"
   var _lastPull = useState({}), lastPull = _lastPull[0], setLastPull = _lastPull[1];
