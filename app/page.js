@@ -7017,6 +7017,7 @@ function DiscontinuedTool(props) {
   var _loading = useState(false), loading = _loading[0], setLoading = _loading[1];
   var _err = useState(""), err = _err[0], setErr = _err[1];
   var _search = useState(""), search = _search[0], setSearch = _search[1];
+  var _sort = useState({ col: "inventoryId", dir: "asc" }), sortState = _sort[0], setSortState = _sort[1];
   var _superMap = useState(null), superMap = _superMap[0], setSuperMap = _superMap[1]; // OldItem -> {newId, newDesc}
   var _dates = useState({}), discDates = _dates[0], setDiscDates = _dates[1];          // "vendor||invId" -> "YYYY-MM-DD"
   var _lastPull = useState({}), lastPull = _lastPull[0], setLastPull = _lastPull[1];
@@ -7091,8 +7092,23 @@ function DiscontinuedTool(props) {
     var q = search.toLowerCase();
     return (r.inventoryId + " " + r.ndc + " " + r.description).toLowerCase().indexOf(q) >= 0;
   });
+  // Sort value per column, including the computed Discontinued Date and Replaced By.
+  function sortVal(r, col) {
+    if (col === "discDate") return discDates[tab + "||" + r.inventoryId] || "";
+    if (col === "replacedBy") { var s = superMap && superMap[r.inventoryId]; return s && s.newId ? s.newId : ""; }
+    return r[col] != null ? r[col] : "";
+  }
+  filtered = filtered.slice().sort(function(a, b) {
+    var av = sortVal(a, sortState.col), bv = sortVal(b, sortState.col);
+    var an = parseFloat(String(av).replace(/[^0-9.]/g, "")), bn = parseFloat(String(bv).replace(/[^0-9.]/g, ""));
+    var bothNum = !isNaN(an) && !isNaN(bn) && String(av).replace(/[^0-9.\-]/g, "") !== "" && String(bv).replace(/[^0-9.\-]/g, "") !== "";
+    var cmp = bothNum ? (an - bn) : String(av).toLowerCase().localeCompare(String(bv).toLowerCase());
+    return sortState.dir === "asc" ? cmp : -cmp;
+  });
 
-  var th = { textAlign: "left", padding: "8px 12px", fontSize: 11, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.03em", borderBottom: "1px solid #E5E7EB", whiteSpace: "nowrap", position: "sticky", top: 0, background: "#F9FAFB" };
+  function sortArrow(col) { if (sortState.col !== col) return ""; return sortState.dir === "asc" ? " \u25B2" : " \u25BC"; }
+
+  var th = { textAlign: "left", padding: "8px 12px", fontSize: 11, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.03em", borderBottom: "1px solid #E5E7EB", whiteSpace: "nowrap", position: "sticky", top: 0, background: "#F9FAFB", cursor: "pointer", userSelect: "none" };
   var td = { padding: "8px 12px", fontSize: 12.5, color: "#1F2937", borderBottom: "1px solid #F3F4F6", verticalAlign: "top" };
   var TOOL = "#DC2626";
 
@@ -7105,7 +7121,7 @@ function DiscontinuedTool(props) {
     </div>
 
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, gap: 12, flexWrap: "wrap" }}>
-      <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search ID, NDC, description\u2026" style={{ flex: 1, minWidth: 220, padding: "8px 12px", border: "1px solid #E5E7EB", borderRadius: 8, fontSize: 13, fontFamily: "'Varela Round', sans-serif" }} />
+      <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search ID, NDC, description…" style={{ flex: 1, minWidth: 220, padding: "8px 12px", border: "1px solid #E5E7EB", borderRadius: 8, fontSize: 13, fontFamily: "'Varela Round', sans-serif" }} />
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <span style={{ fontSize: 12, color: "#9CA3AF" }}>{filtered.length} of {rows.length} item{rows.length === 1 ? "" : "s"}{lastPull[tab] ? " \u00B7 pulled " + new Date(lastPull[tab]).toLocaleTimeString() : ""}</span>
         <button onClick={function() { loadTab(tab, true); }} disabled={loading} style={{ padding: "6px 14px", borderRadius: 6, border: "1px solid " + TOOL, background: "#fff", color: TOOL, fontSize: 12, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", fontFamily: "'Varela Round', sans-serif" }}>{loading ? "Loading\u2026" : "\u21BB Refresh"}</button>
@@ -7115,21 +7131,21 @@ function DiscontinuedTool(props) {
     {err && <div style={{ background: "rgba(220,38,38,0.05)", border: "1px solid rgba(220,38,38,0.2)", borderRadius: 8, padding: "10px 14px", fontSize: 13, color: "#DC2626", marginBottom: 12 }}>{err}</div>}
 
     {loading && rows.length === 0 ? (
-      <div style={{ padding: "40px 16px", textAlign: "center", color: "#9CA3AF", fontSize: 14 }}><Spinner color={TOOL} size={20} /> Loading discontinued items\u2026</div>
+      <div style={{ padding: "40px 16px", textAlign: "center", color: "#9CA3AF", fontSize: 14 }}><Spinner color={TOOL} size={20} /> Loading discontinued items…</div>
     ) : rows.length === 0 ? (
       <div style={{ padding: "32px 16px", textAlign: "center", color: "#9CA3AF", fontSize: 14, border: "1px dashed #E5E7EB", borderRadius: 10 }}>No discontinued items for this vendor.</div>
     ) : (
       <div style={{ border: "1px solid #E5E7EB", borderRadius: 10, overflow: "auto", maxHeight: "70vh" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff" }}>
           <thead><tr>
-            <th style={th}>Inventory ID</th>
-            <th style={th}>NDC</th>
-            <th style={th}>Description</th>
-            <th style={th}>Item Status</th>
-            <th style={th}>ABC Code</th>
-            <th style={th}>Base UOM</th>
-            <th style={th}>Discontinued Date</th>
-            <th style={th}>Replaced By</th>
+            <th style={th} onClick={function() { toggleSort("inventoryId"); }}>Inventory ID{sortArrow("inventoryId")}</th>
+            <th style={th} onClick={function() { toggleSort("ndc"); }}>NDC{sortArrow("ndc")}</th>
+            <th style={th} onClick={function() { toggleSort("description"); }}>Description{sortArrow("description")}</th>
+            <th style={th} onClick={function() { toggleSort("itemStatus"); }}>Item Status{sortArrow("itemStatus")}</th>
+            <th style={th} onClick={function() { toggleSort("abcCode"); }}>ABC Code{sortArrow("abcCode")}</th>
+            <th style={th} onClick={function() { toggleSort("baseUOM"); }}>Base UOM{sortArrow("baseUOM")}</th>
+            <th style={th} onClick={function() { toggleSort("discDate"); }}>Discontinued Date{sortArrow("discDate")}</th>
+            <th style={th} onClick={function() { toggleSort("replacedBy"); }}>Replaced By{sortArrow("replacedBy")}</th>
           </tr></thead>
           <tbody>
             {filtered.map(function(r) {
