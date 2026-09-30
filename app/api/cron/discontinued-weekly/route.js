@@ -26,11 +26,14 @@ const SHEET_TAB = "Discontinued Items"; // the tab name inside each vendor sheet
 const SHEET_HEADER = ["Inventory ID", "NDC", "Description", "Discontinued Date", "Replaced By"];
 
 // One entry per vendor. type = GI endpoint; sheetEnv/slackEnv = env var names.
+// mentions = Slack user IDs to @-mention at the top of that vendor's message (real
+// pings). Format is the bare member ID (e.g. "U02DVFWLK61"); the message wraps it
+// as <@ID> so Slack renders and notifies. Empty array = no mentions.
 const VENDORS = [
-  { key: "fuze", label: "Fuze",                 type: "disc-fuze", sheetEnv: "DISC_SHEET_FUZE", slackEnv: "DISC_SLACK_FUZE" },
-  { key: "ggm",  label: "GogoMeds",             type: "disc-ggm",  sheetEnv: "DISC_SHEET_GGM",  slackEnv: "DISC_SLACK_GGM" },
-  { key: "cgp",  label: "Central Garden & Pet", type: "disc-cgp",  sheetEnv: "DISC_SHEET_CGP",  slackEnv: "DISC_SLACK_CGP" },
-  { key: "ct",   label: "Caretria",             type: "disc-ct",   sheetEnv: "DISC_SHEET_CT",   slackEnv: "DISC_SLACK_CT" },
+  { key: "fuze", label: "Fuze",                 type: "disc-fuze", sheetEnv: "DISC_SHEET_FUZE", slackEnv: "DISC_SLACK_FUZE", mentions: ["U02DVFWLK61", "U07RQD22AF7"] },
+  { key: "ggm",  label: "GogoMeds",             type: "disc-ggm",  sheetEnv: "DISC_SHEET_GGM",  slackEnv: "DISC_SLACK_GGM",  mentions: [] },
+  { key: "cgp",  label: "Central Garden & Pet", type: "disc-cgp",  sheetEnv: "DISC_SHEET_CGP",  slackEnv: "DISC_SLACK_CGP",  mentions: [] },
+  { key: "ct",   label: "Caretria",             type: "disc-ct",   sheetEnv: "DISC_SHEET_CT",   slackEnv: "DISC_SLACK_CT",   mentions: [] },
 ];
 
 // KV keys — dates key is SHARED with the hub tab so both agree on discontinue dates.
@@ -141,7 +144,7 @@ async function postSlack(webhookUrl, text) {
 
 function sheetLink(sheetId) { return "https://docs.google.com/spreadsheets/d/" + sheetId + "/edit"; }
 
-function buildMessage(vendorLabel, newItems, link) {
+function buildMessage(vendorLabel, newItems, link, mentions) {
   const lines = newItems.map(function (it) {
     const rep = it.replacedBy ? (" \u2192 replaced by " + it.replacedBy) : "";
     return "\u2022 " + it.inventoryId + " \u2014 " + (it.description || "") + rep;
@@ -149,7 +152,11 @@ function buildMessage(vendorLabel, newItems, link) {
   const header = newItems.length === 1
     ? ("1 item was discontinued this week for " + vendorLabel + ":")
     : (newItems.length + " items were discontinued this week for " + vendorLabel + ":");
-  return header + "\n\n" + lines.join("\n") + "\n\nFull list: " + link;
+  // Real @-mentions: wrap each user ID as <@ID> so Slack renders + notifies.
+  const mentionLine = (mentions && mentions.length)
+    ? mentions.map(function (id) { return "<@" + id + ">"; }).join(" ") + "\n\n"
+    : "";
+  return mentionLine + header + "\n\n" + lines.join("\n") + "\n\nFull list: " + link;
 }
 
 export async function GET(request) {
@@ -230,7 +237,7 @@ export async function GET(request) {
 
         // Post to this vendor's channel with this vendor's sheet link.
         if (webhook) {
-          try { await postSlack(webhook, buildMessage(v.label, newItems, sheetLink(sheetId))); vResult.slack = "sent"; }
+          try { await postSlack(webhook, buildMessage(v.label, newItems, sheetLink(sheetId), v.mentions)); vResult.slack = "sent"; }
           catch (e) { vResult.slack = "failed"; vResult.errors.push("slack: " + String(e.message || e)); }
         } else {
           vResult.slack = "no webhook (" + v.slackEnv + ")";
