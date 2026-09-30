@@ -19,6 +19,10 @@
     {
       "path": "/api/cron/po-eod-clear",
       "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/cron/discontinued-weekly",
+      "schedule": "0 13 * * 5"
     }
   ]
 }
