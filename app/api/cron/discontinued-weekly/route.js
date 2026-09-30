@@ -145,18 +145,25 @@ async function postSlack(webhookUrl, text) {
 function sheetLink(sheetId) { return "https://docs.google.com/spreadsheets/d/" + sheetId + "/edit"; }
 
 function buildMessage(vendorLabel, newItems, link, mentions) {
-  const lines = newItems.map(function (it) {
-    const rep = it.replacedBy ? (" \u2192 replaced by " + it.replacedBy) : "";
-    return "\u2022 " + it.inventoryId + " \u2014 " + (it.description || "") + rep;
+  // Tight code-block table: ID, Description (truncated), and → replacement SKU.
+  // Monospace so columns align. Vendor name is dropped from the header since each
+  // vendor posts to its own channel.
+  var DESC_MAX = 46;
+  function pad(s, n) { s = String(s == null ? "" : s); return s.length >= n ? s.slice(0, n) : s + " ".repeat(n - s.length); }
+  var idW = 0;
+  newItems.forEach(function (it) { if (String(it.inventoryId).length > idW) idW = String(it.inventoryId).length; });
+  if (idW < 8) idW = 8;
+  var bodyLines = newItems.map(function (it) {
+    var desc = String(it.description || "");
+    if (desc.length > DESC_MAX) desc = desc.slice(0, DESC_MAX - 1) + "\u2026";
+    var rep = it.replacedById ? ("  \u2192 " + it.replacedById) : "";
+    return pad(it.inventoryId, idW) + "  " + pad(desc, DESC_MAX) + rep;
   });
-  const header = newItems.length === 1
-    ? ("1 item was discontinued this week for " + vendorLabel + ":")
-    : (newItems.length + " items were discontinued this week for " + vendorLabel + ":");
-  // Real @-mentions: wrap each user ID as <@ID> so Slack renders + notifies.
-  const mentionLine = (mentions && mentions.length)
-    ? mentions.map(function (id) { return "<@" + id + ">"; }).join(" ") + "\n\n"
+  var header = (newItems.length === 1 ? "1 item was discontinued this week:" : (newItems.length + " items were discontinued this week:"));
+  var mentionLine = (mentions && mentions.length)
+    ? mentions.map(function (id) { return "<@" + id + ">"; }).join(" ") + "\n"
     : "";
-  return mentionLine + header + "\n\n" + lines.join("\n") + "\n\nFull list: " + link;
+  return mentionLine + header + "\n```\n" + bodyLines.join("\n") + "\n```\nFull list: " + link;
 }
 
 export async function GET(request) {
@@ -219,7 +226,8 @@ export async function GET(request) {
         if (!sheeted[sKey]) {
           const sup = superMap[it.inventoryId];
           const replacedBy = sup && sup.newId ? (sup.newId + (sup.newDesc ? " (" + sup.newDesc + ")" : "")) : "";
-          newItems.push(Object.assign({}, it, { discDate: dates[dateVend + "||" + it.inventoryId], replacedBy }));
+          const replacedById = sup && sup.newId ? sup.newId : "";
+          newItems.push(Object.assign({}, it, { discDate: dates[dateVend + "||" + it.inventoryId], replacedBy, replacedById }));
         }
       });
       vResult.newItems = newItems.length;
