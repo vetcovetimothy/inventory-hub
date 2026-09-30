@@ -7008,9 +7008,9 @@ function DiscontinuedTool(props) {
   var toast = props.toast, cred = props.cred;
   var VENDOR_TABS = [
     { id: "disc-fuze", label: "Fuze" },
-    { id: "disc-ggm",  label: "GGM" },
-    { id: "disc-cgp",  label: "CGP" },
-    { id: "disc-ct",   label: "CT" },
+    { id: "disc-ggm",  label: "GogoMeds" },
+    { id: "disc-cgp",  label: "Central Garden & Pet" },
+    { id: "disc-ct",   label: "Caretria" },
   ];
   var _tab = useState("disc-fuze"), tab = _tab[0], setTab = _tab[1];
   var _rows = useState({}), rowsByTab = _rows[0], setRowsByTab = _rows[1];   // { tabId: [items] }
