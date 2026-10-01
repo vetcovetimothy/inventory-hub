@@ -2157,6 +2157,29 @@ function CycleCountTool(props) {
       setStockLoading(false);
     });
   }
+  // Fetch Stock Items (Inventory ID / Sales Unit / Base Unit) from Acumatica's
+  // IN-StockItem OData entity, trim to the 3 needed fields, and cache exactly like
+  // the manual upload. Returns the trimmed rows (or null on failure). Used as the
+  // automatic source; the manual upload remains a fallback.
+  async function fetchStockItems() {
+    if (!cred || !cred.username || !cred.password) return null;
+    try {
+      var resp = await fetch("/api/acumatica", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "stock-items", username: cred.username, password: cred.password }),
+      });
+      var json = await resp.json();
+      if (!resp.ok || !json.data) return null;
+      var trimmed = json.data.map(function(r) { return { "Inventory ID": r.InventoryID || "", "Sales Unit": r.SalesUnit || "", "Base Unit": r.BaseUnit || "" }; }).filter(function(r) { return r["Inventory ID"]; });
+      if (!trimmed.length) return null;
+      setStockRows(trimmed);
+      var meta = { date: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }), count: trimmed.length, name: "Acumatica (IN-StockItem)" };
+      setStockMeta(meta);
+      try { localStorage.setItem("stock-items-cache", JSON.stringify({ rows: trimmed, date: meta.date, name: meta.name })); } catch (e) {}
+      return trimmed;
+    } catch (e) { return null; }
+  }
+
   // Load TP-DOH from localStorage on mount, but only if saved date == today.
   // Cache key bumped to v2 in May 2026 when we switched from On Hand → Final FC units
   // for the DRR calculation. Old v1 caches are cleared automatically.
@@ -2368,10 +2391,19 @@ function CycleCountTool(props) {
     if (!vendorRows || vendorRows.length === 0) { toast("Upload the Vendor Inventory CSV", "error"); return; }
     if (!csvWhSelected) { toast("Select a warehouse from the CSV", "error"); return; }
     if (isSftp && (!sftpRows || sftpRows.length === 0)) { toast("Upload the SFTP BOH Report CSV", "error"); return; }
-    if (!stockRows || stockRows.length === 0) { toast("Upload the Stock Items XLSX first", "error"); return; }
     if (!warehouse.trim()) { toast("Enter a warehouse code for output", "error"); return; }
 
     setLoading(true); setResults([]); setErrors([]); setApprovals({});
+    // Stock Items: auto-fetch from Acumatica (IN-StockItem) if not already loaded.
+    // Falls back to whatever was manually uploaded. Use a local var so the fetched
+    // rows are usable immediately within this run (state update is async).
+    var effStockRows = stockRows;
+    if (!effStockRows || effStockRows.length === 0) {
+      toast("Fetching Stock Items from Acumatica\u2026");
+      var fetched = await fetchStockItems();
+      if (fetched && fetched.length) { effStockRows = fetched; }
+      else { toast("Couldn't fetch Stock Items from Acumatica \u2014 upload the Stock Items XLSX as a fallback.", "error"); setLoading(false); return; }
+    }
     try {
       // Parse NDCs from pasted text — extract NDCs with dashes, skip blanks
       var ndcLines = ndcText.split("\n").map(function(l) { return l.trim(); }).filter(function(l) { return l.length > 0 && /\d/.test(l); });
@@ -2435,7 +2467,7 @@ function CycleCountTool(props) {
       // Build Inventory ID → Sales Unit + Base Unit maps from cached stock items
       var salesUnitMap = {};
       var baseUnitMap = {};
-      stockRows.forEach(function(r) {
+      effStockRows.forEach(function(r) {
         var invId = String(r["Inventory ID"] || "").trim();
         var salesUnit = String(r["Sales Unit"] || "").trim();
         var baseUnit = String(r["Base Unit"] || "").trim();
@@ -2735,8 +2767,8 @@ function CycleCountTool(props) {
             {dohLoading && <p style={{ color: TOOL_COLOR, fontSize: 12, marginTop: 6 }}>Parsing...</p>}
           </div>}
 
-          <div style={{ fontSize: 14, color: "#374151", fontWeight: 600, marginBottom: 8, marginTop: 20, display: "flex", alignItems: "center", gap: 6 }}>{isSftp ? "6" : "5"}. Stock Items XLSX <InfoTip text="Before uploading, make sure to delete all tabs except the one labeled 'Data' in the Excel file." /></div>
-          <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 6 }}>Contains Inventory ID and Sales Unit for UOM lookup</div>
+          <div style={{ fontSize: 14, color: "#374151", fontWeight: 600, marginBottom: 8, marginTop: 20, display: "flex", alignItems: "center", gap: 6 }}>{isSftp ? "6" : "5"}. Stock Items <span style={{ fontSize: 11, fontWeight: 500, color: "#059669", background: "rgba(5,150,105,0.1)", padding: "2px 8px", borderRadius: 10 }}>auto-fetched</span> <InfoTip text="Stock Items (Inventory ID, Sales Unit, Base Unit) are pulled automatically from Acumatica when you click Generate. Uploading a file here is optional \u2014 only needed as a fallback if the fetch fails. If you do upload, delete all tabs except the one labeled 'Data' first." /></div>
+          <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 6 }}>Pulled from Acumatica automatically. Upload below only as a fallback.</div>
           {stockRows && stockMeta ? <div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(5,150,105,0.06)", border: "1px solid rgba(5,150,105,0.2)", borderRadius: 10 }}>
               <span style={{ color: "#059669", fontSize: 13 }}>{"\u2713"} {stockMeta.name} — {stockMeta.count.toLocaleString()} items (saved {stockMeta.date})</span>
