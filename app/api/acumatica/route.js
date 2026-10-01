@@ -36,6 +36,7 @@ const ENDPOINTS = {
   "disc-cgp":      "PURCH%20-%20DiscontinuedSupersession%20Item%20List%20CGP",
   "disc-ct":       "PURCH%20-%20DiscontinuedSupersession%20Item%20List%20CT",
   "supersessions": "ITEM%20-%20End%20Item%20Supersessions",
+  "stock-items":   "IN-StockItem",
 };
 
 // Shared column shape for the 4 discontinued/supersession item-list GIs.
@@ -132,6 +133,14 @@ const COLUMN_MAP = {
     { label: "AlternateType", keys: ["Alternate Type", "AlternateType"] },
     { label: "OldItem",       keys: ["Old Item", "OldItem", "OldInventoryID", "AlternateID"] },
     { label: "SupersessionDesc", keys: ["Description2", "Description 2", "Alternate Description"] },
+  ],
+  // IN-StockItem (standard Stock Items entity). Only three fields are needed for
+  // Cycle Counting: Inventory ID, Sales Unit, Base Unit. Candidate names cover the
+  // common OData spellings for this entity.
+  "stock-items": [
+    { label: "InventoryID",   keys: ["InventoryID", "Inventory ID", "InventoryCD", "InventoryCd"] },
+    { label: "SalesUnit",     keys: ["SalesUnit", "Sales Unit", "SalesUOM", "Sales UOM"] },
+    { label: "BaseUnit",      keys: ["BaseUnit", "Base Unit", "BaseUOM", "Base UOM"] },
   ],
   "item-xref": [
     { label: "InventoryID",   keys: ["InventoryID", "InventoryId", "InventoryCd", "InventoryCD", "Inventory ID"] },
@@ -287,6 +296,7 @@ const CACHE_TTL = {
   "disc-cgp":         60 * 60 * 1000,
   "disc-ct":          60 * 60 * 1000,
   "supersessions":    6 * 60 * 60 * 1000,   // 6h — supersession map is fairly static
+  "stock-items":      6 * 60 * 60 * 1000,   // 6h — item master UOMs change slowly
   "stock-cross-ref":  6 * 60 * 60 * 1000,  // 6h — formulary cross-ref changes slowly
   "item-xref":        6 * 60 * 60 * 1000,  // 6h — item cross-ref changes slowly
   "uom-conversions": 24 * 60 * 60 * 1000,  // 24h — UOM conversions basically never change
@@ -400,6 +410,11 @@ export async function POST(request) {
     // Discontinued lists and the supersession map can be large; fetch all rows.
     if (type === "disc-fuze" || type === "disc-ggm" || type === "disc-cgp" || type === "disc-ct" || type === "supersessions") {
       url += `?$top=50000`;
+    }
+
+    // Stock Items entity is large (full item master); fetch all rows.
+    if (type === "stock-items") {
+      url += `?$top=100000`;
     }
 
     // For UOM conversions, fetch all (no warehouse filter; many rows per item, so
