@@ -2402,7 +2402,7 @@ function CycleCountTool(props) {
       toast("Fetching Stock Items from Acumatica\u2026");
       var fetched = await fetchStockItems();
       if (fetched && fetched.length) { effStockRows = fetched; }
-      else { toast("Couldn't fetch Stock Items from Acumatica \u2014 upload the Stock Items XLSX as a fallback.", "error"); setLoading(false); return; }
+      else { toast("Couldn't fetch Stock Items from Acumatica \u2014 check your connection and try again.", "error"); setLoading(false); return; }
     }
     try {
       // Parse NDCs from pasted text — extract NDCs with dashes, skip blanks
@@ -2767,20 +2767,10 @@ function CycleCountTool(props) {
             {dohLoading && <p style={{ color: TOOL_COLOR, fontSize: 12, marginTop: 6 }}>Parsing...</p>}
           </div>}
 
-          <div style={{ fontSize: 14, color: "#374151", fontWeight: 600, marginBottom: 8, marginTop: 20, display: "flex", alignItems: "center", gap: 6 }}>{isSftp ? "6" : "5"}. Stock Items <span style={{ fontSize: 11, fontWeight: 500, color: "#059669", background: "rgba(5,150,105,0.1)", padding: "2px 8px", borderRadius: 10 }}>auto-fetched</span> <InfoTip text="Stock Items (Inventory ID, Sales Unit, Base Unit) are pulled automatically from Acumatica when you click Generate. Uploading a file here is optional \u2014 only needed as a fallback if the fetch fails. If you do upload, delete all tabs except the one labeled 'Data' first." /></div>
-          <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 6 }}>Pulled from Acumatica automatically. Upload below only as a fallback.</div>
-          {stockRows && stockMeta ? <div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(5,150,105,0.06)", border: "1px solid rgba(5,150,105,0.2)", borderRadius: 10 }}>
-              <span style={{ color: "#059669", fontSize: 13 }}>{"\u2713"} {stockMeta.name} — {stockMeta.count.toLocaleString()} items (saved {stockMeta.date})</span>
-            </div>
-            <label style={{ display: "inline-block", marginTop: 8, fontSize: 12, color: TOOL_COLOR, cursor: "pointer", textDecoration: "underline" }}>
-              {stockLoading ? "Uploading..." : "Replace with new file"}
-              <input type="file" accept=".xlsx,.xls" onChange={function(e) { if (e.target.files[0]) handleStockUpload(e.target.files[0]); }} style={{ display: "none" }} disabled={stockLoading} />
-            </label>
-          </div> : <div>
-            <DropZone accept=".xlsx,.xls" label="Stock Items XLSX" sublabel="Drop file or click to browse" icon="spreadsheet" color={TOOL_COLOR} disabled={stockLoading} onFiles={function(files) { handleStockUpload(files[0]); }} />
-            {stockLoading && <p style={{ color: TOOL_COLOR, fontSize: 12, marginTop: 6 }}>Parsing and saving...</p>}
-          </div>}
+          <div style={{ fontSize: 14, color: "#374151", fontWeight: 600, marginBottom: 8, marginTop: 20, display: "flex", alignItems: "center", gap: 6 }}>{isSftp ? "6" : "5"}. Stock Items <span style={{ fontSize: 11, fontWeight: 500, color: "#059669", background: "rgba(5,150,105,0.1)", padding: "2px 8px", borderRadius: 10 }}>auto-fetched</span></div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(5,150,105,0.06)", border: "1px solid rgba(5,150,105,0.2)", borderRadius: 10, fontSize: 13, color: "#059669" }}>
+            <span>{"\u2713"} Pulled automatically from Acumatica (Inventory ID, Sales Unit, Base Unit) when you click Generate{stockMeta ? " \u2014 last loaded " + stockMeta.count.toLocaleString() + " items on " + stockMeta.date : ""}.</span>
+          </div>
         </div>
       </div>
 
