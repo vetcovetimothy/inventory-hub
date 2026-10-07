@@ -2108,7 +2108,19 @@ function CycleCountTool(props) {
     var mt = true;
     sDel("cc-vendor-rows");
     idbGet("cc-vendor-rows").then(function(rows) {
-      if (mt && Array.isArray(rows) && rows.length > 0) setVendorRows(rows);
+      if (!mt) return;
+      if (Array.isArray(rows) && rows.length > 0) {
+        setVendorRows(rows);
+        // Restore the warehouse picker from the cached rows so the dropdown repopulates.
+        var whCounts = {};
+        rows.forEach(function(r) { var w = (r.Warehouse || "").trim(); if (w) { whCounts[w] = (whCounts[w] || 0) + 1; } });
+        var whList = Object.keys(whCounts).sort();
+        setCsvWarehouses(whList);
+        setCsvWhCounts(whCounts);
+      } else {
+        // No cached vendor data → auto-fetch from Snowflake so the warehouse picker fills in.
+        fetchVendorInventory();
+      }
     });
     return function() { mt = false; };
   }, []);
@@ -2161,6 +2173,42 @@ function CycleCountTool(props) {
   // IN-StockItem OData entity, trim to the 3 needed fields, and cache exactly like
   // the manual upload. Returns the trimmed rows (or null on failure). Used as the
   // automatic source; the manual upload remains a fallback.
+  // Fetch Vendor Inventory from Snowflake and remap its columns to the names the
+  // Cycle Counting tool expects (Warehouse, SKU, Manufacturer Number, Reported Qty,
+  // Stock Qty, Package Size). Returns the remapped rows (or null on failure), and
+  // sets up the warehouse picker exactly like the manual CSV upload does.
+  async function fetchVendorInventory() {
+    try {
+      var resp = await fetch("/api/vendor-inventory");
+      var json = await resp.json();
+      if (!resp.ok || !json.ok || !json.rows) return null;
+      var rows = json.rows.map(function(r) {
+        return {
+          "Warehouse": String(r.WAREHOUSE_SLUG == null ? "" : r.WAREHOUSE_SLUG),
+          "SKU": String(r.VENDOR_INVENTORY_SKU == null ? "" : r.VENDOR_INVENTORY_SKU),
+          "Manufacturer Number": String(r.MANUFACTURER_NO == null ? "" : r.MANUFACTURER_NO),
+          "Reported Qty": r.REPORTED_QUANTITY,
+          "Stock Qty": r.STOCK_QUANTITY,
+          "Package Size": r.PACKAGE_SIZE,
+        };
+      }).filter(function(r) { return r.SKU; });
+      if (!rows.length) return null;
+      setVendorRows(rows);
+      idbSet("cc-vendor-rows", rows);
+      setVendorName("Snowflake (Vendor Inventory)");
+      sSet("cc-vendor-name", "Snowflake (Vendor Inventory)");
+      // Detect warehouses + counts, same as the upload path.
+      var whCounts = {};
+      rows.forEach(function(r) { var w = (r.Warehouse || "").trim(); if (w) { whCounts[w] = (whCounts[w] || 0) + 1; } });
+      var whList = Object.keys(whCounts).sort();
+      setCsvWarehouses(whList);
+      setCsvWhCounts(whCounts);
+      sSet("cc-vendor-warehouses", whList);
+      sSet("cc-vendor-wh-counts", whCounts);
+      return rows;
+    } catch (e) { return null; }
+  }
+
   async function fetchStockItems() {
     if (!cred || !cred.username || !cred.password) return null;
     try {
@@ -2713,14 +2761,20 @@ function CycleCountTool(props) {
           <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 6 }}>Type the warehouse code for the output (e.g. TP-NY, TP-OH)</div>
           <input value={warehouse} onChange={function(e) { setWarehouse(e.target.value); sSet("cc-warehouse", e.target.value); }} placeholder="TP-NY" style={Object.assign({}, S.inp, { maxWidth: 200 })} />
 
-          <div style={{ fontSize: 14, color: "#374151", fontWeight: 600, marginBottom: 8, marginTop: 20 }}>3. Vendor Inventory CSV</div>
-          <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 6 }}>Export from Pharm Admin (contains SKU, Manufacturer Number, Reported Qty, Stock Qty)</div>
-          {(vendorFile || vendorRows) ? <div>
+          <div style={{ fontSize: 14, color: "#374151", fontWeight: 600, marginBottom: 8, marginTop: 20, display: "flex", alignItems: "center", gap: 6 }}>3. Vendor Inventory <span style={{ fontSize: 11, fontWeight: 500, color: "#059669", background: "rgba(5,150,105,0.1)", padding: "2px 8px", borderRadius: 10 }}>auto-fetched</span></div>
+          <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 6 }}>Pulled automatically from Snowflake (SKU, Manufacturer Number, Reported Qty, Stock Qty, Package Size). Refreshes 3x/day upstream.</div>
+          {vendorRows ? <div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(5,150,105,0.06)", border: "1px solid rgba(5,150,105,0.2)", borderRadius: 10 }}>
-              <span style={{ color: "#059669", fontSize: 13 }}>{"\u2713"} {vendorFile ? vendorFile.name : (vendorName || "Vendor Inventory")} — {vendorRows ? vendorRows.length.toLocaleString() + " rows" : "parsing..."}</span>
-              <button onClick={function() { setVendorFile(null); setVendorRows(null); setCsvWarehouses([]); setCsvWhSelected(""); setCsvWhCounts({}); setVendorName(""); idbDel("cc-vendor-rows"); sDel("cc-vendor-warehouses"); sDel("cc-vendor-wh-selected"); sDel("cc-vendor-wh-counts"); sDel("cc-vendor-name"); }} style={{ background: "transparent", border: "none", color: "#9CA3AF", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "0 4px" }}>{"\u00D7"}</button>
+              <span style={{ color: "#059669", fontSize: 13 }}>{"\u2713"} {vendorName || "Vendor Inventory"} — {vendorRows.length.toLocaleString()} rows</span>
+              <button onClick={function() { fetchVendorInventory(); }} style={{ marginLeft: "auto", background: "transparent", border: "1px solid " + TOOL_COLOR, color: TOOL_COLOR, cursor: "pointer", fontSize: 11, padding: "3px 10px", borderRadius: 6, fontFamily: "'Varela Round', sans-serif" }}>{"\u21BB"} Refresh</button>
             </div>
-          </div> : <DropZone accept=".csv" label="Vendor Inventory CSV" sublabel="Drop CSV or click to browse" icon="spreadsheet" color={TOOL_COLOR} onFiles={function(files) { handleVendorUpload(files[0]); }} />}
+          </div> : <div>
+            <div style={{ padding: "10px 12px", background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 10, fontSize: 13, color: "#6B7280", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+              <span>Loading from Snowflake\u2026 or upload a CSV as a fallback.</span>
+              <button onClick={function() { fetchVendorInventory(); }} style={{ background: TOOL_COLOR, border: "none", color: "#fff", cursor: "pointer", fontSize: 11, padding: "4px 12px", borderRadius: 6, fontFamily: "'Varela Round', sans-serif" }}>{"\u21BB"} Fetch now</button>
+            </div>
+            <div style={{ marginTop: 8 }}><DropZone accept=".csv" label="Vendor Inventory CSV (fallback)" sublabel="Drop CSV or click to browse" icon="spreadsheet" color={TOOL_COLOR} onFiles={function(files) { handleVendorUpload(files[0]); }} /></div>
+          </div>}
           {csvWarehouses.length > 1 && <div style={{ marginTop: 10 }}>
             <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 4 }}>Select warehouse from CSV:</div>
             <select value={csvWhSelected} onChange={function(e) { setCsvWhSelected(e.target.value); sSet("cc-vendor-wh-selected", e.target.value); }} style={Object.assign({}, S.inp, { maxWidth: 280, cursor: "pointer" })}>
@@ -7026,6 +7080,123 @@ function DownloadMenu(props) {
   </div>;
 }
 
+function VendorInventoryTool(props) {
+  var toast = props.toast;
+  var TOOL = "#0891B2";
+  var _rows = useState(null), rows = _rows[0], setRows = _rows[1];
+  var _loading = useState(false), loading = _loading[0], setLoading = _loading[1];
+  var _err = useState(""), err = _err[0], setErr = _err[1];
+  var _search = useState(""), search = _search[0], setSearch = _search[1];
+  var _wh = useState("all"), whFilter = _wh[0], setWhFilter = _wh[1];
+  var _bo = useState(false), boOnly = _bo[0], setBoOnly = _bo[1];
+  var _sort = useState({ col: "VENDOR_INVENTORY_SKU", dir: "asc" }), sortState = _sort[0], setSortState = _sort[1];
+  var _pulled = useState(null), pulledAt = _pulled[0], setPulledAt = _pulled[1];
+  function toggleSort(col) { setSortState(function(prev) { if (prev.col === col) return { col: col, dir: prev.dir === "asc" ? "desc" : "asc" }; return { col: col, dir: "asc" }; }); }
+
+  async function load() {
+    setLoading(true); setErr("");
+    try {
+      var resp = await fetch("/api/vendor-inventory");
+      var json = await resp.json();
+      if (!resp.ok || !json.ok) { setErr((json && (json.message || json.hint || json.error)) || "Fetch failed"); setLoading(false); return; }
+      setRows(json.rows || []);
+      setPulledAt(Date.now());
+    } catch (e) { setErr(String(e && e.message || e)); }
+    finally { setLoading(false); }
+  }
+  useEffect(function() { load(); }, []);
+
+  var warehouses = [];
+  if (rows) { var seen = {}; rows.forEach(function(r) { var w = String(r.WAREHOUSE_SLUG || "").trim(); if (w && !seen[w]) { seen[w] = 1; warehouses.push(w); } }); warehouses.sort(); }
+
+  var filtered = (rows || []).filter(function(r) {
+    if (whFilter !== "all" && String(r.WAREHOUSE_SLUG || "").trim() !== whFilter) return false;
+    if (boOnly && String(r.IS_BACKORDERED).toUpperCase() !== "TRUE") return false;
+    if (search) {
+      var q = search.toLowerCase();
+      var hay = (r.VENDOR_INVENTORY_SKU + " " + r.MANUFACTURER_NO + " " + r.MANUFACTURER_NAME + " " + r.PRODUCT_LINE_NAME).toLowerCase();
+      if (hay.indexOf(q) < 0) return false;
+    }
+    return true;
+  });
+  function sv(r, col) { var v = r[col]; if (v == null) return ""; return v; }
+  filtered = filtered.slice().sort(function(a, b) {
+    var av = sv(a, sortState.col), bv = sv(b, sortState.col);
+    var an = parseFloat(av), bn = parseFloat(bv);
+    var bothNum = !isNaN(an) && !isNaN(bn) && String(av).trim() !== "" && String(bv).trim() !== "";
+    var cmp = bothNum ? (an - bn) : String(av).toLowerCase().localeCompare(String(bv).toLowerCase());
+    return sortState.dir === "asc" ? cmp : -cmp;
+  });
+
+  function arrow(col) { if (sortState.col !== col) return ""; return sortState.dir === "asc" ? " \u25B2" : " \u25BC"; }
+  var th = { textAlign: "left", padding: "8px 10px", fontSize: 11, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.03em", borderBottom: "1px solid #E5E7EB", whiteSpace: "nowrap", position: "sticky", top: 0, background: "#F9FAFB", cursor: "pointer", userSelect: "none" };
+  var td = { padding: "7px 10px", fontSize: 12.5, color: "#1F2937", borderBottom: "1px solid #F3F4F6", whiteSpace: "nowrap" };
+  var thR = Object.assign({}, th, { textAlign: "right" });
+  var tdR = Object.assign({}, td, { textAlign: "right" });
+  function num(v) { var n = parseFloat(v); return isNaN(n) ? "\u2014" : n.toLocaleString(undefined, { maximumFractionDigits: 0 }); }
+
+  return <div>
+    <p style={{ color: "#6B7280", fontSize: 13, marginBottom: 16 }}>Live vendor inventory from Snowflake \u2014 per-SKU stock, allocated, and reported quantities by warehouse, with backorder status and package size. Refreshes 3\u00D7/day upstream.</p>
+
+    <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 14, flexWrap: "wrap" }}>
+      <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search SKU, mfr #, manufacturer, product line…" style={{ flex: 1, minWidth: 240, padding: "8px 12px", border: "1px solid #E5E7EB", borderRadius: 8, fontSize: 13, fontFamily: "'Varela Round', sans-serif" }} />
+      <select value={whFilter} onChange={function(e) { setWhFilter(e.target.value); }} style={{ padding: "8px 12px", border: "1px solid #E5E7EB", borderRadius: 8, fontSize: 13, cursor: "pointer", fontFamily: "'Varela Round', sans-serif" }}>
+        <option value="all">All warehouses</option>
+        {warehouses.map(function(w) { return <option key={w} value={w}>{w}</option>; })}
+      </select>
+      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#374151", cursor: "pointer" }}>
+        <input type="checkbox" checked={boOnly} onChange={function(e) { setBoOnly(e.target.checked); }} /> Backordered only
+      </label>
+      <button onClick={function() { load(); }} disabled={loading} style={{ padding: "8px 14px", borderRadius: 8, border: "1px solid " + TOOL, background: "#fff", color: TOOL, fontSize: 12, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", fontFamily: "'Varela Round', sans-serif" }}>{loading ? "Loading…" : "\u21BB Refresh"}</button>
+    </div>
+
+    <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 8 }}>{filtered.length.toLocaleString()} of {(rows || []).length.toLocaleString()} rows{pulledAt ? " \u00B7 pulled " + new Date(pulledAt).toLocaleTimeString() : ""}</div>
+
+    {err && <div style={{ background: "rgba(220,38,38,0.05)", border: "1px solid rgba(220,38,38,0.2)", borderRadius: 8, padding: "10px 14px", fontSize: 13, color: "#DC2626", marginBottom: 12 }}>{err}</div>}
+
+    {loading && !rows ? (
+      <div style={{ padding: "40px 16px", textAlign: "center", color: "#9CA3AF", fontSize: 14 }}><Spinner color={TOOL} size={20} /> Loading vendor inventory from Snowflake…</div>
+    ) : !rows || rows.length === 0 ? (
+      <div style={{ padding: "32px 16px", textAlign: "center", color: "#9CA3AF", fontSize: 14, border: "1px dashed #E5E7EB", borderRadius: 10 }}>No vendor inventory loaded.</div>
+    ) : (
+      <div style={{ border: "1px solid #E5E7EB", borderRadius: 10, overflow: "auto", maxHeight: "72vh" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff" }}>
+          <thead><tr>
+            <th style={th} onClick={function() { toggleSort("VENDOR_INVENTORY_SKU"); }}>SKU{arrow("VENDOR_INVENTORY_SKU")}</th>
+            <th style={th} onClick={function() { toggleSort("MANUFACTURER_NO"); }}>Mfr #{arrow("MANUFACTURER_NO")}</th>
+            <th style={th} onClick={function() { toggleSort("MANUFACTURER_NAME"); }}>Manufacturer{arrow("MANUFACTURER_NAME")}</th>
+            <th style={th} onClick={function() { toggleSort("PRODUCT_LINE_NAME"); }}>Product{arrow("PRODUCT_LINE_NAME")}</th>
+            <th style={th} onClick={function() { toggleSort("WAREHOUSE_SLUG"); }}>Warehouse{arrow("WAREHOUSE_SLUG")}</th>
+            <th style={thR} onClick={function() { toggleSort("STOCK_QUANTITY"); }}>Stock{arrow("STOCK_QUANTITY")}</th>
+            <th style={thR} onClick={function() { toggleSort("ALLOCATED_QUANTITY"); }}>Allocated{arrow("ALLOCATED_QUANTITY")}</th>
+            <th style={thR} onClick={function() { toggleSort("REPORTED_QUANTITY"); }}>Reported{arrow("REPORTED_QUANTITY")}</th>
+            <th style={thR} onClick={function() { toggleSort("PACKAGE_SIZE"); }}>Pkg Size{arrow("PACKAGE_SIZE")}</th>
+            <th style={th} onClick={function() { toggleSort("IS_BACKORDERED"); }}>Backordered{arrow("IS_BACKORDERED")}</th>
+          </tr></thead>
+          <tbody>
+            {filtered.slice(0, 2000).map(function(r, i) {
+              var bo = String(r.IS_BACKORDERED).toUpperCase() === "TRUE";
+              return <tr key={i} style={bo ? { background: "rgba(249,115,22,0.05)" } : null}>
+                <td style={Object.assign({}, td, { fontFamily: "monospace", fontWeight: 600 })}>{r.VENDOR_INVENTORY_SKU || "\u2014"}</td>
+                <td style={Object.assign({}, td, { fontFamily: "monospace" })}>{r.MANUFACTURER_NO || "\u2014"}</td>
+                <td style={td}>{r.MANUFACTURER_NAME || "\u2014"}</td>
+                <td style={Object.assign({}, td, { whiteSpace: "normal", minWidth: 200 })}>{r.PRODUCT_LINE_NAME || "\u2014"}</td>
+                <td style={td}>{r.WAREHOUSE_SLUG || "\u2014"}</td>
+                <td style={tdR}>{num(r.STOCK_QUANTITY)}</td>
+                <td style={tdR}>{num(r.ALLOCATED_QUANTITY)}</td>
+                <td style={tdR}>{num(r.REPORTED_QUANTITY)}</td>
+                <td style={tdR}>{num(r.PACKAGE_SIZE)}</td>
+                <td style={td}>{bo ? <span style={{ color: "#EA580C", fontWeight: 600 }}>Yes</span> : <span style={{ color: "#9CA3AF" }}>No</span>}</td>
+              </tr>;
+            })}
+          </tbody>
+        </table>
+        {filtered.length > 2000 && <div style={{ padding: "8px 12px", fontSize: 12, color: "#9CA3AF", textAlign: "center", borderTop: "1px solid #F3F4F6" }}>Showing first 2,000 of {filtered.length.toLocaleString()} \u2014 narrow with search or filters to see more.</div>}
+      </div>
+    )}
+  </div>;
+}
+
 function DiscontinuedTool(props) {
   var toast = props.toast, cred = props.cred;
   var VENDOR_TABS = [
@@ -10216,8 +10387,8 @@ export default function Hub() {
   );
 
   var isWH = page in WH;
-  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "backorder-resolver" ? "#14B8A6" : page === "po-import" ? "#06B6D4" : page === "cycle-count" ? "#14B8A6" : page === "fuze-tracker" ? "#F59E0B" : page === "ggm-tracker" ? "#8B5CF6" : page === "hills-pawtree" ? "#10B981" : page === "truckloader" ? "#D97706" : page === "oos-tracker" ? "#EF4444" : page === "vendor-settings" ? "#6366F1" : page === "po-recon" ? "#6366F1" : page === "forecasting" ? "#0EA5E9" : page === "how-to" ? "#6B7280" : page === "discontinued" ? "#DC2626" : "#3B82F6";
-  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "backorder-resolver" ? "Backorder Resolver" : page === "po-import" ? "Generic PO Translator" : page === "cycle-count" ? "Cycle Counting" : page === "fuze-tracker" ? "Fuze Tracker" : page === "ggm-tracker" ? "GGM Tracker" : page === "hills-pawtree" ? "Hills & Pawtree Tracker" : page === "truckloader" ? "Hills Truckloader" : page === "oos-tracker" ? "OOS Tracker" : page === "vendor-settings" ? "Vendor Settings" : page === "po-recon" ? "PO Reconciliation" : page === "forecasting" ? "Forecasting" : page === "how-to" ? "How-To Guide" : page === "discontinued" ? "Discontinued Items" : showLogin ? "Login" : "Vendor Settings";
+  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "backorder-resolver" ? "#14B8A6" : page === "po-import" ? "#06B6D4" : page === "cycle-count" ? "#14B8A6" : page === "fuze-tracker" ? "#F59E0B" : page === "ggm-tracker" ? "#8B5CF6" : page === "hills-pawtree" ? "#10B981" : page === "truckloader" ? "#D97706" : page === "oos-tracker" ? "#EF4444" : page === "vendor-settings" ? "#6366F1" : page === "po-recon" ? "#6366F1" : page === "forecasting" ? "#0EA5E9" : page === "how-to" ? "#6B7280" : page === "discontinued" ? "#DC2626" : page === "vendor-inventory" ? "#0891B2" : "#3B82F6";
+  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "backorder-resolver" ? "Backorder Resolver" : page === "po-import" ? "Generic PO Translator" : page === "cycle-count" ? "Cycle Counting" : page === "fuze-tracker" ? "Fuze Tracker" : page === "ggm-tracker" ? "GGM Tracker" : page === "hills-pawtree" ? "Hills & Pawtree Tracker" : page === "truckloader" ? "Hills Truckloader" : page === "oos-tracker" ? "OOS Tracker" : page === "vendor-settings" ? "Vendor Settings" : page === "po-recon" ? "PO Reconciliation" : page === "forecasting" ? "Forecasting" : page === "how-to" ? "How-To Guide" : page === "discontinued" ? "Discontinued Items" : page === "vendor-inventory" ? "Vendor Inventory" : showLogin ? "Login" : "Vendor Settings";
 
   function SideLink(p) {
     var active = page === p.id && !showLogin;
@@ -10243,7 +10414,7 @@ export default function Hub() {
             { key: "hills", label: "Hills Tools", items: [{ id: "hills-pawtree", label: "Hills & Pawtree", color: "#10B981" }, { id: "truckloader", label: "Hills Truckloader", color: "#D97706" }] },
             { key: "oos", label: "OOS", items: [{ id: "oos-tracker", label: "OOS Tracker", color: "#EF4444" }] },
             { key: "tracking", label: "Tracking", items: [{ id: "fuze-tracker", label: "Fuze Tracker", color: "#F59E0B" }, { id: "ggm-tracker", label: "GGM Tracker", color: "#8B5CF6" }] },
-            { key: "inventory", label: "Inventory Tools", items: [{ id: "forecasting", label: "Forecasting", color: "#0EA5E9" }, { id: "short-dating", label: "Short-Dating", color: "#E879F9" }, { id: "backorder", label: "Backorders", color: "#F97316" }, { id: "backorder-resolver", label: "Backorder Resolver", color: "#14B8A6" }, { id: "discontinued", label: "Discontinued", color: "#DC2626" }] },
+            { key: "inventory", label: "Inventory Tools", items: [{ id: "forecasting", label: "Forecasting", color: "#0EA5E9" }, { id: "short-dating", label: "Short-Dating", color: "#E879F9" }, { id: "backorder", label: "Backorders", color: "#F97316" }, { id: "backorder-resolver", label: "Backorder Resolver", color: "#14B8A6" }, { id: "discontinued", label: "Discontinued", color: "#DC2626" }, { id: "vendor-inventory", label: "Vendor Inventory", color: "#0891B2" }] },
           ];
           return sections.map(function(sec, si) {
             var hasActive = sec.items.some(function(item) { return page === item.id && !showLogin; });
@@ -10306,6 +10477,7 @@ export default function Hub() {
           {!showLogin && page === "oos-tracker" && <OOSTracker toast={showToast} cred={cred} />}
           {!showLogin && page === "backorder-resolver" && <BackorderResolver toast={showToast} cred={cred} />}
           {!showLogin && page === "discontinued" && <DiscontinuedTool toast={showToast} cred={cred} />}
+          {!showLogin && page === "vendor-inventory" && <VendorInventoryTool toast={showToast} />}
           {!showLogin && page === "forecasting" && <ForecastingTool toast={showToast} cred={cred} ok={ok} lp={promptLogin} />}
           {!showLogin && (page === "vendor-settings" || page === "vendor-contacts" || page === "rules") && <VendorSettingsPage contacts={vendorContacts} updateContacts={updateVendorContacts} channels={vendorChannels} updateChannels={updateVendorChannels} shipRules={shipRules} updateShipRules={updateShipRules} toast={showToast} />}
           {!showLogin && page === "po-recon" && <PoReconPage cred={cred} ok={ok} lp={promptLogin} toast={showToast} />}
