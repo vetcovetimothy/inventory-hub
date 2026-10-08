@@ -7086,7 +7086,8 @@ function VendorInventoryTool(props) {
       var resp = await fetch("/api/vendor-inventory?cached=1");
       var json = await resp.json();
       if (!resp.ok || !json.ok) { setErr((json && (json.message || json.hint || json.error)) || "Fetch failed"); setLoading(false); return; }
-      setRows(json.rows || []);
+      // Exclude EXP_ warehouses entirely (no rows, no counts, not in the dropdown).
+      setRows((json.rows || []).filter(function(r) { return String(r.WAREHOUSE_SLUG || "").toUpperCase().indexOf("EXP_") !== 0; }));
       setPulledAt(json.cachedAt ? new Date(json.cachedAt).getTime() : Date.now());
     } catch (e) { setErr(String(e && e.message || e)); }
     finally { setLoading(false); }
