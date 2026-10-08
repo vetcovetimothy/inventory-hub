@@ -35,6 +35,10 @@
     {
       "path": "/api/cron/vendor-inventory-cache",
       "schedule": "25 1 * * *"
+    },
+    {
+      "path": "/api/cron/discontinued-cache",
+      "schedule": "0 10 * * *"
     }
   ]
 }
