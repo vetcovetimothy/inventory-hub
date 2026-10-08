@@ -7107,7 +7107,8 @@ function VendorInventoryTool(props) {
     }
     return true;
   });
-  function sv(r, col) { var v = r[col]; if (v == null) return ""; return v; }
+  function onHand(r) { var s = parseFloat(r.STOCK_QUANTITY), a = parseFloat(r.ALLOCATED_QUANTITY); if (isNaN(s)) s = 0; if (isNaN(a)) a = 0; return s - a; }
+  function sv(r, col) { if (col === "ON_HAND") return onHand(r); var v = r[col]; if (v == null) return ""; return v; }
   filtered = filtered.slice().sort(function(a, b) {
     var av = sv(a, sortState.col), bv = sv(b, sortState.col);
     var an = parseFloat(av), bn = parseFloat(bv);
@@ -7155,9 +7156,10 @@ function VendorInventoryTool(props) {
             <th style={th} onClick={function() { toggleSort("MANUFACTURER_NAME"); }}>Manufacturer{arrow("MANUFACTURER_NAME")}</th>
             <th style={th} onClick={function() { toggleSort("PRODUCT_LINE_NAME"); }}>Product{arrow("PRODUCT_LINE_NAME")}</th>
             <th style={th} onClick={function() { toggleSort("WAREHOUSE_SLUG"); }}>Warehouse{arrow("WAREHOUSE_SLUG")}</th>
+            <th style={thR} onClick={function() { toggleSort("REPORTED_QUANTITY"); }}>Reported{arrow("REPORTED_QUANTITY")}</th>
             <th style={thR} onClick={function() { toggleSort("STOCK_QUANTITY"); }}>Stock{arrow("STOCK_QUANTITY")}</th>
             <th style={thR} onClick={function() { toggleSort("ALLOCATED_QUANTITY"); }}>Allocated{arrow("ALLOCATED_QUANTITY")}</th>
-            <th style={thR} onClick={function() { toggleSort("REPORTED_QUANTITY"); }}>Reported{arrow("REPORTED_QUANTITY")}</th>
+            <th style={thR} onClick={function() { toggleSort("ON_HAND"); }}>On Hand{arrow("ON_HAND")}</th>
             <th style={thR} onClick={function() { toggleSort("PACKAGE_SIZE"); }}>Pkg Size{arrow("PACKAGE_SIZE")}</th>
             <th style={th} onClick={function() { toggleSort("IS_BACKORDERED"); }}>Backordered{arrow("IS_BACKORDERED")}</th>
           </tr></thead>
@@ -7170,9 +7172,10 @@ function VendorInventoryTool(props) {
                 <td style={td}>{r.MANUFACTURER_NAME || "\u2014"}</td>
                 <td style={Object.assign({}, td, { whiteSpace: "normal", minWidth: 200 })}>{r.PRODUCT_LINE_NAME || "\u2014"}</td>
                 <td style={td}>{r.WAREHOUSE_SLUG || "\u2014"}</td>
+                <td style={tdR}>{num(r.REPORTED_QUANTITY)}</td>
                 <td style={tdR}>{num(r.STOCK_QUANTITY)}</td>
                 <td style={tdR}>{num(r.ALLOCATED_QUANTITY)}</td>
-                <td style={tdR}>{num(r.REPORTED_QUANTITY)}</td>
+                <td style={Object.assign({}, tdR, { fontWeight: 600 })}>{onHand(r).toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
                 <td style={tdR}>{num(r.PACKAGE_SIZE)}</td>
                 <td style={td}>{bo ? <span style={{ color: "#EA580C", fontWeight: 600 }}>Yes</span> : <span style={{ color: "#9CA3AF" }}>No</span>}</td>
               </tr>;
