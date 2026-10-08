@@ -2761,29 +2761,16 @@ function CycleCountTool(props) {
           <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 6 }}>Type the warehouse code for the output (e.g. TP-NY, TP-OH)</div>
           <input value={warehouse} onChange={function(e) { setWarehouse(e.target.value); sSet("cc-warehouse", e.target.value); }} placeholder="TP-NY" style={Object.assign({}, S.inp, { maxWidth: 200 })} />
 
-          <div style={{ fontSize: 14, color: "#374151", fontWeight: 600, marginBottom: 8, marginTop: 20, display: "flex", alignItems: "center", gap: 6 }}>3. Vendor Inventory <span style={{ fontSize: 11, fontWeight: 500, color: "#059669", background: "rgba(5,150,105,0.1)", padding: "2px 8px", borderRadius: 10 }}>auto-fetched</span></div>
-          <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 6 }}>Pulled automatically from Snowflake (SKU, Manufacturer Number, Reported Qty, Stock Qty, Package Size). Refreshes 3x/day upstream.</div>
-          {vendorRows ? <div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(5,150,105,0.06)", border: "1px solid rgba(5,150,105,0.2)", borderRadius: 10 }}>
-              <span style={{ color: "#059669", fontSize: 13 }}>{"\u2713"} {vendorName || "Vendor Inventory"} — {vendorRows.length.toLocaleString()} rows</span>
-              <button onClick={function() { fetchVendorInventory(); }} style={{ marginLeft: "auto", background: "transparent", border: "1px solid " + TOOL_COLOR, color: TOOL_COLOR, cursor: "pointer", fontSize: 11, padding: "3px 10px", borderRadius: 6, fontFamily: "'Varela Round', sans-serif" }}>{"\u21BB"} Refresh</button>
-            </div>
-          </div> : <div>
-            <div style={{ padding: "10px 12px", background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 10, fontSize: 13, color: "#6B7280", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-              <span>Loading from Snowflake\u2026 or upload a CSV as a fallback.</span>
-              <button onClick={function() { fetchVendorInventory(); }} style={{ background: TOOL_COLOR, border: "none", color: "#fff", cursor: "pointer", fontSize: 11, padding: "4px 12px", borderRadius: 6, fontFamily: "'Varela Round', sans-serif" }}>{"\u21BB"} Fetch now</button>
-            </div>
-            <div style={{ marginTop: 8 }}><DropZone accept=".csv" label="Vendor Inventory CSV (fallback)" sublabel="Drop CSV or click to browse" icon="spreadsheet" color={TOOL_COLOR} onFiles={function(files) { handleVendorUpload(files[0]); }} /></div>
-          </div>}
-          {csvWarehouses.length > 1 && <div style={{ marginTop: 10 }}>
-            <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 4 }}>Select warehouse from CSV:</div>
-            <select value={csvWhSelected} onChange={function(e) { setCsvWhSelected(e.target.value); sSet("cc-vendor-wh-selected", e.target.value); }} style={Object.assign({}, S.inp, { maxWidth: 280, cursor: "pointer" })}>
-              <option value="">— Select —</option>
-              {csvWarehouses.map(function(w) { return <option key={w} value={w}>{w} ({(csvWhCounts[w] || 0).toLocaleString()} rows)</option>; })}
-            </select>
-            {csvWhSelected && <p style={{ color: TOOL_COLOR, fontSize: 12, marginTop: 4 }}>Filtering to {(csvWhCounts[csvWhSelected] || 0).toLocaleString()} rows from {csvWhSelected}</p>}
-          </div>}
-          {csvWarehouses.length === 1 && <p style={{ color: TOOL_COLOR, fontSize: 12, marginTop: 4 }}>Warehouse: {csvWhSelected} ({(csvWhCounts[csvWhSelected] || 0).toLocaleString()} rows)</p>}
+          <div style={{ fontSize: 14, color: "#374151", fontWeight: 600, marginBottom: 10, marginTop: 20, display: "flex", alignItems: "center", gap: 10 }}>
+            3. Vendor Inventory
+            <button onClick={function() { fetchVendorInventory(); }} style={{ background: "transparent", border: "1px solid " + TOOL_COLOR, color: TOOL_COLOR, cursor: "pointer", fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 6, fontFamily: "'Varela Round', sans-serif" }}>{"\u21BB"} Refresh</button>
+          </div>
+          {!vendorRows && <div style={{ marginBottom: 8 }}><DropZone accept=".csv" label="Vendor Inventory CSV (fallback)" sublabel="Loading from Snowflake\u2026 or drop a CSV" icon="spreadsheet" color={TOOL_COLOR} onFiles={function(files) { handleVendorUpload(files[0]); }} /></div>}
+          <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 4 }}>Select warehouse:</div>
+          <select value={csvWhSelected} onChange={function(e) { setCsvWhSelected(e.target.value); sSet("cc-vendor-wh-selected", e.target.value); }} disabled={!csvWarehouses.length} style={Object.assign({}, S.inp, { maxWidth: 280, cursor: csvWarehouses.length ? "pointer" : "not-allowed" })}>
+            <option value="">{csvWarehouses.length ? "— Select —" : "Loading\u2026"}</option>
+            {csvWarehouses.map(function(w) { return <option key={w} value={w}>{w} ({(csvWhCounts[w] || 0).toLocaleString()} rows)</option>; })}
+          </select>
 
           {isSftp && <div>
             <div style={{ fontSize: 14, color: "#374151", fontWeight: 600, marginBottom: 8, marginTop: 20 }}>4. SFTP BOH Report CSV</div>
