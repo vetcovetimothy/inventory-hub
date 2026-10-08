@@ -7217,6 +7217,8 @@ function DiscontinuedTool(props) {
   var _lastPull = useState({}), lastPull = _lastPull[0], setLastPull = _lastPull[1];
 
   var DATES_KV = "discontinued-dates";
+  var CACHE_PREFIX = "disc-cache-";   // per-vendor cache keys written by the daily cron
+  var SUPER_KEY = "disc-cache-super"; // cached supersession map
   function todayISO() { var d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
   function fmtDate(iso) { if (!iso) return "\u2014"; var p = String(iso).split("-"); return p.length === 3 ? (p[1] + "/" + p[2] + "/" + p[0]) : iso; }
 
@@ -7233,10 +7235,29 @@ function DiscontinuedTool(props) {
 
   // Fetch a vendor tab's discontinued GI (+ the shared supersession map, once).
   async function loadTab(tabId, force) {
-    if (!cred || !cred.username || !cred.password) { setErr("Acumatica credentials required."); return; }
     setLoading(true); setErr("");
     try {
-      // Supersession map (shared across tabs) \u2014 fetch once unless forcing.
+      // Fast path: read the daily cache (written by the discontinued-cache cron)
+      // unless the user forced a refresh. Instant load, no Acumatica round-trip.
+      if (!force) {
+        try {
+          var cRes = await kvGet(CACHE_PREFIX + tabId);
+          var cJson = cRes.ok ? await cRes.json() : null;
+          var cData = cJson && cJson.data;
+          if (cData && Array.isArray(cData.rows) && cData.rows.length) {
+            // Supersession map from cache too (shared).
+            if (!superMap) {
+              try { var sRes = await kvGet(SUPER_KEY); var sJson = sRes.ok ? await sRes.json() : null; if (sJson && sJson.data && sJson.data.map) setSuperMap(sJson.data.map); } catch (e) {}
+            }
+            setRowsByTab(function(prev) { return Object.assign({}, prev, { [tabId]: cData.rows }); });
+            setLastPull(function(prev) { return Object.assign({}, prev, { [tabId]: cData.cachedAt ? new Date(cData.cachedAt).getTime() : Date.now() }); });
+            setLoading(false);
+            return;
+          }
+        } catch (e) { /* cache miss \u2014 fall through to live */ }
+      }
+      // Live path: forced refresh, or cache empty. Requires credentials.
+      if (!cred || !cred.username || !cred.password) { setErr("Acumatica credentials required for a live refresh."); setLoading(false); return; }
       var sMap = superMap;
       if (!sMap || force) {
         var sRows = await fetchAcumatica("supersessions", null, cred.username, cred.password);
