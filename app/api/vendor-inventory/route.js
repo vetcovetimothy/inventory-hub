@@ -37,9 +37,46 @@ function json(payload, status) {
   return new Response(JSON.stringify(payload), { status: status || 200, headers: { "Content-Type": "application/json" } });
 }
 
+// KV cache (written in chunks by the vendor-inventory-cache cron, since the full
+// set exceeds a single KV value's size limit).
+var KV_URL = process.env.KV_REST_API_URL;
+var KV_TOKEN = process.env.KV_REST_API_TOKEN;
+var MANIFEST_KEY = "vi-cache-manifest";
+var CHUNK_PREFIX = "vi-cache-";
+async function kvGet(key) {
+  if (!KV_URL || !KV_TOKEN) return null;
+  var resp = await fetch(KV_URL + "/get/" + encodeURIComponent(key), { headers: { Authorization: "Bearer " + KV_TOKEN }, cache: "no-store" });
+  if (!resp.ok) return null;
+  var j = await resp.json();
+  if (!j || j.result == null) return null;
+  try { return JSON.parse(j.result); } catch (e) { return j.result; }
+}
+async function readCache() {
+  var manifest = await kvGet(MANIFEST_KEY);
+  if (!manifest || !manifest.chunks) return null;
+  var rows = [];
+  for (var i = 0; i < manifest.chunks; i++) {
+    var chunk = await kvGet(CHUNK_PREFIX + i);
+    if (!Array.isArray(chunk)) return null; // incomplete cache — treat as miss
+    rows = rows.concat(chunk);
+  }
+  return { rows: rows, cachedAt: manifest.cachedAt, count: manifest.count };
+}
+
 export async function GET(req) {
   var url = new URL(req.url);
   var accountOverride = url.searchParams.get("account");
+
+  // Cached mode: reassemble the chunked KV cache for an instant response. Falls
+  // through to a live Snowflake query if the cache is missing/incomplete.
+  if (url.searchParams.get("cached") === "1") {
+    try {
+      var cached = await readCache();
+      if (cached && cached.rows && cached.rows.length) {
+        return json({ ok: true, count: cached.rows.length, cached: true, cachedAt: cached.cachedAt, rows: cached.rows });
+      }
+    } catch (e) { /* fall through to live query */ }
+  }
 
   var account = process.env.SNOWFLAKE_ACCOUNT || "";
   var user = process.env.SNOWFLAKE_USER || "";
