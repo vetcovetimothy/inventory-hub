@@ -23,6 +23,18 @@
     {
       "path": "/api/cron/discontinued-weekly",
       "schedule": "0 13 * * 5"
+    },
+    {
+      "path": "/api/cron/vendor-inventory-cache",
+      "schedule": "25 9 * * *"
+    },
+    {
+      "path": "/api/cron/vendor-inventory-cache",
+      "schedule": "25 21 * * *"
+    },
+    {
+      "path": "/api/cron/vendor-inventory-cache",
+      "schedule": "25 1 * * *"
     }
   ]
 }
