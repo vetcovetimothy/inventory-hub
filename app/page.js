@@ -2769,7 +2769,7 @@ function CycleCountTool(props) {
           <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 4 }}>Select warehouse:</div>
           <select value={csvWhSelected} onChange={function(e) { setCsvWhSelected(e.target.value); sSet("cc-vendor-wh-selected", e.target.value); }} disabled={!csvWarehouses.length} style={Object.assign({}, S.inp, { maxWidth: 280, cursor: csvWarehouses.length ? "pointer" : "not-allowed" })}>
             <option value="">{csvWarehouses.length ? "— Select —" : "Loading\u2026"}</option>
-            {csvWarehouses.map(function(w) { return <option key={w} value={w}>{w} ({(csvWhCounts[w] || 0).toLocaleString()} rows)</option>; })}
+            {csvWarehouses.filter(function(w) { return String(w).toUpperCase().indexOf("EXP_") !== 0; }).map(function(w) { return <option key={w} value={w}>{w} ({(csvWhCounts[w] || 0).toLocaleString()} rows)</option>; })}
           </select>
 
           {isSftp && <div>
