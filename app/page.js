@@ -2179,7 +2179,7 @@ function CycleCountTool(props) {
   // sets up the warehouse picker exactly like the manual CSV upload does.
   async function fetchVendorInventory() {
     try {
-      var resp = await fetch("/api/vendor-inventory");
+      var resp = await fetch("/api/vendor-inventory?cached=1");
       var json = await resp.json();
       if (!resp.ok || !json.ok || !json.rows) return null;
       var rows = json.rows.map(function(r) {
@@ -7096,11 +7096,11 @@ function VendorInventoryTool(props) {
   async function load() {
     setLoading(true); setErr("");
     try {
-      var resp = await fetch("/api/vendor-inventory");
+      var resp = await fetch("/api/vendor-inventory?cached=1");
       var json = await resp.json();
       if (!resp.ok || !json.ok) { setErr((json && (json.message || json.hint || json.error)) || "Fetch failed"); setLoading(false); return; }
       setRows(json.rows || []);
-      setPulledAt(Date.now());
+      setPulledAt(json.cachedAt ? new Date(json.cachedAt).getTime() : Date.now());
     } catch (e) { setErr(String(e && e.message || e)); }
     finally { setLoading(false); }
   }
@@ -7136,7 +7136,7 @@ function VendorInventoryTool(props) {
   function num(v) { var n = parseFloat(v); return isNaN(n) ? "\u2014" : n.toLocaleString(undefined, { maximumFractionDigits: 0 }); }
 
   return <div>
-    <p style={{ color: "#6B7280", fontSize: 13, marginBottom: 16 }}>Live vendor inventory from Snowflake \u2014 per-SKU stock, allocated, and reported quantities by warehouse, with backorder status and package size. Refreshes 3\u00D7/day upstream.</p>
+    <p style={{ color: "#6B7280", fontSize: 13, marginBottom: 16 }}>Vendor inventory from Snowflake — per-SKU stock, allocated, and reported quantities by warehouse, with backorder status and package size. Auto-refreshed 3×/day.{pulledAt ? "" : ""}</p>
 
     <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 14, flexWrap: "wrap" }}>
       <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search SKU, mfr #, manufacturer, product line…" style={{ flex: 1, minWidth: 240, padding: "8px 12px", border: "1px solid #E5E7EB", borderRadius: 8, fontSize: 13, fontFamily: "'Varela Round', sans-serif" }} />
@@ -7150,7 +7150,7 @@ function VendorInventoryTool(props) {
       <button onClick={function() { load(); }} disabled={loading} style={{ padding: "8px 14px", borderRadius: 8, border: "1px solid " + TOOL, background: "#fff", color: TOOL, fontSize: 12, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", fontFamily: "'Varela Round', sans-serif" }}>{loading ? "Loading…" : "\u21BB Refresh"}</button>
     </div>
 
-    <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 8 }}>{filtered.length.toLocaleString()} of {(rows || []).length.toLocaleString()} rows{pulledAt ? " \u00B7 pulled " + new Date(pulledAt).toLocaleTimeString() : ""}</div>
+    <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 8 }}>{filtered.length.toLocaleString()} of {(rows || []).length.toLocaleString()} rows{pulledAt ? " \u00B7 data from " + new Date(pulledAt).toLocaleString() : ""}</div>
 
     {err && <div style={{ background: "rgba(220,38,38,0.05)", border: "1px solid rgba(220,38,38,0.2)", borderRadius: 8, padding: "10px 14px", fontSize: 13, color: "#DC2626", marginBottom: 12 }}>{err}</div>}
 
