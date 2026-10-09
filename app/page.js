@@ -7236,8 +7236,8 @@ function VendorInventoryTool(props) {
       </div>
     </div>
     <div style={{ marginBottom: 14 }}>{CheckList({ title: "Vendor", count: venSelCount, sel: venSel, setter: setVenSel, items: vendors.map(function(v) { return { value: v, label: v }; }) })}</div>
-    <div style={{ marginBottom: 14 }}>{CheckList({ title: "Manufacturer", count: mfrSelCount, sel: mfrSel, setter: setMfrSel, items: manufacturers.map(function(m) { return { value: m, label: m }; }) })}</div>
-    <div>{CheckList({ title: "Warehouse", count: whSelCount, sel: whSel, setter: setWhSel, groups: (function() { var g = {}; Object.keys(whByVendor).forEach(function(ven) { g[ven] = whByVendor[ven].map(function(w) { return { value: w, label: whName(w) }; }); }); return g; })() })}</div>
+    <div style={{ marginBottom: 14 }}>{CheckList({ title: "Warehouse", count: whSelCount, sel: whSel, setter: setWhSel, groups: (function() { var g = {}; Object.keys(whByVendor).forEach(function(ven) { g[ven] = whByVendor[ven].map(function(w) { return { value: w, label: whName(w) }; }); }); return g; })() })}</div>
+    <div>{CheckList({ title: "Manufacturer", count: mfrSelCount, sel: mfrSel, setter: setMfrSel, items: manufacturers.map(function(m) { return { value: m, label: m }; }) })}</div>
   </div>;
 
   return <div>
