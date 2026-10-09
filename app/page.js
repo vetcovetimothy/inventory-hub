@@ -7195,44 +7195,58 @@ function VendorInventoryTool(props) {
     toast("Downloaded " + filtered.length.toLocaleString() + " rows");
   }
 
-  var selStyle = { padding: "8px 10px", border: "1px solid #E5E7EB", borderRadius: 8, fontSize: 12.5, cursor: "pointer", fontFamily: "'Varela Round', sans-serif", background: "#fff", maxWidth: 220 };
+  // A scrollable checkbox list for a multi-select facet. items: array of {value, label}.
+  function CheckList(opts) {
+    var items = opts.items, sel = opts.sel, setter = opts.setter, title = opts.title, count = opts.count, groups = opts.groups;
+    var rowStyle = { display: "flex", alignItems: "center", gap: 8, padding: "4px 8px", cursor: "pointer", fontSize: 12.5, color: "#374151", borderRadius: 5 };
+    function box(checked) { return <span style={{ width: 15, height: 15, flexShrink: 0, borderRadius: 4, border: checked ? "none" : "1.5px solid #CBD5E1", background: checked ? TOOL : "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}>{checked ? <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg> : null}</span>; }
+    function row(value, label) {
+      var checked = !!sel[value];
+      return <div key={value} onClick={function() { toggleIn(setter, sel, value); }} style={Object.assign({}, rowStyle, { background: checked ? "rgba(8,145,178,0.06)" : "transparent" })}>{box(checked)}<span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span></div>;
+    }
+    return <div style={{ minWidth: 200, flex: "1 1 200px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 5 }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.03em" }}>{title}{count ? " (" + count + ")" : ""}</span>
+        {count ? <button onClick={function() { setter({}); }} style={{ background: "transparent", border: "none", color: TOOL, fontSize: 10, cursor: "pointer", fontFamily: "'Varela Round', sans-serif" }}>clear</button> : null}
+      </div>
+      <div style={{ border: "1px solid #E5E7EB", borderRadius: 8, background: "#fff", maxHeight: 190, overflowY: "auto", padding: 4 }}>
+        {groups
+          ? Object.keys(groups).sort().map(function(g) { return <div key={g}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#9CA3AF", textTransform: "uppercase", padding: "4px 8px 2px" }}>{g}</div>
+              {groups[g].map(function(it) { return row(it.value, it.label); })}
+            </div>; })
+          : items.map(function(it) { return row(it.value, it.label); })}
+      </div>
+    </div>;
+  }
 
   return <div>
     <p style={{ color: "#6B7280", fontSize: 13, marginBottom: 16 }}>Vendor inventory from Snowflake — per-SKU stock, allocated, and reported quantities by warehouse, with backorder status and package size. Auto-refreshed 3×/day. Filters below drive both the view and the CSV download.</p>
 
-    <div style={{ border: "1px solid #E5E7EB", borderRadius: 10, padding: "12px 14px", marginBottom: 14, background: "#FbFcFd" }}>
-      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-        <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search name / SKU / mfr # (contains)…" style={{ flex: 1, minWidth: 220, padding: "8px 12px", border: "1px solid #E5E7EB", borderRadius: 8, fontSize: 13, fontFamily: "'Varela Round', sans-serif" }} />
-        <select value={boFilter} onChange={function(e) { setBoFilter(e.target.value); }} style={{ padding: "8px 12px", border: "1px solid #E5E7EB", borderRadius: 8, fontSize: 13, cursor: "pointer", fontFamily: "'Varela Round', sans-serif" }}>
-          <option value="all">Backorder: All</option>
-          <option value="yes">Backordered only</option>
-          <option value="no">Not backordered</option>
-        </select>
-        <button onClick={function() { setSearch(""); setBoFilter("all"); setWhSel({}); setMfrSel({}); setVenSel({}); }} style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid #E5E7EB", background: "#fff", color: "#6B7280", fontSize: 12, cursor: "pointer", fontFamily: "'Varela Round', sans-serif" }}>Clear filters</button>
-        <button onClick={function() { downloadCSV(); }} disabled={!filtered.length} style={{ padding: "8px 16px", borderRadius: 8, border: "1px solid " + TOOL, background: TOOL, color: "#fff", fontSize: 12, fontWeight: 600, cursor: filtered.length ? "pointer" : "not-allowed", fontFamily: "'Varela Round', sans-serif" }}>{"\u2193"} Download CSV ({filtered.length.toLocaleString()})</button>
-        <button onClick={function() { load(); }} disabled={loading} style={{ padding: "8px 14px", borderRadius: 8, border: "1px solid " + TOOL, background: "#fff", color: TOOL, fontSize: 12, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", fontFamily: "'Varela Round', sans-serif" }}>{loading ? "Loading…" : "\u21BB Refresh"}</button>
+    <div style={{ border: "1px solid #E5E7EB", borderRadius: 10, padding: "14px 16px", marginBottom: 14, background: "#FbFcFd", display: "flex", gap: 20, flexWrap: "wrap", alignItems: "flex-start" }}>
+      {/* Left: search, backorder toggle, actions */}
+      <div style={{ flex: "1 1 300px", minWidth: 280, display: "flex", flexDirection: "column", gap: 12 }}>
+        <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search name / SKU / mfr # (contains)…" style={{ width: "100%", padding: "9px 12px", border: "1px solid #E5E7EB", borderRadius: 8, fontSize: 13, fontFamily: "'Varela Round', sans-serif", boxSizing: "border-box" }} />
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 5 }}>Backorder</div>
+          <div style={{ display: "inline-flex", border: "1px solid #E5E7EB", borderRadius: 8, overflow: "hidden" }}>
+            {[["all", "All"], ["yes", "Backordered"], ["no", "Not backordered"]].map(function(opt, i) {
+              var on = boFilter === opt[0];
+              return <button key={opt[0]} onClick={function() { setBoFilter(opt[0]); }} style={{ padding: "7px 14px", fontSize: 12.5, fontWeight: on ? 700 : 500, border: "none", borderLeft: i === 0 ? "none" : "1px solid #E5E7EB", background: on ? TOOL : "#fff", color: on ? "#fff" : "#6B7280", cursor: "pointer", fontFamily: "'Varela Round', sans-serif" }}>{opt[1]}</button>;
+            })}
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
+          <button onClick={function() { downloadCSV(); }} disabled={!filtered.length} style={{ padding: "9px 18px", borderRadius: 8, border: "1px solid " + TOOL, background: TOOL, color: "#fff", fontSize: 13, fontWeight: 600, cursor: filtered.length ? "pointer" : "not-allowed", fontFamily: "'Varela Round', sans-serif" }}>{"\u2193"} Download CSV ({filtered.length.toLocaleString()})</button>
+          <button onClick={function() { setSearch(""); setBoFilter("all"); setWhSel({}); setMfrSel({}); setVenSel({}); }} style={{ padding: "9px 14px", borderRadius: 8, border: "1px solid #E5E7EB", background: "#fff", color: "#6B7280", fontSize: 12, cursor: "pointer", fontFamily: "'Varela Round', sans-serif" }}>Clear filters</button>
+          <button onClick={function() { load(); }} disabled={loading} style={{ padding: "9px 14px", borderRadius: 8, border: "1px solid " + TOOL, background: "#fff", color: TOOL, fontSize: 12, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", fontFamily: "'Varela Round', sans-serif" }}>{loading ? "Loading…" : "\u21BB Refresh"}</button>
+        </div>
       </div>
-      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 12 }}>
-        <div>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", marginBottom: 4 }}>Vendor {venSelCount ? "(" + venSelCount + ")" : ""}</div>
-          <select multiple value={Object.keys(venSel)} onChange={function() {}} size={Math.min(5, Math.max(3, vendors.length))} style={Object.assign({}, selStyle, { height: "auto" })}>
-            {vendors.map(function(v) { return <option key={v} value={v} onMouseDown={function(e) { e.preventDefault(); toggleIn(setVenSel, venSel, v); }} style={{ padding: "3px 6px", background: venSel[v] ? "rgba(8,145,178,0.12)" : "transparent" }}>{venSel[v] ? "\u2713 " : ""}{v}</option>; })}
-          </select>
-        </div>
-        <div>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", marginBottom: 4 }}>Manufacturer {mfrSelCount ? "(" + mfrSelCount + ")" : ""}</div>
-          <select multiple value={Object.keys(mfrSel)} onChange={function() {}} size={6} style={Object.assign({}, selStyle, { height: "auto", minWidth: 220 })}>
-            {manufacturers.map(function(m) { return <option key={m} value={m} onMouseDown={function(e) { e.preventDefault(); toggleIn(setMfrSel, mfrSel, m); }} style={{ padding: "3px 6px", background: mfrSel[m] ? "rgba(8,145,178,0.12)" : "transparent" }}>{mfrSel[m] ? "\u2713 " : ""}{m}</option>; })}
-          </select>
-        </div>
-        <div>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", marginBottom: 4 }}>Warehouse {whSelCount ? "(" + whSelCount + ")" : ""}</div>
-          <select multiple value={Object.keys(whSel)} onChange={function() {}} size={8} style={Object.assign({}, selStyle, { height: "auto", minWidth: 220 })}>
-            {Object.keys(whByVendor).sort().map(function(ven) { return <optgroup key={ven} label={ven}>
-              {whByVendor[ven].map(function(w) { return <option key={ven + w} value={w} onMouseDown={function(e) { e.preventDefault(); toggleIn(setWhSel, whSel, w); }} style={{ padding: "3px 6px", background: whSel[w] ? "rgba(8,145,178,0.12)" : "transparent" }}>{whSel[w] ? "\u2713 " : ""}{whName(w)}</option>; })}
-            </optgroup>; })}
-          </select>
-        </div>
+      {/* Right: checkbox multi-selects */}
+      <div style={{ flex: "2 1 520px", display: "flex", gap: 14, flexWrap: "wrap" }}>
+        {CheckList({ title: "Vendor", count: venSelCount, sel: venSel, setter: setVenSel, items: vendors.map(function(v) { return { value: v, label: v }; }) })}
+        {CheckList({ title: "Manufacturer", count: mfrSelCount, sel: mfrSel, setter: setMfrSel, items: manufacturers.map(function(m) { return { value: m, label: m }; }) })}
+        {CheckList({ title: "Warehouse", count: whSelCount, sel: whSel, setter: setWhSel, groups: (function() { var g = {}; Object.keys(whByVendor).forEach(function(ven) { g[ven] = whByVendor[ven].map(function(w) { return { value: w, label: whName(w) }; }); }); return g; })() })}
       </div>
     </div>
 
