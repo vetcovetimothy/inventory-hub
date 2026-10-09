@@ -7220,45 +7220,47 @@ function VendorInventoryTool(props) {
     </div>;
   }
 
-  return <div>
-    <p style={{ color: "#6B7280", fontSize: 13, marginBottom: 16 }}>Vendor inventory from Snowflake — per-SKU stock, allocated, and reported quantities by warehouse, with backorder status and package size. Auto-refreshed 3×/day. Filters below drive both the view and the CSV download.</p>
-
-    <div style={{ border: "1px solid #E5E7EB", borderRadius: 10, padding: "14px 16px", marginBottom: 14, background: "#FbFcFd", display: "flex", gap: 20, flexWrap: "wrap", alignItems: "flex-start" }}>
-      {/* Left: search, backorder toggle, actions */}
-      <div style={{ flex: "1 1 300px", minWidth: 280, display: "flex", flexDirection: "column", gap: 12 }}>
-        <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search name / SKU / mfr # (contains)…" style={{ width: "100%", padding: "9px 12px", border: "1px solid #E5E7EB", borderRadius: 8, fontSize: 13, fontFamily: "'Varela Round', sans-serif", boxSizing: "border-box" }} />
-        <div>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 5 }}>Backorder</div>
-          <div style={{ display: "inline-flex", border: "1px solid #E5E7EB", borderRadius: 8, overflow: "hidden" }}>
-            {[["all", "All"], ["yes", "Backordered"], ["no", "Not backordered"]].map(function(opt, i) {
-              var on = boFilter === opt[0];
-              return <button key={opt[0]} onClick={function() { setBoFilter(opt[0]); }} style={{ padding: "7px 14px", fontSize: 12.5, fontWeight: on ? 700 : 500, border: "none", borderLeft: i === 0 ? "none" : "1px solid #E5E7EB", background: on ? TOOL : "#fff", color: on ? "#fff" : "#6B7280", cursor: "pointer", fontFamily: "'Varela Round', sans-serif" }}>{opt[1]}</button>;
-            })}
-          </div>
-        </div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
-          <button onClick={function() { downloadCSV(); }} disabled={!filtered.length} style={{ padding: "9px 18px", borderRadius: 8, border: "1px solid " + TOOL, background: TOOL, color: "#fff", fontSize: 13, fontWeight: 600, cursor: filtered.length ? "pointer" : "not-allowed", fontFamily: "'Varela Round', sans-serif" }}>{"\u2193"} Download CSV ({filtered.length.toLocaleString()})</button>
-          <button onClick={function() { setSearch(""); setBoFilter("all"); setWhSel({}); setMfrSel({}); setVenSel({}); }} style={{ padding: "9px 14px", borderRadius: 8, border: "1px solid #E5E7EB", background: "#fff", color: "#6B7280", fontSize: 12, cursor: "pointer", fontFamily: "'Varela Round', sans-serif" }}>Clear filters</button>
-          <button onClick={function() { load(); }} disabled={loading} style={{ padding: "9px 14px", borderRadius: 8, border: "1px solid " + TOOL, background: "#fff", color: TOOL, fontSize: 12, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", fontFamily: "'Varela Round', sans-serif" }}>{loading ? "Loading…" : "\u21BB Refresh"}</button>
-        </div>
-      </div>
-      {/* Right: checkbox multi-selects */}
-      <div style={{ flex: "2 1 520px", display: "flex", gap: 14, flexWrap: "wrap" }}>
-        {CheckList({ title: "Vendor", count: venSelCount, sel: venSel, setter: setVenSel, items: vendors.map(function(v) { return { value: v, label: v }; }) })}
-        {CheckList({ title: "Manufacturer", count: mfrSelCount, sel: mfrSel, setter: setMfrSel, items: manufacturers.map(function(m) { return { value: m, label: m }; }) })}
-        {CheckList({ title: "Warehouse", count: whSelCount, sel: whSel, setter: setWhSel, groups: (function() { var g = {}; Object.keys(whByVendor).forEach(function(ven) { g[ven] = whByVendor[ven].map(function(w) { return { value: w, label: whName(w) }; }); }); return g; })() })}
+  // The vertical filter sidebar (right side), styled like a slide-out filter menu.
+  var sidebar = <div style={{ flex: "0 0 240px", width: 240, border: "1px solid #E5E7EB", borderRadius: 10, background: "#fff", padding: "14px 14px", alignSelf: "flex-start", position: "sticky", top: 12, maxHeight: "88vh", overflowY: "auto" }}>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+      <span style={{ fontSize: 13, fontWeight: 700, color: "#1F2937", textTransform: "uppercase", letterSpacing: "0.04em" }}>Filter</span>
+      {(venSelCount || mfrSelCount || whSelCount || boFilter !== "all" || search) ? <button onClick={function() { setSearch(""); setBoFilter("all"); setWhSel({}); setMfrSel({}); setVenSel({}); }} style={{ background: "transparent", border: "none", color: TOOL, fontSize: 11, cursor: "pointer", fontFamily: "'Varela Round', sans-serif" }}>Clear all</button> : null}
+    </div>
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 6 }}>Backorder</div>
+      <div style={{ display: "flex", flexDirection: "column", border: "1px solid #E5E7EB", borderRadius: 8, overflow: "hidden" }}>
+        {[["all", "All"], ["yes", "Backordered"], ["no", "Not backordered"]].map(function(opt, i) {
+          var on = boFilter === opt[0];
+          return <button key={opt[0]} onClick={function() { setBoFilter(opt[0]); }} style={{ padding: "7px 12px", fontSize: 12.5, fontWeight: on ? 700 : 500, border: "none", borderTop: i === 0 ? "none" : "1px solid #E5E7EB", background: on ? TOOL : "#fff", color: on ? "#fff" : "#6B7280", cursor: "pointer", textAlign: "left", fontFamily: "'Varela Round', sans-serif" }}>{opt[1]}</button>;
+        })}
       </div>
     </div>
+    <div style={{ marginBottom: 14 }}>{CheckList({ title: "Vendor", count: venSelCount, sel: venSel, setter: setVenSel, items: vendors.map(function(v) { return { value: v, label: v }; }) })}</div>
+    <div style={{ marginBottom: 14 }}>{CheckList({ title: "Manufacturer", count: mfrSelCount, sel: mfrSel, setter: setMfrSel, items: manufacturers.map(function(m) { return { value: m, label: m }; }) })}</div>
+    <div>{CheckList({ title: "Warehouse", count: whSelCount, sel: whSel, setter: setWhSel, groups: (function() { var g = {}; Object.keys(whByVendor).forEach(function(ven) { g[ven] = whByVendor[ven].map(function(w) { return { value: w, label: whName(w) }; }); }); return g; })() })}</div>
+  </div>;
 
-    <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 8 }}>{filtered.length.toLocaleString()} of {(rows || []).length.toLocaleString()} rows{pulledAt ? " \u00B7 data from " + new Date(pulledAt).toLocaleString() : ""}</div>
+  return <div>
+    <p style={{ color: "#6B7280", fontSize: 13, marginBottom: 16 }}>Vendor inventory from Snowflake — per-SKU stock, allocated, and reported quantities by warehouse, with backorder status and package size. Auto-refreshed 3×/day.</p>
 
-    {err && <div style={{ background: "rgba(220,38,38,0.05)", border: "1px solid rgba(220,38,38,0.2)", borderRadius: 8, padding: "10px 14px", fontSize: 13, color: "#DC2626", marginBottom: 12 }}>{err}</div>}
+    <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
+      {/* Left: search + actions row, counts, table */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
+          <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search name / SKU / mfr # (contains)…" style={{ flex: 1, minWidth: 220, padding: "9px 12px", border: "1px solid #E5E7EB", borderRadius: 8, fontSize: 13, fontFamily: "'Varela Round', sans-serif" }} />
+          <button onClick={function() { downloadCSV(); }} disabled={!filtered.length} style={{ padding: "9px 18px", borderRadius: 8, border: "1px solid " + TOOL, background: TOOL, color: "#fff", fontSize: 13, fontWeight: 600, cursor: filtered.length ? "pointer" : "not-allowed", fontFamily: "'Varela Round', sans-serif" }}>{"\u2193"} Download CSV ({filtered.length.toLocaleString()})</button>
+          <button onClick={function() { load(); }} disabled={loading} style={{ padding: "9px 14px", borderRadius: 8, border: "1px solid " + TOOL, background: "#fff", color: TOOL, fontSize: 12, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", fontFamily: "'Varela Round', sans-serif" }}>{loading ? "Loading…" : "\u21BB Refresh"}</button>
+        </div>
 
-    {loading && !rows ? (
-      <div style={{ padding: "40px 16px", textAlign: "center", color: "#9CA3AF", fontSize: 14 }}><Spinner color={TOOL} size={20} /> Loading vendor inventory from Snowflake…</div>
-    ) : !rows || rows.length === 0 ? (
-      <div style={{ padding: "32px 16px", textAlign: "center", color: "#9CA3AF", fontSize: 14, border: "1px dashed #E5E7EB", borderRadius: 10 }}>No vendor inventory loaded.</div>
-    ) : (
+        <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 8 }}>{filtered.length.toLocaleString()} of {(rows || []).length.toLocaleString()} rows{pulledAt ? " \u00B7 data from " + new Date(pulledAt).toLocaleString() : ""}</div>
+
+        {err && <div style={{ background: "rgba(220,38,38,0.05)", border: "1px solid rgba(220,38,38,0.2)", borderRadius: 8, padding: "10px 14px", fontSize: 13, color: "#DC2626", marginBottom: 12 }}>{err}</div>}
+
+        {loading && !rows ? (
+          <div style={{ padding: "40px 16px", textAlign: "center", color: "#9CA3AF", fontSize: 14 }}><Spinner color={TOOL} size={20} /> Loading vendor inventory from Snowflake…</div>
+        ) : !rows || rows.length === 0 ? (
+          <div style={{ padding: "32px 16px", textAlign: "center", color: "#9CA3AF", fontSize: 14, border: "1px dashed #E5E7EB", borderRadius: 10 }}>No vendor inventory loaded.</div>
+        ) : (
       <div style={{ border: "1px solid #E5E7EB", borderRadius: 10, overflow: "auto", maxHeight: "72vh" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff" }}>
           <thead><tr>
@@ -7295,7 +7297,10 @@ function VendorInventoryTool(props) {
         </table>
         {filtered.length > 2000 && <div style={{ padding: "8px 12px", fontSize: 12, color: "#9CA3AF", textAlign: "center", borderTop: "1px solid #F3F4F6" }}>Showing first 2,000 of {filtered.length.toLocaleString()} \u2014 narrow with search or filters to see more.</div>}
       </div>
-    )}
+        )}
+      </div>
+      {sidebar}
+    </div>
   </div>;
 }
 
