@@ -7074,8 +7074,19 @@ function VendorInventoryTool(props) {
   var _loading = useState(false), loading = _loading[0], setLoading = _loading[1];
   var _err = useState(""), err = _err[0], setErr = _err[1];
   var _search = useState(""), search = _search[0], setSearch = _search[1];
-  var _wh = useState("all"), whFilter = _wh[0], setWhFilter = _wh[1];
-  var _bo = useState(false), boOnly = _bo[0], setBoOnly = _bo[1];
+  var _bo = useState("all"), boFilter = _bo[0], setBoFilter = _bo[1];          // all | yes | no
+  var _whSel = useState({}), whSel = _whSel[0], setWhSel = _whSel[1];          // { slug: true } empty = all
+  var _mfrSel = useState({}), mfrSel = _mfrSel[0], setMfrSel = _mfrSel[1];     // { name: true } empty = all
+  var _venSel = useState({}), venSel = _venSel[0], setVenSel = _venSel[1];     // { vendor: true } empty = all
+  function toggleIn(setter, obj, key) { var next = Object.assign({}, obj); if (next[key]) delete next[key]; else next[key] = true; setter(next); }
+  // Warehouse slug -> friendly name.
+  var WH_NAMES = {
+    "TRUEPILL_BROOKLYN": "Brooklyn", "TRUEPILL_HAYWARD": "Hayward", "TRUEPILL_LONG_ISLAND": "Long Island",
+    "TRUEPILL_OHIO": "Ohio", "TRUEPILL_OHIO_FAIRFIELD": "Firebird", "TRUEPILL_SAN_DIEGO": "San Diego", "TRUEPILL_TEXAS": "Dallas",
+    "GOGOMEDS_ARIZONA": "Arizona", "GOGOMEDS_KENTUCKY": "Kentucky",
+    "HILLS_CGP_WAREHOUSE_CA": "Hills CA", "HILLS_CGP_WAREHOUSE_FL": "Hills FL", "HILLS_CGP_WAREHOUSE_NJ": "Hills NJ", "HILLS_CGP_WAREHOUSE_TX": "Hills TX", "HILLS_GP_WAREHOUSE": "Hills GP",
+  };
+  function whName(slug) { return WH_NAMES[slug] || slug; }
   var _sort = useState({ col: "VENDOR_INVENTORY_SKU", dir: "asc" }), sortState = _sort[0], setSortState = _sort[1];
   var _pulled = useState(null), pulledAt = _pulled[0], setPulledAt = _pulled[1];
   function toggleSort(col) { setSortState(function(prev) { if (prev.col === col) return { col: col, dir: prev.dir === "asc" ? "desc" : "asc" }; return { col: col, dir: "asc" }; }); }
@@ -7094,12 +7105,40 @@ function VendorInventoryTool(props) {
   }
   useEffect(function() { load(); }, []);
 
-  var warehouses = [];
-  if (rows) { var seen = {}; rows.forEach(function(r) { var w = String(r.WAREHOUSE_SLUG || "").trim(); if (w && !seen[w]) { seen[w] = 1; warehouses.push(w); } }); warehouses.sort(); }
+  // Facets built from the data. Warehouses are grouped under the vendor their rows
+  // belong to (so the filter can show 'FuzeRx > Brooklyn', etc.).
+  var vendors = [], manufacturers = [], whByVendor = {};
+  if (rows) {
+    var vSeen = {}, mSeen = {}, wSeen = {};
+    rows.forEach(function(r) {
+      var ven = String(r.VENDOR_NAME || "").trim();
+      var mfr = String(r.MANUFACTURER_NAME || "").trim();
+      var w = String(r.WAREHOUSE_SLUG || "").trim();
+      if (ven && !vSeen[ven]) { vSeen[ven] = 1; vendors.push(ven); }
+      if (mfr && !mSeen[mfr]) { mSeen[mfr] = 1; manufacturers.push(mfr); }
+      if (w && ven) {
+        if (!whByVendor[ven]) whByVendor[ven] = [];
+        var wk = ven + "||" + w;
+        if (!wSeen[wk]) { wSeen[wk] = 1; whByVendor[ven].push(w); }
+      }
+    });
+    vendors.sort(); manufacturers.sort();
+    Object.keys(whByVendor).forEach(function(v) { whByVendor[v].sort(function(a, b) { return whName(a).localeCompare(whName(b)); }); });
+  }
+  var whSelCount = Object.keys(whSel).length, mfrSelCount = Object.keys(mfrSel).length, venSelCount = Object.keys(venSel).length;
 
   var filtered = (rows || []).filter(function(r) {
-    if (whFilter !== "all" && String(r.WAREHOUSE_SLUG || "").trim() !== whFilter) return false;
-    if (boOnly && String(r.IS_BACKORDERED).toUpperCase() !== "TRUE") return false;
+    // Backorder (3-way)
+    var bo = String(r.IS_BACKORDERED).toUpperCase() === "TRUE";
+    if (boFilter === "yes" && !bo) return false;
+    if (boFilter === "no" && bo) return false;
+    // Vendor (empty = all)
+    if (venSelCount && !venSel[String(r.VENDOR_NAME || "").trim()]) return false;
+    // Manufacturer (empty = all)
+    if (mfrSelCount && !mfrSel[String(r.MANUFACTURER_NAME || "").trim()]) return false;
+    // Warehouse (empty = all)
+    if (whSelCount && !whSel[String(r.WAREHOUSE_SLUG || "").trim()]) return false;
+    // Name / broad contains
     if (search) {
       var q = search.toLowerCase();
       var hay = (r.VENDOR_INVENTORY_SKU + " " + r.MANUFACTURER_NO + " " + r.MANUFACTURER_NAME + " " + r.PRODUCT_LINE_NAME).toLowerCase();
@@ -7124,19 +7163,77 @@ function VendorInventoryTool(props) {
   var tdR = Object.assign({}, td, { textAlign: "right" });
   function num(v) { var n = parseFloat(v); return isNaN(n) ? "\u2014" : n.toLocaleString(undefined, { maximumFractionDigits: 0 }); }
 
-  return <div>
-    <p style={{ color: "#6B7280", fontSize: 13, marginBottom: 16 }}>Vendor inventory from Snowflake — per-SKU stock, allocated, and reported quantities by warehouse, with backorder status and package size. Auto-refreshed 3×/day.{pulledAt ? "" : ""}</p>
+  // Download the currently-filtered rows as CSV (what you see = what you get).
+  function downloadCSV() {
+    var cols = [
+      ["Vendor", function(r) { return r.VENDOR_NAME; }],
+      ["SKU", function(r) { return r.VENDOR_INVENTORY_SKU; }],
+      ["Manufacturer #", function(r) { return r.MANUFACTURER_NO; }],
+      ["Manufacturer", function(r) { return r.MANUFACTURER_NAME; }],
+      ["Product", function(r) { return r.PRODUCT_LINE_NAME; }],
+      ["Warehouse", function(r) { return whName(String(r.WAREHOUSE_SLUG || "").trim()); }],
+      ["Warehouse Slug", function(r) { return r.WAREHOUSE_SLUG; }],
+      ["Reported", function(r) { return r.REPORTED_QUANTITY; }],
+      ["Stock", function(r) { return r.STOCK_QUANTITY; }],
+      ["Allocated", function(r) { return r.ALLOCATED_QUANTITY; }],
+      ["On Hand", function(r) { return onHand(r); }],
+      ["Package Size", function(r) { return r.PACKAGE_SIZE; }],
+      ["Backordered", function(r) { return String(r.IS_BACKORDERED).toUpperCase() === "TRUE" ? "Yes" : "No"; }],
+      ["BO Est. Availability", function(r) { return r.BACKORDER_ESTIMATED_AVAILABILITY; }],
+      ["Last Scraped", function(r) { return r.LAST_SCRAPED_AT; }],
+    ];
+    function esc(v) { v = v == null ? "" : String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+    var lines = [cols.map(function(c) { return esc(c[0]); }).join(",")];
+    filtered.forEach(function(r) { lines.push(cols.map(function(c) { return esc(c[1](r)); }).join(",")); });
+    var blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    var stamp = new Date().toISOString().slice(0, 10);
+    a.href = url; a.download = "vendor-inventory-" + stamp + ".csv";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast("Downloaded " + filtered.length.toLocaleString() + " rows");
+  }
 
-    <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 14, flexWrap: "wrap" }}>
-      <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search SKU, mfr #, manufacturer, product line…" style={{ flex: 1, minWidth: 240, padding: "8px 12px", border: "1px solid #E5E7EB", borderRadius: 8, fontSize: 13, fontFamily: "'Varela Round', sans-serif" }} />
-      <select value={whFilter} onChange={function(e) { setWhFilter(e.target.value); }} style={{ padding: "8px 12px", border: "1px solid #E5E7EB", borderRadius: 8, fontSize: 13, cursor: "pointer", fontFamily: "'Varela Round', sans-serif" }}>
-        <option value="all">All warehouses</option>
-        {warehouses.map(function(w) { return <option key={w} value={w}>{w}</option>; })}
-      </select>
-      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#374151", cursor: "pointer" }}>
-        <input type="checkbox" checked={boOnly} onChange={function(e) { setBoOnly(e.target.checked); }} /> Backordered only
-      </label>
-      <button onClick={function() { load(); }} disabled={loading} style={{ padding: "8px 14px", borderRadius: 8, border: "1px solid " + TOOL, background: "#fff", color: TOOL, fontSize: 12, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", fontFamily: "'Varela Round', sans-serif" }}>{loading ? "Loading…" : "\u21BB Refresh"}</button>
+  var selStyle = { padding: "8px 10px", border: "1px solid #E5E7EB", borderRadius: 8, fontSize: 12.5, cursor: "pointer", fontFamily: "'Varela Round', sans-serif", background: "#fff", maxWidth: 220 };
+
+  return <div>
+    <p style={{ color: "#6B7280", fontSize: 13, marginBottom: 16 }}>Vendor inventory from Snowflake — per-SKU stock, allocated, and reported quantities by warehouse, with backorder status and package size. Auto-refreshed 3×/day. Filters below drive both the view and the CSV download.</p>
+
+    <div style={{ border: "1px solid #E5E7EB", borderRadius: 10, padding: "12px 14px", marginBottom: 14, background: "#FbFcFd" }}>
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+        <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search name / SKU / mfr # (contains)…" style={{ flex: 1, minWidth: 220, padding: "8px 12px", border: "1px solid #E5E7EB", borderRadius: 8, fontSize: 13, fontFamily: "'Varela Round', sans-serif" }} />
+        <select value={boFilter} onChange={function(e) { setBoFilter(e.target.value); }} style={{ padding: "8px 12px", border: "1px solid #E5E7EB", borderRadius: 8, fontSize: 13, cursor: "pointer", fontFamily: "'Varela Round', sans-serif" }}>
+          <option value="all">Backorder: All</option>
+          <option value="yes">Backordered only</option>
+          <option value="no">Not backordered</option>
+        </select>
+        <button onClick={function() { setSearch(""); setBoFilter("all"); setWhSel({}); setMfrSel({}); setVenSel({}); }} style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid #E5E7EB", background: "#fff", color: "#6B7280", fontSize: 12, cursor: "pointer", fontFamily: "'Varela Round', sans-serif" }}>Clear filters</button>
+        <button onClick={function() { downloadCSV(); }} disabled={!filtered.length} style={{ padding: "8px 16px", borderRadius: 8, border: "1px solid " + TOOL, background: TOOL, color: "#fff", fontSize: 12, fontWeight: 600, cursor: filtered.length ? "pointer" : "not-allowed", fontFamily: "'Varela Round', sans-serif" }}>{"\u2193"} Download CSV ({filtered.length.toLocaleString()})</button>
+        <button onClick={function() { load(); }} disabled={loading} style={{ padding: "8px 14px", borderRadius: 8, border: "1px solid " + TOOL, background: "#fff", color: TOOL, fontSize: 12, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", fontFamily: "'Varela Round', sans-serif" }}>{loading ? "Loading…" : "\u21BB Refresh"}</button>
+      </div>
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 12 }}>
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", marginBottom: 4 }}>Vendor {venSelCount ? "(" + venSelCount + ")" : ""}</div>
+          <select multiple value={Object.keys(venSel)} onChange={function() {}} size={Math.min(5, Math.max(3, vendors.length))} style={Object.assign({}, selStyle, { height: "auto" })}>
+            {vendors.map(function(v) { return <option key={v} value={v} onMouseDown={function(e) { e.preventDefault(); toggleIn(setVenSel, venSel, v); }} style={{ padding: "3px 6px", background: venSel[v] ? "rgba(8,145,178,0.12)" : "transparent" }}>{venSel[v] ? "\u2713 " : ""}{v}</option>; })}
+          </select>
+        </div>
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", marginBottom: 4 }}>Manufacturer {mfrSelCount ? "(" + mfrSelCount + ")" : ""}</div>
+          <select multiple value={Object.keys(mfrSel)} onChange={function() {}} size={6} style={Object.assign({}, selStyle, { height: "auto", minWidth: 220 })}>
+            {manufacturers.map(function(m) { return <option key={m} value={m} onMouseDown={function(e) { e.preventDefault(); toggleIn(setMfrSel, mfrSel, m); }} style={{ padding: "3px 6px", background: mfrSel[m] ? "rgba(8,145,178,0.12)" : "transparent" }}>{mfrSel[m] ? "\u2713 " : ""}{m}</option>; })}
+          </select>
+        </div>
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", marginBottom: 4 }}>Warehouse {whSelCount ? "(" + whSelCount + ")" : ""}</div>
+          <select multiple value={Object.keys(whSel)} onChange={function() {}} size={8} style={Object.assign({}, selStyle, { height: "auto", minWidth: 220 })}>
+            {Object.keys(whByVendor).sort().map(function(ven) { return <optgroup key={ven} label={ven}>
+              {whByVendor[ven].map(function(w) { return <option key={ven + w} value={w} onMouseDown={function(e) { e.preventDefault(); toggleIn(setWhSel, whSel, w); }} style={{ padding: "3px 6px", background: whSel[w] ? "rgba(8,145,178,0.12)" : "transparent" }}>{whSel[w] ? "\u2713 " : ""}{whName(w)}</option>; })}
+            </optgroup>; })}
+          </select>
+        </div>
+      </div>
     </div>
 
     <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 8 }}>{filtered.length.toLocaleString()} of {(rows || []).length.toLocaleString()} rows{pulledAt ? " \u00B7 data from " + new Date(pulledAt).toLocaleString() : ""}</div>
