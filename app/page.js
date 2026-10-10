@@ -2548,10 +2548,14 @@ function CycleCountTool(props) {
         // Location: GEN- or UNV- items use NDC without dashes, others use warehouse code
         var location = (invId.startsWith("GEN-") || invId.startsWith("UNV-")) ? ndcClean : wh;
 
-        // UOM from stock items
+        // UOM from stock items. If missing, DO NOT add the row to the output — a
+        // blank UOM defaults to Base Unit in Acumatica, which could cause a badly
+        // wrong adjustment if the warning is missed. Report it and skip the item so
+        // it can never reach the upload template.
         var uom = salesUnitMap[invId] || "";
         if (!uom) {
-          errs.push("Inventory ID " + invId + " (NDC " + ndc + ") not found in Stock Items for UOM");
+          errs.push("Inventory ID " + invId + " (NDC " + ndc + ") not found in Stock Items for UOM \u2014 excluded from the adjustment sheet");
+          return;
         }
 
         output.push({
