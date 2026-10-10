@@ -26,15 +26,15 @@
     },
     {
       "path": "/api/cron/vendor-inventory-cache",
-      "schedule": "25 9 * * *"
+      "schedule": "25 10 * * *"
     },
     {
       "path": "/api/cron/vendor-inventory-cache",
-      "schedule": "25 21 * * *"
+      "schedule": "25 22 * * *"
     },
     {
       "path": "/api/cron/vendor-inventory-cache",
-      "schedule": "25 1 * * *"
+      "schedule": "25 2 * * *"
     },
     {
       "path": "/api/cron/discontinued-cache",
