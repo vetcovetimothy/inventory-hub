@@ -2765,7 +2765,13 @@ function CycleCountTool(props) {
             3. Vendor Inventory
             <button onClick={function() { fetchVendorInventory(); }} style={{ background: "transparent", border: "1px solid " + TOOL_COLOR, color: TOOL_COLOR, cursor: "pointer", fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 6, fontFamily: "'Varela Round', sans-serif" }}>{"\u21BB"} Refresh</button>
           </div>
-          {!vendorRows && <div style={{ marginBottom: 8 }}><DropZone accept=".csv" label="Vendor Inventory CSV (fallback)" sublabel="Loading from Snowflake\u2026 or drop a CSV" icon="spreadsheet" color={TOOL_COLOR} onFiles={function(files) { handleVendorUpload(files[0]); }} /></div>}
+          {vendorRows ? <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", background: "rgba(5,150,105,0.06)", border: "1px solid rgba(5,150,105,0.2)", borderRadius: 10, fontSize: 12.5, color: "#059669", marginBottom: 8 }}>
+            <span>{"\u2713"} {vendorName || "Vendor Inventory"} \u2014 {vendorRows.length.toLocaleString()} rows loaded</span>
+            <label style={{ marginLeft: "auto", fontSize: 11, color: TOOL_COLOR, cursor: "pointer", textDecoration: "underline" }}>
+              {stockLoading ? "" : "Upload CSV instead"}
+              <input type="file" accept=".csv" onChange={function(e) { if (e.target.files[0]) handleVendorUpload(e.target.files[0]); }} style={{ display: "none" }} />
+            </label>
+          </div> : <div style={{ marginBottom: 8 }}><DropZone accept=".csv" label="Vendor Inventory CSV (backup)" sublabel="Loading from Snowflake\u2026 or drop a CSV to use instead" icon="spreadsheet" color={TOOL_COLOR} onFiles={function(files) { handleVendorUpload(files[0]); }} /></div>}
           <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 4 }}>Select warehouse:</div>
           <select value={csvWhSelected} onChange={function(e) { setCsvWhSelected(e.target.value); sSet("cc-vendor-wh-selected", e.target.value); }} disabled={!csvWarehouses.length} style={Object.assign({}, S.inp, { maxWidth: 280, cursor: csvWarehouses.length ? "pointer" : "not-allowed" })}>
             <option value="">{csvWarehouses.length ? "— Select —" : "Loading\u2026"}</option>
@@ -2808,9 +2814,9 @@ function CycleCountTool(props) {
             {dohLoading && <p style={{ color: TOOL_COLOR, fontSize: 12, marginTop: 6 }}>Parsing...</p>}
           </div>}
 
-          <div style={{ fontSize: 14, color: "#374151", fontWeight: 600, marginBottom: 8, marginTop: 20, display: "flex", alignItems: "center", gap: 6 }}>{isSftp ? "6" : "5"}. Stock Items <span style={{ fontSize: 11, fontWeight: 500, color: "#059669", background: "rgba(5,150,105,0.1)", padding: "2px 8px", borderRadius: 10 }}>auto-fetched</span></div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(5,150,105,0.06)", border: "1px solid rgba(5,150,105,0.2)", borderRadius: 10, fontSize: 13, color: "#059669" }}>
-            <span>{"\u2713"} Pulled automatically from Acumatica (Inventory ID, Sales Unit, Base Unit) when you click Generate{stockMeta ? " \u2014 last loaded " + stockMeta.count.toLocaleString() + " items on " + stockMeta.date : ""}.</span>
+          <div style={{ fontSize: 14, color: "#374151", fontWeight: 600, marginBottom: 8, marginTop: 20, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            {isSftp ? "6" : "5"}. Stock Items <span style={{ fontSize: 11, fontWeight: 500, color: "#059669", background: "rgba(5,150,105,0.1)", padding: "2px 8px", borderRadius: 10 }}>auto-fetched</span>
+            {stockMeta && <span style={{ fontSize: 12, fontWeight: 400, color: "#6B7280" }}>{"\u2014 last loaded " + stockMeta.count.toLocaleString() + " items on " + stockMeta.date}</span>}
           </div>
         </div>
       </div>
