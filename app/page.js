@@ -7221,10 +7221,21 @@ function VendorInventoryTool(props) {
       </div>
       <div style={{ border: "1px solid #E5E7EB", borderRadius: 8, background: "#fff", maxHeight: 190, overflowY: "auto", padding: 4 }}>
         {groups
-          ? Object.keys(groups).sort().map(function(g) { return <div key={g}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: "#9CA3AF", textTransform: "uppercase", padding: "4px 8px 2px" }}>{g}</div>
-              {groups[g].map(function(it) { return row(it.value, it.label); })}
-            </div>; })
+          ? (function() {
+              var keys = Object.keys(groups);
+              var order = opts.groupOrder || [];
+              keys.sort(function(a, b) {
+                var ia = order.indexOf(a), ib = order.indexOf(b);
+                if (ia === -1 && ib === -1) return a.localeCompare(b); // both unlisted: alpha
+                if (ia === -1) return 1;  // unlisted goes after listed
+                if (ib === -1) return -1;
+                return ia - ib;           // both listed: by given order
+              });
+              return keys.map(function(g) { return <div key={g}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#9CA3AF", textTransform: "uppercase", padding: "4px 8px 2px" }}>{g}</div>
+                {groups[g].map(function(it) { return row(it.value, it.label); })}
+              </div>; });
+            })()
           : items.map(function(it) { return row(it.value, it.label); })}
       </div>
     </div>;
@@ -7246,7 +7257,7 @@ function VendorInventoryTool(props) {
       </div>
     </div>
     <div style={{ marginBottom: 14 }}>{CheckList({ title: "Vendor", count: venSelCount, sel: venSel, setter: setVenSel, items: vendors.map(function(v) { return { value: v, label: v }; }) })}</div>
-    <div style={{ marginBottom: 14 }}>{CheckList({ title: "Warehouse", count: whSelCount, sel: whSel, setter: setWhSel, groups: (function() { var g = {}; Object.keys(whByVendor).forEach(function(ven) { g[ven] = whByVendor[ven].map(function(w) { return { value: w, label: whName(w) }; }); }); return g; })() })}</div>
+    <div style={{ marginBottom: 14 }}>{CheckList({ title: "Warehouse", count: whSelCount, sel: whSel, setter: setWhSel, groupOrder: ["FuzeRx", "GoGoMeds", "Central Garden & Pet", "Hill's Pet Nutrition"], groups: (function() { var g = {}; Object.keys(whByVendor).forEach(function(ven) { g[ven] = whByVendor[ven].map(function(w) { return { value: w, label: whName(w) }; }); }); return g; })() })}</div>
     <div>{CheckList({ title: "Manufacturer", count: mfrSelCount, sel: mfrSel, setter: setMfrSel, items: manufacturers.map(function(m) { return { value: m, label: m }; }) })}</div>
   </div>;
 
