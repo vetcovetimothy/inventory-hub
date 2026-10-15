@@ -28,13 +28,16 @@ const WAREHOUSE_TO_LOCATION = {
   "HILL-CP-CA": "MAIN",          // CA uses the "Primary Location" / MAIN code on the vendor
   "HILL-CP-NJ": "HILL-CP-NJ",
   "HILL-CP-FL": "HILL-CP-FL",
-  "HILL-CP-TX": "HILL-CP-TX"
+  "HILL-CP-TX": "HILL-CP-TX",
+  "PHIL-PA": "PHIL-PA"           // Central Pet PA uses its own warehouse code as the Location
 };
 
 const BRANCH = "VETCOVE";
 
 function shortCodeFor(warehouse) {
-  const m = /HILL-CP-([A-Z]{2})$/.exec(warehouse || "");
+  // Take the trailing 2-letter state code after the last dash (e.g. HILL-CP-CA -> CA,
+  // PHIL-PA -> PA). Falls back to the full warehouse code if there's no match.
+  const m = /-([A-Z]{2})$/.exec(warehouse || "");
   return m ? m[1] : warehouse;
 }
 
