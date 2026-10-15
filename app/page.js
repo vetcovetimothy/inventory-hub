@@ -5803,6 +5803,7 @@ function TruckloaderTool(props) {
     "HILL-CP-NJ": { label: "New Jersey", shortCode: "NJ", cpTo: "jcanter@centralpet.com, jspengler@central.com, hd-purchaseorders@vetcove.com, gcustode@central.com" },
     "HILL-CP-FL": { label: "Tampa",      shortCode: "Tampa",  cpTo: "jcanter@centralpet.com, jspengler@central.com, hd-purchaseorders@vetcove.com" },
     "HILL-CP-TX": { label: "Dallas",     shortCode: "Dallas", cpTo: "mcabrera@centralpet.com, jcanter@centralpet.com, jspengler@central.com, hd-purchaseorders@vetcove.com" },
+    "PHIL-PA":    { label: "Pennsylvania", shortCode: "PA", cpTo: "james.hencken@phillipspet.com, Zach.Monroe@phillipspet.com, luis.rodriguez@phillipspet.com, hd-purchaseorders@vetcove.com" },
   };
   var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
 
@@ -8667,7 +8668,7 @@ function VendorSettingsPage(props) {
 
 /* ═══════ MAIN HUB ═══════ */
 /* ═══════ FORECASTING TOOL (Phase 1: ingest + auto-format + export; Phase 2: methods) ═══════ */
-var FC_KNOWN_WAREHOUSES = ["TP-NY", "TP-OH", "TP-CA", "GGM-KY", "GGM-AZ", "HILL-CP-CA", "HILL-CP-NJ", "HILL-CP-FL", "HILL-CP-TX"];
+var FC_KNOWN_WAREHOUSES = ["TP-NY", "TP-OH", "TP-CA", "GGM-KY", "GGM-AZ", "HILL-CP-CA", "HILL-CP-NJ", "HILL-CP-FL", "HILL-CP-TX", "PHIL-PA"];
 
 // Full-text, quote-aware CSV parser (handles commas/newlines inside quoted
 // fields and "" escapes). Returns an array of row-arrays; row 0 = headers.
