@@ -26,13 +26,14 @@ async function kvGet(key) {
   try { return JSON.parse(json.result); } catch { return json.result; }
 }
 
-async function kvSet(key, value) {
+async function kvSet(key, value, ttl) {
   if (!KV_URL || !KV_TOKEN) throw new Error("KV not configured");
   const serialized = JSON.stringify(value);
+  const cmd = (ttl && ttl > 0) ? ["SET", key, serialized, "EX", String(ttl)] : ["SET", key, serialized];
   const resp = await fetch(`${KV_URL}`, {
     method: "POST",
     headers: { Authorization: `Bearer ${KV_TOKEN}`, "Content-Type": "application/json" },
-    body: JSON.stringify(["SET", key, serialized]),
+    body: JSON.stringify(cmd),
     cache: "no-store",
   });
   if (!resp.ok) {
@@ -63,9 +64,9 @@ export async function POST(request) {
   if (!checkAuth(request)) return Response.json({ error: "Unauthorized" }, { status: 401 });
   try {
     const body = await request.json();
-    const { key, value } = body;
+    const { key, value, ttl } = body;
     if (!key) return Response.json({ error: "Missing key" }, { status: 400 });
-    await kvSet(key, value);
+    await kvSet(key, value, ttl);
     return Response.json({ ok: true });
   } catch (err) {
     return Response.json({ error: err.message }, { status: 500 });
