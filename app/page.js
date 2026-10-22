@@ -1076,7 +1076,22 @@ function WHT(props) {
         body: JSON.stringify({ username: cred.username, password: cred.password, removals: removals })
       });
       var resp = await res.json();
-      if (!resp || !Array.isArray(resp.results)) { toast("Unexpected response from Acumatica", "error"); return; }
+      if (!resp || !Array.isArray(resp.results)) {
+        // Not the expected { results: [...] } shape — this is a top-level failure
+        // (most often a login/auth 401). Surface Acumatica's ACTUAL reason instead
+        // of a generic message, so a 401 tells us WHY (expired session, session
+        // limit, insufficient rights, bad creds, etc.).
+        var parts = [];
+        if (resp && resp.stage) parts.push("step: " + resp.stage);
+        if (resp && resp.status) parts.push("HTTP " + resp.status);
+        var detail = (resp && (resp.error || resp.body || resp.message)) ? String(resp.error || resp.body || resp.message).slice(0, 300) : "";
+        if (detail) parts.push(detail);
+        if (resp && resp.hint) parts.push(resp.hint);
+        var msg = parts.length ? parts.join(" \u2014 ") : "Unexpected response from Acumatica";
+        toast("Remove failed: " + msg, "error");
+        console.error("[Remove Short-Dating] Acumatica error:", resp);
+        return;
+      }
       var removedKeys = new Set();
       var deletedPOs = new Set();
       var removedCount = 0;
@@ -1090,8 +1105,21 @@ function WHT(props) {
             if (rl.inventoryID) removedKeys.add(r.orderNbr + "::" + String(rl.inventoryID).trim().toUpperCase());
           });
         } else if (!r.ok) {
-          var why = r.stage === "status-check" ? r.orderNbr + " (status: " + (r.currentStatus || "unknown") + ", must be On Hold)" : r.orderNbr + " (" + (r.error || r.stage) + ")";
+          var why;
+          if (r.stage === "status-check") {
+            why = r.orderNbr + " (status: " + (r.currentStatus || "unknown") + ", must be On Hold)";
+          } else {
+            var bits = [];
+            if (r.status) bits.push("HTTP " + r.status);
+            if (r.stage) bits.push(r.stage);
+            var det = r.error || "";
+            if (Array.isArray(r.errorDetails) && r.errorDetails.length) det = r.errorDetails.join("; ");
+            else if (r.rawBody) det = String(r.rawBody).slice(0, 200);
+            if (det) bits.push(det);
+            why = r.orderNbr + " (" + (bits.join(" \u2014 ") || "failed") + ")";
+          }
           failedSummaries.push(why);
+          console.error("[Remove Short-Dating] PO failure:", r);
         }
       });
       if (removedKeys.size > 0 || deletedPOs.size > 0) {
