@@ -684,6 +684,32 @@ function WHT(props) {
   var vendorContacts = props.vendorContacts || {};
   var isGGM = whKey.indexOf("GGM") === 0;
 
+  // Per-warehouse Acumatica lock. Prevents two people on the SAME warehouse's PO
+  // Tool page from running Acumatica operations simultaneously (which collides into
+  // a 401 at Acumatica's session limit). Returns a token on success, or null if
+  // someone else holds the lock (and toasts who). Auto-expires server-side so a
+  // crash can't block forever. Different warehouses are independent.
+  async function acquireLock(operation) {
+    try {
+      var resp = await fetch("/api/acumatica-lock", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "acquire", warehouse: whKey, heldBy: (cred && cred.username) || "someone", operation: operation }),
+      });
+      var j = await resp.json();
+      if (j && j.ok && j.token) return j.token;
+      if (j && j.busy) { toast((j.heldBy || "Someone") + " is running " + (j.operation || "an Acumatica operation") + " for this warehouse \u2014 try again in a moment.", "error"); }
+      else { toast("Couldn't start \u2014 another operation may be in progress. Try again.", "error"); }
+      return null;
+    } catch (e) { toast("Lock check failed \u2014 try again.", "error"); return null; }
+  }
+  function releaseLock(token) {
+    if (!token) return;
+    fetch("/api/acumatica-lock", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "release", warehouse: whKey, token: token }),
+    }).catch(function() {});
+  }
+
   // Receiving tracker destinations by warehouse (same sheets/tabs as the PO Translator).
   var TRACKER_MAP = {
     "TP-NY": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - BROOKLYN" },
@@ -910,9 +936,12 @@ function WHT(props) {
   var fetchData = useCallback(function() {
     if (!ok) { lp(); return; } setLoading(true); setEmailSent(false); setConfirmClear(false);
     (async function() {
+      var _lockToken = null;
       try {
         var raw;
         if (cred && cred.username && cred.password) {
+          _lockToken = await acquireLock("PO Fetch");
+          if (!_lockToken) { setLoading(false); return; }
           raw = await fetchAcumatica(isGGM ? "po-ggm" : "po", whKey, cred.username, cred.password);
           // Also pull the UOM conversion map (GI649963) so the receiving-tracker
           // pack size uses the real conversion factor, not a guess off the UOM
@@ -1013,6 +1042,8 @@ function WHT(props) {
       } catch (err) {
         setLoading(false);
         toast("Error: " + err.message, "error");
+      } finally {
+        releaseLock(_lockToken);
       }
     })();
   }, [whKey, cred, cfg.label, toast, ok, lp, persist]);
@@ -1036,6 +1067,8 @@ function WHT(props) {
     });
     var removals = Object.keys(byPO).map(function(po) { return { orderNbr: po, skus: byPO[po] }; });
     setAcuRemoveLoading(true);
+    var _remLockToken = await acquireLock("Remove Short-Dating");
+    if (!_remLockToken) { setAcuRemoveLoading(false); return; }
     try {
       var res = await fetch("/api/acumatica-remove-po-lines", {
         method: "POST",
@@ -1088,6 +1121,7 @@ function WHT(props) {
       toast("Network error: " + err.message, "error");
     } finally {
       setAcuRemoveLoading(false);
+      releaseLock(_remLockToken);
     }
   }
 
@@ -1246,6 +1280,8 @@ function WHT(props) {
     }
     setAcuProcLoading(true);
     setAcuProcResult(null);
+    var _procLockToken = await acquireLock("Process All POs");
+    if (!_procLockToken) { setAcuProcLoading(false); return; }
     try {
       var posPayload = processable.map(function(p) {
         return { orderNbr: p.orderNbr, vendorRef: p.vendorRef, channel: p.channel };
@@ -1442,6 +1478,7 @@ function WHT(props) {
       toast("Network error: " + err.message, "error");
     } finally {
       setAcuProcLoading(false);
+      releaseLock(_procLockToken);
     }
   }
 
