@@ -80,7 +80,11 @@ export async function POST(req) {
     });
     if (!loginRes.ok) {
       const text = await loginRes.text();
-      return json({ ok: false, stage: "login", status: loginRes.status, body: text.slice(0, 500) });
+      let hint = "";
+      if (loginRes.status === 401) hint = "Acumatica rejected the login. Usual causes: the concurrent API-session limit is maxed out (another session still open), the user's credentials are wrong/expired, or the account lacks API access.";
+      else if (loginRes.status === 403) hint = "Logged in but the account lacks permission for this operation.";
+      else if (loginRes.status === 429) hint = "Too many requests/sessions — Acumatica is rate-limiting or at its session cap.";
+      return json({ ok: false, stage: "login", status: loginRes.status, hint: hint, body: text.slice(0, 500) });
     }
     const setCookie = loginRes.headers.get("set-cookie") || "";
     cookies = setCookie.split(",").map(c => c.split(";")[0].trim()).filter(Boolean).join("; ");
