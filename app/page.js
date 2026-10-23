@@ -1820,16 +1820,16 @@ function WHT(props) {
                   else { resultText = "\u2717 " + (row.error || row.stage || "unknown error"); resultColor = "#DC2626"; }
                   var ts = (acuProcResult.trackerStatus || {})[String(row.orderNbr || "").trim()];
                   var tOutcome = acuProcResult.trackerOutcome;
-                  var trackerText = "", trackerColor = "#9CA3AF";
+                  var trackerText = "", trackerColor = "#9CA3AF", trackerLoading = false;
                   if (!row.ok) { trackerText = "\u2014"; }
                   else if (tOutcome === "read-failed") { trackerText = "\u26A0 not written (read failed)"; trackerColor = "#DC2626"; }
-                  else if (!ts) { trackerText = "\u2014"; }
+                  else if (!ts) { trackerLoading = true; }  // released OK, tracker add still in progress → spinner
                   else if (tOutcome === "failed") { trackerText = "\u26A0 add failed"; trackerColor = "#DC2626"; }
                   else if (ts.added > 0 && ts.skipped > 0) { trackerText = "\u2713 " + ts.added + " added, " + ts.skipped + " already there"; trackerColor = "#059669"; }
                   else if (ts.added > 0) { trackerText = "\u2713 " + ts.added + " added"; trackerColor = "#059669"; }
                   else if (ts.skipped > 0) { trackerText = "\u2713 already on tracker"; trackerColor = "#059669"; }
                   else { trackerText = "\u2014"; }
-                  return <tr key={i} style={{ borderBottom: "1px solid #F3F4F6" }}><td style={{ padding: "6px 12px", color: "#1F2937", fontFamily: "monospace" }}>{row.orderNbr}</td><td style={{ padding: "6px 12px", color: "#374151", fontFamily: "monospace" }}>{row.requestedVendorRef || ""}</td><td style={{ padding: "6px 12px", color: "#6B7280", fontSize: 11 }}>{row.channel || ""}</td><td style={{ padding: "6px 12px", color: resultColor, fontWeight: 600 }}>{resultText}{row.emailError && row.emailError.errorDetails ? <div style={{ fontSize: 10, color: "#9CA3AF", fontWeight: 400, marginTop: 2 }}>{row.emailError.errorDetails.map(function(e) { return e.message; }).join("; ")}</div> : null}</td><td style={{ padding: "6px 12px", color: trackerColor, fontWeight: 600, fontSize: 11 }}>{trackerText}</td></tr>;
+                  return <tr key={i} style={{ borderBottom: "1px solid #F3F4F6" }}><td style={{ padding: "6px 12px", color: "#1F2937", fontFamily: "monospace" }}>{row.orderNbr}</td><td style={{ padding: "6px 12px", color: "#374151", fontFamily: "monospace" }}>{row.requestedVendorRef || ""}</td><td style={{ padding: "6px 12px", color: "#6B7280", fontSize: 11 }}>{row.channel || ""}</td><td style={{ padding: "6px 12px", color: resultColor, fontWeight: 600 }}>{resultText}{row.emailError && row.emailError.errorDetails ? <div style={{ fontSize: 10, color: "#9CA3AF", fontWeight: 400, marginTop: 2 }}>{row.emailError.errorDetails.map(function(e) { return e.message; }).join("; ")}</div> : null}</td><td style={{ padding: "6px 12px", color: trackerColor, fontWeight: 600, fontSize: 11 }}>{trackerLoading ? <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "#6B7280", fontWeight: 400 }}><span style={{ width: 12, height: 12, border: "2px solid #0891B2", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} /> adding\u2026</span> : trackerText}</td></tr>;
                 })}</tbody>
               </table>
             </div>
