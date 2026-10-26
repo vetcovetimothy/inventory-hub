@@ -3238,12 +3238,15 @@ function POImportTool(props) {
   function buildTrackerTargets(allowRefs) {
     var byTab = {};
     var held = {};
+    var skipped = { noWarehouse: {}, unmappedWarehouse: {}, heldByGate: {} }; // diagnostics
     (results || []).forEach(function(r) {
       var wh = String(r.warehouse || "").trim();
+      var poN = String(r.poNumber || "").trim() || "(no PO#)";
+      if (!wh) { skipped.noWarehouse[poN] = true; return; }
       var dest = TRACKER_MAP[wh];
-      if (!dest) return;
+      if (!dest) { skipped.unmappedWarehouse[poN + " \u2192 " + wh] = true; return; }
       var poNum = String(r.poNumber || "").trim();
-      if (allowRefs && poNum && !allowRefs[poNum]) { held[poNum] = true; return; }
+      if (allowRefs && poNum && !allowRefs[poNum]) { held[poNum] = true; skipped.heldByGate[poNum] = true; return; }
       var supplier = vendor === "ggm-crossovers" ? "Bloodworth" : (r.vendorSource || "");
       // GEN- items may share one InventoryID across several NDCs with different pack
       // sizes; for GEN- the per-line UOM trailing number is the reliable pack size.
@@ -3268,6 +3271,7 @@ function POImportTool(props) {
     });
     var targets = Object.keys(byTab).map(function(k) { return byTab[k]; });
     targets.heldRefs = Object.keys(held);
+    targets.skipped = skipped;
     return targets;
   }
 
@@ -3301,8 +3305,15 @@ function POImportTool(props) {
   async function addToTracker(allowRefs) {
     var targets = buildTrackerTargets(allowRefs || null);
     var heldRefs = targets.heldRefs || [];
+    var sk = targets.skipped || {};
+    // Log full skip diagnostics so any silent miss is traceable.
+    console.log("[addToTracker] targets:", targets.length, "| skip reasons:", JSON.stringify(sk), "| heldRefs:", heldRefs);
     if (!targets.length) {
+      var noWh = Object.keys(sk.noWarehouse || {});
+      var unmapped = Object.keys(sk.unmappedWarehouse || {});
       if (heldRefs.length) { toast(heldRefs.length + " PO(s) not written \u2014 not in Acumatica: " + heldRefs.join(", "), "error"); return { okCount: 0, skipped: 0, failMsg: "", heldRefs: heldRefs }; }
+      if (unmapped.length) { toast("Not added \u2014 unmapped warehouse(s): " + unmapped.join(", ") + ". Check the warehouse code.", "error"); return { okCount: 0, skipped: 0, failMsg: "unmapped warehouse", heldRefs: heldRefs }; }
+      if (noWh.length) { toast("Not added \u2014 " + noWh.length + " PO(s) had no detected warehouse: " + noWh.join(", ") + ". The store name may not be recognized.", "error"); return { okCount: 0, skipped: 0, failMsg: "no warehouse", heldRefs: heldRefs }; }
       toast("No lines map to a tracker tab (check the warehouse).", "error"); return { okCount: 0, skipped: 0, failMsg: "no targets", heldRefs: heldRefs };
     }
     var okCount = 0, skipped = 0, failMsg = "", tabsUsed = {};
