@@ -3316,23 +3316,35 @@ function POImportTool(props) {
       if (noWh.length) { toast("Not added \u2014 " + noWh.length + " PO(s) had no detected warehouse: " + noWh.join(", ") + ". The store name may not be recognized.", "error"); return { okCount: 0, skipped: 0, failMsg: "no warehouse", heldRefs: heldRefs }; }
       toast("No lines map to a tracker tab (check the warehouse).", "error"); return { okCount: 0, skipped: 0, failMsg: "no targets", heldRefs: heldRefs };
     }
-    var okCount = 0, skipped = 0, failMsg = "", tabsUsed = {};
+    var okCount = 0, skipped = 0, failMsg = "", tabsUsed = {}, tabErrors = [];
     for (var i = 0; i < targets.length; i++) {
       var t = targets[i];
-      var refSet = {};
-      // Fail-CLOSED dedup: must know what's already on the tab before appending. If
-      // the read fails, stop this tab and report it rather than appending blind (a
-      // blind append on a transient read error double-posts every row).
+      // Fail-CLOSED dedup at the LINE level (PO# + NDC), so a PO that's only
+      // PARTIALLY on the tab (e.g. PO Recon added some lines) still gets its
+      // genuinely-new lines added. Falls back to PO-level if the tab has no NDC
+      // column. If the read fails, skip THIS tab (report it) but keep going to the
+      // others \u2014 one tab's failure shouldn't block another warehouse.
+      var pairSet = {}, poOnlySet = {}, lineLevel = false;
       try {
-        var rr = await fetch("/api/tracker-read", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sheetId: t.sheetId, tab: t.tab }) });
-        if (!rr.ok) { failMsg = t.tab + ": couldn't read existing rows (dedup unsafe) \u2014 not appended"; break; }
+        var rr = await fetch("/api/tracker-read", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sheetId: t.sheetId, tab: t.tab, withLines: true }) });
+        if (!rr.ok) { tabErrors.push(t.tab + ": couldn't read existing rows (dedup unsafe) \u2014 not appended"); continue; }
         var rd = await rr.json();
-        ((rd && rd.refs) || []).forEach(function (x) { refSet[String(x).trim()] = true; });
-      } catch (e) { failMsg = t.tab + ": couldn't read existing rows (" + String(e) + ") \u2014 not appended"; break; }
+        if (rd && Array.isArray(rd.pairs)) {
+          lineLevel = true;
+          rd.pairs.forEach(function (pr) { var po = String(pr.po || "").trim(); var dg = String(pr.ndcDigits || "").trim(); if (po && dg) pairSet[po + "||" + dg] = true; });
+        } else {
+          ((rd && rd.refs) || []).forEach(function (x) { poOnlySet[String(x).trim()] = true; });
+        }
+      } catch (e) { tabErrors.push(t.tab + ": couldn't read existing rows (" + String(e) + ") \u2014 not appended"); continue; }
       var keepRows = [], keepNdcUnf = [], keepInvId = [];
       t.rows.forEach(function (row, ri) {
         var ref = Array.isArray(row) ? String(row[6] || "").trim() : "";
-        if (ref && refSet[ref]) { skipped++; return; }
+        var ndcDigits = String((t.ndcUnf || [])[ri] || "").replace(/\D/g, "");
+        if (lineLevel) {
+          if (ref && ndcDigits && pairSet[ref + "||" + ndcDigits]) { skipped++; return; }
+        } else {
+          if (ref && poOnlySet[ref]) { skipped++; return; }  // no NDC column \u2014 PO-level fallback
+        }
         keepRows.push(row);
         keepNdcUnf.push((t.ndcUnf || [])[ri] || "");
         keepInvId.push((t.invId || [])[ri] || "");
@@ -3342,9 +3354,10 @@ function POImportTool(props) {
         var resp = await fetch("/api/tracker-append", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sheetId: t.sheetId, tab: t.tab, rows: keepRows, extraColumns: [{ header: "NDC unformatted", values: keepNdcUnf }, { header: "Inventory ID", values: keepInvId }] }) });
         var data = await resp.json();
         if (data && data.ok) { okCount += (data.appended || keepRows.length); tabsUsed[t.tab] = true; }
-        else { failMsg = t.tab + ": " + ((data && data.error) || "failed"); break; }
-      } catch (e) { failMsg = t.tab + ": " + String(e); break; }
+        else { tabErrors.push(t.tab + ": " + ((data && data.error) || "failed")); continue; }
+      } catch (e) { tabErrors.push(t.tab + ": " + String(e)); continue; }
     }
+    if (tabErrors.length) failMsg = tabErrors.join("; ");
     var heldNote = heldRefs.length ? " \u2014 " + heldRefs.length + " PO(s) skipped (not in Acumatica: " + heldRefs.join(", ") + ")" : "";
     if (failMsg) { toast("Tracker add failed \u2014 " + failMsg, "error"); }
     else if (okCount > 0) { setTrackerAdded({ count: okCount, tabs: Object.keys(tabsUsed).join(", "), at: Date.now() }); toast("Added " + okCount + " row" + (okCount === 1 ? "" : "s") + " to the tracker" + (skipped ? " (" + skipped + " already there, skipped)" : "") + heldNote + "."); }
@@ -3376,23 +3389,35 @@ function POImportTool(props) {
   async function confirmTrackerAppend() {
     if (!trackerPreview) return;
     setTrackerBusy(true);
-    var okCount = 0, skipped = 0, failMsg = "";
+    var okCount = 0, skipped = 0, failMsg = "", tabErrors = [];
     try {
       for (var i = 0; i < trackerPreview.targets.length; i++) {
         var t = trackerPreview.targets[i];
-        // Fail-CLOSED dedup, same as addToTracker: read existing refs first and skip
-        // duplicates; if the read fails, stop rather than double-posting.
-        var refSet = {};
+        // Fail-CLOSED, LINE-level dedup (PO# + NDC), same as addToTracker, so a
+        // partially-present PO still gets its new lines. Falls back to PO-level if
+        // the tab has no NDC column. One tab's read/append failure skips that tab
+        // but continues to the others.
+        var pairSet = {}, poOnlySet = {}, lineLevel = false;
         try {
-          var rr = await fetch("/api/tracker-read", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sheetId: t.sheetId, tab: t.tab }) });
-          if (!rr.ok) { failMsg = t.tab + ": couldn't read existing rows (dedup unsafe) \u2014 not appended"; break; }
+          var rr = await fetch("/api/tracker-read", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sheetId: t.sheetId, tab: t.tab, withLines: true }) });
+          if (!rr.ok) { tabErrors.push(t.tab + ": couldn't read existing rows (dedup unsafe) \u2014 not appended"); continue; }
           var rd = await rr.json();
-          ((rd && rd.refs) || []).forEach(function (x) { refSet[String(x).trim()] = true; });
-        } catch (e) { failMsg = t.tab + ": couldn't read existing rows (" + String(e) + ") \u2014 not appended"; break; }
+          if (rd && Array.isArray(rd.pairs)) {
+            lineLevel = true;
+            rd.pairs.forEach(function (pr) { var po = String(pr.po || "").trim(); var dg = String(pr.ndcDigits || "").trim(); if (po && dg) pairSet[po + "||" + dg] = true; });
+          } else {
+            ((rd && rd.refs) || []).forEach(function (x) { poOnlySet[String(x).trim()] = true; });
+          }
+        } catch (e) { tabErrors.push(t.tab + ": couldn't read existing rows (" + String(e) + ") \u2014 not appended"); continue; }
         var keepRows = [], keepNdcUnf = [], keepInvId = [];
         t.rows.forEach(function (row, ri) {
           var ref = Array.isArray(row) ? String(row[6] || "").trim() : "";
-          if (ref && refSet[ref]) { skipped++; return; }
+          var ndcDigits = String((t.ndcUnf || [])[ri] || "").replace(/\D/g, "");
+          if (lineLevel) {
+            if (ref && ndcDigits && pairSet[ref + "||" + ndcDigits]) { skipped++; return; }
+          } else {
+            if (ref && poOnlySet[ref]) { skipped++; return; }
+          }
           keepRows.push(row);
           keepNdcUnf.push((t.ndcUnf || [])[ri] || "");
           keepInvId.push((t.invId || [])[ri] || "");
@@ -3401,8 +3426,9 @@ function POImportTool(props) {
         var resp = await fetch("/api/tracker-append", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sheetId: t.sheetId, tab: t.tab, rows: keepRows, extraColumns: [{ header: "NDC unformatted", values: keepNdcUnf }, { header: "Inventory ID", values: keepInvId }] }) });
         var data = await resp.json();
         if (data && data.ok) okCount += (data.appended || keepRows.length);
-        else { failMsg = t.tab + ": " + ((data && data.error) || "failed"); break; }
+        else { tabErrors.push(t.tab + ": " + ((data && data.error) || "failed")); continue; }
       }
+      if (tabErrors.length) failMsg = tabErrors.join("; ");
       var held = (trackerPreview.heldRefs || []);
       var heldNote = held.length ? " \u2014 " + held.length + " PO(s) skipped (not in Acumatica: " + held.join(", ") + ")" : "";
       if (failMsg) toast("Tracker add failed \u2014 " + failMsg, "error");
