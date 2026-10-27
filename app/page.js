@@ -73,21 +73,36 @@ function kvPost(key, value) {
 
 /* ═══════ API HELPERS ═══════ */
 async function fetchAcumatica(type, warehouse, username, password) {
-  const resp = await fetch("/api/acumatica", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ type, warehouse, username, password }),
-  });
-  const json = await resp.json();
-  if (!resp.ok) {
-    // Surface Acumatica's actual reason (detail + hint), not just the status.
-    var parts = [json.error || "Acumatica request failed"];
-    if (json.hint) parts.push(json.hint);
-    else if (json.detail) parts.push(String(json.detail).slice(0, 200));
-    if (json.error || json.detail || json.hint) console.error("[fetchAcumatica] error:", json);
-    throw new Error(parts.join(" \u2014 "));
+  // Reads are safe to retry (no double-write risk). Many 401s are transient \u2014 a
+  // momentary auth blip or session collision \u2014 so on a 401 we wait briefly and retry
+  // up to 2 more times before surfacing the error. Non-401 errors (and success) are
+  // returned immediately; a genuinely-bad credential will just fail all 3 attempts.
+  var MAX_ATTEMPTS = 3;
+  var json, resp, lastStatus;
+  for (var attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    resp = await fetch("/api/acumatica", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type, warehouse, username, password }),
+    });
+    json = await resp.json();
+    if (resp.ok) return json.data || [];
+    lastStatus = resp.status;
+    // Only retry on 401 (transient auth/session). Anything else won't self-resolve.
+    if (resp.status === 401 && attempt < MAX_ATTEMPTS) {
+      console.warn("[fetchAcumatica] 401 on attempt " + attempt + " for " + type + " \u2014 retrying\u2026");
+      await new Promise(function (r) { setTimeout(r, 1500); });
+      continue;
+    }
+    break;
   }
-  return json.data || [];
+  // All attempts failed \u2014 surface Acumatica's actual reason (detail + hint).
+  var parts = [json.error || "Acumatica request failed"];
+  if (lastStatus === 401) parts[0] = (json.error || "Acumatica returned 401") + " (after " + MAX_ATTEMPTS + " attempts)";
+  if (json.hint) parts.push(json.hint);
+  else if (json.detail) parts.push(String(json.detail).slice(0, 200));
+  console.error("[fetchAcumatica] error:", json);
+  throw new Error(parts.join(" \u2014 "));
 }
 
 async function postGmailDrafts(drafts, refreshToken) {
