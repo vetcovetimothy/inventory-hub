@@ -463,8 +463,12 @@ export async function POST(request) {
 
     if (!resp.ok) {
       const text = await resp.text();
+      let hint = "";
+      if (resp.status === 401) hint = "Acumatica rejected the credentials for this fetch. Usual causes: the account's password is wrong/expired, the account lacks OData/API access, or too many sessions are open at once. Re-enter credentials (bottom-left) or try again in a moment.";
+      else if (resp.status === 403) hint = "Authenticated but the account lacks permission for this data.";
+      else if (resp.status === 429) hint = "Acumatica is rate-limiting \u2014 too many requests at once. Wait a moment and retry.";
       return Response.json(
-        { error: `Acumatica returned ${resp.status}`, detail: text.slice(0, 500) },
+        { error: `Acumatica returned ${resp.status}`, detail: text.slice(0, 500), hint: hint },
         { status: resp.status }
       );
     }
