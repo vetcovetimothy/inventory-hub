@@ -79,7 +79,14 @@ async function fetchAcumatica(type, warehouse, username, password) {
     body: JSON.stringify({ type, warehouse, username, password }),
   });
   const json = await resp.json();
-  if (!resp.ok) throw new Error(json.error || "Acumatica request failed");
+  if (!resp.ok) {
+    // Surface Acumatica's actual reason (detail + hint), not just the status.
+    var parts = [json.error || "Acumatica request failed"];
+    if (json.hint) parts.push(json.hint);
+    else if (json.detail) parts.push(String(json.detail).slice(0, 200));
+    if (json.error || json.detail || json.hint) console.error("[fetchAcumatica] error:", json);
+    throw new Error(parts.join(" \u2014 "));
+  }
   return json.data || [];
 }
 
