@@ -4501,7 +4501,7 @@ function POImportTool(props) {
   return (
     <div>
       <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
-        {[["translator", "PO Translator"], ["check", "Price Check"], ["netnew", "Net New" + ((netNewList && netNewList.length) ? " (" + netNewList.length + ")" : "")]].map(function(t) { var on = subTab === t[0]; return <button key={t[0]} onClick={function() { setSubTab(t[0]); }} style={{ padding: "8px 18px", borderRadius: 8, border: "1px solid " + (on ? TOOL_COLOR : "#E5E7EB"), background: on ? TOOL_COLOR : "#fff", color: on ? "#fff" : "#6B7280", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>{t[1]}</button>; })}
+        {[["translator", "PO Translator"], ["check", "Price Check/Message"], ["netnew", "Net New" + ((netNewList && netNewList.length) ? " (" + netNewList.length + ")" : "")]].map(function(t) { var on = subTab === t[0]; return <button key={t[0]} onClick={function() { setSubTab(t[0]); }} style={{ padding: "8px 18px", borderRadius: 8, border: "1px solid " + (on ? TOOL_COLOR : "#E5E7EB"), background: on ? TOOL_COLOR : "#fff", color: on ? "#fff" : "#6B7280", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>{t[1]}</button>; })}
       </div>
 
       {subTab === "check" && <div>
