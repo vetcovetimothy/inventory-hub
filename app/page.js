@@ -73,8 +73,8 @@ function kvPost(key, value) {
 
 /* ═══════ API HELPERS ═══════ */
 async function fetchAcumatica(type, warehouse, username, password) {
-  // Reads are safe to retry (no double-write risk). Many 401s are transient \u2014 a
-  // momentary auth blip or session collision \u2014 so on a 401 we wait briefly and retry
+  // Reads are safe to retry (no double-write risk). Many 401s are transient — a
+  // momentary auth blip or session collision — so on a 401 we wait briefly and retry
   // up to 2 more times before surfacing the error. Non-401 errors (and success) are
   // returned immediately; a genuinely-bad credential will just fail all 3 attempts.
   var MAX_ATTEMPTS = 3;
@@ -90,19 +90,19 @@ async function fetchAcumatica(type, warehouse, username, password) {
     lastStatus = resp.status;
     // Only retry on 401 (transient auth/session). Anything else won't self-resolve.
     if (resp.status === 401 && attempt < MAX_ATTEMPTS) {
-      console.warn("[fetchAcumatica] 401 on attempt " + attempt + " for " + type + " \u2014 retrying\u2026");
+      console.warn("[fetchAcumatica] 401 on attempt " + attempt + " for " + type + " — retrying\u2026");
       await new Promise(function (r) { setTimeout(r, 1500); });
       continue;
     }
     break;
   }
-  // All attempts failed \u2014 surface Acumatica's actual reason (detail + hint).
+  // All attempts failed — surface Acumatica's actual reason (detail + hint).
   var parts = [json.error || "Acumatica request failed"];
   if (lastStatus === 401) parts[0] = (json.error || "Acumatica returned 401") + " (after " + MAX_ATTEMPTS + " attempts)";
   if (json.hint) parts.push(json.hint);
   else if (json.detail) parts.push(String(json.detail).slice(0, 200));
   console.error("[fetchAcumatica] error:", json);
-  throw new Error(parts.join(" \u2014 "));
+  throw new Error(parts.join(" — "));
 }
 
 async function postGmailDrafts(drafts, refreshToken) {
@@ -719,10 +719,10 @@ function WHT(props) {
       });
       var j = await resp.json();
       if (j && j.ok && j.token) return j.token;
-      if (j && j.busy) { toast((j.heldBy || "Someone") + " is running " + (j.operation || "an Acumatica operation") + " for this warehouse \u2014 try again in a moment.", "error"); }
-      else { toast("Couldn't start \u2014 another operation may be in progress. Try again.", "error"); }
+      if (j && j.busy) { toast((j.heldBy || "Someone") + " is running " + (j.operation || "an Acumatica operation") + " for this warehouse — try again in a moment.", "error"); }
+      else { toast("Couldn't start — another operation may be in progress. Try again.", "error"); }
       return null;
-    } catch (e) { toast("Lock check failed \u2014 try again.", "error"); return null; }
+    } catch (e) { toast("Lock check failed — try again.", "error"); return null; }
   }
   function releaseLock(token) {
     if (!token) return;
@@ -838,7 +838,7 @@ function WHT(props) {
       } catch (e) { if (m) setKvStatus("kv-error:" + e.message); }
       // KV is the source of truth. If KV RESPONDED but had no data (e.g. the
       // nightly clear emptied it), purge the stale localStorage copy instead of
-      // falling back to it \u2014 otherwise a cleared warehouse would still show old
+      // falling back to it — otherwise a cleared warehouse would still show old
       // POs from this browser's cache. Only fall back to localStorage when KV
       // could NOT be reached (network error), so a transient hiccup doesn't wipe
       // a user's local data.
@@ -848,7 +848,7 @@ function WHT(props) {
         setData([]); setShipNotes({}); setRunBy(null); setRunTime(null); setEmailSent(false); setSubPage("overview");
         if (m) setKvStatus("no-data");
       } else if (!loaded && m) {
-        // KV unreachable \u2014 fall back to localStorage as a last resort.
+        // KV unreachable — fall back to localStorage as a last resort.
         var s = sGet("wh-data-" + whKey);
         if (s && s.data && s.data.length > 0) {
           setData(s.data); setEmailSent(s.emailSent || false); setRunBy(s.runBy || null); setRunTime(s.runTime || null); setSubPage("data");
@@ -1028,11 +1028,11 @@ function WHT(props) {
         //    forward from the SAME VENDOR's most-recent prior note, so a ref the
         //    user already entered isn't lost just because the PO number changed.
         //    We deliberately do NOT carry the `done`/`addedToTracker` flags across
-        //    a PO change \u2014 only the human-entered reference text \u2014 so a changed
+        //    a PO change — only the human-entered reference text — so a changed
         //    PO still gets re-processed, but the ref the user typed survives.
         var prevNotes = Object.assign({}, sGet("ship-notes-" + whKey) || {}, shipNotes);
         // Index prior notes per vendor. Only carry a reference forward when the
-        // vendor had exactly ONE prior PO \u2014 if a vendor had multiple concurrent
+        // vendor had exactly ONE prior PO — if a vendor had multiple concurrent
         // POs we can't know which ref belongs to which new PO, so we don't guess
         // (avoids mis-assigning one PO's ref to another).
         var prevByVendor = {};
@@ -1047,7 +1047,7 @@ function WHT(props) {
         var newGroups = {};
         rows.forEach(function(r) { var k = r.VendorName + " || " + (r.OrderNbr || ""); newGroups[k] = 1; });
         // Count POs per vendor in the NEW data. Only carry a ref forward by vendor
-        // when the vendor has exactly ONE PO in BOTH the old and new data \u2014 otherwise
+        // when the vendor has exactly ONE PO in BOTH the old and new data — otherwise
         // we could copy one PO's ref onto a sibling PO that was intentionally left
         // blank (the bug: typing a ref on one of two same-vendor POs, then a refresh
         // filling both). With multiple POs, require an exact Vendor||PO match.
@@ -1079,7 +1079,7 @@ function WHT(props) {
     var validPairs = pairs.filter(function(p) { return p && p.orderNbr && p.inventoryID; });
     var missingCount = pairs.length - validPairs.length;
     if (validPairs.length === 0) {
-      toast(missingCount > 0 ? "No Inventory IDs available for the selected lines \u2014 try Re-fetch" : "Nothing to remove", "error");
+      toast(missingCount > 0 ? "No Inventory IDs available for the selected lines — try Re-fetch" : "Nothing to remove", "error");
       return;
     }
     var byPO = {};
@@ -1109,7 +1109,7 @@ function WHT(props) {
         var detail = (resp && (resp.error || resp.body || resp.message)) ? String(resp.error || resp.body || resp.message).slice(0, 300) : "";
         if (detail) parts.push(detail);
         if (resp && resp.hint) parts.push(resp.hint);
-        var msg = parts.length ? parts.join(" \u2014 ") : "Unexpected response from Acumatica";
+        var msg = parts.length ? parts.join(" — ") : "Unexpected response from Acumatica";
         toast("Remove failed: " + msg, "error");
         console.error("[Remove Short-Dating] Acumatica error:", resp);
         return;
@@ -1138,7 +1138,7 @@ function WHT(props) {
             if (Array.isArray(r.errorDetails) && r.errorDetails.length) det = r.errorDetails.join("; ");
             else if (r.rawBody) det = String(r.rawBody).slice(0, 200);
             if (det) bits.push(det);
-            why = r.orderNbr + " (" + (bits.join(" \u2014 ") || "failed") + ")";
+            why = r.orderNbr + " (" + (bits.join(" — ") || "failed") + ")";
           }
           failedSummaries.push(why);
           console.error("[Remove Short-Dating] PO failure:", r);
@@ -1270,7 +1270,7 @@ function WHT(props) {
       return;
     }
     if (built.processable.length === 0) {
-      toast("Nothing to process \u2014 all rows are done or missing data", "error");
+      toast("Nothing to process — all rows are done or missing data", "error");
       return;
     }
     if (built.processable.length >= 5) {
@@ -1472,7 +1472,7 @@ function WHT(props) {
       });
 
       var trackerOutcome = "none"; // none | ok | failed | read-failed
-      if (dedupReadFailed) { trackerOutcome = "read-failed"; toast("Tracker not updated \u2014 couldn't read existing rows to avoid duplicates. Try again.", "error"); }
+      if (dedupReadFailed) { trackerOutcome = "read-failed"; toast("Tracker not updated — couldn't read existing rows to avoid duplicates. Try again.", "error"); }
       else if (trackerRows.length) {
         if (dest) {
           try {
@@ -1495,7 +1495,7 @@ function WHT(props) {
         }
       } else if (skippedLines > 0) {
         trackerOutcome = "ok"; // everything already present counts as "on the tracker"
-        toast("All " + skippedLines + " line(s) already on " + (dest ? dest.tab : "the tracker") + " \u2014 nothing to add", "success");
+        toast("All " + skippedLines + " line(s) already on " + (dest ? dest.tab : "the tracker") + " — nothing to add", "success");
         addedKeys.forEach(function(k) { updatedNotes[k] = Object.assign({}, updatedNotes[k] || {}, { addedToTracker: true }); });
         changed = true;
       }
@@ -1522,7 +1522,7 @@ function WHT(props) {
         var failBits = [];
         if (s.failedCount) failBits.push(s.failedCount + " failed");
         if (s.ediFailedCount) failBits.push(s.ediFailedCount + " EDI failed");
-        toast(s.successCount + " succeeded, " + failBits.join(", ") + " \u2014 see results", "error");
+        toast(s.successCount + " succeeded, " + failBits.join(", ") + " — see results", "error");
       }
     } catch (err) {
       toast("Network error: " + err.message, "error");
@@ -1640,7 +1640,7 @@ function WHT(props) {
       {flagCount > 0 && <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 10, padding: "14px 20px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}><IconAlert /><span style={{ fontSize: 13, color: "#DC2626", flex: 1 }}><strong>Flagged:</strong>{flags.s.length > 0 && " " + flags.s.length + " Short-Dating"}{flags.so.length > 0 && " " + flags.so.length + " Sell-Off"}</span>{flags.s.length > 0 && <button disabled={!ok || acuRemoveLoading} onClick={function() { var shortPairs = flags.s.map(function(idx) { var r = data[idx]; return { orderNbr: r.OrderNbr, inventoryID: String(r.InventoryID || "").trim(), skuNDC: r.SKUNDC }; }); removeFromAcumatica(shortPairs); }} title={!ok ? "Acumatica credentials required" : "Remove all short-dating lines from their POs in Acumatica. POs must be On Hold."} style={Object.assign({}, S.btn(), { padding: "6px 12px", fontSize: 12, background: (!ok || acuRemoveLoading) ? "#9CA3AF" : "#DC2626", borderColor: (!ok || acuRemoveLoading) ? "#9CA3AF" : "#DC2626", opacity: (!ok || acuRemoveLoading) ? 0.7 : 1, cursor: (!ok || acuRemoveLoading) ? "not-allowed" : "pointer" })}>{acuRemoveLoading ? <><Spinner /> Removing...</> : "Remove All Short-Dating from POs"}</button>}</div>}
       {sdExemptEntries.length > 0 && <div style={{ background: "rgba(99,102,241,0.06)", border: "1px solid rgba(99,102,241,0.25)", borderRadius: 10, padding: "10px 16px", marginBottom: 16 }}>
         <div onClick={function() { setShowExempt(!showExempt); }} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, color: "#4F46E5", fontWeight: 600 }}><span>{showExempt ? "\u25BE" : "\u25B8"}</span><span>Short-dating exemptions {"\u00B7"} {isGGM ? "GoGoMeds" : "Fuze"} ({sdExemptEntries.length})</span></div>
-        {showExempt && <div style={{ marginTop: 8 }}>{sdExemptEntries.map(function(it) { return <div key={it.invId} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12, padding: "5px 0", borderTop: "1px solid rgba(99,102,241,0.12)" }}><span style={{ fontFamily: "monospace", minWidth: 90, color: "#4F46E5" }}>{it.invId}</span><span style={{ flex: 1, color: "#374151" }}>{it.desc || "\u2014"}</span>{!it.onPO && <span style={{ fontSize: 10, color: "#9CA3AF", fontStyle: "italic" }}>not on a current PO</span>}<button onClick={function() { toggleSdExempt(it.invId); }} title="Remove this exemption" style={{ background: "transparent", border: "1px solid #D1D5DB", color: "#6B7280", borderRadius: 4, padding: "2px 8px", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Remove</button></div>; })}</div>}
+        {showExempt && <div style={{ marginTop: 8 }}>{sdExemptEntries.map(function(it) { return <div key={it.invId} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12, padding: "5px 0", borderTop: "1px solid rgba(99,102,241,0.12)" }}><span style={{ fontFamily: "monospace", minWidth: 90, color: "#4F46E5" }}>{it.invId}</span><span style={{ flex: 1, color: "#374151" }}>{it.desc || "—"}</span>{!it.onPO && <span style={{ fontSize: 10, color: "#9CA3AF", fontStyle: "italic" }}>not on a current PO</span>}<button onClick={function() { toggleSdExempt(it.invId); }} title="Remove this exemption" style={{ background: "transparent", border: "1px solid #D1D5DB", color: "#6B7280", borderRadius: 4, padding: "2px 8px", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Remove</button></div>; })}</div>}
       </div>}
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
         <input style={Object.assign({}, S.inp, { maxWidth: 260 })} placeholder="Search..." value={search} onChange={function(e) { setSearch(e.target.value); }} />
@@ -1656,7 +1656,7 @@ function WHT(props) {
         <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto", maxHeight: "calc(100vh - 260px)" })}>
         <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
           <thead><tr><th style={Object.assign({}, S.th, { width: 32 })}></th>{["InventoryID", "SKU", "Description", "Qty", "Vendor", "PO #"].concat(!isGGM ? ["Reorder", "Max", "Lead", "Min", "OnHand", "Avail"] : []).concat(["Price", "Total", "Flag"]).map(function(h) { var isSorted = poSort.col === h; return <th key={h} onClick={function() { setPoSort(isSorted ? { col: h, dir: poSort.dir === "asc" ? "desc" : "asc" } : { col: h, dir: h === "Qty" || h === "Price" || h === "Total" || h === "Avail" || h === "OnHand" || h === "Reorder" || h === "Max" || h === "Lead" || h === "Min" ? "desc" : "asc" }); }} style={Object.assign({}, S.th, { cursor: "pointer", userSelect: "none" })}>{h === "InventoryID" ? "Inv ID" : h}{isSorted ? (poSort.dir === "desc" ? " \u25BE" : " \u25B4") : ""}</th>; })}<th style={Object.assign({}, S.th, { width: 175 })}></th></tr></thead>
-          <tbody>{filtered.map(function(r, i) { var f = getFlag(r); var isShortRaw = (r.MovementClass || "").toLowerCase().trim() === "short-dating"; var invId = String(r.InventoryID || "").trim(); var isExempt = isShortRaw && !!sdExempt[invId]; var bg = f === "short" ? "rgba(220,38,38,0.04)" : f === "selloff" ? "rgba(217,119,6,0.04)" : "transparent"; var tc = f === "short" ? "#DC2626" : f === "selloff" ? "#D97706" : "#374151"; var fmt = function(v) { var n = parseFloat(v); if (isNaN(n)) return v; return n % 1 === 0 ? String(Math.round(n)) : n.toFixed(2); }; var dismissKey = r.SKUNDC + ":" + r.OrderNbr; var isDone = dismissed[dismissKey]; return <tr key={i} style={{ background: bg, opacity: isDone ? 0.4 : 1, transition: "opacity 0.15s" }}><td style={Object.assign({}, S.td, { textAlign: "center", padding: "8px 4px" })}>{f ? <button onClick={function() { var u = Object.assign({}, dismissed); if (isDone) { delete u[dismissKey]; } else { u[dismissKey] = true; } setDismissed(u); }} style={{ width: 20, height: 20, borderRadius: 4, border: isDone ? "2px solid #059669" : "2px solid #D1D5DB", background: isDone ? "#059669" : "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", transition: "all 0.15s", flexShrink: 0 }}>{isDone && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}</button> : null}</td><td style={Object.assign({}, S.td, { color: tc, minWidth: 90, whiteSpace: "nowrap", fontFamily: "monospace", fontSize: 11 })}>{r.InventoryID || "\u2014"}</td><td style={Object.assign({}, S.td, { color: tc, minWidth: 120, whiteSpace: "nowrap" })}>{r.SKUNDC}</td><td style={Object.assign({}, S.td, { color: tc, minWidth: 180, maxWidth: 350 })}><CopyCell text={r.Description} toast={toast} color={tc} accentColor={cfg.color} /></td><td style={Object.assign({}, S.td, { color: tc })}>{fmt(r.OrderQty)}</td><td style={Object.assign({}, S.td, { color: tc })}>{r.VendorName}</td><td style={Object.assign({}, S.td, { color: tc })}>{r.OrderNbr}</td>{!isGGM && <><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.ReorderPoint)}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.MaxQty)}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.LeadTime)}d</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.MinOrderQty)}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.OnHandQty)}</td><td style={Object.assign({}, S.td, { color: r.QtyAvailable < 0 ? "#DC2626" : tc, textAlign: "right" })}>{fmt(r.QtyAvailable)}</td></>}<td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>${r.Price.toFixed(2)}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>${r.TotalPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td><td style={S.td}>{isExempt ? <span style={S.badge("exempt")}>Exempt</span> : f ? <span style={S.badge(f === "short" ? "danger" : "warning")}>{f === "short" ? "Short" : "Sell-Off"}</span> : "\u2014"}</td><td style={Object.assign({}, S.td, { textAlign: "center", padding: "8px 4px" })}><div style={{ display: "flex", gap: 6, justifyContent: "center", alignItems: "center" }}>{isShortRaw ? <button onClick={function() { toggleSdExempt(invId, { desc: r.Description, sku: r.SKUNDC }); }} title={isExempt ? ("Remove short-dating exemption for " + invId + " (" + (isGGM ? "GGM" : "Fuze") + ")") : ("Exempt " + invId + " from short-dating across all " + (isGGM ? "GGM" : "Fuze") + " warehouses")} style={{ background: isExempt ? "#6366F1" : "transparent", border: "1px solid " + (isExempt ? "#6366F1" : "#D1D5DB"), color: isExempt ? "#FFFFFF" : "#6B7280", padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>{isExempt ? "SD Exempt \u2713" : "SD Exempt"}</button> : null}{f ? <button disabled={!ok || acuRemoveLoading || !r.InventoryID} onClick={function() { removeFromAcumatica([{ orderNbr: r.OrderNbr, inventoryID: String(r.InventoryID || "").trim(), skuNDC: r.SKUNDC }]); }} title={!ok ? "Acumatica credentials required" : !r.InventoryID ? "No Inventory ID for this line \u2014 try Re-fetch" : "Remove this line from " + r.OrderNbr + " in Acumatica (PO must be On Hold)"} style={{ background: "transparent", border: "1px solid " + ((!ok || acuRemoveLoading || !r.InventoryID) ? "#D1D5DB" : "#DC2626"), color: (!ok || acuRemoveLoading || !r.InventoryID) ? "#9CA3AF" : "#DC2626", padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: (!ok || acuRemoveLoading || !r.InventoryID) ? "not-allowed" : "pointer" }}>Remove</button> : null}</div></td></tr>; })}</tbody>
+          <tbody>{filtered.map(function(r, i) { var f = getFlag(r); var isShortRaw = (r.MovementClass || "").toLowerCase().trim() === "short-dating"; var invId = String(r.InventoryID || "").trim(); var isExempt = isShortRaw && !!sdExempt[invId]; var bg = f === "short" ? "rgba(220,38,38,0.04)" : f === "selloff" ? "rgba(217,119,6,0.04)" : "transparent"; var tc = f === "short" ? "#DC2626" : f === "selloff" ? "#D97706" : "#374151"; var fmt = function(v) { var n = parseFloat(v); if (isNaN(n)) return v; return n % 1 === 0 ? String(Math.round(n)) : n.toFixed(2); }; var dismissKey = r.SKUNDC + ":" + r.OrderNbr; var isDone = dismissed[dismissKey]; return <tr key={i} style={{ background: bg, opacity: isDone ? 0.4 : 1, transition: "opacity 0.15s" }}><td style={Object.assign({}, S.td, { textAlign: "center", padding: "8px 4px" })}>{f ? <button onClick={function() { var u = Object.assign({}, dismissed); if (isDone) { delete u[dismissKey]; } else { u[dismissKey] = true; } setDismissed(u); }} style={{ width: 20, height: 20, borderRadius: 4, border: isDone ? "2px solid #059669" : "2px solid #D1D5DB", background: isDone ? "#059669" : "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", transition: "all 0.15s", flexShrink: 0 }}>{isDone && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}</button> : null}</td><td style={Object.assign({}, S.td, { color: tc, minWidth: 90, whiteSpace: "nowrap", fontFamily: "monospace", fontSize: 11 })}>{r.InventoryID || "—"}</td><td style={Object.assign({}, S.td, { color: tc, minWidth: 120, whiteSpace: "nowrap" })}>{r.SKUNDC}</td><td style={Object.assign({}, S.td, { color: tc, minWidth: 180, maxWidth: 350 })}><CopyCell text={r.Description} toast={toast} color={tc} accentColor={cfg.color} /></td><td style={Object.assign({}, S.td, { color: tc })}>{fmt(r.OrderQty)}</td><td style={Object.assign({}, S.td, { color: tc })}>{r.VendorName}</td><td style={Object.assign({}, S.td, { color: tc })}>{r.OrderNbr}</td>{!isGGM && <><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.ReorderPoint)}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.MaxQty)}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.LeadTime)}d</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.MinOrderQty)}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>{fmt(r.OnHandQty)}</td><td style={Object.assign({}, S.td, { color: r.QtyAvailable < 0 ? "#DC2626" : tc, textAlign: "right" })}>{fmt(r.QtyAvailable)}</td></>}<td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>${r.Price.toFixed(2)}</td><td style={Object.assign({}, S.td, { color: tc, textAlign: "right" })}>${r.TotalPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td><td style={S.td}>{isExempt ? <span style={S.badge("exempt")}>Exempt</span> : f ? <span style={S.badge(f === "short" ? "danger" : "warning")}>{f === "short" ? "Short" : "Sell-Off"}</span> : "—"}</td><td style={Object.assign({}, S.td, { textAlign: "center", padding: "8px 4px" })}><div style={{ display: "flex", gap: 6, justifyContent: "center", alignItems: "center" }}>{isShortRaw ? <button onClick={function() { toggleSdExempt(invId, { desc: r.Description, sku: r.SKUNDC }); }} title={isExempt ? ("Remove short-dating exemption for " + invId + " (" + (isGGM ? "GGM" : "Fuze") + ")") : ("Exempt " + invId + " from short-dating across all " + (isGGM ? "GGM" : "Fuze") + " warehouses")} style={{ background: isExempt ? "#6366F1" : "transparent", border: "1px solid " + (isExempt ? "#6366F1" : "#D1D5DB"), color: isExempt ? "#FFFFFF" : "#6B7280", padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}>{isExempt ? "SD Exempt \u2713" : "SD Exempt"}</button> : null}{f ? <button disabled={!ok || acuRemoveLoading || !r.InventoryID} onClick={function() { removeFromAcumatica([{ orderNbr: r.OrderNbr, inventoryID: String(r.InventoryID || "").trim(), skuNDC: r.SKUNDC }]); }} title={!ok ? "Acumatica credentials required" : !r.InventoryID ? "No Inventory ID for this line — try Re-fetch" : "Remove this line from " + r.OrderNbr + " in Acumatica (PO must be On Hold)"} style={{ background: "transparent", border: "1px solid " + ((!ok || acuRemoveLoading || !r.InventoryID) ? "#D1D5DB" : "#DC2626"), color: (!ok || acuRemoveLoading || !r.InventoryID) ? "#9CA3AF" : "#DC2626", padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: (!ok || acuRemoveLoading || !r.InventoryID) ? "not-allowed" : "pointer" }}>Remove</button> : null}</div></td></tr>; })}</tbody>
         </table>
       </div></div> : <div style={Object.assign({}, S.card, { textAlign: "center", padding: 48, color: "#9CA3AF" })}>Run fetch first.</div>}
     </div>}
@@ -1756,7 +1756,7 @@ function WHT(props) {
             <div style={{ fontSize: 18, fontWeight: 700, color: "#1F2937", marginBottom: 12 }}>Process {ready.length} of {ready.length + missing.length} POs?</div>
             <div style={{ fontSize: 13, color: "#374151", marginBottom: 16, lineHeight: 1.55 }}>
               <strong style={{ color: "#047857" }}>{ready.length}</strong> {ready.length === 1 ? "PO has" : "POs have"} a Vendor Ref and will be processed now.
-              <br /><strong style={{ color: "#6B7280" }}>{missing.length}</strong> {missing.length === 1 ? "PO is" : "POs are"} missing a Vendor Ref and will be skipped {"\u2014"} you can fill them in and re-run later.
+              <br /><strong style={{ color: "#6B7280" }}>{missing.length}</strong> {missing.length === 1 ? "PO is" : "POs are"} missing a Vendor Ref and will be skipped {"—"} you can fill them in and re-run later.
             </div>
             <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 16, padding: "8px 12px", background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 6 }}>
               <div style={{ fontWeight: 600, marginBottom: 4 }}>Skipping:</div>
@@ -1843,14 +1843,14 @@ function WHT(props) {
                   var ts = (acuProcResult.trackerStatus || {})[String(row.orderNbr || "").trim()];
                   var tOutcome = acuProcResult.trackerOutcome;
                   var trackerText = "", trackerColor = "#9CA3AF", trackerLoading = false;
-                  if (!row.ok) { trackerText = "\u2014"; }
+                  if (!row.ok) { trackerText = "—"; }
                   else if (tOutcome === "read-failed") { trackerText = "\u26A0 not written (read failed)"; trackerColor = "#DC2626"; }
                   else if (!ts) { trackerLoading = true; }  // released OK, tracker add still in progress → spinner
                   else if (tOutcome === "failed") { trackerText = "\u26A0 add failed"; trackerColor = "#DC2626"; }
                   else if (ts.added > 0 && ts.skipped > 0) { trackerText = "\u2713 " + ts.added + " added, " + ts.skipped + " already there"; trackerColor = "#059669"; }
                   else if (ts.added > 0) { trackerText = "\u2713 " + ts.added + " added"; trackerColor = "#059669"; }
                   else if (ts.skipped > 0) { trackerText = "\u2713 already on tracker"; trackerColor = "#059669"; }
-                  else { trackerText = "\u2014"; }
+                  else { trackerText = "—"; }
                   return <tr key={i} style={{ borderBottom: "1px solid #F3F4F6" }}><td style={{ padding: "6px 12px", color: "#1F2937", fontFamily: "monospace" }}>{row.orderNbr}</td><td style={{ padding: "6px 12px", color: "#374151", fontFamily: "monospace" }}>{row.requestedVendorRef || ""}</td><td style={{ padding: "6px 12px", color: "#6B7280", fontSize: 11 }}>{row.channel || ""}</td><td style={{ padding: "6px 12px", color: resultColor, fontWeight: 600 }}>{resultText}{row.emailError && row.emailError.errorDetails ? <div style={{ fontSize: 10, color: "#9CA3AF", fontWeight: 400, marginTop: 2 }}>{row.emailError.errorDetails.map(function(e) { return e.message; }).join("; ")}</div> : null}</td><td style={{ padding: "6px 12px", color: trackerColor, fontWeight: 600, fontSize: 11 }}>{trackerLoading ? <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "#6B7280", fontWeight: 400 }}><span style={{ width: 12, height: 12, border: "2px solid #0891B2", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} /> adding…</span> : trackerText}</td></tr>;
                 })}</tbody>
               </table>
@@ -1976,7 +1976,7 @@ function WHT(props) {
                   <input value={reported} onChange={function(e) { var u = Object.assign({}, pcReported); u[rKey] = e.target.value; setPcReported(u); }} placeholder="$0.00" style={{ width: 85, padding: "5px 8px", borderRadius: 6, border: "1px solid #E5E7EB", fontSize: 12, textAlign: "right", outline: "none", background: reported ? "#FFFFFF" : "#F9FAFB", color: "#374151" }} />
                 </div>
                 <div style={{ textAlign: "right", minWidth: 85, fontSize: 12, fontWeight: 600, color: reportedUnit !== null ? (Math.abs(reportedUnit - r.Price) < 0.01 ? "#059669" : "#DC2626") : "#9CA3AF", display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 4 }}>
-                  {reportedUnit !== null ? <>{Math.abs(reportedUnit - r.Price) < 0.01 ? <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg> : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#DC2626" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>}{"$" + reportedUnit.toFixed(4)}</> : "\u2014"}
+                  {reportedUnit !== null ? <>{Math.abs(reportedUnit - r.Price) < 0.01 ? <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg> : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#DC2626" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>}{"$" + reportedUnit.toFixed(4)}</> : "—"}
                 </div>
               </div>;
             })}
@@ -2402,11 +2402,11 @@ function CycleCountTool(props) {
         };
       }).filter(function(r) { return r.productCode; });
       if (trimmed.length === 0) {
-        toast("TP-DOH file has no valid rows \u2014 make sure 'Report data' is the first sheet", "error");
+        toast("TP-DOH file has no valid rows — make sure 'Report data' is the first sheet", "error");
         setDohLoading(false); setDohFile(null); return;
       }
       if (!finalFcKey) {
-        toast("TP-DOH parsed but no 'Final FC units' column found \u2014 Daily Run Rate will be 0", "error");
+        toast("TP-DOH parsed but no 'Final FC units' column found — Daily Run Rate will be 0", "error");
       }
       setDohRows(trimmed);
       var today = new Date().toLocaleDateString();
@@ -2414,7 +2414,7 @@ function CycleCountTool(props) {
       setDohMeta(meta);
       try {
         localStorage.setItem("tpdoh-cache-v2", JSON.stringify({ rows: trimmed, savedDate: today, name: file.name }));
-        toast("TP-DOH loaded \u2014 " + trimmed.length + " items (today only)", "success");
+        toast("TP-DOH loaded — " + trimmed.length + " items (today only)", "success");
       } catch (e) {
         toast("TP-DOH loaded but failed to cache locally", "error");
       }
@@ -2537,7 +2537,7 @@ function CycleCountTool(props) {
       toast("Fetching Stock Items from Acumatica\u2026");
       var fetched = await fetchStockItems();
       if (fetched && fetched.length) { effStockRows = fetched; }
-      else { toast("Couldn't fetch Stock Items from Acumatica \u2014 check your connection and try again.", "error"); setLoading(false); return; }
+      else { toast("Couldn't fetch Stock Items from Acumatica — check your connection and try again.", "error"); setLoading(false); return; }
     }
     try {
       // Parse NDCs from pasted text — extract NDCs with dashes, skip blanks
@@ -2641,7 +2641,7 @@ function CycleCountTool(props) {
         // it can never reach the upload template.
         var uom = salesUnitMap[invId] || "";
         if (!uom) {
-          errs.push("Inventory ID " + invId + " (NDC " + ndc + ") not found in Stock Items for UOM \u2014 excluded from the adjustment sheet");
+          errs.push("Inventory ID " + invId + " (NDC " + ndc + ") not found in Stock Items for UOM — excluded from the adjustment sheet");
           return;
         }
 
@@ -2857,7 +2857,7 @@ function CycleCountTool(props) {
             <button onClick={function() { fetchVendorInventory(); }} style={{ background: "transparent", border: "1px solid " + TOOL_COLOR, color: TOOL_COLOR, cursor: "pointer", fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 6, fontFamily: "'Varela Round', sans-serif" }}>{"\u21BB"} Refresh</button>
           </div>
           {vendorRows ? <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", background: "rgba(5,150,105,0.06)", border: "1px solid rgba(5,150,105,0.2)", borderRadius: 10, fontSize: 12.5, color: "#059669", marginBottom: 8 }}>
-            <span>{"\u2713"} {vendorName || "Vendor Inventory"} \u2014 {vendorRows.length.toLocaleString()} rows loaded</span>
+            <span>{"\u2713"} {vendorName || "Vendor Inventory"} — {vendorRows.length.toLocaleString()} rows loaded</span>
             <label style={{ marginLeft: "auto", fontSize: 11, color: TOOL_COLOR, cursor: "pointer", textDecoration: "underline" }}>
               {stockLoading ? "" : "Upload CSV instead"}
               <input type="file" accept=".csv" onChange={function(e) { if (e.target.files[0]) handleVendorUpload(e.target.files[0]); }} style={{ display: "none" }} />
@@ -2907,7 +2907,7 @@ function CycleCountTool(props) {
 
           <div style={{ fontSize: 14, color: "#374151", fontWeight: 600, marginBottom: 8, marginTop: 20, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             {isSftp ? "6" : "5"}. Stock Items <span style={{ fontSize: 11, fontWeight: 500, color: "#059669", background: "rgba(5,150,105,0.1)", padding: "2px 8px", borderRadius: 10 }}>auto-fetched</span>
-            {stockMeta && <span style={{ fontSize: 12, fontWeight: 400, color: "#6B7280" }}>{"\u2014 last loaded " + stockMeta.count.toLocaleString() + " items on " + stockMeta.date}</span>}
+            {stockMeta && <span style={{ fontSize: 12, fontWeight: 400, color: "#6B7280" }}>{"— last loaded " + stockMeta.count.toLocaleString() + " items on " + stockMeta.date}</span>}
           </div>
         </div>
       </div>
@@ -3002,7 +3002,7 @@ function CycleCountTool(props) {
             var dosDisplay = r.daysOfSupply == null ? "—" : (r.daysOfSupply > 0 ? "+" : "") + r.daysOfSupply.toFixed(1);
             var dosColor = r.daysOfSupply == null ? "#DC2626" : (Math.abs(r.daysOfSupply) > 14 ? "#DC2626" : "#374151");
             return <tr key={i} style={{ background: rowBg, borderBottom: borderBottom, borderLeft: borderLeft }}>
-              {hasDoh && <td style={Object.assign({}, S.td, { textAlign: "center" })}>{r.isFlagged ? <input type="checkbox" checked={approved} onChange={function() { toggleApproval(ccApprKey(r)); }} style={{ cursor: "pointer", width: 16, height: 16 }} /> : <span style={{ color: "#D1D5DB" }}>{"\u2014"}</span>}</td>}
+              {hasDoh && <td style={Object.assign({}, S.td, { textAlign: "center" })}>{r.isFlagged ? <input type="checkbox" checked={approved} onChange={function() { toggleApproval(ccApprKey(r)); }} style={{ cursor: "pointer", width: 16, height: 16 }} /> : <span style={{ color: "#D1D5DB" }}>{"—"}</span>}</td>}
               <td style={Object.assign({}, S.td, { color: r.inventoryId.startsWith("GEN-") ? "#059669" : r.inventoryId.startsWith("UNV-") ? "#2563EB" : "#374151" })}>{r.inventoryId}</td>
               <td style={S.td}>{r.warehouse}</td>
               <td style={S.td}>{r.location}</td>
@@ -3116,7 +3116,7 @@ function POImportTool(props) {
   var NETNEW_KV = "netnew-flagged-items";
   // Price Check copy-message list: compiled from parsed POs so you can copy a Slack
   // message. Each entry: { inventoryId, ndc, description, deltaPct, addedAt }. Same
-  // structure as Net New \u2014 copy the message, then click Done to clear a row.
+  // structure as Net New — copy the message, then click Done to clear a row.
   var _pcMsg = useState([]), pcMsgList = _pcMsg[0], setPcMsgList = _pcMsg[1];
   var PCMSG_KV = "pricecheck-message-items";
   var _pcMode = useState("ndc"), pcMode = _pcMode[0], setPcMode = _pcMode[1];   // "ndc" | "mfr"
@@ -3343,9 +3343,9 @@ function POImportTool(props) {
     if (!targets.length) {
       var noWh = Object.keys(sk.noWarehouse || {});
       var unmapped = Object.keys(sk.unmappedWarehouse || {});
-      if (heldRefs.length) { toast(heldRefs.length + " PO(s) not written \u2014 not in Acumatica: " + heldRefs.join(", "), "error"); return { okCount: 0, skipped: 0, failMsg: "", heldRefs: heldRefs }; }
-      if (unmapped.length) { toast("Not added \u2014 unmapped warehouse(s): " + unmapped.join(", ") + ". Check the warehouse code.", "error"); return { okCount: 0, skipped: 0, failMsg: "unmapped warehouse", heldRefs: heldRefs }; }
-      if (noWh.length) { toast("Not added \u2014 " + noWh.length + " PO(s) had no detected warehouse: " + noWh.join(", ") + ". The store name may not be recognized.", "error"); return { okCount: 0, skipped: 0, failMsg: "no warehouse", heldRefs: heldRefs }; }
+      if (heldRefs.length) { toast(heldRefs.length + " PO(s) not written — not in Acumatica: " + heldRefs.join(", "), "error"); return { okCount: 0, skipped: 0, failMsg: "", heldRefs: heldRefs }; }
+      if (unmapped.length) { toast("Not added — unmapped warehouse(s): " + unmapped.join(", ") + ". Check the warehouse code.", "error"); return { okCount: 0, skipped: 0, failMsg: "unmapped warehouse", heldRefs: heldRefs }; }
+      if (noWh.length) { toast("Not added — " + noWh.length + " PO(s) had no detected warehouse: " + noWh.join(", ") + ". The store name may not be recognized.", "error"); return { okCount: 0, skipped: 0, failMsg: "no warehouse", heldRefs: heldRefs }; }
       toast("No lines map to a tracker tab (check the warehouse).", "error"); return { okCount: 0, skipped: 0, failMsg: "no targets", heldRefs: heldRefs };
     }
     var okCount = 0, skipped = 0, failMsg = "", tabsUsed = {}, tabErrors = [];
@@ -3355,11 +3355,11 @@ function POImportTool(props) {
       // PARTIALLY on the tab (e.g. PO Recon added some lines) still gets its
       // genuinely-new lines added. Falls back to PO-level if the tab has no NDC
       // column. If the read fails, skip THIS tab (report it) but keep going to the
-      // others \u2014 one tab's failure shouldn't block another warehouse.
+      // others — one tab's failure shouldn't block another warehouse.
       var pairSet = {}, poOnlySet = {}, lineLevel = false;
       try {
         var rr = await fetch("/api/tracker-read", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sheetId: t.sheetId, tab: t.tab, withLines: true }) });
-        if (!rr.ok) { tabErrors.push(t.tab + ": couldn't read existing rows (dedup unsafe) \u2014 not appended"); continue; }
+        if (!rr.ok) { tabErrors.push(t.tab + ": couldn't read existing rows (dedup unsafe) — not appended"); continue; }
         var rd = await rr.json();
         if (rd && Array.isArray(rd.pairs)) {
           lineLevel = true;
@@ -3367,7 +3367,7 @@ function POImportTool(props) {
         } else {
           ((rd && rd.refs) || []).forEach(function (x) { poOnlySet[String(x).trim()] = true; });
         }
-      } catch (e) { tabErrors.push(t.tab + ": couldn't read existing rows (" + String(e) + ") \u2014 not appended"); continue; }
+      } catch (e) { tabErrors.push(t.tab + ": couldn't read existing rows (" + String(e) + ") — not appended"); continue; }
       var keepRows = [], keepNdcUnf = [], keepInvId = [];
       t.rows.forEach(function (row, ri) {
         var ref = Array.isArray(row) ? String(row[6] || "").trim() : "";
@@ -3375,7 +3375,7 @@ function POImportTool(props) {
         if (lineLevel) {
           if (ref && ndcDigits && pairSet[ref + "||" + ndcDigits]) { skipped++; return; }
         } else {
-          if (ref && poOnlySet[ref]) { skipped++; return; }  // no NDC column \u2014 PO-level fallback
+          if (ref && poOnlySet[ref]) { skipped++; return; }  // no NDC column — PO-level fallback
         }
         keepRows.push(row);
         keepNdcUnf.push((t.ndcUnf || [])[ri] || "");
@@ -3390,11 +3390,11 @@ function POImportTool(props) {
       } catch (e) { tabErrors.push(t.tab + ": " + String(e)); continue; }
     }
     if (tabErrors.length) failMsg = tabErrors.join("; ");
-    var heldNote = heldRefs.length ? " \u2014 " + heldRefs.length + " PO(s) skipped (not in Acumatica: " + heldRefs.join(", ") + ")" : "";
-    if (failMsg) { toast("Tracker add failed \u2014 " + failMsg, "error"); }
+    var heldNote = heldRefs.length ? " — " + heldRefs.length + " PO(s) skipped (not in Acumatica: " + heldRefs.join(", ") + ")" : "";
+    if (failMsg) { toast("Tracker add failed — " + failMsg, "error"); }
     else if (okCount > 0) { setTrackerAdded({ count: okCount, tabs: Object.keys(tabsUsed).join(", "), at: Date.now() }); toast("Added " + okCount + " row" + (okCount === 1 ? "" : "s") + " to the tracker" + (skipped ? " (" + skipped + " already there, skipped)" : "") + heldNote + "."); }
-    else if (skipped > 0) { toast("All rows were already on the tracker \u2014 nothing to add" + heldNote + "."); }
-    else if (heldRefs.length) { toast(heldRefs.length + " PO(s) not written \u2014 not in Acumatica: " + heldRefs.join(", "), "error"); }
+    else if (skipped > 0) { toast("All rows were already on the tracker — nothing to add" + heldNote + "."); }
+    else if (heldRefs.length) { toast(heldRefs.length + " PO(s) not written — not in Acumatica: " + heldRefs.join(", "), "error"); }
     var outcome = { okCount: okCount, skipped: skipped, failMsg: failMsg, tabs: Object.keys(tabsUsed).join(", "), heldRefs: heldRefs };
     // Record tracker outcome on the batch (merging with any create info already set)
     // so the primary button locks and the result popup can report it.
@@ -3413,7 +3413,7 @@ function POImportTool(props) {
     var unmapped = (results || []).filter(function(r) { return !TRACKER_MAP[String(r.warehouse || "").trim()]; }).length;
     var heldRefs = targets.heldRefs || [];
     if (!targets.length) {
-      if (heldRefs.length) { toast(heldRefs.length + " PO(s) not shown \u2014 not in Acumatica: " + heldRefs.join(", "), "error"); return; }
+      if (heldRefs.length) { toast(heldRefs.length + " PO(s) not shown — not in Acumatica: " + heldRefs.join(", "), "error"); return; }
       toast("No lines map to a tracker tab (check the warehouse).", "error"); return;
     }
     setTrackerPreview({ targets: targets, unmapped: unmapped, heldRefs: heldRefs });
@@ -3432,7 +3432,7 @@ function POImportTool(props) {
         var pairSet = {}, poOnlySet = {}, lineLevel = false;
         try {
           var rr = await fetch("/api/tracker-read", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sheetId: t.sheetId, tab: t.tab, withLines: true }) });
-          if (!rr.ok) { tabErrors.push(t.tab + ": couldn't read existing rows (dedup unsafe) \u2014 not appended"); continue; }
+          if (!rr.ok) { tabErrors.push(t.tab + ": couldn't read existing rows (dedup unsafe) — not appended"); continue; }
           var rd = await rr.json();
           if (rd && Array.isArray(rd.pairs)) {
             lineLevel = true;
@@ -3440,7 +3440,7 @@ function POImportTool(props) {
           } else {
             ((rd && rd.refs) || []).forEach(function (x) { poOnlySet[String(x).trim()] = true; });
           }
-        } catch (e) { tabErrors.push(t.tab + ": couldn't read existing rows (" + String(e) + ") \u2014 not appended"); continue; }
+        } catch (e) { tabErrors.push(t.tab + ": couldn't read existing rows (" + String(e) + ") — not appended"); continue; }
         var keepRows = [], keepNdcUnf = [], keepInvId = [];
         t.rows.forEach(function (row, ri) {
           var ref = Array.isArray(row) ? String(row[6] || "").trim() : "";
@@ -3462,12 +3462,12 @@ function POImportTool(props) {
       }
       if (tabErrors.length) failMsg = tabErrors.join("; ");
       var held = (trackerPreview.heldRefs || []);
-      var heldNote = held.length ? " \u2014 " + held.length + " PO(s) skipped (not in Acumatica: " + held.join(", ") + ")" : "";
-      if (failMsg) toast("Tracker add failed \u2014 " + failMsg, "error");
+      var heldNote = held.length ? " — " + held.length + " PO(s) skipped (not in Acumatica: " + held.join(", ") + ")" : "";
+      if (failMsg) toast("Tracker add failed — " + failMsg, "error");
       else {
         var tabNames = trackerPreview.targets.map(function(t) { return t.tab; }).join(", ");
         if (okCount > 0) toast("Added " + okCount + " row" + (okCount === 1 ? "" : "s") + " to the tracker" + (skipped ? " (" + skipped + " already there, skipped)" : "") + heldNote + ".");
-        else toast("All rows were already on the tracker \u2014 nothing to add" + heldNote + ".");
+        else toast("All rows were already on the tracker — nothing to add" + heldNote + ".");
         setTrackerAdded({ count: okCount, tabs: tabNames, at: Date.now() });
         setTrackerPreview(null);
         setAcuCreateResult(null);
@@ -3511,7 +3511,7 @@ function POImportTool(props) {
   // Price Check message list helpers (mirror Net New).
   function savePcMsg(list) { setPcMsgList(list); kvPost(PCMSG_KV, list).catch(function() {}); }
   function removePcMsg(key) {
-    var next = (pcMsgList || []).filter(function(x) { return (x.inventoryId + "|" + x.ndc) !== key; });
+    var next = (pcMsgList || []).filter(function(x) { return ((x.poNumber||"") + "|" + x.inventoryId + "|" + x.ndc) !== key; });
     savePcMsg(next);
   }
   function updateFlagThreshold(v) {
@@ -3995,14 +3995,14 @@ function POImportTool(props) {
       }
 
       setResults(matched);
-      // Compile parsed items into the Price Check copy-message list \u2014 ONLY items whose
+      // Compile parsed items into the Price Check copy-message list — ONLY items whose
       // \u0394% unit cost is at/above the threshold (same flag the Translator table uses).
       // \u0394% is computed exactly like the table: avg cost is per base unit, so scale it
       // up to the PO's UOM (avgPerPkg = avgCost \u00D7 uomConvFactor) and compare to the
       // parsed unit price. Merge + dedup by inventoryId|ndc.
       (function() {
         var existing = (pcMsgList || []).slice();
-        var seen = {}; existing.forEach(function(x) { seen[x.inventoryId + "|" + x.ndc] = true; });
+        var seen = {}; existing.forEach(function(x) { seen[(x.poNumber||"") + "|" + x.inventoryId + "|" + x.ndc] = true; });
         var now = Date.now(), added = false;
         matched.forEach(function(r) {
           if (!r.inventoryId || !r.ndc) return;
@@ -4011,7 +4011,7 @@ function POImportTool(props) {
           var price = r.unitPrice;
           var pct = (avgPerPkg != null && avgPerPkg > 0 && price) ? ((price - avgPerPkg) / avgPerPkg) * 100 : null;
           if (pct == null || pct < flagThreshold) return;   // only over-threshold items
-          var key = r.inventoryId + "|" + r.ndc;
+          var key = (r.poNumber||"") + "|" + r.inventoryId + "|" + r.ndc;
           if (seen[key]) return;
           existing.push({ inventoryId: r.inventoryId, ndc: r.ndc, description: r.acumaticaDesc || r.drugName || "", deltaPct: Math.round(pct * 10) / 10, poNumber: r.poNumber || "", warehouse: r.warehouse || "", addedAt: now });
           seen[key] = true; added = true;
@@ -4043,7 +4043,7 @@ function POImportTool(props) {
             var next = (netNewList || []).concat(added);
             saveNetNew(next);
             setNetNewFlash({ items: added, at: Date.now() });
-            toast(added.length + " net-new item" + (added.length === 1 ? "" : "s") + " flagged \u2014 see the Net New tab", "success");
+            toast(added.length + " net-new item" + (added.length === 1 ? "" : "s") + " flagged — see the Net New tab", "success");
           }
         } catch (e) { /* non-blocking: net-new check failure never breaks parsing */ }
       })();
@@ -4210,7 +4210,7 @@ function POImportTool(props) {
       var noUom = lines.filter(function(l) { return !l.uom; });
       var badQty = lines.find(function(l) { return !(Number(l.orderQty) > 0); });
       if (noUom.length) {
-        blocked.push({ file: fileKey, reason: "Missing UOM in Acumatica for: " + noUom.map(function(l) { return l.inventoryId || l.alternateId || "?"; }).join(", ") + " \u2014 set the item's purchasing UOM in Acumatica, then re-run." });
+        blocked.push({ file: fileKey, reason: "Missing UOM in Acumatica for: " + noUom.map(function(l) { return l.inventoryId || l.alternateId || "?"; }).join(", ") + " — set the item's purchasing UOM in Acumatica, then re-run." });
         return;
       }
       if (badQty) {
@@ -4238,10 +4238,10 @@ function POImportTool(props) {
     var built = buildAcumaticaPOs();
     if (built.pos.length === 0) {
       if (built.blocked.length > 0) {
-        toast("Cannot create any POs. " + built.blocked.length + " blocked \u2014 see below", "error");
+        toast("Cannot create any POs. " + built.blocked.length + " blocked — see below", "error");
         setAcuCreateConfirm({ pos: [], blocked: built.blocked });
       } else {
-        toast("Nothing to create \u2014 no parsed results", "error");
+        toast("Nothing to create — no parsed results", "error");
       }
       return;
     }
@@ -4279,15 +4279,15 @@ function POImportTool(props) {
         var chk = await chkResp.json();
         if (!chk.ok) {
           progStep("verify", "failed", "Couldn't verify against Acumatica");
-          setAcuCreateResult({ data: { ok: false, stage: "precheck-failed", failure: { stage: "precheck", errorDetails: [{ message: "Could not verify against Acumatica before creating (" + (chk.stage || "unknown") + "). Nothing was created \u2014 try again." }] }, succeeded: [] }, requested: posToCreate });
-          toast("Couldn't verify against Acumatica \u2014 nothing created", "error");
+          setAcuCreateResult({ data: { ok: false, stage: "precheck-failed", failure: { stage: "precheck", errorDetails: [{ message: "Could not verify against Acumatica before creating (" + (chk.stage || "unknown") + "). Nothing was created — try again." }] }, succeeded: [] }, requested: posToCreate });
+          toast("Couldn't verify against Acumatica — nothing created", "error");
           setAcuCreateLoading(false);
           return;
         }
         if (chk.existing && chk.existing.length) {
-          progStep("verify", "failed", chk.existingRefs.length + " already in Acumatica \u2014 batch blocked");
+          progStep("verify", "failed", chk.existingRefs.length + " already in Acumatica — batch blocked");
           setAcuCreateResult({ data: { ok: false, stage: "already-exists", alreadyExists: chk.existing, succeeded: [] }, requested: posToCreate });
-          toast(chk.existingRefs.length + " PO(s) already in Acumatica \u2014 batch blocked, nothing created", "error");
+          toast(chk.existingRefs.length + " PO(s) already in Acumatica — batch blocked, nothing created", "error");
           setAcuCreateLoading(false);
           return;
         }
@@ -4295,7 +4295,7 @@ function POImportTool(props) {
     } catch (err) {
       progStep("verify", "failed", "Pre-create check errored");
       setAcuCreateResult({ data: { ok: false, stage: "precheck-error", failure: { stage: "precheck", errorDetails: [{ message: "Pre-create check errored: " + String(err) + ". Nothing was created." }] }, succeeded: [] }, requested: posToCreate });
-      toast("Pre-create check failed \u2014 nothing created", "error");
+      toast("Pre-create check failed — nothing created", "error");
       setAcuCreateLoading(false);
       return;
     }
@@ -4324,7 +4324,7 @@ function POImportTool(props) {
       var data = await resp.json();
       // Always open the result dialog and leave it open until the user closes it.
       // It carries the new Acumatica PO number, the line-by-line NDC confirmation,
-      // and (for GGM) the dummy-cleanup result \u2014 worth keeping visible.
+      // and (for GGM) the dummy-cleanup result — worth keeping visible.
       setAcuCreateResult({ data: data, requested: posToCreate });
       if (data.ok) {
         progStep("create", "done", (data.succeeded ? data.succeeded.length : 0) + " PO(s) created");
@@ -4335,13 +4335,13 @@ function POImportTool(props) {
         toast("Created " + (data.succeeded ? data.succeeded.length : 0) + " PO(s) in Acumatica", "success");
       } else {
         var succ = data.succeeded ? data.succeeded.length : 0;
-        progStep("create", "failed", succ + "/" + posToCreate.length + " created \u2014 stopped on failure");
-        toast(succ + "/" + posToCreate.length + " created \u2014 stopped on failure (see results)", "error");
+        progStep("create", "failed", succ + "/" + posToCreate.length + " created — stopped on failure");
+        toast(succ + "/" + posToCreate.length + " created — stopped on failure (see results)", "error");
       }
     } catch (err) {
       progStep("create", "failed", "Network error");
       setAcuCreateResult({ data: { ok: false, stage: "fetch-error", failure: { stage: "fetch", errorDetails: [{ message: String(err) }] }, succeeded: [] }, requested: posToCreate });
-      toast("Network error \u2014 see results", "error");
+      toast("Network error — see results", "error");
     } finally {
       setAcuCreateLoading(false);
     }
@@ -4402,13 +4402,13 @@ function POImportTool(props) {
       var rs = (ddata && ddata.results) || [];
       var del = rs.filter(function(r) { return r.deleted; }).length;
       var prob = rs.length - del;
-      // "not-found" means there was simply no dummy to delete (e.g. a re-run) \u2014
+      // "not-found" means there was simply no dummy to delete (e.g. a re-run) —
       // that's benign and shouldn't be treated as a problem that keeps the dialog
       // open. A real problem is a found-but-failed or ambiguous delete.
       var realProblem = rs.some(function(r) { return !r.deleted && r.reason !== "not-found"; });
       if (del > 0 && prob === 0) toast("Deleted " + del + " dummy PO(s)", "success");
       else if (del > 0) toast("Deleted " + del + " dummy PO(s), " + prob + " need attention", "error");
-      else if (realProblem) toast("Dummy PO not deleted \u2014 see results", "error");
+      else if (realProblem) toast("Dummy PO not deleted — see results", "error");
       // (no toast when simply nothing to delete; the create toast already covers success)
       // Best-effort: check off the deleted dummy in the PO Tool's Shipping tab
       // for that warehouse. Non-fatal if it can't (the delete already succeeded).
@@ -4519,13 +4519,13 @@ function POImportTool(props) {
         {pcResult && <div style={S.card}>
           <div style={{ marginBottom: 16 }}>
             <div style={{ fontSize: 18, fontWeight: 700, color: TOOL_COLOR }}>{pcResult.inventoryId}</div>
-            <div style={{ fontSize: 14, color: "#1F2937", marginTop: 2 }}>{pcResult.description || "\u2014"}</div>
-            <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 2 }}>{"NDC " + pcResult.ndc + "  \u00B7  UOM " + (pcResult.uom || "\u2014") + (pcResult.convFactor ? "  \u00B7  " + pcResult.convFactor + " per pkg" : "")}</div>
+            <div style={{ fontSize: 14, color: "#1F2937", marginTop: 2 }}>{pcResult.description || "—"}</div>
+            <div style={{ fontSize: 12, color: "#9CA3AF", marginTop: 2 }}>{"NDC " + pcResult.ndc + "  \u00B7  UOM " + (pcResult.uom || "—") + (pcResult.convFactor ? "  \u00B7  " + pcResult.convFactor + " per pkg" : "")}</div>
           </div>
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
             <div style={{ flex: 1, minWidth: 180, background: "#F8F9FB", borderRadius: 8, padding: "12px 16px" }}>
               <div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>Our avg cost / unit</div>
-              <div style={{ fontSize: 22, fontWeight: 700, color: "#1F2937", marginTop: 4 }}>{pcResult.avgCost != null ? "$" + pcResult.avgCost.toFixed(4) : "\u2014"}</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: "#1F2937", marginTop: 4 }}>{pcResult.avgCost != null ? "$" + pcResult.avgCost.toFixed(4) : "—"}</div>
             </div>
             {pcResult.avgCost != null && pcResult.convFactor && <div style={{ flex: 1, minWidth: 180, background: "#F8F9FB", borderRadius: 8, padding: "12px 16px" }}>
               <div style={{ fontSize: 11, color: "#6B7280", textTransform: "uppercase", fontWeight: 600 }}>{"Our avg cost / " + (pcResult.uom || "pkg")}</div>
@@ -4553,7 +4553,7 @@ function POImportTool(props) {
         {/* Parsed-PO copy message: Inventory ID / NDC / Description / % Unit Cost */}
         <div style={{ marginTop: 24 }}>
           <div style={{ fontSize: 15, fontWeight: 700, color: "#1F2937", marginBottom: 6 }}>Parsed PO message</div>
-          <p style={{ color: "#6B7280", fontSize: 13, marginBottom: 16 }}>Auto-compiled from parsed POs \u2014 only items <strong>at or above the \u0394% Unit Cost Threshold</strong>. Copy the whole message, paste it where you need it, then click <strong>Done</strong> on each row once it's handled.</p>
+          <p style={{ color: "#6B7280", fontSize: 13, marginBottom: 16 }}>Auto-compiled from parsed POs — only items <strong>at or above the \u0394% Unit Cost Threshold</strong>. Copy the whole message, paste it where you need it, then click <strong>Done</strong> on each row once it's handled.</p>
           {(!pcMsgList || pcMsgList.length === 0) ? (
             <div style={{ padding: "32px 16px", textAlign: "center", color: "#9CA3AF", fontSize: 14, border: "1px dashed #E5E7EB", borderRadius: 10 }}>No parsed items yet. Parse a PO in the PO Translator and the lines show up here.</div>
           ) : (function() {
@@ -4587,15 +4587,15 @@ function POImportTool(props) {
                   <tbody>
                     {sorted.map(function(it) {
                       var dColor = it.deltaPct == null ? "#9CA3AF" : (it.deltaPct > 0 ? "#DC2626" : (it.deltaPct < 0 ? "#059669" : "#6B7280"));
-                      return <tr key={it.inventoryId + "|" + it.ndc}>
+                      return <tr key={(it.poNumber||"") + "|" + it.inventoryId + "|" + it.ndc}>
                         <td style={Object.assign({}, td, { fontWeight: 600, whiteSpace: "nowrap" })}>{it.inventoryId}</td>
-                        <td style={Object.assign({}, td, { whiteSpace: "nowrap" })}>{it.poNumber || "\u2014"}</td>
-                        <td style={Object.assign({}, td, { whiteSpace: "nowrap" })}>{it.warehouse || "\u2014"}</td>
-                        <td style={Object.assign({}, td, { fontFamily: "monospace", whiteSpace: "nowrap" })}>{it.ndc || "\u2014"}</td>
-                        <td style={td}>{it.description || "\u2014"}</td>
-                        <td style={Object.assign({}, td, { textAlign: "right", whiteSpace: "nowrap", color: dColor, fontWeight: 600 })}>{it.deltaPct == null ? "\u2014" : (it.deltaPct > 0 ? "+" : "") + it.deltaPct + "%"}</td>
+                        <td style={Object.assign({}, td, { whiteSpace: "nowrap" })}>{it.poNumber || "—"}</td>
+                        <td style={Object.assign({}, td, { whiteSpace: "nowrap" })}>{it.warehouse || "—"}</td>
+                        <td style={Object.assign({}, td, { fontFamily: "monospace", whiteSpace: "nowrap" })}>{it.ndc || "—"}</td>
+                        <td style={td}>{it.description || "—"}</td>
+                        <td style={Object.assign({}, td, { textAlign: "right", whiteSpace: "nowrap", color: dColor, fontWeight: 600 })}>{it.deltaPct == null ? "—" : (it.deltaPct > 0 ? "+" : "") + it.deltaPct + "%"}</td>
                         <td style={Object.assign({}, td, { textAlign: "right", whiteSpace: "nowrap" })}>
-                          <button onClick={function() { removePcMsg(it.inventoryId + "|" + it.ndc); toast("Cleared " + it.inventoryId, "success"); }} style={{ padding: "5px 14px", borderRadius: 6, border: "1px solid #059669", background: "#059669", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Done</button>
+                          <button onClick={function() { removePcMsg((it.poNumber||"") + "|" + it.inventoryId + "|" + it.ndc); toast("Cleared " + it.inventoryId, "success"); }} style={{ padding: "5px 14px", borderRadius: 6, border: "1px solid #059669", background: "#059669", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Done</button>
                         </td>
                       </tr>;
                     })}
@@ -4615,7 +4615,7 @@ function POImportTool(props) {
           var sorted = netNewList.slice().sort(function(a, b) { return (b.addedAt || 0) - (a.addedAt || 0); });
           // Tab-separated rows (a header row + one row per item). Slack detects
           // tab-delimited text with newlines on paste and offers to render it as a
-          // table attachment \u2014 the same behavior as pasting from Google Sheets.
+          // table attachment — the same behavior as pasting from Google Sheets.
           var combinedMsg = ["Inventory ID\tNDC\tDescription"].concat(sorted.map(function(it) {
             return it.inventoryId + "\t" + (it.ndc || "") + "\t" + (it.description || "");
           })).join("\n");
@@ -4624,7 +4624,7 @@ function POImportTool(props) {
           return <div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, padding: "10px 14px", background: "#F0F9FF", border: "1px solid #BAE6FD", borderRadius: 10 }}>
               <span style={{ fontSize: 13, color: "#0C4A6E", fontWeight: 600 }}>{sorted.length} item{sorted.length === 1 ? "" : "s"} in this message</span>
-              <button onClick={function() { if (navigator.clipboard) { navigator.clipboard.writeText(combinedMsg).then(function() { toast("Message copied \u2014 paste into Slack", "success"); }).catch(function() { toast("Copy failed", "error"); }); } }} style={{ padding: "8px 20px", borderRadius: 6, border: "1px solid " + TOOL_COLOR, background: TOOL_COLOR, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Copy message</button>
+              <button onClick={function() { if (navigator.clipboard) { navigator.clipboard.writeText(combinedMsg).then(function() { toast("Message copied — paste into Slack", "success"); }).catch(function() { toast("Copy failed", "error"); }); } }} style={{ padding: "8px 20px", borderRadius: 6, border: "1px solid " + TOOL_COLOR, background: TOOL_COLOR, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Copy message</button>
             </div>
             <div style={{ border: "1px solid #E5E7EB", borderRadius: 10, overflow: "hidden" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff" }}>
@@ -4638,8 +4638,8 @@ function POImportTool(props) {
                   {sorted.map(function(it) {
                     return <tr key={it.inventoryId}>
                       <td style={Object.assign({}, td, { fontWeight: 600, whiteSpace: "nowrap" })}>{it.inventoryId}</td>
-                      <td style={Object.assign({}, td, { fontFamily: "monospace", whiteSpace: "nowrap" })}>{it.ndc || "\u2014"}</td>
-                      <td style={td}>{it.description || "\u2014"}</td>
+                      <td style={Object.assign({}, td, { fontFamily: "monospace", whiteSpace: "nowrap" })}>{it.ndc || "—"}</td>
+                      <td style={td}>{it.description || "—"}</td>
                       <td style={Object.assign({}, td, { textAlign: "right", whiteSpace: "nowrap" })}>
                         <button onClick={function() { removeNetNew(it.inventoryId); toast("Cleared " + it.inventoryId, "success"); }} style={{ padding: "5px 14px", borderRadius: 6, border: "1px solid #059669", background: "#059669", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Done</button>
                       </td>
@@ -4754,11 +4754,11 @@ function POImportTool(props) {
           if (poStatusBusy) return <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 8, padding: "10px 16px", marginBottom: 16, fontSize: 13, color: "#6B7280" }}><Spinner size={14} /> Checking tracker and Acumatica…</div>;
           var ov = poStatus.overall;
           var meta = {
-            "new":          { bg: "#EFF6FF", bd: "#BFDBFE", fg: "#1D4ED8", icon: "\u2705", text: "New \u2014 not in Acumatica or on the tracker. Ready to create." },
-            "acu-only":     { bg: "#FFFBEB", bd: "#FDE68A", fg: "#B45309", icon: "\uD83D\uDCCB", text: "Already in Acumatica, not on the tracker. Add to tracker only \u2014 create is skipped." },
-            "tracker-only": { bg: "#FFFBEB", bd: "#FDE68A", fg: "#B45309", icon: "\uD83D\uDCC1", text: "On the tracker, not in Acumatica. Create in Acumatica only \u2014 tracker add is skipped." },
-            "synced":       { bg: "#ECFDF5", bd: "#A7F3D0", fg: "#047857", icon: "\u2714\uFE0F", text: "Fully synced \u2014 already in Acumatica and on the tracker. Nothing to do." },
-            "mixed":        { bg: "#FFFBEB", bd: "#FDE68A", fg: "#B45309", icon: "\u26A0", text: "Mixed \u2014 these POs are in different states. See per-PO detail below; use Advanced to act selectively." }
+            "new":          { bg: "#EFF6FF", bd: "#BFDBFE", fg: "#1D4ED8", icon: "\u2705", text: "New — not in Acumatica or on the tracker. Ready to create." },
+            "acu-only":     { bg: "#FFFBEB", bd: "#FDE68A", fg: "#B45309", icon: "\uD83D\uDCCB", text: "Already in Acumatica, not on the tracker. Add to tracker only — create is skipped." },
+            "tracker-only": { bg: "#FFFBEB", bd: "#FDE68A", fg: "#B45309", icon: "\uD83D\uDCC1", text: "On the tracker, not in Acumatica. Create in Acumatica only — tracker add is skipped." },
+            "synced":       { bg: "#ECFDF5", bd: "#A7F3D0", fg: "#047857", icon: "\u2714\uFE0F", text: "Fully synced — already in Acumatica and on the tracker. Nothing to do." },
+            "mixed":        { bg: "#FFFBEB", bd: "#FDE68A", fg: "#B45309", icon: "\u26A0", text: "Mixed — these POs are in different states. See per-PO detail below; use Advanced to act selectively." }
           }[ov] || { bg: "#F9FAFB", bd: "#E5E7EB", fg: "#374151", icon: "", text: "" };
           return <div style={{ background: meta.bg, border: "1px solid " + meta.bd, borderRadius: 8, padding: "10px 16px", marginBottom: 16 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -4768,10 +4768,10 @@ function POImportTool(props) {
             {(ov === "mixed") && <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 3 }}>
               {poStatus.perPo.map(function(p, i) {
                 var label = p.state === "synced" ? "in Acumatica " + (p.acu && p.acu.orderNbr ? "(" + p.acu.orderNbr + ") " : "") + "+ on tracker" : p.state === "acu-only" ? "in Acumatica " + (p.acu && p.acu.orderNbr ? "(" + p.acu.orderNbr + ") " : "") + "only" : p.state === "tracker-only" ? "on tracker only" : "new";
-                return <div key={i} style={{ fontSize: 11, color: "#78350F" }}><span style={{ fontFamily: "monospace", fontWeight: 600 }}>{p.po}</span>{" \u2014 " + label}</div>;
+                return <div key={i} style={{ fontSize: 11, color: "#78350F" }}><span style={{ fontFamily: "monospace", fontWeight: 600 }}>{p.po}</span>{" — " + label}</div>;
               })}
             </div>}
-            {(poStatus.acuCheckFailed || poStatus.trackerReadFailed) && <div style={{ marginTop: 6, fontSize: 11, color: "#92400E" }}>{"Note: could not fully verify " + [poStatus.acuCheckFailed ? "Acumatica" : null, poStatus.trackerReadFailed ? "tracker" : null].filter(Boolean).join(" and ") + " \u2014 status may be incomplete."}</div>}
+            {(poStatus.acuCheckFailed || poStatus.trackerReadFailed) && <div style={{ marginTop: 6, fontSize: 11, color: "#92400E" }}>{"Note: could not fully verify " + [poStatus.acuCheckFailed ? "Acumatica" : null, poStatus.trackerReadFailed ? "tracker" : null].filter(Boolean).join(" and ") + " — status may be incomplete."}</div>}
           </div>;
         })()}
 
@@ -4795,28 +4795,28 @@ function POImportTool(props) {
                   primary = { label: acuCreateLoading ? "Creating\u2026" : "Checking\u2026", disabled: true, spin: true, fn: function(){} };
                 } else if (!poStatus) {
                   primary = didCreate
-                    ? { label: "\u2713 Done", disabled: true, fn: function(){}, title: "Completed this batch \u2014 Clear or re-parse to run again" }
+                    ? { label: "\u2713 Done", disabled: true, fn: function(){}, title: "Completed this batch — Clear or re-parse to run again" }
                     : { label: "\u2192 Create PO + add to tracker", disabled: !ok, fn: onCreatePOsClick, title: !ok ? "Acumatica credentials required" : "" };
                 } else if (ov === "new") {
                   // Needs create (+ auto tracker). Locks once created.
                   primary = didCreate
-                    ? { label: "\u2713 Created + added", disabled: true, fn: function(){}, title: "Created in Acumatica and added to tracker \u2014 Clear or re-parse to run again" }
+                    ? { label: "\u2713 Created + added", disabled: true, fn: function(){}, title: "Created in Acumatica and added to tracker — Clear or re-parse to run again" }
                     : { label: "\u2192 Create PO + add to tracker", disabled: !ok, fn: onCreatePOsClick, title: !ok ? "Acumatica credentials required" : "Create in Acumatica, then add to the tracker" };
                 } else if (ov === "acu-only") {
                   // Already in Acumatica; action is tracker-add only. Locks once tracked.
                   primary = didTracker
-                    ? { label: "\u2713 Added to tracker", disabled: true, fn: function(){}, title: "Added to the receiving tracker \u2014 Clear or re-parse to run again" }
-                    : { label: "\u2192 Add to tracker", disabled: false, fn: function() { addToTracker(allowRefsFromState()).then(function() { setAcuCreateResult({ data: { ok: true, succeeded: [], trackerOnly: true }, requested: [] }); }); }, title: "Already in Acumatica \u2014 just add to the receiving tracker" };
+                    ? { label: "\u2713 Added to tracker", disabled: true, fn: function(){}, title: "Added to the receiving tracker — Clear or re-parse to run again" }
+                    : { label: "\u2192 Add to tracker", disabled: false, fn: function() { addToTracker(allowRefsFromState()).then(function() { setAcuCreateResult({ data: { ok: true, succeeded: [], trackerOnly: true }, requested: [] }); }); }, title: "Already in Acumatica — just add to the receiving tracker" };
                 } else if (ov === "tracker-only") {
                   // Already on tracker; action is create only. Locks once created.
                   primary = didCreate
-                    ? { label: "\u2713 Created", disabled: true, fn: function(){}, title: "Created in Acumatica \u2014 Clear or re-parse to run again" }
-                    : { label: "\u2192 Create PO in Acumatica", disabled: !ok, fn: onCreatePOsClick, title: !ok ? "Acumatica credentials required" : "Already on the tracker \u2014 just create in Acumatica" };
+                    ? { label: "\u2713 Created", disabled: true, fn: function(){}, title: "Created in Acumatica — Clear or re-parse to run again" }
+                    : { label: "\u2192 Create PO in Acumatica", disabled: !ok, fn: onCreatePOsClick, title: !ok ? "Acumatica credentials required" : "Already on the tracker — just create in Acumatica" };
                 } else if (ov === "synced") {
                   primary = { label: "\u2713 Already complete", disabled: true, fn: function(){}, title: "This PO is already in Acumatica and on the tracker" };
                 } else { // mixed
                   primary = (didCreate || didTracker)
-                    ? { label: "\u2713 Done", disabled: true, fn: function(){}, title: "Completed this batch \u2014 Clear or re-parse to run again" }
+                    ? { label: "\u2713 Done", disabled: true, fn: function(){}, title: "Completed this batch — Clear or re-parse to run again" }
                     : { label: "\u2192 Create + add where needed", disabled: !ok, fn: onCreatePOsClick, title: "Acts per-PO; already-existing ones are skipped" };
                 }
                 var lockCreate = didCreate; // for the Advanced "create only" item
@@ -4857,13 +4857,13 @@ function POImportTool(props) {
               return <tr key={i} style={{ background: (qtyChanged || priceChanged) ? "rgba(245,158,11,0.06)" : (r.ndcFound ? "transparent" : "rgba(239,68,68,0.04)") }}>
                 <td style={Object.assign({}, S.td, { padding: "11px 10px" })}><span style={S.badge(r.ndcFound ? "success" : "danger")}>{r.ndcFound ? <><IconCheck /> Match</> : <><IconAlert /> Missing</>}</span></td>
                 <td style={Object.assign({}, S.td, { padding: "11px 10px", whiteSpace: "nowrap", fontFamily: "monospace", fontSize: 12 })}>{r.ndc}</td>
-                <td style={Object.assign({}, S.td, { padding: "11px 10px", whiteSpace: "nowrap", fontFamily: "monospace", fontSize: 12, color: r.inventoryId ? "#059669" : "#9CA3AF" })}>{r.inventoryId || "\u2014"}</td>
-                <td style={Object.assign({}, S.td, { padding: "11px 10px", minWidth: 150, wordBreak: "normal", overflowWrap: "break-word" })}>{r.acumaticaDesc || "\u2014"}</td>
-                <td style={Object.assign({}, S.td, { padding: "11px 10px", whiteSpace: "nowrap", color: r.uom ? "#06B6D4" : "#9CA3AF" })}>{r.uom || "\u2014"}</td>
-                <td style={Object.assign({}, S.td, { padding: "11px 10px", color: "#6B7280", minWidth: 150, wordBreak: "normal", overflowWrap: "break-word" })}>{r.drugName || "\u2014"}</td>
+                <td style={Object.assign({}, S.td, { padding: "11px 10px", whiteSpace: "nowrap", fontFamily: "monospace", fontSize: 12, color: r.inventoryId ? "#059669" : "#9CA3AF" })}>{r.inventoryId || "—"}</td>
+                <td style={Object.assign({}, S.td, { padding: "11px 10px", minWidth: 150, wordBreak: "normal", overflowWrap: "break-word" })}>{r.acumaticaDesc || "—"}</td>
+                <td style={Object.assign({}, S.td, { padding: "11px 10px", whiteSpace: "nowrap", color: r.uom ? "#06B6D4" : "#9CA3AF" })}>{r.uom || "—"}</td>
+                <td style={Object.assign({}, S.td, { padding: "11px 10px", color: "#6B7280", minWidth: 150, wordBreak: "normal", overflowWrap: "break-word" })}>{r.drugName || "—"}</td>
                 <td style={Object.assign({}, S.td, { padding: "8px 8px", textAlign: "center" })}><input style={Object.assign({}, S.inp, { width: 64, padding: "6px 8px", textAlign: "center", color: qtyChanged ? "#D97706" : "#374151", background: qtyChanged ? "rgba(245,158,11,0.1)" : "#F8F9FB" })} type="number" value={screenshotQtys[r.ndc] != null ? screenshotQtys[r.ndc] : (r.qty || "")} onChange={function(e) { var updated = Object.assign({}, screenshotQtys); updated[r.ndc] = e.target.value; setScreenshotQtys(updated); }} /></td>
                 <td style={Object.assign({}, S.td, { padding: "8px 8px", textAlign: "right" })}><input style={Object.assign({}, S.inp, { width: 82, padding: "6px 8px", textAlign: "right", color: priceChanged ? "#D97706" : "#059669", background: priceChanged ? "rgba(245,158,11,0.1)" : "#F8F9FB" })} type="number" step="0.01" value={editedPrices[r.ndc] != null ? editedPrices[r.ndc] : (r.unitPrice || "")} onChange={function(e) { var updated = Object.assign({}, editedPrices); updated[r.ndc] = e.target.value; setEditedPrices(updated); }} /></td>
-                <td style={Object.assign({}, S.td, { padding: "11px 10px", textAlign: "right", whiteSpace: "nowrap" })}>{extCost ? "$" + extCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "\u2014"}</td>
+                <td style={Object.assign({}, S.td, { padding: "11px 10px", textAlign: "right", whiteSpace: "nowrap" })}>{extCost ? "$" + extCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "—"}</td>
                 {(function() {
                   var hasAvg = r.avgCost != null && r.avgCost > 0;
                   // Scale avg cost (per base unit, e.g. per tablet) up to PO UOM (e.g. per BT100)
@@ -4875,9 +4875,9 @@ function POImportTool(props) {
                     ? Object.assign({}, S.td, { textAlign: "center", padding: "8px 10px" })
                     : Object.assign({}, S.td, { padding: "11px 10px", textAlign: "right", color: pctColor, fontWeight: pct != null && pct >= 20 ? 600 : 400 });
                   return <>
-                    <td style={Object.assign({}, S.td, { padding: "11px 10px", textAlign: "right", whiteSpace: "nowrap", color: hasAvg ? "#374151" : "#9CA3AF" })}>{avgPerPkg != null ? "$" + avgPerPkg.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 }) : "\u2014"}</td>
+                    <td style={Object.assign({}, S.td, { padding: "11px 10px", textAlign: "right", whiteSpace: "nowrap", color: hasAvg ? "#374151" : "#9CA3AF" })}>{avgPerPkg != null ? "$" + avgPerPkg.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 }) : "—"}</td>
                     <td style={pctTdStyle}>
-                      {pct == null ? <span style={{ color: "#9CA3AF" }}>{"\u2014"}</span>
+                      {pct == null ? <span style={{ color: "#9CA3AF" }}>{"—"}</span>
                         : isFlag ? <span style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "#DC2626", color: "#FFFFFF", padding: "4px 10px", borderRadius: 999, fontSize: 12, fontWeight: 700, letterSpacing: 0.3, boxShadow: "0 1px 2px rgba(220,38,38,0.3)" }}>{"\u26A0 +" + pct.toFixed(1) + "%"}</span>
                         : <span style={{ color: pctColor, fontWeight: pct >= 20 ? 600 : 400 }}>{(pct > 0 ? "+" : "") + pct.toFixed(1) + "%"}</span>}
                     </td>
@@ -4959,7 +4959,7 @@ function POImportTool(props) {
         var trackerOnly = data.trackerOnly === true;
         return <div onClick={function() { setAcuCreateResult(null); setDummyDelete(null); setCreateProgress(null); }} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
           <div onClick={function(e) { e.stopPropagation(); }} style={{ background: "#FFFFFF", borderRadius: 8, padding: 24, width: "min(720px, 92vw)", maxHeight: "85vh", overflow: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.2)" }}>
-            <div style={{ fontSize: 18, fontWeight: 700, color: (allOk || trackerOnly) ? "#047857" : "#DC2626", marginBottom: 8 }}>{trackerOnly ? "\u2713 Tracker updated" : allOk ? "\u2713 All POs created" : alreadyExists ? "\u26A0 Already in Acumatica \u2014 nothing created" : "\u26A0 Stopped on failure"}</div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: (allOk || trackerOnly) ? "#047857" : "#DC2626", marginBottom: 8 }}>{trackerOnly ? "\u2713 Tracker updated" : allOk ? "\u2713 All POs created" : alreadyExists ? "\u26A0 Already in Acumatica — nothing created" : "\u26A0 Stopped on failure"}</div>
             {!alreadyExists && !trackerOnly && <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 16 }}>{succeeded.length} created, {failure ? "1 failed" : "0 failed"}{notAttempted.length > 0 ? ", " + notAttempted.length + " not attempted" : ""}</div>}
 
             {renderProgressSteps(TOOL_COLOR)}
@@ -5045,8 +5045,8 @@ function POImportTool(props) {
                     </tr></thead>
                     <tbody>{lr.map(function(l, li) {
                       return <tr key={li} style={{ borderBottom: li < lr.length - 1 ? "1px solid #F9FAFB" : "none" }}>
-                        <td style={{ padding: "4px 10px", color: "#374151", fontFamily: "monospace" }}>{l.inventoryID || "\u2014"}</td>
-                        <td style={{ padding: "4px 10px", color: "#374151", fontFamily: "monospace" }}>{l.alternateID || "\u2014"}</td>
+                        <td style={{ padding: "4px 10px", color: "#374151", fontFamily: "monospace" }}>{l.inventoryID || "—"}</td>
+                        <td style={{ padding: "4px 10px", color: "#374151", fontFamily: "monospace" }}>{l.alternateID || "—"}</td>
                         <td style={{ padding: "4px 10px", color: "#374151", textAlign: "right" }}>{l.orderQty}</td>
                       </tr>;
                     })}</tbody>
@@ -5080,13 +5080,13 @@ function POImportTool(props) {
                 ? <div style={{ background: "#ECFDF5", border: "1px solid #A7F3D0", borderRadius: 6, padding: "8px 12px", fontSize: 12, color: "#047857" }}>
                     {batchDone.tracker.count > 0
                       ? "\u2713 Added " + batchDone.tracker.count + " row" + (batchDone.tracker.count === 1 ? "" : "s") + (batchDone.tracker.tabs ? " to " + batchDone.tracker.tabs : "") + (batchDone.tracker.skipped ? " (" + batchDone.tracker.skipped + " already on tracker, skipped)" : "")
-                      : "\u2713 Nothing to add \u2014 all rows were already on the tracker" + (batchDone.tracker.skipped ? " (" + batchDone.tracker.skipped + " skipped)" : "")}
+                      : "\u2713 Nothing to add — all rows were already on the tracker" + (batchDone.tracker.skipped ? " (" + batchDone.tracker.skipped + " skipped)" : "")}
                   </div>
                 : <div style={{ background: "rgba(220,38,38,0.04)", border: "1px solid rgba(220,38,38,0.2)", borderRadius: 6, padding: "8px 12px", fontSize: 12, color: "#DC2626" }}>
-                    {"\u26A0 Tracker add failed \u2014 " + (batchDone.tracker.fail || "unknown error") + ". The Acumatica PO was still created; use Advanced \u2192 Add to tracker to retry."}
+                    {"\u26A0 Tracker add failed — " + (batchDone.tracker.fail || "unknown error") + ". The Acumatica PO was still created; use Advanced \u2192 Add to tracker to retry."}
                   </div>}
               {batchDone.tracker.held && batchDone.tracker.held.length > 0 && <div style={{ marginTop: 8, background: "rgba(180,83,9,0.06)", border: "1px solid rgba(180,83,9,0.25)", borderRadius: 6, padding: "8px 12px", fontSize: 12, color: "#B45309" }}>
-                {"\u26A0 " + batchDone.tracker.held.length + " PO(s) not written to the tracker \u2014 not created in Acumatica: " + batchDone.tracker.held.join(", ") + ". Re-parse and create these before adding them."}
+                {"\u26A0 " + batchDone.tracker.held.length + " PO(s) not written to the tracker — not created in Acumatica: " + batchDone.tracker.held.join(", ") + ". Re-parse and create these before adding them."}
               </div>}
             </div>}
 
@@ -5101,7 +5101,7 @@ function POImportTool(props) {
       {trackerPreview && <div onClick={function() { if (!trackerBusy) setTrackerPreview(null); }} style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100 }}>
         <div onClick={function(e) { e.stopPropagation(); }} style={{ background: "#FFFFFF", borderRadius: 8, padding: 24, width: "min(860px, 94vw)", maxHeight: "85vh", overflow: "auto", boxShadow: "0 10px 40px rgba(0,0,0,0.2)" }}>
           <div style={{ fontSize: 18, fontWeight: 700, color: "#1F2937", marginBottom: 4 }}>Add to tracker</div>
-          <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 16 }}>Review the rows, then confirm to append them to the bottom of each tab. Nothing existing is overwritten, and it lands correctly even if the sheet is filtered.{trackerPreview.unmapped ? "  \u00B7  " + trackerPreview.unmapped + " line(s) skipped \u2014 warehouse not mapped to a tracker tab." : ""}</div>
+          <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 16 }}>Review the rows, then confirm to append them to the bottom of each tab. Nothing existing is overwritten, and it lands correctly even if the sheet is filtered.{trackerPreview.unmapped ? "  \u00B7  " + trackerPreview.unmapped + " line(s) skipped — warehouse not mapped to a tracker tab." : ""}</div>
           {trackerPreview.targets.map(function(t, ti) {
             return <div key={ti} style={{ marginBottom: 16 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6 }}>{t.tab} <span style={{ color: "#9CA3AF", fontWeight: 400 }}>{"\u00B7 " + t.rows.length + " row" + (t.rows.length === 1 ? "" : "s")}</span></div>
@@ -5277,7 +5277,7 @@ function HillsTracker(props) {
   }
 
   // For a bare month/day, anchor the year to a reference date (the PO's order
-  // date) rather than today \u2014 an ETA can't precede the order, so a month/day
+  // date) rather than today — an ETA can't precede the order, so a month/day
   // that falls before the order date must be the following year. This stays
   // correct even when the ETA is entered late. Falls back to today if no
   // reference date is available.
@@ -5560,7 +5560,7 @@ function FuzeTracker(props) {
             <td style={Object.assign({}, S.td, { color: "#1F2937", fontWeight: 500 })}>{r["Supplier"]}</td>
             <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, whiteSpace: "nowrap" })}>{r["NDC"]}</td>
             <td style={S.td}>{r["Product Description"]}</td>
-            <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, color: invId ? "#D97706" : "#9CA3AF", fontWeight: 600 })}>{invId || "\u2014"}</td>
+            <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, color: invId ? "#D97706" : "#9CA3AF", fontWeight: 600 })}>{invId || "—"}</td>
             <td style={Object.assign({}, S.td, { textAlign: "right" })}>{r["Pkg Qty"]}</td>
             <td style={Object.assign({}, S.td, { textAlign: "right" })}>{r["Expected BOH Increase"]}</td>
             <td style={S.td}>{r["PO No."]}</td>
@@ -5739,7 +5739,7 @@ function GGMTracker(props) {
             <td style={Object.assign({}, S.td, { color: "#1F2937", fontWeight: 500 })}>{r["Manufacturer"]}</td>
             <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, whiteSpace: "nowrap" })}>{r["NDC"]}</td>
             <td style={S.td}>{r["Product Description"]}</td>
-            <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, color: invId ? "#7C3AED" : "#9CA3AF", fontWeight: 600 })}>{invId || "\u2014"}</td>
+            <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 11, color: invId ? "#7C3AED" : "#9CA3AF", fontWeight: 600 })}>{invId || "—"}</td>
             <td style={Object.assign({}, S.td, { textAlign: "right" })}>{r["Pkg Qty"]}</td>
             <td style={Object.assign({}, S.td, { textAlign: "right" })}>{r["Expected BOH Increase"]}</td>
             <td style={S.td}>{r["PO Number"]}</td>
@@ -6411,7 +6411,7 @@ function TruckloaderTool(props) {
   async function sendAllPOsToEDI() {
     setEdiConfirm(false);
     var succeeded = createdPOs || [];
-    if (succeeded.length === 0) { toast("No created POs to send \u2014 create POs in the Truck Assignments tab first.", "error"); return; }
+    if (succeeded.length === 0) { toast("No created POs to send — create POs in the Truck Assignments tab first.", "error"); return; }
     if (!cred || !cred.username || !cred.password) { toast("Acumatica credentials required", "error"); lp && lp(); return; }
     setEdiSending(true);
     setEdiResult(null);
@@ -6461,7 +6461,7 @@ function TruckloaderTool(props) {
             if (dres && dres.failed > 0) toast("PO-list draft failed to create", "error");
             else toast("Draft created listing " + sentNbrs.length + " PO(s)", "success");
           } else {
-            toast("POs sent to EDI \u2014 connect Gmail to auto-draft the PO list", "info");
+            toast("POs sent to EDI — connect Gmail to auto-draft the PO list", "info");
           }
         }
       } catch (de) { toast("PO-list draft error: " + de.message, "error"); }
@@ -6788,9 +6788,9 @@ function TruckloaderTool(props) {
                 <input type="number" min="0" value={it.caseNeed} onChange={function(e) { updateCaseNeed(origIdx, e.target.value); }} style={Object.assign({}, S.inp, { width: 70, textAlign: "right", padding: "4px 8px", color: "#9CA3AF" })} />
               </td>
               <td style={Object.assign({}, S.td, { background: rowBg, textAlign: "center", fontWeight: 600 })}>{it.roundedPallets}</td>
-              <td style={Object.assign({}, S.td, { background: rowBg, textAlign: "center", fontWeight: 600, color: it.totalLbs > TARGET ? "#DC2626" : "#374151" })}>{it.totalLbs ? it.totalLbs.toLocaleString(undefined, { maximumFractionDigits: 1 }) : "\u2014"}</td>
-              <td style={Object.assign({}, S.td, { background: rowBg, textAlign: "center", color: "#9CA3AF" })}>{it.lbsPerPallet ? it.lbsPerPallet.toLocaleString(undefined, { maximumFractionDigits: 1 }) : "\u2014"}</td>
-              <td style={Object.assign({}, S.td, { background: rowBg, textAlign: "center", color: "#9CA3AF" })}>{it.casesPerPallet || "\u2014"}</td>
+              <td style={Object.assign({}, S.td, { background: rowBg, textAlign: "center", fontWeight: 600, color: it.totalLbs > TARGET ? "#DC2626" : "#374151" })}>{it.totalLbs ? it.totalLbs.toLocaleString(undefined, { maximumFractionDigits: 1 }) : "—"}</td>
+              <td style={Object.assign({}, S.td, { background: rowBg, textAlign: "center", color: "#9CA3AF" })}>{it.lbsPerPallet ? it.lbsPerPallet.toLocaleString(undefined, { maximumFractionDigits: 1 }) : "—"}</td>
+              <td style={Object.assign({}, S.td, { background: rowBg, textAlign: "center", color: "#9CA3AF" })}>{it.casesPerPallet || "—"}</td>
               <td style={Object.assign({}, S.td, { background: rowBg, width: 40 })}>
                 <button onClick={function() { removeItem(origIdx); }} style={{ background: "transparent", border: "none", cursor: "pointer", color: "#DC2626", fontSize: 14 }}>{"\u2715"}</button>
               </td>
@@ -6998,19 +6998,19 @@ function TruckloaderTool(props) {
                   <td style={Object.assign({}, S.td, { maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", padding: "6px 6px", fontSize: 11 })} title={f.description}>{f.description}</td>
                   <td style={Object.assign({}, S.td, { textAlign: "center", fontWeight: 700, padding: "6px 6px", fontSize: 11 })}>{f.replenClass}</td>
                   <td style={Object.assign({}, S.td, { textAlign: "right", padding: "6px 6px", fontSize: 11 })}>{f.onHand}</td>
-                  <td style={Object.assign({}, S.td, { textAlign: "right", padding: "6px 6px", fontSize: 11, color: "#9CA3AF" })}>{(dailySales > 0 && f.unitsPerPallet > 0) ? Math.round(f.unitsPerPallet / dailySales) : "\u2014"}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "right", padding: "6px 6px", fontSize: 11, color: "#9CA3AF" })}>{(dailySales > 0 && f.unitsPerPallet > 0) ? Math.round(f.unitsPerPallet / dailySales) : "—"}</td>
                   <td style={Object.assign({}, S.td, { textAlign: "center", fontWeight: 700, color: urgCol, padding: "6px 6px", fontSize: 11 })}>{f.combined}</td>
-                  <td style={Object.assign({}, S.td, { textAlign: "center", padding: "6px 6px", fontSize: 11, fontWeight: 600, color: "#A78BFA" })}>{addDays == null ? "\u2014" : "+" + addDays}</td>
-                  <td style={Object.assign({}, S.td, { textAlign: "center", padding: "6px 6px", fontSize: 11, fontWeight: 700, color: "#7C3AED", background: "#F5F3FF" })}>{newDoh == null ? "\u2014" : newDoh}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "center", padding: "6px 6px", fontSize: 11, fontWeight: 600, color: "#A78BFA" })}>{addDays == null ? "—" : "+" + addDays}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "center", padding: "6px 6px", fontSize: 11, fontWeight: 700, color: "#7C3AED", background: "#F5F3FF" })}>{newDoh == null ? "—" : newDoh}</td>
                   <td style={Object.assign({}, S.td, { textAlign: "center", width: 44, padding: "4px 2px" })}><input type="number" min="1" value={curPals} onChange={function(e) { var u = Object.assign({}, fillPals); u[f.productCode] = Math.max(1, parseInt(e.target.value) || 1); setFillPals(u); }} style={Object.assign({}, S.inp, { width: 38, textAlign: "center", padding: "2px 2px", fontSize: 11 })} /></td>
-                  <td style={Object.assign({}, S.td, { textAlign: "right", padding: "6px 6px", fontSize: 12, fontWeight: 700, color: "#059669" })}>{f.unitsPerPallet > 0 ? (curPals * f.unitsPerPallet) : "\u2014"}</td>
-                  <td style={Object.assign({}, S.td, { textAlign: "right", padding: "6px 6px", fontSize: 11, fontWeight: 600 })}>{rowLbs > 0 ? rowLbs.toLocaleString(undefined, { maximumFractionDigits: 0 }) : "\u2014"}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "right", padding: "6px 6px", fontSize: 12, fontWeight: 700, color: "#059669" })}>{f.unitsPerPallet > 0 ? (curPals * f.unitsPerPallet) : "—"}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "right", padding: "6px 6px", fontSize: 11, fontWeight: 600 })}>{rowLbs > 0 ? rowLbs.toLocaleString(undefined, { maximumFractionDigits: 0 }) : "—"}</td>
                   <td style={Object.assign({}, S.td, { textAlign: "center", width: 36, padding: "4px 2px" })}><button onClick={function() { addFillToOrder(f, fillPals[f.productCode] || sugPals || 1); }} style={{ background: "#059669", color: "#fff", border: "none", borderRadius: 6, padding: "3px 7px", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>+</button></td>
                 </tr>;
               })}</tbody>
             </table>
           </div>
-          </> : <div style={{ padding: "48px 24px", textAlign: "center", color: "#9CA3AF", fontSize: 13 }}>All suggestions added {"\u2014"} review or remove items in the panel on the right.</div>}
+          </> : <div style={{ padding: "48px 24px", textAlign: "center", color: "#9CA3AF", fontSize: 13 }}>All suggestions added {"—"} review or remove items in the panel on the right.</div>}
         </div>
 
         {/* RIGHT - Sticky order panel */}
@@ -7161,7 +7161,7 @@ function TruckloaderTool(props) {
               <button onClick={function() { createDraft("hills"); }} disabled={hillsDraftSent} style={Object.assign({}, S.btn(), { opacity: hillsDraftSent ? 0.5 : 1 })}><IconMail /> {hillsDraftSent ? "Draft Created" : "Create Draft for Hill\u2019s"}</button>
               {(function() {
                 var ediCount = createdPOs ? createdPOs.length : 0;
-                return <button onClick={function() { if (ediCount === 0) { toast("No created POs to send \u2014 create POs in the Truck Assignments tab first.", "error"); return; } setEdiConfirm(true); }} disabled={ediSending || ediCount === 0 || ediSent} title={ediSent ? "Already sent to EDI \u2014 click Unlock to re-send the same POs" : ediCount === 0 ? "Create POs in the Truck Assignments tab first" : "Send the " + ediCount + " created PO(s) to TrueCommerce EDI"} style={{ background: ediSent ? "#059669" : (ediSending || ediCount === 0) ? "#93C5FD" : "#2563EB", color: "#fff", border: "none", padding: "9px 16px", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: (ediSending || ediCount === 0 || ediSent) ? "not-allowed" : "pointer", opacity: ediSent ? 0.7 : 1, display: "inline-flex", alignItems: "center", gap: 6 }}>{ediSent ? <><IconCheck /> Sent to EDI</> : ediSending ? <><Spinner /> Sending{"\u2026"}</> : <>{"\u2192"} Send all POs to EDI{ediCount > 0 ? " (" + ediCount + ")" : ""}</>}</button>;
+                return <button onClick={function() { if (ediCount === 0) { toast("No created POs to send — create POs in the Truck Assignments tab first.", "error"); return; } setEdiConfirm(true); }} disabled={ediSending || ediCount === 0 || ediSent} title={ediSent ? "Already sent to EDI — click Unlock to re-send the same POs" : ediCount === 0 ? "Create POs in the Truck Assignments tab first" : "Send the " + ediCount + " created PO(s) to TrueCommerce EDI"} style={{ background: ediSent ? "#059669" : (ediSending || ediCount === 0) ? "#93C5FD" : "#2563EB", color: "#fff", border: "none", padding: "9px 16px", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: (ediSending || ediCount === 0 || ediSent) ? "not-allowed" : "pointer", opacity: ediSent ? 0.7 : 1, display: "inline-flex", alignItems: "center", gap: 6 }}>{ediSent ? <><IconCheck /> Sent to EDI</> : ediSending ? <><Spinner /> Sending{"\u2026"}</> : <>{"\u2192"} Send all POs to EDI{ediCount > 0 ? " (" + ediCount + ")" : ""}</>}</button>;
               })()}
               {ediSent && <button onClick={function() { setEdiSent(false); }} title="Unlock so you can send these same POs to EDI again (no new POs are created)" style={Object.assign({}, S.btn("ghost"), { fontSize: 12, padding: "8px 12px" })}>{"\u21BB"} Unlock to re-send</button>}
             </div>
@@ -7189,7 +7189,7 @@ function TruckloaderTool(props) {
                   <tbody>{ediResult.resp.results.map(function(r, ri) {
                     var sent = r.ok && r.ediSent;
                     var label = sent ? "\u2713 Sent to EDI" : r.ediError ? ("\u26A0 " + r.ediError) : r.error ? ("\u26A0 " + r.error) : "\u26A0 Not sent";
-                    return <tr key={ri}><td style={Object.assign({}, S.td, { fontFamily: "monospace", fontWeight: 600 })}>{ediResult.orderNbrs[ri] || "\u2014"}</td><td style={Object.assign({}, S.td, { color: sent ? "#059669" : "#DC2626" })}>{label}</td></tr>;
+                    return <tr key={ri}><td style={Object.assign({}, S.td, { fontFamily: "monospace", fontWeight: 600 })}>{ediResult.orderNbrs[ri] || "—"}</td><td style={Object.assign({}, S.td, { color: sent ? "#059669" : "#DC2626" })}>{label}</td></tr>;
                   })}</tbody>
                 </table> : <div style={{ fontSize: 13, color: "#DC2626" }}>{(ediResult.resp && ediResult.resp.error) || "Unexpected response from Acumatica."}</div>}
                 <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
@@ -7397,7 +7397,7 @@ function VendorInventoryTool(props) {
   var td = { padding: "7px 10px", fontSize: 12.5, color: "#1F2937", borderBottom: "1px solid #F3F4F6", whiteSpace: "nowrap" };
   var thR = Object.assign({}, th, { textAlign: "right" });
   var tdR = Object.assign({}, td, { textAlign: "right" });
-  function num(v) { var n = parseFloat(v); return isNaN(n) ? "\u2014" : n.toLocaleString(undefined, { maximumFractionDigits: 0 }); }
+  function num(v) { var n = parseFloat(v); return isNaN(n) ? "—" : n.toLocaleString(undefined, { maximumFractionDigits: 0 }); }
 
   // Download the currently-filtered rows as CSV (what you see = what you get).
   function downloadCSV() {
@@ -7527,11 +7527,11 @@ function VendorInventoryTool(props) {
             {filtered.slice(0, 2000).map(function(r, i) {
               var bo = String(r.IS_BACKORDERED).toUpperCase() === "TRUE";
               return <tr key={i} style={bo ? { background: "rgba(249,115,22,0.05)" } : null}>
-                <td style={Object.assign({}, td, { fontFamily: "monospace", fontWeight: 600 })}>{r.VENDOR_INVENTORY_SKU || "\u2014"}</td>
-                <td style={Object.assign({}, td, { fontFamily: "monospace" })}>{r.MANUFACTURER_NO || "\u2014"}</td>
-                <td style={td}>{r.MANUFACTURER_NAME || "\u2014"}</td>
-                <td style={Object.assign({}, td, { whiteSpace: "normal", minWidth: 200 })}>{r.PRODUCT_LINE_NAME || "\u2014"}</td>
-                <td style={td}>{r.WAREHOUSE_SLUG || "\u2014"}</td>
+                <td style={Object.assign({}, td, { fontFamily: "monospace", fontWeight: 600 })}>{r.VENDOR_INVENTORY_SKU || "—"}</td>
+                <td style={Object.assign({}, td, { fontFamily: "monospace" })}>{r.MANUFACTURER_NO || "—"}</td>
+                <td style={td}>{r.MANUFACTURER_NAME || "—"}</td>
+                <td style={Object.assign({}, td, { whiteSpace: "normal", minWidth: 200 })}>{r.PRODUCT_LINE_NAME || "—"}</td>
+                <td style={td}>{r.WAREHOUSE_SLUG || "—"}</td>
                 <td style={tdR}>{num(r.REPORTED_QUANTITY)}</td>
                 <td style={tdR}>{num(r.STOCK_QUANTITY)}</td>
                 <td style={tdR}>{num(r.ALLOCATED_QUANTITY)}</td>
@@ -7542,7 +7542,7 @@ function VendorInventoryTool(props) {
             })}
           </tbody>
         </table>
-        {filtered.length > 2000 && <div style={{ padding: "8px 12px", fontSize: 12, color: "#9CA3AF", textAlign: "center", borderTop: "1px solid #F3F4F6" }}>Showing first 2,000 of {filtered.length.toLocaleString()} \u2014 narrow with search or filters to see more.</div>}
+        {filtered.length > 2000 && <div style={{ padding: "8px 12px", fontSize: 12, color: "#9CA3AF", textAlign: "center", borderTop: "1px solid #F3F4F6" }}>Showing first 2,000 of {filtered.length.toLocaleString()} — narrow with search or filters to see more.</div>}
       </div>
         )}
       </div>
@@ -7574,7 +7574,7 @@ function DiscontinuedTool(props) {
   var CACHE_PREFIX = "disc-cache-";   // per-vendor cache keys written by the daily cron
   var SUPER_KEY = "disc-cache-super"; // cached supersession map
   function todayISO() { var d = new Date(); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); }
-  function fmtDate(iso) { if (!iso) return "\u2014"; var p = String(iso).split("-"); return p.length === 3 ? (p[1] + "/" + p[2] + "/" + p[0]) : iso; }
+  function fmtDate(iso) { if (!iso) return "—"; var p = String(iso).split("-"); return p.length === 3 ? (p[1] + "/" + p[2] + "/" + p[0]) : iso; }
 
   // Load persisted discontinue dates once on mount.
   useEffect(function() {
@@ -7608,7 +7608,7 @@ function DiscontinuedTool(props) {
             setLoading(false);
             return;
           }
-        } catch (e) { /* cache miss \u2014 fall through to live */ }
+        } catch (e) { /* cache miss — fall through to live */ }
       }
       // Live path: forced refresh, or cache empty. Requires credentials.
       if (!cred || !cred.username || !cred.password) { setErr("Acumatica credentials required for a live refresh."); setLoading(false); return; }
@@ -7722,13 +7722,13 @@ function DiscontinuedTool(props) {
               var sup = superMap && superMap[r.inventoryId];
               return <tr key={r.inventoryId}>
                 <td style={Object.assign({}, td, { fontWeight: 600, fontFamily: "monospace", whiteSpace: "nowrap" })}>{r.inventoryId}</td>
-                <td style={Object.assign({}, td, { fontFamily: "monospace", whiteSpace: "nowrap" })}>{r.ndc || "\u2014"}</td>
-                <td style={td}>{r.description || "\u2014"}</td>
-                <td style={Object.assign({}, td, { whiteSpace: "nowrap" })}>{r.itemStatus || "\u2014"}</td>
-                <td style={Object.assign({}, td, { whiteSpace: "nowrap" })}>{r.abcCode || "\u2014"}</td>
-                <td style={Object.assign({}, td, { whiteSpace: "nowrap" })}>{r.baseUOM || "\u2014"}</td>
+                <td style={Object.assign({}, td, { fontFamily: "monospace", whiteSpace: "nowrap" })}>{r.ndc || "—"}</td>
+                <td style={td}>{r.description || "—"}</td>
+                <td style={Object.assign({}, td, { whiteSpace: "nowrap" })}>{r.itemStatus || "—"}</td>
+                <td style={Object.assign({}, td, { whiteSpace: "nowrap" })}>{r.abcCode || "—"}</td>
+                <td style={Object.assign({}, td, { whiteSpace: "nowrap" })}>{r.baseUOM || "—"}</td>
                 <td style={Object.assign({}, td, { whiteSpace: "nowrap", fontWeight: 600 })}>{fmtDate(discDates[dKey])}</td>
-                <td style={td}>{sup && sup.newId ? <span><span style={{ fontFamily: "monospace", fontWeight: 600, color: "#047857" }}>{sup.newId}</span>{sup.newDesc ? <span style={{ color: "#6B7280" }}>{" \u2014 " + sup.newDesc}</span> : null}</span> : <span style={{ color: "#9CA3AF" }}>{"\u2014"}</span>}</td>
+                <td style={td}>{sup && sup.newId ? <span><span style={{ fontFamily: "monospace", fontWeight: 600, color: "#047857" }}>{sup.newId}</span>{sup.newDesc ? <span style={{ color: "#6B7280" }}>{" — " + sup.newDesc}</span> : null}</span> : <span style={{ color: "#9CA3AF" }}>{"—"}</span>}</td>
               </tr>;
             })}
           </tbody>
@@ -8101,7 +8101,7 @@ function OOSTracker(props) {
   }, []);
 
   var WH_MAP = { "TRUEPILL_BROOKLYN": "Brooklyn", "TRUEPILL_OHIO": "Ohio", "TRUEPILL_HAYWARD": "Hayward", "TRUEPILL_OHIO_FAIRFIELD": "Firebird", "TRUEPILL_DALLAS": "Dallas", "TRUEPILL_TEXAS": "Dallas", "TRUEPILL_LONG_ISLAND": "Long Island", "TRUEPILL_NEW_YORK_LONG_ISLAND": "Long Island", "TRUEPILL_SAN_DIEGO": "San Diego", "TRUEPILL_CALIFORNIA_SAN_DIEGO": "San Diego", "GOGOMEDS_KY": "Kentucky", "GOGOMEDS_AZ": "Arizona", "GOGOMEDS_KENTUCKY": "Kentucky", "GOGOMEDS_ARIZONA": "Arizona", "HILLS_CGP_WAREHOUSE_CA": "Hills CA", "HILLS_CGP_WAREHOUSE_NJ": "Hills NJ", "HILLS_CGP_WAREHOUSE_FL": "Hills FL", "HILLS_CGP_WAREHOUSE_TX": "Hills TX" };
-  function mapWH(slug) { return WH_MAP[slug] || slug || "\u2014"; }
+  function mapWH(slug) { return WH_MAP[slug] || slug || "—"; }
   function splitList(s) { return String(s == null ? "" : s).split(",").map(function(x) { return x.trim(); }).filter(Boolean); }
   function deriveOOS(r) {
     r._vendors = splitList(r.OOS_VENDOR_NAMES);
@@ -8394,7 +8394,7 @@ function OOSTracker(props) {
         {(function() {
           var total = totalsByVendor[(TAB_VENDOR_LABEL[tab] || "").toLowerCase()];
           var pct = total ? (data.length / total * 100) : null;
-          return <div style={Object.assign({}, S.statCard, { background: "#FFF7ED" })}><div style={{ fontSize: 11, color: "#B45309", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>% Mfr Nos OOS</div><div style={{ fontSize: 28, fontWeight: 500, color: "#EA580C", marginTop: 6 }}>{pct == null ? "\u2014" : pct.toFixed(1) + "%"}</div><div style={{ fontSize: 11, color: "#9A6B3F", marginTop: 2 }}>{total ? (data.length + " / " + total) : "no total"}</div></div>;
+          return <div style={Object.assign({}, S.statCard, { background: "#FFF7ED" })}><div style={{ fontSize: 11, color: "#B45309", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>% Mfr Nos OOS</div><div style={{ fontSize: 28, fontWeight: 500, color: "#EA580C", marginTop: 6 }}>{pct == null ? "—" : pct.toFixed(1) + "%"}</div><div style={{ fontSize: 11, color: "#9A6B3F", marginTop: 2 }}>{total ? (data.length + " / " + total) : "no total"}</div></div>;
         })()}
         {warehouses.map(function(wh) { var ct = data.filter(function(r) { return (r._whs || []).indexOf(wh) >= 0; }).length; return <div key={wh} style={Object.assign({}, S.statCard, { background: "#F9FAFB" })}><div style={{ fontSize: 11, color: "#6B7280", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px" }}>{wh}</div><div style={{ fontSize: 28, fontWeight: 500, color: "#374151", marginTop: 6 }}>{ct}</div></div>; })}
       </div>
@@ -8444,7 +8444,7 @@ function OOSTracker(props) {
                 var allowed = []; (r._whs || []).forEach(function(dn) { (OOS_TO_ACU[dn] || []).forEach(function(c) { if (allowed.indexOf(c) < 0) allowed.push(c); }); }); if (allowed.length === 0) allowed = null;
                 var allMatches = orderMap[String(r.MANUFACTURER_NO)] || [];
                 var matches = allowed ? allMatches.filter(function(m) { return allowed.indexOf((m.wh || "").trim().toUpperCase()) >= 0; }) : allMatches;
-                if (matches.length === 0) return <span style={{ color: "#D1D5DB", fontSize: 13 }}>{"\u2014"}</span>;
+                if (matches.length === 0) return <span style={{ color: "#D1D5DB", fontSize: 13 }}>{"—"}</span>;
                 function fmtDate(s) {
                   if (!s) return "";
                   var iso = String(s).split("T")[0];
@@ -8469,7 +8469,7 @@ function OOSTracker(props) {
                       var ordStr = m.orderDate ? fmtDate(m.orderDate) : "";
                       var etaStr = m.expectedArrival ? fmtDate(m.expectedArrival) : "";
                       return <div key={mi} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                        <span style={{ fontFamily: "monospace", fontSize: 11, fontWeight: 600, color: m.received ? "#9CA3AF" : "#1F2937", textDecoration: m.received ? "line-through" : "none" }}>{m.vendorRef || "\u2014"}</span>
+                        <span style={{ fontFamily: "monospace", fontSize: 11, fontWeight: 600, color: m.received ? "#9CA3AF" : "#1F2937", textDecoration: m.received ? "line-through" : "none" }}>{m.vendorRef || "—"}</span>
                         {m.po && <span style={{ fontFamily: "monospace", fontSize: 10, fontWeight: 500, color: "#9CA3AF" }}>{m.po}</span>}
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
                           {ordStr && <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, color: m.received ? "#9CA3AF" : "#4B5563", background: m.received ? "#F9FAFB" : "#F3F4F6", padding: "2px 7px", borderRadius: 999, whiteSpace: "nowrap" }}>
@@ -9248,7 +9248,7 @@ function ReplenishUpdate(props) {
 
       {result && result.fieldMap && result.fieldMap.source === "file" && <div style={{ padding: "8px 14px", marginBottom: 16, background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 10, fontSize: 11, color: "#166534" }}>{"Current ROP / Max / Class read from the uploaded export (" + result.fieldMap.rows + " rows): " + (result.fieldMap.name || "")}</div>}
       {result && result.fieldMap && result.fieldMap.source === "live" && (!result.fieldMap.rop || !result.fieldMap.max) && <div style={{ padding: "10px 14px", marginBottom: 16, background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 10, fontSize: 12, color: "#991B1B" }}>{"The live whse-replenish feed didn't return Reorder Point / Max (current values are 0). Fields it returned: " + (result.fieldMap.keys || []).join(", ") + ". Upload the Stock Item Whse Replenish export above and I'll read current values from that instead."}</div>}
-      {result && result.fieldMap && result.fieldMap.source === "live" && result.fieldMap.rop && result.fieldMap.max && <div style={{ padding: "8px 14px", marginBottom: 16, background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 10, fontSize: 11, color: "#166534" }}>{"Current values mapped from live feed fields \u2014 ROP: \"" + result.fieldMap.rop + "\", Max: \"" + result.fieldMap.max + "\"" + (result.fieldMap.cls ? ", Class: \"" + result.fieldMap.cls + "\"" : "")}</div>}
+      {result && result.fieldMap && result.fieldMap.source === "live" && result.fieldMap.rop && result.fieldMap.max && <div style={{ padding: "8px 14px", marginBottom: 16, background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 10, fontSize: 11, color: "#166534" }}>{"Current values mapped from live feed fields — ROP: \"" + result.fieldMap.rop + "\", Max: \"" + result.fieldMap.max + "\"" + (result.fieldMap.cls ? ", Class: \"" + result.fieldMap.cls + "\"" : "")}</div>}
 
       {result && summary && <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden" })}>
         <div style={{ padding: "10px 16px", fontWeight: 600, fontSize: 13, color: "#1F2937", borderBottom: "1px solid #F3F4F6" }}>Change summary by warehouse</div>
@@ -9279,7 +9279,7 @@ function ReplenishUpdate(props) {
       </div>}
 
       {result && result.outliers.length > 0 && <div style={Object.assign({}, S.card, { padding: 0, overflow: "hidden", marginTop: 16, border: "1px solid #FCD34D" })}>
-        <div style={{ padding: "10px 16px", fontWeight: 600, fontSize: 13, color: "#92400E", background: "#FFFBEB", borderBottom: "1px solid #FDE68A" }}>{"\u26A0 Outliers for review (" + result.outliers.length + ") \u2014 large increases; these are still in the upload file, just flagged"}</div>
+        <div style={{ padding: "10px 16px", fontWeight: 600, fontSize: 13, color: "#92400E", background: "#FFFBEB", borderBottom: "1px solid #FDE68A" }}>{"\u26A0 Outliers for review (" + result.outliers.length + ") — large increases; these are still in the upload file, just flagged"}</div>
         <div style={{ maxHeight: 320, overflow: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead><tr>{["Inventory ID", "Whse", "Class", "ROP now", "ROP new", "ROP %", "Max now", "Max new", "Max %"].map(function (h, i) { return <th key={i} style={Object.assign({}, S.th, { textAlign: i < 3 ? "left" : "right" })}>{h}</th>; })}</tr></thead>
@@ -9744,7 +9744,7 @@ function ForecastingTool(props) {
     var pCol = fcIdxExact(hdr, "Product code"), lCol = fcIdxExact(hdr, "Location code"), cCol = fcIdxExact(hdr, "Class");
     if (pCol < 0 || lCol < 0 || cCol < 0) { toast("Report is missing Product code / Location code / Class", "error"); return; }
     var finalCol = tpDefaultFinal(hdr);
-    if (finalCol < 0) { toast("No 'Maximum level' column found in this report \u2014 the forecast value column will be missing. Re-export from Netstock with Maximum level included.", "error"); }
+    if (finalCol < 0) { toast("No 'Maximum level' column found in this report — the forecast value column will be missing. Re-export from Netstock with Maximum level included.", "error"); }
     var keepBase = TP_KEEP.map(function (n) { return fcIdxExact(hdr, n); }).filter(function (i) { return i >= 0; });
     var keep = finalCol >= 0 ? keepBase.concat([finalCol]) : keepBase;
     setTpBusy(true);
@@ -9863,7 +9863,7 @@ function ForecastingTool(props) {
   // one that can span multiple months). Show it when B is the global strategy or
   // any single row overrides to B; every other strategy fills the current month only.
   var monthBarActive = globalMethod === "B" || Object.keys(rowMethod).some(function (k) { return rowMethod[k] === "B"; });
-  // A forecast strategy is in play (global, or any per-row override) \u2014 used to
+  // A forecast strategy is in play (global, or any per-row override) — used to
   // show controls (Drop toggle) that only matter when something is being forecast.
   var strategyActive = globalMethod !== "none" || Object.keys(rowMethod).some(function (k) { return rowMethod[k] && rowMethod[k] !== "none"; });
   function methodValueForMonth(row, m, num, gm) {
@@ -10156,7 +10156,7 @@ function ForecastingTool(props) {
 
       {tpSessions.length > 0 && <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
-          {tpSessions.map(function (s, i) { var on = i === tpActive; return <div key={s.id} onClick={function () { setTpActive(i); }} title={(s.warehouse || "(no warehouse)") + " \u2014 " + s.fileName} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 16px", borderRadius: "10px 10px 0 0", cursor: "pointer", fontSize: 12.5, fontWeight: 600, border: "1px solid " + (on ? "#0EA5E9" : "#E5E7EB"), background: on ? "#0EA5E9" : "#fff", color: on ? "#fff" : "#6B7280", whiteSpace: "nowrap", flexShrink: 0 }}>
+          {tpSessions.map(function (s, i) { var on = i === tpActive; return <div key={s.id} onClick={function () { setTpActive(i); }} title={(s.warehouse || "(no warehouse)") + " — " + s.fileName} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 16px", borderRadius: "10px 10px 0 0", cursor: "pointer", fontSize: 12.5, fontWeight: 600, border: "1px solid " + (on ? "#0EA5E9" : "#E5E7EB"), background: on ? "#0EA5E9" : "#fff", color: on ? "#fff" : "#6B7280", whiteSpace: "nowrap", flexShrink: 0 }}>
             <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 180 }}>{s.warehouse || s.fileName}</span>
             <span onClick={function (e) { e.stopPropagation(); closeTpSession(i); }} title="Close this tab" style={{ fontWeight: 700, lineHeight: 1, opacity: 0.6 }}>{"\u00D7"}</span>
           </div>; })}
@@ -10202,7 +10202,7 @@ function ForecastingTool(props) {
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
             <div>
               <div style={{ fontSize: 15, fontWeight: 600, color: "#1F2937", marginBottom: 4 }}>Netstock forecast file</div>
-              <div style={{ fontSize: 13, color: "#6B7280" }}>{fileName ? (fileName + "  -  " + rows.length + " rows") : "Drag a CSV here, or click Upload \u2014 the multi-forecast export from Netstock."}</div>
+              <div style={{ fontSize: 13, color: "#6B7280" }}>{fileName ? (fileName + "  -  " + rows.length + " rows") : "Drag a CSV here, or click Upload — the multi-forecast export from Netstock."}</div>
             </div>
             <div>
               <input ref={fileRef} type="file" accept=".csv,text/csv" onChange={onFile} style={{ display: "none" }} />
@@ -10267,7 +10267,7 @@ function ForecastingTool(props) {
         <span style={{ fontSize: 12, color: "#6B7280" }}>Forecasted <b style={{ color: "#059669", fontVariantNumeric: "tabular-nums" }}>{fcFmt(filledCount)}</b></span>
         <span style={{ width: 1, height: 16, background: "#E5E7EB" }} />
         <span style={{ fontSize: 12, color: "#6B7280" }}>Strategy <b style={{ color: "#1F2937" }}>{globalMethod === "none" ? "None" : ((FC_METHODS.filter(function (x) { return x.id === globalMethod; })[0] || {}).short || globalMethod)}</b></span>
-        {(function () { var d = new Date(); var t = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); var notToday = pullDate !== t; return <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "#6B7280", marginLeft: "auto" }} title="Date the Netstock forecast was last pulled \u2014 MTD run-rate divides by the days elapsed up to this date"><span>Netstock pulled</span><input type="date" value={pullDate} max={t} onChange={function (e) { setPullDate(e.target.value || t); }} style={{ fontSize: 12, padding: "3px 6px", borderRadius: 6, fontFamily: "inherit", color: notToday ? "#92400E" : "#1F2937", background: notToday ? "#FEF3C7" : "#fff", border: "1px solid " + (notToday ? "#FCD34D" : "#D1D5DB") }} />{notToday ? <span style={{ fontSize: 10, color: "#92400E", fontWeight: 700 }}>not today</span> : null}</span>; })()}
+        {(function () { var d = new Date(); var t = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); var notToday = pullDate !== t; return <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "#6B7280", marginLeft: "auto" }} title="Date the Netstock forecast was last pulled — MTD run-rate divides by the days elapsed up to this date"><span>Netstock pulled</span><input type="date" value={pullDate} max={t} onChange={function (e) { setPullDate(e.target.value || t); }} style={{ fontSize: 12, padding: "3px 6px", borderRadius: 6, fontFamily: "inherit", color: notToday ? "#92400E" : "#1F2937", background: notToday ? "#FEF3C7" : "#fff", border: "1px solid " + (notToday ? "#FCD34D" : "#D1D5DB") }} />{notToday ? <span style={{ fontSize: 10, color: "#92400E", fontWeight: 700 }}>not today</span> : null}</span>; })()}
         <span style={{ fontSize: 12, color: "#6B7280" }}>Filling <b style={{ color: "#1F2937" }}>{targetCols.map(function (c) { var u = anchors.uploads.filter(function (x) { return x.idx === c; })[0]; return u ? u.label : ""; }).filter(Boolean).join(", ") || "-"}</b></span>
       </div>}
 
@@ -10347,7 +10347,7 @@ function ForecastingTool(props) {
                 var k = rowKey(row);
                 var dropRow = rowBelowFinal(row);
                 var pct = pctVsFinal(row, anchorNum);
-                return <tr key={ri} style={Object.assign({}, ri % 2 === 1 ? { background: "#FAFBFC" } : null, dropRow ? { opacity: 0.45 } : null)} title={dropRow ? "Below Netstock Final \u2014 excluded from export" : ""}>
+                return <tr key={ri} style={Object.assign({}, ri % 2 === 1 ? { background: "#FAFBFC" } : null, dropRow ? { opacity: 0.45 } : null)} title={dropRow ? "Below Netstock Final — excluded from export" : ""}>
                   <td style={Object.assign({}, S.td, { fontWeight: 500, whiteSpace: "nowrap", textDecoration: dropRow ? "line-through" : "none" })}>{row[productCol]}</td>
                   <td title={descCol >= 0 ? String(row[descCol] || "") : ""} style={Object.assign({}, S.td, { maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })}>{descCol >= 0 ? row[descCol] : ""}</td>
                   {anchors.trail3.map(function (hi) { return <td key={hi} style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums", color: "#6B7280" })}>{fcFmt(row[hi])}</td>; })}
@@ -10389,9 +10389,9 @@ function ForecastingTool(props) {
                     </td>;
                   })}
                   <td style={Object.assign({}, S.td, { textAlign: "right", fontVariantNumeric: "tabular-nums", fontWeight: 600, borderLeft: "1px solid #E5E7EB" })}>{(function () {
-                    if (dropRow || !inSef(row)) return <span style={{ color: "#D1D5DB", fontWeight: 400 }} title="Excluded from the export CSV">{"\u2014"}</span>;
+                    if (dropRow || !inSef(row)) return <span style={{ color: "#D1D5DB", fontWeight: 400 }} title="Excluded from the export CSV">{"—"}</span>;
                     var parts = targetCols.map(function (c) { var num = uploadNum(c); var v = num == null ? null : effectiveForMonth(row, num); return v == null ? null : Math.round(v).toLocaleString(); }).filter(function (x) { return x != null; });
-                    if (!parts.length) return <span style={{ color: "#D1D5DB", fontWeight: 400 }} title="Nothing will be written for this row">{"\u2014"}</span>;
+                    if (!parts.length) return <span style={{ color: "#D1D5DB", fontWeight: 400 }} title="Nothing will be written for this row">{"—"}</span>;
                     return <span style={{ color: "#0B6FA8" }} title="Value written to the export CSV">{parts.join(" / ")}</span>;
                   })()}</td>
                 </tr>;
@@ -10467,7 +10467,7 @@ function PoReconPage(props) {
           if (digits) pkgRefDigits[digits] = entry;
         });
         addLog("Loaded pack sizes for " + Object.keys(pkgRefDigits).length + " NDC key(s) from PURCH - Pack Size Reference.");
-      } catch (e) { addLog("Pack Size Reference fetch failed \u2014 falling back to BOHPackSize/UOM.", "warn"); }
+      } catch (e) { addLog("Pack Size Reference fetch failed — falling back to BOHPackSize/UOM.", "warn"); }
       var rows = (tp || []).concat(ggm || []);
       addLog("Pulled " + rows.length + " PO lines (TP " + (tp || []).length + ", GGM " + (ggm || []).length + ").");
 
@@ -10483,7 +10483,7 @@ function PoReconPage(props) {
         if (!ref) { skippedNoRef++; return; }
         var k = wh + "||" + ref; if (!groups[k]) groups[k] = { wh: wh, ref: ref, lines: [] }; groups[k].lines.push(r);
       });
-      if (skippedNoRef) addLog("Skipped " + skippedNoRef + " line(s) with a blank Vendor Ref \u2014 not added.", "warn");
+      if (skippedNoRef) addLog("Skipped " + skippedNoRef + " line(s) with a blank Vendor Ref — not added.", "warn");
       var whset = {}; Object.keys(groups).forEach(function (k) { whset[groups[k].wh] = 1; });
       var whs = Object.keys(whset);
       if (!whs.length) { addLog("No recent POs mapped to a tracker tab. Nothing to do.", "warn"); setBusy(false); return; }
@@ -10532,14 +10532,14 @@ function PoReconPage(props) {
       var totalMissingPOs = 0, totalRows = 0;
       missingWhs.forEach(function (w) { totalMissingPOs += perWh[w].refs.length; totalRows += perWh[w].rows.length; });
       if (!totalMissingPOs) { addLog("\u2713 Everything is already on the trackers. Nothing to add.", "ok"); setSummary({ added: 0, pos: 0, verified: true }); setBusy(false); return; }
-      addLog("Found " + totalMissingPOs + " PO(s) missing across " + missingWhs.length + " tab(s) \u2014 " + totalRows + " line(s). Adding\u2026");
+      addLog("Found " + totalMissingPOs + " PO(s) missing across " + missingWhs.length + " tab(s) — " + totalRows + " line(s). Adding\u2026");
 
       var addedTotal = 0;
       for (var mi = 0; mi < missingWhs.length; mi++) {
         var w = missingWhs[mi], dest = TRACKER_MAP[w], pw = perWh[w];
         var aResp = await fetch("/api/tracker-append", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sheetId: dest.sheetId, tab: dest.tab, rows: pw.rows, extraColumns: [{ header: "Expected Arrival", values: pw.arrival }, { header: "NDC unformatted", values: pw.ndcUnf }, { header: "Inventory ID", values: pw.invId }] }) });
         var aData = await aResp.json();
-        if (aData && aData.ok) { addedTotal += aData.appended; addLog("Added " + aData.appended + " line(s) to " + dest.tab + " \u2014 PO(s): " + pw.refs.join(", "), "ok"); }
+        if (aData && aData.ok) { addedTotal += aData.appended; addLog("Added " + aData.appended + " line(s) to " + dest.tab + " — PO(s): " + pw.refs.join(", "), "ok"); }
         else { addLog("Failed to add to " + dest.tab + ": " + ((aData && aData.error) || "unknown"), "error"); }
       }
 
@@ -10550,8 +10550,8 @@ function PoReconPage(props) {
         var after = await readRefs(dest2);
         perWh[w2].refs.forEach(function (ref) { if (!after[ref]) stillMissing.push(dest2.tab + " / " + ref); });
       }
-      if (stillMissing.length) addLog("\u26A0 Verification: still not found \u2014 " + stillMissing.join(", "), "error");
-      else addLog("\u2713 Verified \u2014 all added POs are present on the trackers.", "ok");
+      if (stillMissing.length) addLog("\u26A0 Verification: still not found — " + stillMissing.join(", "), "error");
+      else addLog("\u2713 Verified — all added POs are present on the trackers.", "ok");
       setSummary({ added: addedTotal, pos: totalMissingPOs, verified: stillMissing.length === 0 });
     } catch (e) { addLog("Error: " + (e && e.message ? e.message : e), "error"); toast("Reconciliation failed", "error"); }
     finally { setBusy(false); }
@@ -10718,7 +10718,7 @@ export default function Hub() {
   ]; }, []);
 
   var sdEmail = useMemo(function() { return {
-    title: "Generate Email Drafts", subtitle: "One draft per vendor \u2014 asking about better dating availability.", subjectPrefix: "Short-Dating Items \u2013 ",
+    title: "Generate Email Drafts", subtitle: "One draft per vendor — asking about better dating availability.", subjectPrefix: "Short-Dating Items \u2013 ",
     buildTo: function(e) { return ["hd-purchaseorders@vetcove.com", e].filter(Boolean).join(", "); },
     tableCols: [{ key: "#", label: "#" }, { key: "Description", label: "Product" }, { key: "InventoryID", label: "Inventory ID" }, { key: "SKUNDC", label: "TruePill SKU" }, { key: "BestKnownDating", label: "Best Known Dating", highlightColor: "#D97706" }],
   }; }, []);
@@ -10737,7 +10737,7 @@ export default function Hub() {
   ]; }, []);
 
   var bkoEmail = useMemo(function() { return {
-    title: "Generate Backorder Emails", subtitle: "One draft per vendor \u2014 asking for recovery ETA updates. CC: hd-purchaseorders@vetcove.com", subjectPrefix: "Backorder Item Status \u2013 ",
+    title: "Generate Backorder Emails", subtitle: "One draft per vendor — asking for recovery ETA updates. CC: hd-purchaseorders@vetcove.com", subjectPrefix: "Backorder Item Status \u2013 ",
     buildTo: function(e) { return e || ""; },
     tableCols: [{ key: "#", label: "#" }, { key: "Description", label: "Product Description" }, { key: "InventoryID", label: "Inventory ID (Mfr No.)" }, { key: "RecoveryDate", label: "Recovery Date", highlightColor: "#3B82F6" }],
   }; }, []);
