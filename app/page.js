@@ -3995,21 +3995,25 @@ function POImportTool(props) {
       }
 
       setResults(matched);
-      // Compile parsed items into the Price Check copy-message list (Inventory ID,
-      // NDC, description, % unit cost). Merge with the existing list, dedup by
-      // inventoryId|ndc so re-parsing doesn't duplicate rows.
+      // Compile parsed items into the Price Check copy-message list \u2014 ONLY items whose
+      // \u0394% unit cost is at/above the threshold (same flag the Translator table uses).
+      // \u0394% is computed exactly like the table: avg cost is per base unit, so scale it
+      // up to the PO's UOM (avgPerPkg = avgCost \u00D7 uomConvFactor) and compare to the
+      // parsed unit price. Merge + dedup by inventoryId|ndc.
       (function() {
         var existing = (pcMsgList || []).slice();
         var seen = {}; existing.forEach(function(x) { seen[x.inventoryId + "|" + x.ndc] = true; });
         var now = Date.now(), added = false;
         matched.forEach(function(r) {
           if (!r.inventoryId || !r.ndc) return;
+          var hasAvg = r.avgCost != null && r.avgCost > 0;
+          var avgPerPkg = hasAvg ? (r.uomConvFactor && r.uomConvFactor > 0 ? r.avgCost * r.uomConvFactor : r.avgCost) : null;
+          var price = r.unitPrice;
+          var pct = (avgPerPkg != null && avgPerPkg > 0 && price) ? ((price - avgPerPkg) / avgPerPkg) * 100 : null;
+          if (pct == null || pct < flagThreshold) return;   // only over-threshold items
           var key = r.inventoryId + "|" + r.ndc;
           if (seen[key]) return;
-          var deltaPct = (r.unitPrice != null && r.avgCost != null && r.avgCost > 0)
-            ? Math.round(((r.unitPrice - r.avgCost) / r.avgCost) * 1000) / 10
-            : null;
-          existing.push({ inventoryId: r.inventoryId, ndc: r.ndc, description: r.acumaticaDesc || r.drugName || "", deltaPct: deltaPct, addedAt: now });
+          existing.push({ inventoryId: r.inventoryId, ndc: r.ndc, description: r.acumaticaDesc || r.drugName || "", deltaPct: Math.round(pct * 10) / 10, addedAt: now });
           seen[key] = true; added = true;
         });
         if (added) savePcMsg(existing);
@@ -4549,7 +4553,7 @@ function POImportTool(props) {
         {/* Parsed-PO copy message: Inventory ID / NDC / Description / % Unit Cost */}
         <div style={{ marginTop: 24 }}>
           <div style={{ fontSize: 15, fontWeight: 700, color: "#1F2937", marginBottom: 6 }}>Parsed PO message</div>
-          <p style={{ color: "#6B7280", fontSize: 13, marginBottom: 16 }}>Auto-compiled from POs you've parsed. Copy the whole message, paste it where you need it, then click <strong>Done</strong> on each row once it's handled.</p>
+          <p style={{ color: "#6B7280", fontSize: 13, marginBottom: 16 }}>Auto-compiled from parsed POs \u2014 only items <strong>at or above the \u0394% Unit Cost Threshold</strong>. Copy the whole message, paste it where you need it, then click <strong>Done</strong> on each row once it's handled.</p>
           {(!pcMsgList || pcMsgList.length === 0) ? (
             <div style={{ padding: "32px 16px", textAlign: "center", color: "#9CA3AF", fontSize: 14, border: "1px dashed #E5E7EB", borderRadius: 10 }}>No parsed items yet. Parse a PO in the PO Translator and the lines show up here.</div>
           ) : (function() {
