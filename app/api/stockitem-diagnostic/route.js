@@ -73,6 +73,8 @@ async function run(username, password, inventoryID) {
       hasABCCode: abc.present,
       abcCodeValue: abc.present ? abc.value : null,
       alternatesFound: alternates,
+      noteField: ("note" in record) ? record.note : "(no 'note' key)",
+      noteIDField: ("NoteID" in record) ? record.NoteID : "(no 'NoteID' key)",
       allTopLevelFields: Object.keys(record).sort(),
     });
   } catch (err) {
