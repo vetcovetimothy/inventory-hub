@@ -3114,6 +3114,11 @@ function POImportTool(props) {
   var _netNew = useState([]), netNewList = _netNew[0], setNetNewList = _netNew[1];
   var _netNewFlash = useState(null), netNewFlash = _netNewFlash[0], setNetNewFlash = _netNewFlash[1];
   var NETNEW_KV = "netnew-flagged-items";
+  // Price Check copy-message list: compiled from parsed POs so you can copy a Slack
+  // message. Each entry: { inventoryId, ndc, description, deltaPct, addedAt }. Same
+  // structure as Net New \u2014 copy the message, then click Done to clear a row.
+  var _pcMsg = useState([]), pcMsgList = _pcMsg[0], setPcMsgList = _pcMsg[1];
+  var PCMSG_KV = "pricecheck-message-items";
   var _pcMode = useState("ndc"), pcMode = _pcMode[0], setPcMode = _pcMode[1];   // "ndc" | "mfr"
   var _pcQuery = useState(""), pcQuery = _pcQuery[0], setPcQuery = _pcQuery[1];
   var _pcBusy = useState(false), pcBusy = _pcBusy[0], setPcBusy = _pcBusy[1];
@@ -3131,16 +3136,21 @@ function POImportTool(props) {
       var map = maps[0], avgMap = maps[1] || {}, uomMap = maps[2] || {}, perWh = maps[3] || {};
       if (!map) throw new Error("Could not fetch NDC data from Acumatica. Check your login.");
       var entry = null, invId = null, shownNdc = "";
-      if (pcMode === "ndc") {
+      // One search bar: auto-detect. A query containing letters (e.g. GEN-10192)
+      // is an Inventory ID; an all-digits/dashes query is treated as an NDC first,
+      // then falls back to an ID match if no NDC hits.
+      var looksLikeId = /[A-Za-z]/.test(q);
+      if (!looksLikeId) {
         entry = lookupNdc(q, map);
         if (entry) { invId = entry.inventoryId; shownNdc = q; }
-      } else {
+      }
+      if (!entry) {
         var target = q.toUpperCase();
         for (var k in map) {
           if (map[k] && String(map[k].inventoryId || "").toUpperCase() === target) { entry = map[k]; invId = map[k].inventoryId; shownNdc = k; break; }
         }
       }
-      if (!entry || !invId) throw new Error("No match for \"" + q + "\" " + (pcMode === "ndc" ? "(NDC)" : "(Mfr No)") + " in the Generic NDCs map.");
+      if (!entry || !invId) throw new Error("No match for \"" + q + "\" (NDC or GEN- Inventory ID) in the Generic NDCs map.");
       var uom = (entry.uom || "").toUpperCase();
       var conv = (invId && uom && uomMap[invId] && uomMap[invId][uom]) ? uomMap[invId][uom] : null;
       var convFactor = conv ? (conv.op === "Divide" ? (1 / conv.factor) : conv.factor) : null;
@@ -3485,10 +3495,24 @@ function POImportTool(props) {
     }).catch(function() {});
     return function() { mt = false; };
   }, []);
+  // Load the persisted Price Check message list on mount.
+  useEffect(function() {
+    var mt = true;
+    kvGet(PCMSG_KV).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+      if (mt && d && Array.isArray(d.data)) setPcMsgList(d.data);
+    }).catch(function() {});
+    return function() { mt = false; };
+  }, []);
   function saveNetNew(list) { setNetNewList(list); kvPost(NETNEW_KV, list).catch(function() {}); }
   function removeNetNew(invId) {
     var next = (netNewList || []).filter(function(x) { return x.inventoryId !== invId; });
     saveNetNew(next);
+  }
+  // Price Check message list helpers (mirror Net New).
+  function savePcMsg(list) { setPcMsgList(list); kvPost(PCMSG_KV, list).catch(function() {}); }
+  function removePcMsg(key) {
+    var next = (pcMsgList || []).filter(function(x) { return (x.inventoryId + "|" + x.ndc) !== key; });
+    savePcMsg(next);
   }
   function updateFlagThreshold(v) {
     var n = parseFloat(v);
@@ -3971,6 +3995,25 @@ function POImportTool(props) {
       }
 
       setResults(matched);
+      // Compile parsed items into the Price Check copy-message list (Inventory ID,
+      // NDC, description, % unit cost). Merge with the existing list, dedup by
+      // inventoryId|ndc so re-parsing doesn't duplicate rows.
+      (function() {
+        var existing = (pcMsgList || []).slice();
+        var seen = {}; existing.forEach(function(x) { seen[x.inventoryId + "|" + x.ndc] = true; });
+        var now = Date.now(), added = false;
+        matched.forEach(function(r) {
+          if (!r.inventoryId || !r.ndc) return;
+          var key = r.inventoryId + "|" + r.ndc;
+          if (seen[key]) return;
+          var deltaPct = (r.unitPrice != null && r.avgCost != null && r.avgCost > 0)
+            ? Math.round(((r.unitPrice - r.avgCost) / r.avgCost) * 1000) / 10
+            : null;
+          existing.push({ inventoryId: r.inventoryId, ndc: r.ndc, description: r.acumaticaDesc || r.drugName || "", deltaPct: deltaPct, addedAt: now });
+          seen[key] = true; added = true;
+        });
+        if (added) savePcMsg(existing);
+      })();
       computeBatchStatus(matched);
       // Net New check: flag any GEN- item that appears on PURCH - Net New Item List.
       // Adds new matches to the persisted running list and pops a notice. Non-blocking.
@@ -4460,13 +4503,11 @@ function POImportTool(props) {
       {subTab === "check" && <div>
         <p style={{ color: "#6B7280", fontSize: 13, marginBottom: 20 }}>Look up a single generic by NDC or Mfr No (GEN- Inventory ID), see our average cost, and compare a quoted price per unit.</p>
         <div style={S.card}>
-          <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, marginBottom: 8 }}>Search by</div>
-          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-            {[["ndc", "NDC"], ["mfr", "Mfr No (GEN-)"]].map(function(m) { var on = pcMode === m[0]; return <button key={m[0]} onClick={function() { setPcMode(m[0]); }} style={{ padding: "6px 14px", borderRadius: 8, border: "1px solid " + (on ? TOOL_COLOR : "#E5E7EB"), background: on ? "rgba(6,182,212,0.08)" : "#fff", color: on ? TOOL_COLOR : "#6B7280", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>{m[1]}</button>; })}
-          </div>
+          <div style={{ fontSize: 12, color: "#6B7280", fontWeight: 500, marginBottom: 8 }}>Search by NDC or Mfr No (GEN- Inventory ID)</div>
           <div style={{ display: "flex", gap: 10 }}>
-            <input value={pcQuery} onChange={function(e) { setPcQuery(e.target.value); }} onKeyDown={function(e) { if (e.key === "Enter") pcLookup(); }} placeholder={pcMode === "ndc" ? "e.g. 27808-0266-01" : "e.g. GEN-10192"} style={Object.assign({}, S.inp, { flex: "1 1 320px", maxWidth: 420, padding: "10px 12px" })} />
+            <input value={pcQuery} onChange={function(e) { setPcQuery(e.target.value); }} onKeyDown={function(e) { if (e.key === "Enter") pcLookup(); }} placeholder="e.g. 27808-0266-01 or GEN-10192" style={Object.assign({}, S.inp, { flex: "1 1 320px", maxWidth: 420, padding: "10px 12px" })} />
             <button onClick={pcLookup} disabled={pcBusy} style={Object.assign({}, S.btn(), { padding: "10px 20px", opacity: pcBusy ? 0.7 : 1 })}>{pcBusy ? "Looking up\u2026" : "Look up"}</button>
+            <button onClick={function() { setPcQuery(""); setPcResult(null); setPcErr(""); setPcPrice(""); }} style={Object.assign({}, S.btn("ghost"), { padding: "10px 16px" })}>Clear</button>
           </div>
           {pcErr && <div style={{ marginTop: 12, fontSize: 13, color: "#DC2626" }}>{pcErr}</div>}
         </div>
@@ -4504,6 +4545,58 @@ function POImportTool(props) {
             </div>
           </div>
         </div>}
+
+        {/* Parsed-PO copy message: Inventory ID / NDC / Description / % Unit Cost */}
+        <div style={{ marginTop: 24 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "#1F2937", marginBottom: 6 }}>Parsed PO message</div>
+          <p style={{ color: "#6B7280", fontSize: 13, marginBottom: 16 }}>Auto-compiled from POs you've parsed. Copy the whole message, paste it where you need it, then click <strong>Done</strong> on each row once it's handled.</p>
+          {(!pcMsgList || pcMsgList.length === 0) ? (
+            <div style={{ padding: "32px 16px", textAlign: "center", color: "#9CA3AF", fontSize: 14, border: "1px dashed #E5E7EB", borderRadius: 10 }}>No parsed items yet. Parse a PO in the PO Translator and the lines show up here.</div>
+          ) : (function() {
+            var sorted = pcMsgList.slice().sort(function(a, b) { return (b.addedAt || 0) - (a.addedAt || 0); });
+            function fmtPct(d) { return d == null ? "" : (d > 0 ? "+" : "") + d + "%"; }
+            // Tab-separated so it pastes as a table (same as Net New).
+            var combinedMsg = ["Inventory ID\tNDC\tDrug Description\t% Unit Cost"].concat(sorted.map(function(it) {
+              return it.inventoryId + "\t" + (it.ndc || "") + "\t" + (it.description || "") + "\t" + fmtPct(it.deltaPct);
+            })).join("\n");
+            var th = { textAlign: "left", padding: "10px 14px", fontSize: 11, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.03em", borderBottom: "1px solid #E5E7EB", whiteSpace: "nowrap" };
+            var td = { padding: "10px 14px", fontSize: 13, color: "#1F2937", borderBottom: "1px solid #F3F4F6", verticalAlign: "top" };
+            return <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, padding: "10px 14px", background: "#F0F9FF", border: "1px solid #BAE6FD", borderRadius: 10 }}>
+                <span style={{ fontSize: 13, color: "#0C4A6E", fontWeight: 600 }}>{sorted.length} item{sorted.length === 1 ? "" : "s"} in this message</span>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={function() { if (navigator.clipboard) { navigator.clipboard.writeText(combinedMsg).then(function() { toast("Message copied", "success"); }).catch(function() { toast("Copy failed", "error"); }); } }} style={{ padding: "8px 20px", borderRadius: 6, border: "1px solid " + TOOL_COLOR, background: TOOL_COLOR, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Copy message</button>
+                  <button onClick={function() { savePcMsg([]); toast("Cleared all", "success"); }} style={{ padding: "8px 14px", borderRadius: 6, border: "1px solid #E5E7EB", background: "#fff", color: "#6B7280", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Clear all</button>
+                </div>
+              </div>
+              <div style={{ border: "1px solid #E5E7EB", borderRadius: 10, overflow: "hidden" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff" }}>
+                  <thead><tr style={{ background: "#F9FAFB" }}>
+                    <th style={th}>Inventory ID</th>
+                    <th style={th}>NDC</th>
+                    <th style={th}>Drug Description</th>
+                    <th style={Object.assign({}, th, { textAlign: "right" })}>% Unit Cost</th>
+                    <th style={Object.assign({}, th, { textAlign: "right" })}>Action</th>
+                  </tr></thead>
+                  <tbody>
+                    {sorted.map(function(it) {
+                      var dColor = it.deltaPct == null ? "#9CA3AF" : (it.deltaPct > 0 ? "#DC2626" : (it.deltaPct < 0 ? "#059669" : "#6B7280"));
+                      return <tr key={it.inventoryId + "|" + it.ndc}>
+                        <td style={Object.assign({}, td, { fontWeight: 600, whiteSpace: "nowrap" })}>{it.inventoryId}</td>
+                        <td style={Object.assign({}, td, { fontFamily: "monospace", whiteSpace: "nowrap" })}>{it.ndc || "\u2014"}</td>
+                        <td style={td}>{it.description || "\u2014"}</td>
+                        <td style={Object.assign({}, td, { textAlign: "right", whiteSpace: "nowrap", color: dColor, fontWeight: 600 })}>{it.deltaPct == null ? "\u2014" : (it.deltaPct > 0 ? "+" : "") + it.deltaPct + "%"}</td>
+                        <td style={Object.assign({}, td, { textAlign: "right", whiteSpace: "nowrap" })}>
+                          <button onClick={function() { removePcMsg(it.inventoryId + "|" + it.ndc); toast("Cleared " + it.inventoryId, "success"); }} style={{ padding: "5px 14px", borderRadius: 6, border: "1px solid #059669", background: "#059669", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Done</button>
+                        </td>
+                      </tr>;
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>;
+          })()}
+        </div>
       </div>}
 
       {subTab === "netnew" && <div>
