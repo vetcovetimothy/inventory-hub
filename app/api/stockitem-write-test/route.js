@@ -53,26 +53,29 @@ export async function POST(req) {
   } catch (err) { return json({ ok: false, stage: "login", error: String(err) }); }
 
   const H = { "Content-Type": "application/json", "Accept": "application/json", "Cookie": cookies };
-  const itemUrl = `${BASE}/entity/Default/${API_VERSION}/StockItem/${encodeURIComponent(inventoryID)}`;
+  // READ by key uses the path; WRITE uses the BASE endpoint with the key in the body.
+  // PUT /StockItem/{id} routes to Acumatica's file handler ("PutFile") and fails.
+  const readUrl = `${BASE}/entity/Default/${API_VERSION}/StockItem/${encodeURIComponent(inventoryID)}`;
+  const writeUrl = `${BASE}/entity/Default/${API_VERSION}/StockItem`;
 
   try {
     // 1. Read BEFORE
     let before = null;
     try {
-      const r = await fetch(itemUrl, { method: "GET", headers: H });
+      const r = await fetch(readUrl, { method: "GET", headers: H });
       const t = await r.text();
       if (!r.ok) return json({ ok: false, stage: "read-before", status: r.status, body: t.slice(0, 500) });
       const rec = JSON.parse(t);
       before = { note: fieldVal(rec, "note"), ABCCode: fieldVal(rec, "ABCCode") };
     } catch (e) { return json({ ok: false, stage: "read-before", error: String(e) }); }
 
-    // 2. Build the PUT payload — only the fields provided.
+    // 2. Build the PUT payload — only the fields provided. Key goes in the body.
     const payload = { InventoryID: { value: inventoryID } };
     if (note !== undefined) payload.note = { value: String(note) };
     if (abcCode !== undefined) payload.ABCCode = { value: String(abcCode) };
 
-    // 3. Write
-    const putRes = await fetch(itemUrl, { method: "PUT", headers: H, body: JSON.stringify(payload) });
+    // 3. Write to the BASE endpoint (key in body identifies the record to update).
+    const putRes = await fetch(writeUrl, { method: "PUT", headers: H, body: JSON.stringify(payload) });
     const putText = await putRes.text();
     if (!putRes.ok) {
       return json({ ok: false, stage: "write", status: putRes.status, before: before, sent: payload, rawResponse: putText.slice(0, 1500) });
