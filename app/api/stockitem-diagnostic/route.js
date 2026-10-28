@@ -75,7 +75,10 @@ async function run(username, password, inventoryID) {
       alternatesFound: alternates,
       noteField: ("note" in record) ? record.note : "(no 'note' key)",
       noteIDField: ("NoteID" in record) ? record.NoteID : "(no 'NoteID' key)",
+      customObject: ("custom" in record) ? record.custom : "(no 'custom' key)",
+      movementishFields: Object.keys(record).filter(function(k){ return /mov|class|abc/i.test(k); }),
       allTopLevelFields: Object.keys(record).sort(),
+      rawRecord: record,
     });
   } catch (err) {
     return json({ ok: false, stage: "run", error: String(err) });
