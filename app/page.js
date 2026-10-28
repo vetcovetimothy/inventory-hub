@@ -4013,7 +4013,7 @@ function POImportTool(props) {
           if (pct == null || pct < flagThreshold) return;   // only over-threshold items
           var key = r.inventoryId + "|" + r.ndc;
           if (seen[key]) return;
-          existing.push({ inventoryId: r.inventoryId, ndc: r.ndc, description: r.acumaticaDesc || r.drugName || "", deltaPct: Math.round(pct * 10) / 10, addedAt: now });
+          existing.push({ inventoryId: r.inventoryId, ndc: r.ndc, description: r.acumaticaDesc || r.drugName || "", deltaPct: Math.round(pct * 10) / 10, poNumber: r.poNumber || "", warehouse: r.warehouse || "", addedAt: now });
           seen[key] = true; added = true;
         });
         if (added) savePcMsg(existing);
@@ -4560,8 +4560,8 @@ function POImportTool(props) {
             var sorted = pcMsgList.slice().sort(function(a, b) { return (b.addedAt || 0) - (a.addedAt || 0); });
             function fmtPct(d) { return d == null ? "" : (d > 0 ? "+" : "") + d + "%"; }
             // Tab-separated so it pastes as a table (same as Net New).
-            var combinedMsg = ["Inventory ID\tNDC\tDrug Description\t% Unit Cost"].concat(sorted.map(function(it) {
-              return it.inventoryId + "\t" + (it.ndc || "") + "\t" + (it.description || "") + "\t" + fmtPct(it.deltaPct);
+            var combinedMsg = ["Inventory ID\tPO #\tWarehouse\tNDC\tDrug Description\t% Unit Cost"].concat(sorted.map(function(it) {
+              return it.inventoryId + "\t" + (it.poNumber || "") + "\t" + (it.warehouse || "") + "\t" + (it.ndc || "") + "\t" + (it.description || "") + "\t" + fmtPct(it.deltaPct);
             })).join("\n");
             var th = { textAlign: "left", padding: "10px 14px", fontSize: 11, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.03em", borderBottom: "1px solid #E5E7EB", whiteSpace: "nowrap" };
             var td = { padding: "10px 14px", fontSize: 13, color: "#1F2937", borderBottom: "1px solid #F3F4F6", verticalAlign: "top" };
@@ -4577,6 +4577,8 @@ function POImportTool(props) {
                 <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff" }}>
                   <thead><tr style={{ background: "#F9FAFB" }}>
                     <th style={th}>Inventory ID</th>
+                    <th style={th}>PO #</th>
+                    <th style={th}>Warehouse</th>
                     <th style={th}>NDC</th>
                     <th style={th}>Drug Description</th>
                     <th style={Object.assign({}, th, { textAlign: "right" })}>% Unit Cost</th>
@@ -4587,6 +4589,8 @@ function POImportTool(props) {
                       var dColor = it.deltaPct == null ? "#9CA3AF" : (it.deltaPct > 0 ? "#DC2626" : (it.deltaPct < 0 ? "#059669" : "#6B7280"));
                       return <tr key={it.inventoryId + "|" + it.ndc}>
                         <td style={Object.assign({}, td, { fontWeight: 600, whiteSpace: "nowrap" })}>{it.inventoryId}</td>
+                        <td style={Object.assign({}, td, { whiteSpace: "nowrap" })}>{it.poNumber || "\u2014"}</td>
+                        <td style={Object.assign({}, td, { whiteSpace: "nowrap" })}>{it.warehouse || "\u2014"}</td>
                         <td style={Object.assign({}, td, { fontFamily: "monospace", whiteSpace: "nowrap" })}>{it.ndc || "\u2014"}</td>
                         <td style={td}>{it.description || "\u2014"}</td>
                         <td style={Object.assign({}, td, { textAlign: "right", whiteSpace: "nowrap", color: dColor, fontWeight: 600 })}>{it.deltaPct == null ? "\u2014" : (it.deltaPct > 0 ? "+" : "") + it.deltaPct + "%"}</td>
