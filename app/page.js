@@ -4553,7 +4553,7 @@ function POImportTool(props) {
         {/* Parsed-PO copy message: Inventory ID / NDC / Description / % Unit Cost */}
         <div style={{ marginTop: 24 }}>
           <div style={{ fontSize: 15, fontWeight: 700, color: "#1F2937", marginBottom: 6 }}>Parsed PO message</div>
-          <p style={{ color: "#6B7280", fontSize: 13, marginBottom: 16 }}>Auto-compiled from parsed POs — only items <strong>at or above the \u0394% Unit Cost Threshold</strong>. Copy the whole message, paste it where you need it, then click <strong>Done</strong> on each row once it's handled.</p>
+          <p style={{ color: "#6B7280", fontSize: 13, marginBottom: 16 }}>Auto-compiled from parsed POs — only items <strong>at or above the Δ% Unit Cost Threshold</strong>. Copy the whole message, paste it where you need it, then click <strong>Done</strong> on each row once it's handled.</p>
           {(!pcMsgList || pcMsgList.length === 0) ? (
             <div style={{ padding: "32px 16px", textAlign: "center", color: "#9CA3AF", fontSize: 14, border: "1px dashed #E5E7EB", borderRadius: 10 }}>No parsed items yet. Parse a PO in the PO Translator and the lines show up here.</div>
           ) : (function() {
