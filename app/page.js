@@ -4557,50 +4557,56 @@ function POImportTool(props) {
           {(!pcMsgList || pcMsgList.length === 0) ? (
             <div style={{ padding: "32px 16px", textAlign: "center", color: "#9CA3AF", fontSize: 14, border: "1px dashed #E5E7EB", borderRadius: 10 }}>No parsed items yet. Parse a PO in the PO Translator and the lines show up here.</div>
           ) : (function() {
-            var sorted = pcMsgList.slice().sort(function(a, b) { return (b.addedAt || 0) - (a.addedAt || 0); });
             function fmtPct(d) { return d == null ? "" : (d > 0 ? "+" : "") + d + "%"; }
-            // Tab-separated so it pastes as a table (same as Net New).
-            var combinedMsg = ["Inventory ID\tPO #\tWarehouse\tNDC\tDrug Description\t% Unit Cost"].concat(sorted.map(function(it) {
-              return it.inventoryId + "\t" + (it.poNumber || "") + "\t" + (it.warehouse || "") + "\t" + (it.ndc || "") + "\t" + (it.description || "") + "\t" + fmtPct(it.deltaPct);
-            })).join("\n");
             var th = { textAlign: "left", padding: "10px 14px", fontSize: 11, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.03em", borderBottom: "1px solid #E5E7EB", whiteSpace: "nowrap" };
             var td = { padding: "10px 14px", fontSize: 13, color: "#1F2937", borderBottom: "1px solid #F3F4F6", verticalAlign: "top" };
+            // Group the message items by warehouse.
+            var groups = {};
+            pcMsgList.forEach(function(it) { var w = (it.warehouse || "Unspecified").trim() || "Unspecified"; if (!groups[w]) groups[w] = []; groups[w].push(it); });
+            var whKeys = Object.keys(groups).sort();
             return <div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, padding: "10px 14px", background: "#F0F9FF", border: "1px solid #BAE6FD", borderRadius: 10 }}>
-                <span style={{ fontSize: 13, color: "#0C4A6E", fontWeight: 600 }}>{sorted.length} item{sorted.length === 1 ? "" : "s"} in this message</span>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button onClick={function() { if (navigator.clipboard) { navigator.clipboard.writeText(combinedMsg).then(function() { toast("Message copied", "success"); }).catch(function() { toast("Copy failed", "error"); }); } }} style={{ padding: "8px 20px", borderRadius: 6, border: "1px solid " + TOOL_COLOR, background: TOOL_COLOR, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Copy message</button>
-                  <button onClick={function() { savePcMsg([]); toast("Cleared all", "success"); }} style={{ padding: "8px 14px", borderRadius: 6, border: "1px solid #E5E7EB", background: "#fff", color: "#6B7280", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Clear all</button>
-                </div>
-              </div>
-              <div style={{ border: "1px solid #E5E7EB", borderRadius: 10, overflow: "hidden" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff" }}>
-                  <thead><tr style={{ background: "#F9FAFB" }}>
-                    <th style={th}>Inventory ID</th>
-                    <th style={th}>PO #</th>
-                    <th style={th}>Warehouse</th>
-                    <th style={th}>NDC</th>
-                    <th style={th}>Drug Description</th>
-                    <th style={Object.assign({}, th, { textAlign: "right" })}>% Unit Cost</th>
-                    <th style={Object.assign({}, th, { textAlign: "right" })}>Action</th>
-                  </tr></thead>
-                  <tbody>
-                    {sorted.map(function(it) {
-                      var dColor = it.deltaPct == null ? "#9CA3AF" : (it.deltaPct > 0 ? "#DC2626" : (it.deltaPct < 0 ? "#059669" : "#6B7280"));
-                      return <tr key={(it.poNumber||"") + "|" + it.inventoryId + "|" + it.ndc}>
-                        <td style={Object.assign({}, td, { fontWeight: 600, whiteSpace: "nowrap" })}>{it.inventoryId}</td>
-                        <td style={Object.assign({}, td, { whiteSpace: "nowrap" })}>{it.poNumber || "—"}</td>
-                        <td style={Object.assign({}, td, { whiteSpace: "nowrap" })}>{it.warehouse || "—"}</td>
-                        <td style={Object.assign({}, td, { fontFamily: "monospace", whiteSpace: "nowrap" })}>{it.ndc || "—"}</td>
-                        <td style={td}>{it.description || "—"}</td>
-                        <td style={Object.assign({}, td, { textAlign: "right", whiteSpace: "nowrap", color: dColor, fontWeight: 600 })}>{it.deltaPct == null ? "—" : (it.deltaPct > 0 ? "+" : "") + it.deltaPct + "%"}</td>
-                        <td style={Object.assign({}, td, { textAlign: "right", whiteSpace: "nowrap" })}>
-                          <button onClick={function() { removePcMsg((it.poNumber||"") + "|" + it.inventoryId + "|" + it.ndc); toast("Cleared " + it.inventoryId, "success"); }} style={{ padding: "5px 14px", borderRadius: 6, border: "1px solid #059669", background: "#059669", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Done</button>
-                        </td>
-                      </tr>;
-                    })}
-                  </tbody>
-                </table>
+              {whKeys.map(function(wh) {
+                var items = groups[wh].slice().sort(function(a, b) { return (b.addedAt || 0) - (a.addedAt || 0); });
+                // Per-warehouse copy message (Warehouse is the header, so omit that column here).
+                var combinedMsg = ["Inventory ID\tPO #\tNDC\tDrug Description\t% Unit Cost"].concat(items.map(function(it) {
+                  return it.inventoryId + "\t" + (it.poNumber || "") + "\t" + (it.ndc || "") + "\t" + (it.description || "") + "\t" + fmtPct(it.deltaPct);
+                })).join("\n");
+                return <div key={wh} style={{ marginBottom: 22 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, padding: "10px 14px", background: "#F0F9FF", border: "1px solid #BAE6FD", borderRadius: 10 }}>
+                    <span style={{ fontSize: 14, color: "#0C4A6E", fontWeight: 700 }}>{wh} <span style={{ fontWeight: 500, fontSize: 12 }}>· {items.length} item{items.length === 1 ? "" : "s"}</span></span>
+                    <button onClick={function() { if (navigator.clipboard) { navigator.clipboard.writeText(combinedMsg).then(function() { toast("Copied " + wh + " message", "success"); }).catch(function() { toast("Copy failed", "error"); }); } }} style={{ padding: "8px 20px", borderRadius: 6, border: "1px solid " + TOOL_COLOR, background: TOOL_COLOR, color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Copy message</button>
+                  </div>
+                  <div style={{ border: "1px solid #E5E7EB", borderRadius: 10, overflow: "hidden" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff" }}>
+                      <thead><tr style={{ background: "#F9FAFB" }}>
+                        <th style={th}>Inventory ID</th>
+                        <th style={th}>PO #</th>
+                        <th style={th}>NDC</th>
+                        <th style={th}>Drug Description</th>
+                        <th style={Object.assign({}, th, { textAlign: "right" })}>% Unit Cost</th>
+                        <th style={Object.assign({}, th, { textAlign: "right" })}>Action</th>
+                      </tr></thead>
+                      <tbody>
+                        {items.map(function(it) {
+                          var dColor = it.deltaPct == null ? "#9CA3AF" : (it.deltaPct > 0 ? "#DC2626" : (it.deltaPct < 0 ? "#059669" : "#6B7280"));
+                          return <tr key={(it.poNumber||"") + "|" + it.inventoryId + "|" + it.ndc}>
+                            <td style={Object.assign({}, td, { fontWeight: 600, whiteSpace: "nowrap" })}>{it.inventoryId}</td>
+                            <td style={Object.assign({}, td, { whiteSpace: "nowrap" })}>{it.poNumber || "—"}</td>
+                            <td style={Object.assign({}, td, { fontFamily: "monospace", whiteSpace: "nowrap" })}>{it.ndc || "—"}</td>
+                            <td style={td}>{it.description || "—"}</td>
+                            <td style={Object.assign({}, td, { textAlign: "right", whiteSpace: "nowrap", color: dColor, fontWeight: 600 })}>{it.deltaPct == null ? "—" : (it.deltaPct > 0 ? "+" : "") + it.deltaPct + "%"}</td>
+                            <td style={Object.assign({}, td, { textAlign: "right", whiteSpace: "nowrap" })}>
+                              <button onClick={function() { removePcMsg((it.poNumber||"") + "|" + it.inventoryId + "|" + it.ndc); toast("Cleared " + it.inventoryId, "success"); }} style={{ padding: "5px 14px", borderRadius: 6, border: "1px solid #059669", background: "#059669", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Done</button>
+                            </td>
+                          </tr>;
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>;
+              })}
+              <div style={{ textAlign: "right" }}>
+                <button onClick={function() { savePcMsg([]); toast("Cleared all", "success"); }} style={{ padding: "8px 14px", borderRadius: 6, border: "1px solid #E5E7EB", background: "#fff", color: "#6B7280", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Clear all</button>
               </div>
             </div>;
           })()}
