@@ -6278,6 +6278,32 @@ function TruckloaderTool(props) {
   }
 
   // DOH-priority truck optimizer: lowest DOH → Truck 1
+  // Adjust the pallet count on one truck assignment (in the Truck Assignments page).
+  // Recomputes that line's Order Qty and Weight from its per-pallet rates, then the
+  // truck's total/remaining/fill flag. No re-optimize — it edits in place.
+  function setAssignmentPallets(truckLabel, inventoryID, newPallets) {
+    var np = parseInt(newPallets, 10);
+    if (isNaN(np) || np < 0) return;
+    setTruckGroups(function(prev) {
+      if (!prev) return prev;
+      return prev.map(function(tk) {
+        if (tk.isError || tk.label !== truckLabel) return tk;
+        var newAssign = tk.assignments.map(function(a) {
+          if (a.inventoryID !== inventoryID) return a;
+          var perPalletQty = (a.pallets > 0) ? (a.orderQty / a.pallets) : 0;
+          var perPalletLbs = (a.pallets > 0) ? ((a.lbs || 0) / a.pallets) : 0;
+          return Object.assign({}, a, {
+            pallets: np,
+            orderQty: Math.round(perPalletQty * np),
+            lbs: Math.round(perPalletLbs * np * 10) / 10,
+          });
+        });
+        var newLbs = newAssign.reduce(function(s, x) { return s + (x.lbs || 0); }, 0);
+        return Object.assign({}, tk, { assignments: newAssign, totalLbs: newLbs, remaining: TARGET - newLbs, needsFill: newLbs < MIN_WEIGHT });
+      });
+    });
+  }
+
   function optimizeTrucks() {
     if (orderItems.length === 0) { toast("No items to optimize", "error"); return; }
     var target = TARGET * 100;
@@ -6953,7 +6979,9 @@ function TruckloaderTool(props) {
                   <td style={Object.assign({}, S.td, { fontFamily: "monospace", fontSize: 12, fontWeight: 600 })}>{a.inventoryID}{a.isFill ? <span style={{ marginLeft: 6, padding: "1px 6px", borderRadius: 999, fontSize: 9, fontWeight: 700, fontFamily: "system-ui, -apple-system, sans-serif", letterSpacing: "0.3px", color: "#fff", background: "#7C3AED", verticalAlign: "middle" }}>FILL</span> : null}</td>
                   <td style={Object.assign({}, S.td, { maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" })} title={a.description}>{a.description}{a.isSplit ? <span style={Object.assign({}, S.badge("purple"), { marginLeft: 6, fontSize: 10 })}>SPLIT</span> : ""}</td>
                   <td style={Object.assign({}, S.td, { textAlign: "right" })}>{a.orderQty}</td>
-                  <td style={Object.assign({}, S.td, { textAlign: "right" })}>{a.pallets}</td>
+                  <td style={Object.assign({}, S.td, { textAlign: "right" })}>
+                    <input type="number" min="0" value={a.pallets} onChange={function(e) { setAssignmentPallets(t.label, a.inventoryID, e.target.value); }} style={{ width: 54, padding: "4px 6px", textAlign: "right", border: "1px solid #E5E7EB", borderRadius: 6, fontSize: 13, fontFamily: "inherit" }} />
+                  </td>
                   <td style={Object.assign({}, S.td, { textAlign: "right", fontWeight: 600 })}>{a.lbs ? a.lbs.toLocaleString(undefined, { maximumFractionDigits: 1 }) + " lbs" : "—"}</td>
                   <td style={Object.assign({}, S.td, { textAlign: "center", padding: "8px 4px" })}><button onClick={function() { var id = a.inventoryID; var srcItem = orderItems.find(function(it) { return it.inventoryID === id; }); if (srcItem && !srcItem.isFill) { setConfirmRemove({ id: id, action: function() { setOrderItems(orderItems.filter(function(it) { return it.inventoryID !== id; })); var updated = truckGroups.map(function(tk) { if (tk.isError) return tk; var newAssign = tk.assignments.filter(function(x) { return x.inventoryID !== id; }); var newLbs = newAssign.reduce(function(s, x) { return s + (x.lbs || 0); }, 0); return Object.assign({}, tk, { assignments: newAssign, totalLbs: newLbs, remaining: TARGET - newLbs, needsFill: newLbs < MIN_WEIGHT }); }).filter(function(tk) { return tk.isError || tk.assignments.length > 0; }); setTruckGroups(updated); toast("Removed " + id); setConfirmRemove(null); } }); return; } setOrderItems(orderItems.filter(function(it) { return it.inventoryID !== id; })); var updated = truckGroups.map(function(tk) { if (tk.isError) return tk; var newAssign = tk.assignments.filter(function(x) { return x.inventoryID !== id; }); var newLbs = newAssign.reduce(function(s, x) { return s + (x.lbs || 0); }, 0); return Object.assign({}, tk, { assignments: newAssign, totalLbs: newLbs, remaining: TARGET - newLbs, needsFill: newLbs < MIN_WEIGHT }); }).filter(function(tk) { return tk.isError || tk.assignments.length > 0; }); setTruckGroups(updated); toast("Removed " + id); }} style={{ background: "none", border: "none", cursor: "pointer", color: "#D1D5DB", fontSize: 14, padding: 2, borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center" }} title="Remove from order">{"\u2715"}</button></td>
                 </tr>;
