@@ -259,6 +259,7 @@ const WH = {
   "TP-OTC": { label: "Firebird", full: "Firebird, OH", color: "#7C3AED", emailTo: "nigel.white@fuzehealth.com, anna.wilson@fuzehealth.com, trudie.selby@fuzehealth.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Firebird " + d; } },
   "GGM-KY": { label: "[GGM] Southgate", full: "[GGM] Southgate, KY", color: "#8B5CF6", emailTo: "p.pocsatko@gogomeds.com, m.shull@gogomeds.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Weekly Replenishment Orders " + d; } },
   "GGM-AZ": { label: "[GGM] Scottsdale", full: "[GGM] Scottsdale, AZ", color: "#EC4899", emailTo: "r.aldrich@gogomeds.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Weekly Replenishment Orders " + d; } },
+  "CT-FL": { label: "[CT] Lakeland", full: "[CT] Lakeland, FL", color: "#0D9488", emailTo: "kourtni.westberry@caretria.com, hd-purchaseorders@vetcove.com", subjectFn: function(d) { return "Weekly Replenishment Orders " + d; } },
 };
 
 /* ═══════ VENDOR CONTACTS ═══════ */
@@ -743,6 +744,7 @@ function WHT(props) {
     "TP-OTC": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - FIREBIRD" },
     "GGM-KY": { sheetId: "1dMZ_8VC6zaqLLWXQHFfuTXgxMfm0T4ip7To1CbXLfMk", tab: "RECEIVING - KY" },
     "GGM-AZ": { sheetId: "1dMZ_8VC6zaqLLWXQHFfuTXgxMfm0T4ip7To1CbXLfMk", tab: "RECEIVING - AZ" },
+    "CT-FL": { sheetId: "1atyDm4yT39_z-fl01qS4TrDHaJTonF9hJIi0Q003Jc8", tab: "RECEIVING - FL" },
   };
   function uomToPkgSize(uom) { var m = String(uom == null ? "" : uom).match(/(\d+)\s*$/); return m ? Number(m[1]) : 1; }
   function fmtTrackerDate(v) {
@@ -3172,6 +3174,7 @@ function POImportTool(props) {
     "TP-OTC": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - FIREBIRD" },
     "GGM-KY": { sheetId: "1dMZ_8VC6zaqLLWXQHFfuTXgxMfm0T4ip7To1CbXLfMk", tab: "RECEIVING - KY" },
     "GGM-AZ": { sheetId: "1dMZ_8VC6zaqLLWXQHFfuTXgxMfm0T4ip7To1CbXLfMk", tab: "RECEIVING - AZ" },
+    "CT-FL": { sheetId: "1atyDm4yT39_z-fl01qS4TrDHaJTonF9hJIi0Q003Jc8", tab: "RECEIVING - FL" },
   };
   function uomToPkgSize(uom) { var m = String(uom == null ? "" : uom).match(/(\d+)\s*$/); return m ? Number(m[1]) : 1; }
   // ── Unified post-parse status ────────────────────────────────────────────
@@ -8935,7 +8938,7 @@ function VendorSettingsPage(props) {
 
 /* ═══════ MAIN HUB ═══════ */
 /* ═══════ FORECASTING TOOL (Phase 1: ingest + auto-format + export; Phase 2: methods) ═══════ */
-var FC_KNOWN_WAREHOUSES = ["TP-NY", "TP-OH", "TP-CA", "GGM-KY", "GGM-AZ", "HILL-CP-CA", "HILL-CP-NJ", "HILL-CP-FL", "HILL-CP-TX", "PHIL-PA"];
+var FC_KNOWN_WAREHOUSES = ["TP-NY", "TP-OH", "TP-CA", "GGM-KY", "GGM-AZ", "HILL-CP-CA", "HILL-CP-NJ", "HILL-CP-FL", "HILL-CP-TX", "PHIL-PA", "CT-FL"];
 
 // Full-text, quote-aware CSV parser (handles commas/newlines inside quoted
 // fields and "" escapes). Returns an array of row-arrays; row 0 = headers.
@@ -10468,6 +10471,7 @@ function PoReconPage(props) {
     "TP-OTC": { sheetId: "1Akzsql73Fkbkh817m4FZfHrzVqkv5cz9vyS25EofXtY", tab: "RECEIVING - FIREBIRD" },
     "GGM-KY": { sheetId: "1dMZ_8VC6zaqLLWXQHFfuTXgxMfm0T4ip7To1CbXLfMk", tab: "RECEIVING - KY" },
     "GGM-AZ": { sheetId: "1dMZ_8VC6zaqLLWXQHFfuTXgxMfm0T4ip7To1CbXLfMk", tab: "RECEIVING - AZ" },
+    "CT-FL": { sheetId: "1atyDm4yT39_z-fl01qS4TrDHaJTonF9hJIi0Q003Jc8", tab: "RECEIVING - FL" },
   };
   function uomToPkgSize(u) { var m = String(u == null ? "" : u).match(/(\d+)\s*$/); return m ? Number(m[1]) : 1; }
   function fmtDate(v) { if (!v) return ""; var s = String(v).trim(); var m = s.match(/^(\d{4})-(\d{2})-(\d{2})/); if (m) return Number(m[2]) + "/" + Number(m[3]) + "/" + m[1]; return s.slice(0, 10); }
