@@ -5596,8 +5596,11 @@ function FuzeTracker(props) {
 /* ═══════ GGM TRACKER ═══════ */
 function GGMTracker(props) {
   var toast = props.toast, cred = props.cred;
-  var TOOL_COLOR = "#8B5CF6";
-  var _wh = useState("GGM-KY"), whTab = _wh[0], setWhTab = _wh[1];
+  // Parameterized so the same component serves GGM and Caretria. Defaults = GGM.
+  var TOOL_COLOR = props.toolColor || "#8B5CF6";
+  var TRACKER_TABS = props.whTabs || [{ id: "GGM-KY", label: "Kentucky" }, { id: "GGM-AZ", label: "Arizona" }];
+  var KV_PREFIX = props.kvPrefix || "ggm-tracker-";
+  var _wh = useState(TRACKER_TABS[0].id), whTab = _wh[0], setWhTab = _wh[1];
   var _d = useState([]), data = _d[0], setData = _d[1];
   var _ld = useState(false), loading = _ld[0], setLoading = _ld[1];
   var _q = useState(""), search = _q[0], setSearch = _q[1];
@@ -5654,7 +5657,7 @@ function GGMTracker(props) {
           setData(json.data || []);
           setLastFetched(Date.now());
           if (!silent) toast("Loaded " + (json.count || 0) + " items for " + wh);
-          kvPost("ggm-tracker-" + wh, { data: json.data || [], fetchedAt: Date.now() }).catch(function() {});
+          kvPost(KV_PREFIX + wh, { data: json.data || [], fetchedAt: Date.now() }).catch(function() {});
         }
       })
       .catch(function(err) { if (!silent) toast("Error: " + err.message, "error"); })
@@ -5671,7 +5674,7 @@ function GGMTracker(props) {
 
   useEffect(function() {
     var m = true;
-    kvGet("ggm-tracker-" + whTab).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+    kvGet(KV_PREFIX + whTab).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
       if (!m) return;
       if (d && d.data && d.data.data && d.data.data.length > 0) {
         setData(d.data.data);
@@ -5704,7 +5707,7 @@ function GGMTracker(props) {
     return { total: total, received: received, pending: pending };
   }, [data]);
 
-  var whTabs = [{ id: "GGM-KY", label: "Kentucky" }, { id: "GGM-AZ", label: "Arizona" }];
+  var whTabs = TRACKER_TABS;
 
   return <div>
     {/* Warehouse tabs */}
@@ -7793,7 +7796,7 @@ function OOSTracker(props) {
   var _orderMapCacheHit = useState(false), orderMapCacheHit = _orderMapCacheHit[0], setOrderMapCacheHit = _orderMapCacheHit[1];
   function normalizeNdc(s) { return (s || "").replace(/\D/g, ""); }
   // Which Acumatica warehouses (and which Google Sheets) are relevant per OOS tab
-  var TAB_WAREHOUSES = { fuzerx: ["TP-NY", "TP-OH", "TP-CA", "TP-TX", "TP-LI", "TP-SD", "TP-OTC"], gogomeds: ["GGM-KY", "GGM-AZ"], cgp: [] };
+  var TAB_WAREHOUSES = { fuzerx: ["TP-NY", "TP-OH", "TP-CA", "TP-TX", "TP-LI", "TP-SD", "TP-OTC"], gogomeds: ["GGM-KY", "GGM-AZ"], cgp: [], caretria: ["CT-FL"] };
   function loadOrderMap(forceFresh) {
     var whsForTab = TAB_WAREHOUSES[tab] || [];
     setOrderMapLoading(true);
@@ -8168,7 +8171,8 @@ function OOSTracker(props) {
   var TAB_VENDORS = {
     fuzerx: ["fuzerx", "fuze"],
     gogomeds: ["gogomeds", "gogo"],
-    cgp: ["central garden", "cgp"]
+    cgp: ["central garden", "cgp"],
+    caretria: ["caretria", "caretia"]
   };
   function vendorMatch(vendors, vendorTab) {
     var aliases = TAB_VENDORS[vendorTab] || [];
@@ -8178,7 +8182,7 @@ function OOSTracker(props) {
     });
   }
   // Canonical vendor name per tab, used to look up the totals denominator.
-  var TAB_VENDOR_LABEL = { fuzerx: "FuzeRx", gogomeds: "GoGoMeds", cgp: "Central Garden & Pet" };
+  var TAB_VENDOR_LABEL = { fuzerx: "FuzeRx", gogomeds: "GoGoMeds", cgp: "Central Garden & Pet", caretria: "Caretria" };
   // Build a { vendorName(lowercased): total } map from TOTALITEMSEVER rows.
   function buildTotals(rows) {
     var m = {};
@@ -10808,8 +10812,8 @@ export default function Hub() {
   );
 
   var isWH = page in WH;
-  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "backorder-resolver" ? "#14B8A6" : page === "po-import" ? "#06B6D4" : page === "cycle-count" ? "#14B8A6" : page === "fuze-tracker" ? "#F59E0B" : page === "ggm-tracker" ? "#8B5CF6" : page === "hills-pawtree" ? "#10B981" : page === "truckloader" ? "#D97706" : page === "oos-tracker" ? "#EF4444" : page === "vendor-settings" ? "#6366F1" : page === "po-recon" ? "#6366F1" : page === "forecasting" ? "#0EA5E9" : page === "how-to" ? "#6B7280" : page === "discontinued" ? "#DC2626" : page === "vendor-inventory" ? "#0891B2" : "#3B82F6";
-  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "backorder-resolver" ? "Backorder Resolver" : page === "po-import" ? "Generic PO Translator" : page === "cycle-count" ? "Cycle Counting" : page === "fuze-tracker" ? "Fuze Tracker" : page === "ggm-tracker" ? "GGM Tracker" : page === "hills-pawtree" ? "Hills & Pawtree Tracker" : page === "truckloader" ? "Hills Truckloader" : page === "oos-tracker" ? "OOS Tracker" : page === "vendor-settings" ? "Vendor Settings" : page === "po-recon" ? "PO Reconciliation" : page === "forecasting" ? "Forecasting" : page === "how-to" ? "How-To Guide" : page === "discontinued" ? "Discontinued Items" : page === "vendor-inventory" ? "Vendor Inventory" : showLogin ? "Login" : "Vendor Settings";
+  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "backorder-resolver" ? "#14B8A6" : page === "po-import" ? "#06B6D4" : page === "cycle-count" ? "#14B8A6" : page === "fuze-tracker" ? "#F59E0B" : page === "ggm-tracker" ? "#8B5CF6" : page === "caretria-tracker" ? "#0D9488" : page === "hills-pawtree" ? "#10B981" : page === "truckloader" ? "#D97706" : page === "oos-tracker" ? "#EF4444" : page === "vendor-settings" ? "#6366F1" : page === "po-recon" ? "#6366F1" : page === "forecasting" ? "#0EA5E9" : page === "how-to" ? "#6B7280" : page === "discontinued" ? "#DC2626" : page === "vendor-inventory" ? "#0891B2" : "#3B82F6";
+  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "backorder-resolver" ? "Backorder Resolver" : page === "po-import" ? "Generic PO Translator" : page === "cycle-count" ? "Cycle Counting" : page === "fuze-tracker" ? "Fuze Tracker" : page === "ggm-tracker" ? "GGM Tracker" : page === "caretria-tracker" ? "Caretria Tracker" : page === "hills-pawtree" ? "Hills & Pawtree Tracker" : page === "truckloader" ? "Hills Truckloader" : page === "oos-tracker" ? "OOS Tracker" : page === "vendor-settings" ? "Vendor Settings" : page === "po-recon" ? "PO Reconciliation" : page === "forecasting" ? "Forecasting" : page === "how-to" ? "How-To Guide" : page === "discontinued" ? "Discontinued Items" : page === "vendor-inventory" ? "Vendor Inventory" : showLogin ? "Login" : "Vendor Settings";
 
   function SideLink(p) {
     var active = page === p.id && !showLogin;
@@ -10834,7 +10838,7 @@ export default function Hub() {
             { key: "generic", label: "Generic PO Tools", items: [{ id: "po-import", label: "Generic PO Translator", color: "#06B6D4" }] },
             { key: "hills", label: "Hills Tools", items: [{ id: "hills-pawtree", label: "Hills & Pawtree", color: "#10B981" }, { id: "truckloader", label: "Hills Truckloader", color: "#D97706" }] },
             { key: "oos", label: "OOS", items: [{ id: "oos-tracker", label: "OOS Tracker", color: "#EF4444" }] },
-            { key: "tracking", label: "Tracking", items: [{ id: "fuze-tracker", label: "Fuze Tracker", color: "#F59E0B" }, { id: "ggm-tracker", label: "GGM Tracker", color: "#8B5CF6" }] },
+            { key: "tracking", label: "Tracking", items: [{ id: "fuze-tracker", label: "Fuze Tracker", color: "#F59E0B" }, { id: "ggm-tracker", label: "GGM Tracker", color: "#8B5CF6" }, { id: "caretria-tracker", label: "Caretria Tracker", color: "#0D9488" }] },
             { key: "inventory", label: "Inventory Tools", items: [{ id: "forecasting", label: "Forecasting", color: "#0EA5E9" }, { id: "short-dating", label: "Short-Dating", color: "#E879F9" }, { id: "backorder", label: "Backorders", color: "#F97316" }, { id: "backorder-resolver", label: "Backorder Resolver", color: "#14B8A6" }, { id: "discontinued", label: "Discontinued", color: "#DC2626" }, { id: "vendor-inventory", label: "Vendor Inventory", color: "#0891B2" }, { id: "cycle-count", label: "Cycle Counting", color: "#14B8A6" }] },
           ];
           return sections.map(function(sec, si) {
@@ -10893,6 +10897,7 @@ export default function Hub() {
           {!showLogin && page === "cycle-count" && <CycleCountTool key="cc-standard" toast={showToast} cred={cred} />}
           {!showLogin && page === "fuze-tracker" && <FuzeTracker toast={showToast} cred={cred} />}
           {!showLogin && page === "ggm-tracker" && <GGMTracker toast={showToast} cred={cred} />}
+          {!showLogin && page === "caretria-tracker" && <GGMTracker toast={showToast} cred={cred} toolColor="#0D9488" kvPrefix="caretria-tracker-" whTabs={[{ id: "CT-FL", label: "Lakeland" }]} />}
           {!showLogin && page === "hills-pawtree" && <HillsTracker toast={showToast} ok={ok} lp={promptLogin} cred={cred} />}
           {!showLogin && page === "truckloader" && <TruckloaderTool toast={showToast} ok={ok} lp={promptLogin} cred={cred} gmail={gmail} />}
           {!showLogin && page === "oos-tracker" && <OOSTracker toast={showToast} cred={cred} />}
