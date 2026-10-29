@@ -401,12 +401,9 @@ export async function POST(request) {
     // Build OData URL
     let url = `${BASE}${PREFIX}/${ENDPOINTS[type]}`;
 
-    // For PO fetches, filter by warehouse in OData. The CT GI exposes the warehouse
-    // as SiteID (POLine field) rather than Warehouse, so it filters on that.
-    if ((type === "po" || type === "po-ggm") && warehouse) {
+    // For PO fetches, filter by warehouse in OData.
+    if ((type === "po" || type === "po-ggm" || type === "po-ct") && warehouse) {
       url += `?$filter=Warehouse eq '${warehouse}'`;
-    } else if (type === "po-ct" && warehouse) {
-      url += `?$filter=SiteID eq '${warehouse}'`;
     }
 
     // For replenishment needs, fetch all and let client filter by warehouse
