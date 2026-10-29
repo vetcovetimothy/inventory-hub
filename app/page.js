@@ -7962,9 +7962,11 @@ function OOSTracker(props) {
   var _fuzeData = useState([]), fuzeData = _fuzeData[0], setFuzeData = _fuzeData[1];
   var _ggmData = useState([]), ggmData = _ggmData[0], setGgmData = _ggmData[1];
   var _cgpData = useState([]), cgpData = _cgpData[0], setCgpData = _cgpData[1];
+  var _ctData = useState([]), ctData = _ctData[0], setCtData = _ctData[1];
   var _fuzeName = useState(null), fuzeName = _fuzeName[0], setFuzeName = _fuzeName[1];
   var _ggmName = useState(null), ggmName = _ggmName[0], setGgmName = _ggmName[1];
   var _cgpName = useState(null), cgpName = _cgpName[0], setCgpName = _cgpName[1];
+  var _ctName = useState(null), ctName = _ctName[0], setCtName = _ctName[1];
   var _allWhse = useState([]), allWhseData = _allWhse[0], setAllWhseData = _allWhse[1];
   var _allWhseName = useState(null), allWhseName = _allWhseName[0], setAllWhseName = _allWhseName[1];
   var _totals = useState({}), totalsByVendor = _totals[0], setTotalsByVendor = _totals[1];
@@ -8058,7 +8060,7 @@ function OOSTracker(props) {
       // needing a re-fetch. Cached buckets can overlap, so dedupe by Mfr No +
       // product line before re-splitting.
       var combined = [], seen = {};
-      ["fuze", "ggm", "cgp"].forEach(function(k) {
+      ["fuze", "ggm", "cgp", "ct"].forEach(function(k) {
         (parsed[k] || []).forEach(function(row) {
           var id = String(row.MANUFACTURER_NO == null ? "" : row.MANUFACTURER_NO) + "|" + String(row.PRODUCT_LINE_NAME == null ? "" : row.PRODUCT_LINE_NAME);
           if (seen[id]) return;
@@ -8071,6 +8073,7 @@ function OOSTracker(props) {
         setFuzeData(sp0.fuze); setFuzeName(parsed.fuzeName || nm0);
         setGgmData(sp0.ggm); setGgmName(parsed.ggmName || nm0);
         setCgpData(sp0.cgp); setCgpName(parsed.cgpName || nm0);
+        setCtData(sp0.ct); setCtName(parsed.ctName || nm0);
       }
     }).catch(function() {});
     // Load table 2 (All Warehouse-Manufacturer Nos OOS)
@@ -8194,14 +8197,15 @@ function OOSTracker(props) {
     return m;
   }
   function splitByVendor(rows) {
-    var fuze = [], ggm = [], cgp = [];
+    var fuze = [], ggm = [], cgp = [], ct = [];
     (rows || []).forEach(function(r) {
       deriveOOS(r);
       if (vendorMatch(r._vendors, "fuzerx")) fuze.push(r);
       if (vendorMatch(r._vendors, "gogomeds")) ggm.push(r);
       if (vendorMatch(r._vendors, "cgp")) cgp.push(r);
+      if (vendorMatch(r._vendors, "caretria")) ct.push(r);
     });
-    return { fuze: fuze, ggm: ggm, cgp: cgp };
+    return { fuze: fuze, ggm: ggm, cgp: cgp, ct: ct };
   }
   function whStyle(d) {
     var bg = d === "Brooklyn" ? "#EFF6FF" : d === "Ohio" ? "#ECFDF5" : d === "Hayward" ? "#FFF7ED" : d === "Dallas" ? "#ECFEFF" : d === "Long Island" ? "#EEF2FF" : d === "San Diego" ? "#FFF7ED" : d === "Firebird" ? "#F5F3FF" : d === "Kentucky" ? "#F5F3FF" : d === "Arizona" ? "#FDF2F8" : d === "Hills CA" ? "#FEF9C3" : d === "Hills NJ" ? "#E0F2FE" : d === "Hills FL" ? "#FFE4E6" : d === "Hills TX" ? "#CCFBF1" : "#F3F4F6";
@@ -8236,8 +8240,8 @@ function OOSTracker(props) {
     return rows;
   }
 
-  function saveDataToKV(fuze, fuzeFn, ggm, ggmFn, cgp, cgpFn) {
-    kvPost(OOS_DATA_KEY, { fuze: fuze, fuzeName: fuzeFn, ggm: ggm, ggmName: ggmFn, cgp: cgp, cgpName: cgpFn, _savedAt: Date.now() }).catch(function() {});
+  function saveDataToKV(fuze, fuzeFn, ggm, ggmFn, cgp, cgpFn, ct, ctFn) {
+    kvPost(OOS_DATA_KEY, { fuze: fuze, fuzeName: fuzeFn, ggm: ggm, ggmName: ggmFn, cgp: cgp, cgpName: cgpFn, ct: ct, ctName: ctFn, _savedAt: Date.now() }).catch(function() {});
   }
 
   // Pure: given current miss/notes maps, compute the updated maps for one vendor's
@@ -8311,16 +8315,18 @@ function OOSTracker(props) {
       setFuzeData(sp.fuze); setFuzeName(nm);
       setGgmData(sp.ggm); setGgmName(nm);
       setCgpData(sp.cgp); setCgpName(nm);
-      saveDataToKV(sp.fuze, nm, sp.ggm, nm, sp.cgp, nm);
+      setCtData(sp.ct); setCtName(nm);
+      saveDataToKV(sp.fuze, nm, sp.ggm, nm, sp.cgp, nm, sp.ct, nm);
       var now = Date.now();
       var u1 = computeMissUpdate(sp.fuze, "fuzerx", missCount, permNotes);
       var u2 = computeMissUpdate(sp.ggm, "gogomeds", u1.miss, u1.notes);
       var u3 = computeMissUpdate(sp.cgp, "cgp", u2.miss, u2.notes);
-      setMissCount(u3.miss);
-      kvPost(OOS_NOTES_MISS_KEY, Object.assign({}, u3.miss, { _savedAt: now })).catch(function() {});
-      if (u1.notesChanged || u2.notesChanged || u3.notesChanged) {
-        setPermNotes(u3.notes);
-        kvPost(OOS_NOTES_PERM_KEY, Object.assign({}, u3.notes, { _savedAt: now })).catch(function() {});
+      var u4 = computeMissUpdate(sp.ct, "caretria", u3.miss, u3.notes);
+      setMissCount(u4.miss);
+      kvPost(OOS_NOTES_MISS_KEY, Object.assign({}, u4.miss, { _savedAt: now })).catch(function() {});
+      if (u1.notesChanged || u2.notesChanged || u3.notesChanged || u4.notesChanged) {
+        setPermNotes(u4.notes);
+        kvPost(OOS_NOTES_PERM_KEY, Object.assign({}, u4.notes, { _savedAt: now })).catch(function() {});
       }
       setWhFilter("all"); setSearch("");
       toast("Loaded " + rows.length + " OOS products from " + file.name);
@@ -8351,30 +8357,32 @@ function OOSTracker(props) {
       if (!d || !d.ok) { setSfLoading(false); toast("Snowflake fetch failed: " + ((d && (d.message || d.hint || d.error)) || "unknown error"), "error"); return; }
       var all = d.rows || [];
       var sp = splitByVendor(all);
-      var fuze = sp.fuze, ggm = sp.ggm, cgp = sp.cgp;
-      var dropped = all.filter(function(r) { return !(vendorMatch(r._vendors, "fuzerx") || vendorMatch(r._vendors, "gogomeds") || vendorMatch(r._vendors, "cgp")); }).length;
+      var fuze = sp.fuze, ggm = sp.ggm, cgp = sp.cgp, ct = sp.ct;
+      var dropped = all.filter(function(r) { return !(vendorMatch(r._vendors, "fuzerx") || vendorMatch(r._vendors, "gogomeds") || vendorMatch(r._vendors, "cgp") || vendorMatch(r._vendors, "caretria")); }).length;
       var nm = "Snowflake \u00B7 " + new Date().toLocaleString();
       setFuzeData(fuze); setFuzeName(nm);
       setGgmData(ggm); setGgmName(nm);
       setCgpData(cgp); setCgpName(nm);
-      saveDataToKV(fuze, nm, ggm, nm, cgp, nm);
-      // Chain miss-count updates across all three vendors into ONE state write.
+      setCtData(ct); setCtName(nm);
+      saveDataToKV(fuze, nm, ggm, nm, cgp, nm, ct, nm);
+      // Chain miss-count updates across all vendors into ONE state write.
       var now = Date.now();
       var u1 = computeMissUpdate(fuze, "fuzerx", missCount, permNotes);
       var u2 = computeMissUpdate(ggm, "gogomeds", u1.miss, u1.notes);
       var u3 = computeMissUpdate(cgp, "cgp", u2.miss, u2.notes);
-      setMissCount(u3.miss);
-      kvPost(OOS_NOTES_MISS_KEY, Object.assign({}, u3.miss, { _savedAt: now })).catch(function() {});
-      if (u1.notesChanged || u2.notesChanged || u3.notesChanged) {
-        setPermNotes(u3.notes);
-        kvPost(OOS_NOTES_PERM_KEY, Object.assign({}, u3.notes, { _savedAt: now })).catch(function() {});
+      var u4 = computeMissUpdate(ct, "caretria", u3.miss, u3.notes);
+      setMissCount(u4.miss);
+      kvPost(OOS_NOTES_MISS_KEY, Object.assign({}, u4.miss, { _savedAt: now })).catch(function() {});
+      if (u1.notesChanged || u2.notesChanged || u3.notesChanged || u4.notesChanged) {
+        setPermNotes(u4.notes);
+        kvPost(OOS_NOTES_PERM_KEY, Object.assign({}, u4.notes, { _savedAt: now })).catch(function() {});
       }
       setWhFilter("all"); setSearch("");
       setSfLoading(false);
       var pulledAt = Date.now(), pulledBy = cred && cred.username ? cred.username : "";
       setLastPull({ at: pulledAt, by: pulledBy });
       kvPost(OOS_LASTPULL_KEY, { at: pulledAt, by: pulledBy, _savedAt: pulledAt }).catch(function() {});
-      toast("Loaded " + (fuze.length + ggm.length + cgp.length) + " OOS items from Snowflake" + (dropped > 0 ? " (" + dropped + " other-vendor rows skipped)" : ""));
+      toast("Loaded " + (fuze.length + ggm.length + cgp.length + ct.length) + " OOS items from Snowflake" + (dropped > 0 ? " (" + dropped + " other-vendor rows skipped)" : ""));
     }).catch(function(e) { setSfLoading(false); toast("Snowflake fetch error: " + (e && e.message || e), "error"); });
   }
 
@@ -8388,8 +8396,8 @@ function OOSTracker(props) {
     </div>;
   }
 
-  var data = tab === "fuzerx" ? fuzeData : tab === "cgp" ? cgpData : ggmData;
-  var currentName = tab === "fuzerx" ? fuzeName : tab === "cgp" ? cgpName : ggmName;
+  var data = tab === "fuzerx" ? fuzeData : tab === "cgp" ? cgpData : tab === "caretria" ? ctData : ggmData;
+  var currentName = tab === "fuzerx" ? fuzeName : tab === "cgp" ? cgpName : tab === "caretria" ? ctName : ggmName;
   var _sdIds = useState({}), sdIds = _sdIds[0], setSdIds = _sdIds[1];
   var _boIds = useState({}), boIds = _boIds[0], setBoIds = _boIds[1];
   var _sfLoading = useState(false), sfLoading = _sfLoading[0], setSfLoading = _sfLoading[1];
@@ -8453,7 +8461,7 @@ function OOSTracker(props) {
         <div style={{ flex: 1 }} />
         <span style={{ fontSize: 12, color: "#9CA3AF" }}>{filtered.length} of {data.length} items</span>
         <CacheStatus lastFetchedAt={orderMapLastFetched} cacheHit={orderMapCacheHit} refreshing={orderMapLoading} color={TOOL_COLOR} onRefresh={function() { loadOrderMap(true); }} />
-        <button onClick={function() { setFuzeData([]); setFuzeName(null); setGgmData([]); setGgmName(null); setCgpData([]); setCgpName(null); saveDataToKV([], null, [], null, [], null); }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}><IconTrash /> Replace CSV</button>
+        <button onClick={function() { setFuzeData([]); setFuzeName(null); setGgmData([]); setGgmName(null); setCgpData([]); setCgpName(null); setCtData([]); setCtName(null); saveDataToKV([], null, [], null, [], null, [], null); }} style={Object.assign({}, S.btn("ghost"), { padding: "6px 14px", fontSize: 12 })}><IconTrash /> Replace CSV</button>
       </div>
       <div style={Object.assign({}, S.card, { padding: 0, overflow: "auto", maxHeight: "calc(100vh - 220px)" })}>
         <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
@@ -8632,11 +8640,12 @@ function OOSTracker(props) {
       <button onClick={function() { setTab("fuzerx"); setWhFilter("all"); setSearch(""); setAllWhseSearch(""); }} style={S.pill(tab === "fuzerx", "#3B82F6")}>FuzeRx{fuzeData.length > 0 && <span style={{ fontSize: 10, background: tab === "fuzerx" ? "rgba(255,255,255,0.2)" : "rgba(100,116,139,0.2)", padding: "1px 6px", borderRadius: 4, marginLeft: 6 }}>{fuzeData.length}</span>}</button>
       <button onClick={function() { setTab("gogomeds"); setWhFilter("all"); setSearch(""); setAllWhseSearch(""); }} style={S.pill(tab === "gogomeds", "#8B5CF6")}>GoGoMeds{ggmData.length > 0 && <span style={{ fontSize: 10, background: tab === "gogomeds" ? "rgba(255,255,255,0.2)" : "rgba(100,116,139,0.2)", padding: "1px 6px", borderRadius: 4, marginLeft: 6 }}>{ggmData.length}</span>}</button>
       <button onClick={function() { setTab("cgp"); setWhFilter("all"); setSearch(""); setAllWhseSearch(""); }} style={S.pill(tab === "cgp", "#10B981")}>Central Garden &amp; Pet{cgpData.length > 0 && <span style={{ fontSize: 10, background: tab === "cgp" ? "rgba(255,255,255,0.2)" : "rgba(100,116,139,0.2)", padding: "1px 6px", borderRadius: 4, marginLeft: 6 }}>{cgpData.length}</span>}</button>
+      <button onClick={function() { setTab("caretria"); setWhFilter("all"); setSearch(""); setAllWhseSearch(""); }} style={S.pill(tab === "caretria", "#0D9488")}>Caretria{ctData.length > 0 && <span style={{ fontSize: 10, background: tab === "caretria" ? "rgba(255,255,255,0.2)" : "rgba(100,116,139,0.2)", padding: "1px 6px", borderRadius: 4, marginLeft: 6 }}>{ctData.length}</span>}</button>
       <div style={{ flex: 1 }} />
       {lastPull && lastPull.at && <div style={{ fontSize: 11, color: "#9CA3AF", alignSelf: "center", marginRight: 4, whiteSpace: "nowrap" }}>Last pull: {(function() { try { return new Date(lastPull.at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); } catch (e) { return ""; } })()}{lastPull.by ? " by " + lastPull.by : ""}</div>}
       <button onClick={function() { loadFromSnowflake(); }} disabled={sfLoading} style={Object.assign({}, S.btn("ghost"), { background: "#EF4444", color: "#fff", border: "none", padding: "8px 14px", fontSize: 12, opacity: sfLoading ? 0.6 : 1, cursor: sfLoading ? "default" : "pointer" })}>{sfLoading ? "Fetching\u2026" : "\u2601 Fetch from Snowflake"}</button>
     </div>
-    {(fuzeData.length === 0 && ggmData.length === 0 && cgpData.length === 0 && allWhseData.length === 0)
+    {(fuzeData.length === 0 && ggmData.length === 0 && cgpData.length === 0 && ctData.length === 0 && allWhseData.length === 0)
       ? uploadZone()
       : <div>
           {(fuzeData.length > 0 || ggmData.length > 0 || cgpData.length > 0) ? dataTable() : null}
