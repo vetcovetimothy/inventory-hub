@@ -4013,7 +4013,10 @@ function POImportTool(props) {
           if (pct == null || pct < flagThreshold) return;   // only over-threshold items
           var key = (r.poNumber||"") + "|" + r.inventoryId + "|" + r.ndc;
           if (seen[key]) return;
-          existing.push({ inventoryId: r.inventoryId, ndc: r.ndc, description: r.acumaticaDesc || r.drugName || "", deltaPct: Math.round(pct * 10) / 10, poNumber: r.poNumber || "", warehouse: r.warehouse || "", addedAt: now });
+          // Per-unit (base unit) costs: avg per unit = avgCost; PO per unit = pkg price ÷ conv factor.
+          var avgPerUnit = hasAvg ? r.avgCost : null;
+          var poPerUnit = (price && r.uomConvFactor && r.uomConvFactor > 0) ? (price / r.uomConvFactor) : price;
+          existing.push({ inventoryId: r.inventoryId, ndc: r.ndc, description: r.acumaticaDesc || r.drugName || "", avgPerUnit: avgPerUnit, poPerUnit: poPerUnit, deltaPct: Math.round(pct * 10) / 10, poNumber: r.poNumber || "", warehouse: r.warehouse || "", addedAt: now });
           seen[key] = true; added = true;
         });
         if (added) savePcMsg(existing);
@@ -4568,8 +4571,9 @@ function POImportTool(props) {
               {whKeys.map(function(wh) {
                 var items = groups[wh].slice().sort(function(a, b) { return (b.addedAt || 0) - (a.addedAt || 0); });
                 // Per-warehouse copy message (Warehouse is the header, so omit that column here).
-                var combinedMsg = ["Inventory ID\tPO #\tNDC\tDrug Description\t% Unit Cost"].concat(items.map(function(it) {
-                  return it.inventoryId + "\t" + (it.poNumber || "") + "\t" + (it.ndc || "") + "\t" + (it.description || "") + "\t" + fmtPct(it.deltaPct);
+                var fmtMoney = function(v) { return (v == null || isNaN(v)) ? "" : "$" + Number(v).toFixed(4); };
+                var combinedMsg = ["Inventory ID\tPO #\tNDC\tDrug Description\tAvg Per Unit\tPO Unit Cost\t% Unit Cost"].concat(items.map(function(it) {
+                  return it.inventoryId + "\t" + (it.poNumber || "") + "\t" + (it.ndc || "") + "\t" + (it.description || "") + "\t" + fmtMoney(it.avgPerUnit) + "\t" + fmtMoney(it.poPerUnit) + "\t" + fmtPct(it.deltaPct);
                 })).join("\n");
                 return <div key={wh} style={{ marginBottom: 22 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, padding: "10px 14px", background: "#F0F9FF", border: "1px solid #BAE6FD", borderRadius: 10 }}>
@@ -4583,6 +4587,8 @@ function POImportTool(props) {
                         <th style={th}>PO #</th>
                         <th style={th}>NDC</th>
                         <th style={th}>Drug Description</th>
+                        <th style={Object.assign({}, th, { textAlign: "right" })}>Avg Per Unit</th>
+                        <th style={Object.assign({}, th, { textAlign: "right" })}>PO Unit Cost</th>
                         <th style={Object.assign({}, th, { textAlign: "right" })}>% Unit Cost</th>
                         <th style={Object.assign({}, th, { textAlign: "right" })}>Action</th>
                       </tr></thead>
@@ -4594,6 +4600,8 @@ function POImportTool(props) {
                             <td style={Object.assign({}, td, { whiteSpace: "nowrap" })}>{it.poNumber || "—"}</td>
                             <td style={Object.assign({}, td, { fontFamily: "monospace", whiteSpace: "nowrap" })}>{it.ndc || "—"}</td>
                             <td style={td}>{it.description || "—"}</td>
+                            <td style={Object.assign({}, td, { textAlign: "right", whiteSpace: "nowrap" })}>{it.avgPerUnit == null ? "—" : "$" + Number(it.avgPerUnit).toFixed(4)}</td>
+                            <td style={Object.assign({}, td, { textAlign: "right", whiteSpace: "nowrap" })}>{it.poPerUnit == null ? "—" : "$" + Number(it.poPerUnit).toFixed(4)}</td>
                             <td style={Object.assign({}, td, { textAlign: "right", whiteSpace: "nowrap", color: dColor, fontWeight: 600 })}>{it.deltaPct == null ? "—" : (it.deltaPct > 0 ? "+" : "") + it.deltaPct + "%"}</td>
                             <td style={Object.assign({}, td, { textAlign: "right", whiteSpace: "nowrap" })}>
                               <button onClick={function() { removePcMsg((it.poNumber||"") + "|" + it.inventoryId + "|" + it.ndc); toast("Cleared " + it.inventoryId, "success"); }} style={{ padding: "5px 14px", borderRadius: 6, border: "1px solid #059669", background: "#059669", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Done</button>
