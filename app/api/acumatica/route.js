@@ -15,6 +15,7 @@ const PREFIX = process.env.ACUMATICA_ODATA_PREFIX || "/odata/VetCove";
 const ENDPOINTS = {
   "po":            "PURCH%20-%20TP%20PO%20Export%20with%20Replen",
   "po-ggm":        "PURCH%20-%20Export%20PO%20Lines%20GGM",
+  "po-ct":         "PURCH%20-%20Export%20PO%20Lines%20CT",
   "ndc-lookup":    "PURCH%20-%20Generic%20Current%20NDCs",
   "item-xref":     "ITEM%20-%20Non-Stock%20Cross%20Reference",
   "short-dating":  "INV%20-%20Short-Dating%20Tracker",
@@ -81,6 +82,25 @@ const COLUMN_MAP = {
     { label: "VendorName",    keys: ["VendorName", "Vendor", "Vendor Name"] },
     { label: "OrderNbr",      keys: ["OrderNbr", "Order Nbr.", "OrderNbr."] },
     { label: "Warehouse",     keys: ["Warehouse", "WarehouseID", "WarehouseId"] },
+    { label: "ReorderPoint",  keys: ["ReorderPoint"] },
+    { label: "MaxQty",        keys: ["MaxQty"] },
+    { label: "LeadTime",      keys: ["VendorLeadTimeDays", "LeadTime", "LeadTimeDays"] },
+    { label: "MinOrderQty",   keys: ["MinOrderQty"] },
+    { label: "QtyAvailable",  keys: ["QtyAvailable", "QtyAvail"] },
+    { label: "Price",         keys: ["Price", "UnitCost", "LastCost"] },
+    { label: "MovementClass", keys: ["MovementClass", "Movement Class"] },
+    { label: "InventoryID",   keys: ["InventoryID", "InventoryID_2", "InventoryId", "InventoryCD", "InventoryCd"] },
+    { label: "OrderDate",     keys: ["Date", "OrderDate", "PODate", "TranDate", "DocDate", "DocumentDate"] },
+    { label: "PromisedDate",  keys: ["PromisedDate", "Promised Date", "Promised", "ExpectedDate", "PromiseDate"] },
+    { label: "UOM",           keys: ["UOM", "UOM_2", "Unit", "PurchaseUnit", "UnitOfMeasure", "OrderUOM"] },
+  ],
+  "po-ct": [
+    { label: "SKUNDC",        keys: ["SKUNDC", "SkuNDC", "SKU_NDC", "SKU/NDC", "SKU", "NDC", "InventoryID", "InventoryId", "InventoryCd", "InventoryCD", "ItemID", "ItemId", "Inventory ID"] },
+    { label: "Description",   keys: ["Description", "Descr", "ItemDescription", "TranDesc", "InventoryDescription", "LineDescription"] },
+    { label: "OrderQty",      keys: ["OrderQty", "Order Qty", "Qty", "Quantity"] },
+    { label: "VendorName",    keys: ["VendorName", "Vendor", "Vendor Name"] },
+    { label: "OrderNbr",      keys: ["OrderNbr", "Order Nbr.", "OrderNbr."] },
+    { label: "Warehouse",     keys: ["Warehouse", "WarehouseID", "WarehouseId", "SiteID", "SiteId"] },
     { label: "ReorderPoint",  keys: ["ReorderPoint"] },
     { label: "MaxQty",        keys: ["MaxQty"] },
     { label: "LeadTime",      keys: ["VendorLeadTimeDays", "LeadTime", "LeadTimeDays"] },
@@ -381,9 +401,12 @@ export async function POST(request) {
     // Build OData URL
     let url = `${BASE}${PREFIX}/${ENDPOINTS[type]}`;
 
-    // For PO fetches, filter by warehouse in OData
+    // For PO fetches, filter by warehouse in OData. The CT GI exposes the warehouse
+    // as SiteID (POLine field) rather than Warehouse, so it filters on that.
     if ((type === "po" || type === "po-ggm") && warehouse) {
       url += `?$filter=Warehouse eq '${warehouse}'`;
+    } else if (type === "po-ct" && warehouse) {
+      url += `?$filter=SiteID eq '${warehouse}'`;
     }
 
     // For replenishment needs, fetch all and let client filter by warehouse
@@ -485,7 +508,7 @@ export async function POST(request) {
     let rawRows = json.value || [];
 
     // For PO fetches, filter to today's date only and exclude certain vendors
-    if ((type === "po" || type === "po-ggm") && rawRows.length > 0) {
+    if ((type === "po" || type === "po-ggm" || type === "po-ct") && rawRows.length > 0) {
       // Get today in US Eastern time (Acumatica's likely timezone)
       const nowET = new Date(new Date().toLocaleString("en-US", { timeZone: "America/New_York" }));
       const todayStr = nowET.getFullYear() + "-" + String(nowET.getMonth() + 1).padStart(2, "0") + "-" + String(nowET.getDate()).padStart(2, "0");
@@ -505,7 +528,7 @@ export async function POST(request) {
         let vendorName = "";
         for (const k of vendorKeys) { if (row[k]) { vendorName = String(row[k]).toLowerCase(); break; } }
         if (vendorName.includes("truepill") || vendorName.includes("bloodworth")) return false;
-        if (vendorName.includes("vetcove generics") && type !== "po-ggm") return false;
+        if (vendorName.includes("vetcove generics") && type !== "po-ggm" && type !== "po-ct") return false;
 
         return true;
       });
