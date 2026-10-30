@@ -7147,7 +7147,8 @@ function TruckloaderTool(props) {
           kvPost("truckloader-email-overrides", updated).catch(function() {});
         }
         var hillsBody = "<p>Hi, please find attached our weekly replenishment order. Please include the Purchase Order # on our packing list.</p><p>We look forward to confirmation of receipt. Let us know if you have any questions.</p><p>Thanks,</p>";
-        var cpBody = "<p>Hi Central Pet team,</p><p>I've just placed this week's replenishment POs with Hill's. Attaching here to create in your systems. Hill's hasn't set delivery appointments yet.</p><p>Thanks,</p>";
+        var cpGreeting = (warehouse || "").indexOf("PHIL") === 0 ? "Hi Phillips team," : "Hi Central Pet team,";
+        var cpBody = "<p>" + cpGreeting + "</p><p>I've just placed this week's replenishment POs with Hill's. Attaching here to create in your systems. Hill's hasn't set delivery appointments yet.</p><p>Thanks,</p>";
 
         async function createDraft(type) {
           if (!gmail || !gmail.token) { toast("Connect Gmail first (bottom-left)", "error"); return; }
