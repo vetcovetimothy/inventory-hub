@@ -2334,15 +2334,23 @@ function CycleCountTool(props) {
     return function() { mt = false; };
   }, []);
 
-  // Load cached stock items from localStorage on mount
+  // Load cached stock items from localStorage on mount, but ONLY if the cache is
+  // from today. A stale cache is cleared so the tool auto-fetches fresh from OData
+  // (matches the TP-DOH daily-expiry pattern). This prevents an old cache from
+  // sticking around forever.
   useEffect(function() {
     try {
       var saved = localStorage.getItem("stock-items-cache");
       if (saved) {
         var parsed = JSON.parse(saved);
-        if (parsed && parsed.rows && parsed.rows.length > 0) {
+        var today = new Date().toLocaleDateString();
+        if (parsed && parsed.savedDate === today && parsed.rows && parsed.rows.length > 0) {
           setStockRows(parsed.rows);
           setStockMeta({ date: parsed.date || "unknown", count: parsed.rows.length, name: parsed.name || "Stock Items" });
+        } else {
+          // Stale (not from today) or legacy cache with no savedDate — clear it so
+          // effStockRows stays empty and processData auto-fetches live.
+          localStorage.removeItem("stock-items-cache");
         }
       }
     } catch (e) { /* localStorage unavailable, ignore */ }
@@ -2366,7 +2374,7 @@ function CycleCountTool(props) {
       setStockMeta(meta);
       // Save to localStorage
       try {
-        localStorage.setItem("stock-items-cache", JSON.stringify({ rows: trimmed, date: meta.date, name: meta.name }));
+        localStorage.setItem("stock-items-cache", JSON.stringify({ rows: trimmed, date: meta.date, name: meta.name, savedDate: new Date().toLocaleDateString() }));
         toast("Stock Items saved (" + trimmed.length + " items)", "success");
       } catch (e) {
         toast("Stock Items loaded but failed to cache locally", "error");
@@ -2432,7 +2440,7 @@ function CycleCountTool(props) {
       setStockRows(trimmed);
       var meta = { date: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }), count: trimmed.length, name: "Acumatica (IN-StockItem)" };
       setStockMeta(meta);
-      try { localStorage.setItem("stock-items-cache", JSON.stringify({ rows: trimmed, date: meta.date, name: meta.name })); } catch (e) {}
+      try { localStorage.setItem("stock-items-cache", JSON.stringify({ rows: trimmed, date: meta.date, name: meta.name, savedDate: new Date().toLocaleDateString() })); } catch (e) {}
       return trimmed;
     } catch (e) { return null; }
   }
