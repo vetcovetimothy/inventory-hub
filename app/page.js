@@ -2231,7 +2231,11 @@ function HillsMasterTool(props) {
   var inp = { width: "100%", border: "1px solid transparent", borderRadius: 6, padding: "6px 8px", fontSize: 13, fontFamily: "inherit", background: "transparent" };
   var inpNum = Object.assign({}, inp, { textAlign: "right", fontFamily: "monospace" });
 
-  return <Section id="hills-master" title="Hills Master" color={TOOL_COLOR}>
+  return <div>
+    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+      <div style={{ width: 10, height: 10, borderRadius: "50%", background: TOOL_COLOR, flexShrink: 0 }} />
+      <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: "#1F2937" }}>Hills Master</h2>
+    </div>
     <p style={{ color: "#6B7280", fontSize: 13, marginBottom: 14 }}>Pallet weights and units-per-pallet for every Hill's item. The Hills Truckloader reads this data directly — edits you save here take effect in the Truckloader immediately. Edit cells inline, add or remove rows, then <strong>Save</strong>. You can still re-upload a fresh sheet from Hill's.</p>
 
     <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 14, flexWrap: "wrap" }}>
@@ -2267,7 +2271,7 @@ function HillsMasterTool(props) {
           </tbody>
         </table>
       </div>}
-  </Section>;
+  </div>;
 }
 
 function CycleCountTool(props) {
