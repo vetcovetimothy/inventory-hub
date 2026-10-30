@@ -3037,7 +3037,7 @@ function CycleCountTool(props) {
 
           <div style={{ fontSize: 14, color: "#374151", fontWeight: 600, marginBottom: 8, marginTop: 20, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             {isSftp ? "6" : "5"}. Stock Items <span style={{ fontSize: 11, fontWeight: 500, color: "#059669", background: "rgba(5,150,105,0.1)", padding: "2px 8px", borderRadius: 10 }}>auto-fetched</span>
-            {stockMeta && <span style={{ fontSize: 12, fontWeight: 400, color: "#6B7280" }}>{"— last loaded " + stockMeta.count.toLocaleString() + " items on " + stockMeta.date}</span>}
+            {stockMeta && <span style={{ fontSize: 12, fontWeight: 400, color: "#6B7280" }}>{"— " + stockMeta.count.toLocaleString() + " items, last fetched " + stockMeta.date}</span>}
           </div>
         </div>
       </div>
