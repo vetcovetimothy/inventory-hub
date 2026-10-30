@@ -2155,6 +2155,121 @@ function DropZone(props) {
 }
 
 /* ═══════ CYCLE COUNTING TOOL ═══════ */
+function HillsMasterTool(props) {
+  var toast = props.toast;
+  var TOOL_COLOR = "#D97706";
+  var _items = useState([]), items = _items[0], setItems = _items[1];
+  var _meta = useState({ uploadedAt: null, fileName: null }), meta = _meta[0], setMeta = _meta[1];
+  var _loading = useState(true), loading = _loading[0], setLoading = _loading[1];
+  var _dirty = useState(false), dirty = _dirty[0], setDirty = _dirty[1];
+  var _saving = useState(false), saving = _saving[0], setSaving = _saving[1];
+  var _q = useState(""), search = _q[0], setSearch = _q[1];
+
+  // Load from the same KV key the Truckloader reads, so edits here feed it directly.
+  useEffect(function() {
+    var mt = true;
+    kvGet("hills-master").then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
+      if (!mt) return;
+      if (d && d.data && Array.isArray(d.data.items)) {
+        setItems(d.data.items.map(function(it) { return { id: it.id || "", description: it.description || "", unitsPerPallet: it.unitsPerPallet || 0, palletWeight: it.palletWeight || 0 }; }));
+        setMeta({ uploadedAt: d.data.uploadedAt || null, fileName: d.data.fileName || null });
+      }
+      setLoading(false);
+    }).catch(function() { setLoading(false); });
+    return function() { mt = false; };
+  }, []);
+
+  function updateCell(idx, field, value) {
+    setItems(function(prev) {
+      var next = prev.slice();
+      var v = (field === "unitsPerPallet" || field === "palletWeight") ? (value === "" ? "" : parseFloat(value)) : value;
+      next[idx] = Object.assign({}, prev[idx]); next[idx][field] = v;
+      return next;
+    });
+    setDirty(true);
+  }
+  function addRow() { setItems(function(prev) { return prev.concat([{ id: "", description: "", unitsPerPallet: 0, palletWeight: 0 }]); }); setDirty(true); }
+  function removeRow(idx) { setItems(function(prev) { return prev.filter(function(_, i) { return i !== idx; }); }); setDirty(true); }
+
+  function save() {
+    // Clean: keep rows with an id and a positive pallet weight (same rule as the upload parser).
+    var clean = items.map(function(it) {
+      return { id: String(it.id || "").trim(), description: it.description || "", unitsPerPallet: parseFloat(it.unitsPerPallet) || 0, palletWeight: parseFloat(it.palletWeight) || 0 };
+    }).filter(function(x) { return x.id && x.palletWeight > 0; });
+    var data = { items: clean, uploadedAt: Date.now(), fileName: (meta.fileName || "edited-in-hub") };
+    setSaving(true);
+    kvPost("hills-master", data).then(function() {
+      setItems(clean); setMeta({ uploadedAt: data.uploadedAt, fileName: data.fileName }); setDirty(false); setSaving(false);
+      toast("Hills Master saved (" + clean.length + " items)", "success");
+    }).catch(function() { setSaving(false); toast("Save failed", "error"); });
+  }
+
+  function onUpload(e) {
+    var file = e.target.files && e.target.files[0]; if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function(ev) {
+      try {
+        var XLSX = require("xlsx");
+        var wb = XLSX.read(ev.target.result, { type: "array" });
+        var ws = wb.Sheets[wb.SheetNames[0]];
+        var rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
+        var parsed = rows.map(function(r) {
+          return { id: String(r["Inventory ID"] || r["InventoryID"] || r["inventory id"] || "").trim(), unitsPerPallet: parseFloat(r["Units to Pallet"] || r["UnitsToPallet"] || 0), palletWeight: parseFloat(r["Pallet Gross Weight"] || r["PalletGrossWeight"] || 0), description: r["Description"] || r["Descr"] || "" };
+        }).filter(function(x) { return x.id && x.palletWeight > 0; });
+        setItems(parsed); setMeta({ uploadedAt: Date.now(), fileName: file.name }); setDirty(true);
+        toast("Loaded " + parsed.length + " items from " + file.name + " — review and Save", "success");
+      } catch (err) { toast("Error parsing file: " + err.message, "error"); }
+    };
+    reader.readAsArrayBuffer(file);
+    e.target.value = "";
+  }
+
+  var S = useMemo(function() { return makeStyles(TOOL_COLOR); }, []);
+  var filtered = search ? items.filter(function(it) { var s = search.toLowerCase(); return (it.id || "").toLowerCase().indexOf(s) >= 0 || (it.description || "").toLowerCase().indexOf(s) >= 0; }) : items;
+  var th = { textAlign: "left", padding: "8px 10px", fontSize: 11, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.03em", borderBottom: "1px solid #E5E7EB", whiteSpace: "nowrap", background: "#F9FAFB" };
+  var td = { padding: "4px 6px", borderBottom: "1px solid #F3F4F6", verticalAlign: "middle" };
+  var inp = { width: "100%", border: "1px solid transparent", borderRadius: 6, padding: "6px 8px", fontSize: 13, fontFamily: "inherit", background: "transparent" };
+  var inpNum = Object.assign({}, inp, { textAlign: "right", fontFamily: "monospace" });
+
+  return <Section id="hills-master" title="Hills Master" color={TOOL_COLOR}>
+    <p style={{ color: "#6B7280", fontSize: 13, marginBottom: 14 }}>Pallet weights and units-per-pallet for every Hill's item. The Hills Truckloader reads this data directly — edits you save here take effect in the Truckloader immediately. Edit cells inline, add or remove rows, then <strong>Save</strong>. You can still re-upload a fresh sheet from Hill's.</p>
+
+    <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 14, flexWrap: "wrap" }}>
+      <button onClick={save} disabled={!dirty || saving} style={Object.assign({}, S.btn(), { padding: "8px 18px", opacity: (!dirty || saving) ? 0.5 : 1, cursor: (!dirty || saving) ? "default" : "pointer" })}>{saving ? "Saving\u2026" : dirty ? "Save changes" : "Saved"}</button>
+      <button onClick={addRow} style={Object.assign({}, S.btn("ghost"), { padding: "8px 14px" })}>+ Add row</button>
+      <label style={Object.assign({}, S.btn("ghost"), { padding: "8px 14px", cursor: "pointer" })}>Re-upload sheet<input type="file" accept=".xlsx,.xls" onChange={onUpload} style={{ display: "none" }} /></label>
+      <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search ID or description\u2026" style={Object.assign({}, S.inp, { flex: "1 1 240px", maxWidth: 360, padding: "8px 12px" })} />
+      <span style={{ fontSize: 12, color: "#9CA3AF" }}>{items.length} items{meta.uploadedAt ? " \u00B7 updated " + new Date(meta.uploadedAt).toLocaleDateString() : ""}{dirty ? " \u00B7 unsaved changes" : ""}</span>
+    </div>
+
+    {loading ? <div style={{ padding: 40, textAlign: "center", color: "#9CA3AF" }}>Loading…</div>
+      : items.length === 0 ? <div style={{ padding: "32px 16px", textAlign: "center", color: "#9CA3AF", fontSize: 14, border: "1px dashed #E5E7EB", borderRadius: 10 }}>No Hills Master data yet. Re-upload a sheet from Hill's, or add rows manually.</div>
+      : <div style={{ border: "1px solid #E5E7EB", borderRadius: 10, overflow: "auto", maxHeight: "68vh" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff" }}>
+          <thead><tr>
+            <th style={th}>Inventory ID</th>
+            <th style={th}>Description</th>
+            <th style={Object.assign({}, th, { textAlign: "right" })}>Units/Pallet</th>
+            <th style={Object.assign({}, th, { textAlign: "right" })}>Pallet Weight</th>
+            <th style={Object.assign({}, th, { textAlign: "right", width: 50 })}></th>
+          </tr></thead>
+          <tbody>
+            {filtered.map(function(it) {
+              var idx = items.indexOf(it);
+              return <tr key={idx}>
+                <td style={td}><input value={it.id} onChange={function(e) { updateCell(idx, "id", e.target.value); }} style={Object.assign({}, inp, { fontFamily: "monospace", fontWeight: 600 })} /></td>
+                <td style={td}><input value={it.description} onChange={function(e) { updateCell(idx, "description", e.target.value); }} style={inp} /></td>
+                <td style={td}><input value={it.unitsPerPallet} onChange={function(e) { updateCell(idx, "unitsPerPallet", e.target.value); }} style={inpNum} /></td>
+                <td style={td}><input value={it.palletWeight} onChange={function(e) { updateCell(idx, "palletWeight", e.target.value); }} style={inpNum} /></td>
+                <td style={Object.assign({}, td, { textAlign: "right" })}><button onClick={function() { removeRow(idx); }} title="Remove" style={{ border: "none", background: "none", color: "#DC2626", cursor: "pointer", fontSize: 16, padding: "2px 8px" }}>×</button></td>
+              </tr>;
+            })}
+          </tbody>
+        </table>
+      </div>}
+  </Section>;
+}
+
 function CycleCountTool(props) {
   var toast = props.toast;
   var cred = props.cred;
@@ -10823,8 +10938,8 @@ export default function Hub() {
   );
 
   var isWH = page in WH;
-  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "backorder-resolver" ? "#14B8A6" : page === "po-import" ? "#06B6D4" : page === "cycle-count" ? "#14B8A6" : page === "fuze-tracker" ? "#F59E0B" : page === "ggm-tracker" ? "#8B5CF6" : page === "caretria-tracker" ? "#0D9488" : page === "hills-pawtree" ? "#10B981" : page === "truckloader" ? "#D97706" : page === "oos-tracker" ? "#EF4444" : page === "vendor-settings" ? "#6366F1" : page === "po-recon" ? "#6366F1" : page === "forecasting" ? "#0EA5E9" : page === "how-to" ? "#6B7280" : page === "discontinued" ? "#DC2626" : page === "vendor-inventory" ? "#0891B2" : "#3B82F6";
-  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "backorder-resolver" ? "Backorder Resolver" : page === "po-import" ? "Generic PO Translator" : page === "cycle-count" ? "Cycle Counting" : page === "fuze-tracker" ? "Fuze Tracker" : page === "ggm-tracker" ? "GGM Tracker" : page === "caretria-tracker" ? "Caretria Tracker" : page === "hills-pawtree" ? "Hills & Pawtree Tracker" : page === "truckloader" ? "Hills Truckloader" : page === "oos-tracker" ? "OOS Tracker" : page === "vendor-settings" ? "Vendor Settings" : page === "po-recon" ? "PO Reconciliation" : page === "forecasting" ? "Forecasting" : page === "how-to" ? "How-To Guide" : page === "discontinued" ? "Discontinued Items" : page === "vendor-inventory" ? "Vendor Inventory" : showLogin ? "Login" : "Vendor Settings";
+  var activeColor = isWH ? WH[page].color : page === "short-dating" ? "#E879F9" : page === "backorder" ? "#F97316" : page === "backorder-resolver" ? "#14B8A6" : page === "po-import" ? "#06B6D4" : page === "cycle-count" ? "#14B8A6" : page === "fuze-tracker" ? "#F59E0B" : page === "ggm-tracker" ? "#8B5CF6" : page === "caretria-tracker" ? "#0D9488" : page === "hills-pawtree" ? "#10B981" : page === "truckloader" ? "#D97706" : page === "oos-tracker" ? "#EF4444" : page === "vendor-settings" ? "#6366F1" : page === "po-recon" ? "#6366F1" : page === "forecasting" ? "#0EA5E9" : page === "how-to" ? "#6B7280" : page === "discontinued" ? "#DC2626" : page === "vendor-inventory" ? "#0891B2" : page === "hills-master" ? "#D97706" : "#3B82F6";
+  var activeLabel = isWH ? WH[page].full : page === "short-dating" ? "Short-Dating Tracker" : page === "backorder" ? "Backorder Tracker" : page === "backorder-resolver" ? "Backorder Resolver" : page === "po-import" ? "Generic PO Translator" : page === "cycle-count" ? "Cycle Counting" : page === "fuze-tracker" ? "Fuze Tracker" : page === "ggm-tracker" ? "GGM Tracker" : page === "caretria-tracker" ? "Caretria Tracker" : page === "hills-pawtree" ? "Hills & Pawtree Tracker" : page === "truckloader" ? "Hills Truckloader" : page === "oos-tracker" ? "OOS Tracker" : page === "vendor-settings" ? "Vendor Settings" : page === "po-recon" ? "PO Reconciliation" : page === "forecasting" ? "Forecasting" : page === "how-to" ? "How-To Guide" : page === "discontinued" ? "Discontinued Items" : page === "vendor-inventory" ? "Vendor Inventory" : page === "hills-master" ? "Hills Master" : showLogin ? "Login" : "Vendor Settings";
 
   function SideLink(p) {
     var active = page === p.id && !showLogin;
@@ -10850,7 +10965,7 @@ export default function Hub() {
             { key: "hills", label: "Hills Tools", items: [{ id: "hills-pawtree", label: "Hills & Pawtree", color: "#10B981" }, { id: "truckloader", label: "Hills Truckloader", color: "#D97706" }] },
             { key: "oos", label: "OOS", items: [{ id: "oos-tracker", label: "OOS Tracker", color: "#EF4444" }] },
             { key: "tracking", label: "Tracking", items: [{ id: "fuze-tracker", label: "Fuze Tracker", color: "#F59E0B" }, { id: "ggm-tracker", label: "GGM Tracker", color: "#8B5CF6" }, { id: "caretria-tracker", label: "Caretria Tracker", color: "#0D9488" }] },
-            { key: "inventory", label: "Inventory Tools", items: [{ id: "forecasting", label: "Forecasting", color: "#0EA5E9" }, { id: "short-dating", label: "Short-Dating", color: "#E879F9" }, { id: "backorder", label: "Backorders", color: "#F97316" }, { id: "backorder-resolver", label: "Backorder Resolver", color: "#14B8A6" }, { id: "discontinued", label: "Discontinued", color: "#DC2626" }, { id: "vendor-inventory", label: "Vendor Inventory", color: "#0891B2" }, { id: "cycle-count", label: "Cycle Counting", color: "#14B8A6" }] },
+            { key: "inventory", label: "Inventory Tools", items: [{ id: "forecasting", label: "Forecasting", color: "#0EA5E9" }, { id: "short-dating", label: "Short-Dating", color: "#E879F9" }, { id: "backorder", label: "Backorders", color: "#F97316" }, { id: "backorder-resolver", label: "Backorder Resolver", color: "#14B8A6" }, { id: "discontinued", label: "Discontinued", color: "#DC2626" }, { id: "vendor-inventory", label: "Vendor Inventory", color: "#0891B2" }, { id: "cycle-count", label: "Cycle Counting", color: "#14B8A6" }, { id: "hills-master", label: "Hills Master", color: "#D97706" }] },
           ];
           return sections.map(function(sec, si) {
             var hasActive = sec.items.some(function(item) { return page === item.id && !showLogin; });
@@ -10915,6 +11030,7 @@ export default function Hub() {
           {!showLogin && page === "backorder-resolver" && <BackorderResolver toast={showToast} cred={cred} />}
           {!showLogin && page === "discontinued" && <DiscontinuedTool toast={showToast} cred={cred} />}
           {!showLogin && page === "vendor-inventory" && <VendorInventoryTool toast={showToast} />}
+          {!showLogin && page === "hills-master" && <HillsMasterTool toast={showToast} />}
           {!showLogin && page === "forecasting" && <ForecastingTool toast={showToast} cred={cred} ok={ok} lp={promptLogin} />}
           {!showLogin && (page === "vendor-settings" || page === "vendor-contacts" || page === "rules") && <VendorSettingsPage contacts={vendorContacts} updateContacts={updateVendorContacts} channels={vendorChannels} updateChannels={updateVendorChannels} shipRules={shipRules} updateShipRules={updateShipRules} toast={showToast} />}
           {!showLogin && page === "po-recon" && <PoReconPage cred={cred} ok={ok} lp={promptLogin} toast={showToast} />}
