@@ -2339,6 +2339,7 @@ function CycleCountTool(props) {
   // (matches the TP-DOH daily-expiry pattern). This prevents an old cache from
   // sticking around forever.
   useEffect(function() {
+    var hadTodayCache = false;
     try {
       var saved = localStorage.getItem("stock-items-cache");
       if (saved) {
@@ -2347,14 +2348,19 @@ function CycleCountTool(props) {
         if (parsed && parsed.savedDate === today && parsed.rows && parsed.rows.length > 0) {
           setStockRows(parsed.rows);
           setStockMeta({ date: parsed.date || "unknown", count: parsed.rows.length, name: parsed.name || "Stock Items" });
+          hadTodayCache = true;
         } else {
-          // Stale (not from today) or legacy cache with no savedDate — clear it so
-          // effStockRows stays empty and processData auto-fetches live.
+          // Stale (not from today) or legacy cache with no savedDate — clear it.
           localStorage.removeItem("stock-items-cache");
         }
       }
     } catch (e) { /* localStorage unavailable, ignore */ }
-  }, []);
+    // No valid (today) cache → auto-fetch fresh from OData on mount so the status
+    // shows "last fetched today" immediately, rather than waiting for Process.
+    if (!hadTodayCache && cred && cred.username && cred.password) {
+      fetchStockItems();
+    }
+  }, [cred]);
 
   // Upload and cache stock items to localStorage
   function handleStockUpload(file) {
