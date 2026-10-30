@@ -2164,6 +2164,7 @@ function HillsMasterTool(props) {
   var _dirty = useState(false), dirty = _dirty[0], setDirty = _dirty[1];
   var _saving = useState(false), saving = _saving[0], setSaving = _saving[1];
   var _q = useState(""), search = _q[0], setSearch = _q[1];
+  var _edit = useState(null), editingIdx = _edit[0], setEditingIdx = _edit[1];
 
   // Load from the same KV key the Truckloader reads, so edits here feed it directly.
   useEffect(function() {
@@ -2228,8 +2229,8 @@ function HillsMasterTool(props) {
   var filtered = search ? items.filter(function(it) { var s = search.toLowerCase(); return (it.id || "").toLowerCase().indexOf(s) >= 0 || (it.description || "").toLowerCase().indexOf(s) >= 0; }) : items;
   var th = { textAlign: "left", padding: "8px 10px", fontSize: 11, fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.03em", borderBottom: "1px solid #E5E7EB", whiteSpace: "nowrap", background: "#F9FAFB" };
   var td = { padding: "4px 6px", borderBottom: "1px solid #F3F4F6", verticalAlign: "middle" };
-  var inp = { width: "100%", border: "1px solid transparent", borderRadius: 6, padding: "6px 8px", fontSize: 13, fontFamily: "inherit", background: "transparent" };
-  var inpNum = Object.assign({}, inp, { textAlign: "right", fontFamily: "monospace" });
+  var inp = { width: "100%", maxWidth: 220, border: "1px solid #D1D5DB", borderRadius: 5, padding: "3px 6px", fontSize: 12, fontFamily: "inherit", background: "#fff", outline: "none" };
+  var inpNum = Object.assign({}, inp, { textAlign: "right", fontFamily: "monospace", maxWidth: 90 });
 
   return <div>
     <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
@@ -2239,11 +2240,11 @@ function HillsMasterTool(props) {
     <p style={{ color: "#6B7280", fontSize: 13, marginBottom: 14 }}>Pallet weights and units-per-pallet for every Hill's item. The Hills Truckloader reads this data directly — edits you save here take effect in the Truckloader immediately. Edit cells inline, add or remove rows, then <strong>Save</strong>. You can still re-upload a fresh sheet from Hill's.</p>
 
     <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 14, flexWrap: "wrap" }}>
-      <button onClick={save} disabled={!dirty || saving} style={Object.assign({}, S.btn(), { padding: "8px 18px", opacity: (!dirty || saving) ? 0.5 : 1, cursor: (!dirty || saving) ? "default" : "pointer" })}>{saving ? "Saving\u2026" : dirty ? "Save changes" : "Saved"}</button>
+      <button onClick={save} disabled={!dirty || saving} style={Object.assign({}, S.btn(), { padding: "8px 18px", opacity: (!dirty || saving) ? 0.5 : 1, cursor: (!dirty || saving) ? "default" : "pointer" })}>{saving ? "Saving…" : dirty ? "Save changes" : "Saved"}</button>
       <button onClick={addRow} style={Object.assign({}, S.btn("ghost"), { padding: "8px 14px" })}>+ Add row</button>
       <label style={Object.assign({}, S.btn("ghost"), { padding: "8px 14px", cursor: "pointer" })}>Re-upload sheet<input type="file" accept=".xlsx,.xls" onChange={onUpload} style={{ display: "none" }} /></label>
-      <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search ID or description\u2026" style={Object.assign({}, S.inp, { flex: "1 1 240px", maxWidth: 360, padding: "8px 12px" })} />
-      <span style={{ fontSize: 12, color: "#9CA3AF" }}>{items.length} items{meta.uploadedAt ? " \u00B7 updated " + new Date(meta.uploadedAt).toLocaleDateString() : ""}{dirty ? " \u00B7 unsaved changes" : ""}</span>
+      <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search ID or description…" style={Object.assign({}, S.inp, { flex: "1 1 240px", maxWidth: 360, padding: "8px 12px" })} />
+      <span style={{ fontSize: 12, color: "#9CA3AF" }}>{items.length} items{meta.uploadedAt ? " · updated " + new Date(meta.uploadedAt).toLocaleDateString() : ""}{dirty ? " · unsaved changes" : ""}</span>
     </div>
 
     {loading ? <div style={{ padding: 40, textAlign: "center", color: "#9CA3AF" }}>Loading…</div>
@@ -2255,17 +2256,31 @@ function HillsMasterTool(props) {
             <th style={th}>Description</th>
             <th style={Object.assign({}, th, { textAlign: "right" })}>Units/Pallet</th>
             <th style={Object.assign({}, th, { textAlign: "right" })}>Pallet Weight</th>
-            <th style={Object.assign({}, th, { textAlign: "right", width: 50 })}></th>
+            <th style={Object.assign({}, th, { textAlign: "right", width: 90 })}></th>
           </tr></thead>
           <tbody>
             {filtered.map(function(it) {
               var idx = items.indexOf(it);
+              var editing = editingIdx === idx;
+              var cellTxt = { padding: "8px 10px", fontSize: 13, color: "#1F2937", borderBottom: "1px solid #F3F4F6" };
+              if (editing) {
+                return <tr key={idx} style={{ background: "#FFFBEB" }}>
+                  <td style={td}><input value={it.id} onChange={function(e) { updateCell(idx, "id", e.target.value); }} style={Object.assign({}, inp, { fontFamily: "monospace", fontWeight: 600 })} /></td>
+                  <td style={td}><input value={it.description} onChange={function(e) { updateCell(idx, "description", e.target.value); }} style={inp} /></td>
+                  <td style={Object.assign({}, td, { textAlign: "right" })}><input value={it.unitsPerPallet} onChange={function(e) { updateCell(idx, "unitsPerPallet", e.target.value); }} style={inpNum} /></td>
+                  <td style={Object.assign({}, td, { textAlign: "right" })}><input value={it.palletWeight} onChange={function(e) { updateCell(idx, "palletWeight", e.target.value); }} style={inpNum} /></td>
+                  <td style={Object.assign({}, td, { textAlign: "right", whiteSpace: "nowrap" })}>
+                    <button onClick={function() { setEditingIdx(null); }} title="Done editing" style={{ border: "1px solid #059669", background: "#059669", color: "#fff", cursor: "pointer", fontSize: 11, fontWeight: 600, padding: "3px 9px", borderRadius: 5, marginRight: 6 }}>Done</button>
+                    <button onClick={function() { if (window.confirm("Remove " + (it.id || "this row") + "?")) { removeRow(idx); setEditingIdx(null); } }} title="Delete row" style={{ border: "1px solid #FCA5A5", background: "#fff", color: "#DC2626", cursor: "pointer", fontSize: 13, fontWeight: 700, padding: "2px 8px", borderRadius: 5, lineHeight: 1 }}>×</button>
+                  </td>
+                </tr>;
+              }
               return <tr key={idx}>
-                <td style={td}><input value={it.id} onChange={function(e) { updateCell(idx, "id", e.target.value); }} style={Object.assign({}, inp, { fontFamily: "monospace", fontWeight: 600 })} /></td>
-                <td style={td}><input value={it.description} onChange={function(e) { updateCell(idx, "description", e.target.value); }} style={inp} /></td>
-                <td style={td}><input value={it.unitsPerPallet} onChange={function(e) { updateCell(idx, "unitsPerPallet", e.target.value); }} style={inpNum} /></td>
-                <td style={td}><input value={it.palletWeight} onChange={function(e) { updateCell(idx, "palletWeight", e.target.value); }} style={inpNum} /></td>
-                <td style={Object.assign({}, td, { textAlign: "right" })}><button onClick={function() { removeRow(idx); }} title="Remove" style={{ border: "none", background: "none", color: "#DC2626", cursor: "pointer", fontSize: 16, padding: "2px 8px" }}>×</button></td>
+                <td style={Object.assign({}, cellTxt, { fontFamily: "monospace", fontWeight: 600 })}>{it.id || "—"}</td>
+                <td style={cellTxt}>{it.description || "—"}</td>
+                <td style={Object.assign({}, cellTxt, { textAlign: "right", fontFamily: "monospace" })}>{it.unitsPerPallet}</td>
+                <td style={Object.assign({}, cellTxt, { textAlign: "right", fontFamily: "monospace" })}>{it.palletWeight}</td>
+                <td style={Object.assign({}, cellTxt, { textAlign: "right" })}><button onClick={function() { setEditingIdx(idx); }} title="Edit row" style={{ border: "1px solid #E5E7EB", background: "#fff", color: "#6B7280", cursor: "pointer", fontSize: 13, padding: "3px 9px", borderRadius: 5 }}>✎</button></td>
               </tr>;
             })}
           </tbody>
