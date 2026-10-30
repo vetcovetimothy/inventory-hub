@@ -2191,6 +2191,22 @@ function HillsMasterTool(props) {
   }
   function addRow() { setItems(function(prev) { return prev.concat([{ id: "", description: "", unitsPerPallet: 0, palletWeight: 0 }]); }); setDirty(true); }
   function removeRow(idx) { setItems(function(prev) { return prev.filter(function(_, i) { return i !== idx; }); }); setDirty(true); }
+  // Download the current data as xlsx (same column headers the upload parser reads,
+  // so a downloaded + edited file re-uploads cleanly).
+  function downloadXlsx() {
+    try {
+      var XLSX = require("xlsx");
+      var aoa = [["Inventory ID", "Description", "Units to Pallet", "Pallet Gross Weight"]].concat(items.map(function(it) {
+        return [it.id || "", it.description || "", it.unitsPerPallet || 0, it.palletWeight || 0];
+      }));
+      var ws = XLSX.utils.aoa_to_sheet(aoa);
+      var wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Hills Master");
+      var d = new Date().toISOString().slice(0, 10);
+      XLSX.writeFile(wb, "hills-master-" + d + ".xlsx");
+      toast("Downloaded " + items.length + " items", "success");
+    } catch (err) { toast("Download error: " + err.message, "error"); }
+  }
 
   function save() {
     // Clean: keep rows with an id and a positive pallet weight (same rule as the upload parser).
@@ -2243,6 +2259,7 @@ function HillsMasterTool(props) {
       <button onClick={save} disabled={!dirty || saving} style={Object.assign({}, S.btn(), { padding: "8px 18px", opacity: (!dirty || saving) ? 0.5 : 1, cursor: (!dirty || saving) ? "default" : "pointer" })}>{saving ? "Saving…" : dirty ? "Save changes" : "Saved"}</button>
       <button onClick={addRow} style={Object.assign({}, S.btn("ghost"), { padding: "8px 14px" })}>+ Add row</button>
       <label style={Object.assign({}, S.btn("ghost"), { padding: "8px 14px", cursor: "pointer" })}>Re-upload sheet<input type="file" accept=".xlsx,.xls" onChange={onUpload} style={{ display: "none" }} /></label>
+      <button onClick={downloadXlsx} disabled={items.length === 0} style={Object.assign({}, S.btn("ghost"), { padding: "8px 14px", opacity: items.length === 0 ? 0.5 : 1, cursor: items.length === 0 ? "default" : "pointer" })}>Download</button>
       <input value={search} onChange={function(e) { setSearch(e.target.value); }} placeholder="Search ID or description…" style={Object.assign({}, S.inp, { flex: "1 1 240px", maxWidth: 360, padding: "8px 12px" })} />
       <span style={{ fontSize: 12, color: "#9CA3AF" }}>{items.length} items{meta.uploadedAt ? " · updated " + new Date(meta.uploadedAt).toLocaleDateString() : ""}{dirty ? " · unsaved changes" : ""}</span>
     </div>
@@ -2270,8 +2287,8 @@ function HillsMasterTool(props) {
                   <td style={Object.assign({}, td, { textAlign: "right" })}><input value={it.unitsPerPallet} onChange={function(e) { updateCell(idx, "unitsPerPallet", e.target.value); }} style={inpNum} /></td>
                   <td style={Object.assign({}, td, { textAlign: "right" })}><input value={it.palletWeight} onChange={function(e) { updateCell(idx, "palletWeight", e.target.value); }} style={inpNum} /></td>
                   <td style={Object.assign({}, td, { textAlign: "right", whiteSpace: "nowrap" })}>
-                    <button onClick={function() { setEditingIdx(null); }} title="Done editing" style={{ border: "1px solid #059669", background: "#059669", color: "#fff", cursor: "pointer", fontSize: 11, fontWeight: 600, padding: "3px 9px", borderRadius: 5, marginRight: 6 }}>Done</button>
-                    <button onClick={function() { if (window.confirm("Remove " + (it.id || "this row") + "?")) { removeRow(idx); setEditingIdx(null); } }} title="Delete row" style={{ border: "1px solid #FCA5A5", background: "#fff", color: "#DC2626", cursor: "pointer", fontSize: 13, fontWeight: 700, padding: "2px 8px", borderRadius: 5, lineHeight: 1 }}>×</button>
+                    <button onClick={function() { if (window.confirm("Remove " + (it.id || "this row") + "?")) { removeRow(idx); setEditingIdx(null); } }} title="Delete row" style={{ border: "1px solid #FCA5A5", background: "#fff", color: "#DC2626", cursor: "pointer", fontSize: 11, fontWeight: 600, padding: "3px 9px", borderRadius: 5, marginRight: 6 }}>Delete</button>
+                    <button onClick={function() { setEditingIdx(null); }} title="Done editing" style={{ border: "1px solid #059669", background: "#059669", color: "#fff", cursor: "pointer", fontSize: 11, fontWeight: 600, padding: "3px 9px", borderRadius: 5 }}>Done</button>
                   </td>
                 </tr>;
               }
