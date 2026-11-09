@@ -148,7 +148,13 @@ export async function POST(request) {
 
     const accessToken = await getAccessToken(refreshToken);
 
-    // Fetch user's Gmail signature (look for "Vetcove" signature)
+    // Fetch the user's Gmail signature. Preference order, each only considered if the
+    // entry actually HAS signature text:
+    //   1. A "Vetcove" signature (displayName or signature text mentions Vetcove)
+    //   2. The account's default sendAs signature (isDefault / isPrimary)
+    //   3. The first sendAs entry that has any signature at all
+    // This way a normal Gmail signature auto-appends even if it doesn't contain the
+    // literal word "Vetcove".
     let signature = "";
     try {
       const sigResp = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/settings/sendAs", {
@@ -157,11 +163,17 @@ export async function POST(request) {
       if (sigResp.ok) {
         const sigData = await sigResp.json();
         const sendAs = sigData.sendAs || [];
-        const vcSig = sendAs.find(s =>
+        const withSig = sendAs.filter(s => s.signature && s.signature.trim());
+        // 1. Prefer a Vetcove-flagged signature.
+        let chosen = withSig.find(s =>
           (s.displayName && s.displayName.includes("Vetcove")) ||
           (s.signature && s.signature.includes("Vetcove"))
         );
-        if (vcSig && vcSig.signature) signature = vcSig.signature;
+        // 2. Else the default / primary account's signature.
+        if (!chosen) chosen = withSig.find(s => s.isDefault || s.isPrimary);
+        // 3. Else just the first account that has a signature.
+        if (!chosen) chosen = withSig[0];
+        if (chosen && chosen.signature) signature = chosen.signature;
       }
     } catch (sigErr) {
       console.warn("Could not fetch Gmail signature:", sigErr.message);
