@@ -174,6 +174,20 @@ export async function POST(request) {
         // 3. Else just the first account that has a signature.
         if (!chosen) chosen = withSig[0];
         if (chosen && chosen.signature) signature = chosen.signature;
+        // DEBUG: when called with { debugSignature: true }, return the raw signature
+        // HTML (and a note on how its first image is encoded) instead of creating
+        // drafts — so we can compare one person's signature against another's.
+        if (body && body.debugSignature) {
+          var imgSrc = "";
+          var m = (signature || "").match(/<img[^>]*src=["']([^"']*)["']/i);
+          if (m) imgSrc = m[1].slice(0, 120);
+          var imgKind = !imgSrc ? "no <img> found"
+            : imgSrc.indexOf("cid:") === 0 ? "cid: (inline attachment — breaks when sent via API)"
+            : imgSrc.indexOf("data:") === 0 ? "data: URI (embedded bytes — always works)"
+            : imgSrc.indexOf("http") === 0 ? "hosted URL (" + imgSrc + ")"
+            : "other: " + imgSrc;
+          return Response.json({ debug: true, signatureFound: !!signature, imageEncoding: imgKind, signatureHtml: (signature || "").slice(0, 2000) });
+        }
       }
     } catch (sigErr) {
       console.warn("Could not fetch Gmail signature:", sigErr.message);
