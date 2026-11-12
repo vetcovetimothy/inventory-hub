@@ -30,7 +30,7 @@ const SHEET_HEADER = ["Inventory ID", "NDC", "Description", "Discontinued Date",
 // pings). Format is the bare member ID (e.g. "U02DVFWLK61"); the message wraps it
 // as <@ID> so Slack renders and notifies. Empty array = no mentions.
 const VENDORS = [
-  { key: "fuze", label: "Fuze",                 type: "disc-fuze", sheetEnv: "DISC_SHEET_FUZE", slackEnv: "DISC_SLACK_FUZE", mentions: ["U02DVFWLK61", "U07RQD22AF7"] },
+  { key: "fuze", label: "Fuze",                 type: "disc-fuze", sheetEnv: "DISC_SHEET_FUZE", slackEnv: "DISC_SLACK_FUZE", mentions: ["U02DVFWLK61", "U07RQD22AF7", "U0A41PFSQG3", "UDCGQATB4", "U0A4BP9V936", "U0A1WLQH1AN"] },
   { key: "ggm",  label: "GogoMeds",             type: "disc-ggm",  sheetEnv: "DISC_SHEET_GGM",  slackEnv: "DISC_SLACK_GGM",  mentions: [] },
   { key: "cgp",  label: "Central Garden & Pet", type: "disc-cgp",  sheetEnv: "DISC_SHEET_CGP",  slackEnv: "DISC_SLACK_CGP",  mentions: [] },
   { key: "ct",   label: "Caretria",             type: "disc-ct",   sheetEnv: "DISC_SHEET_CT",   slackEnv: "DISC_SLACK_CT",   mentions: [] },
