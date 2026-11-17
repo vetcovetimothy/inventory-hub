@@ -6230,6 +6230,7 @@ function TruckloaderTool(props) {
   var _trucks = useState(null), truckGroups = _trucks[0], setTruckGroups = _trucks[1];
   var _step = useState("order"), step = _step[0], setStep = _step[1];
   var _nsDoh = useState(null), netstockDoh = _nsDoh[0], setNetstockDoh = _nsDoh[1];
+  var _nsDrag = useState(false), nsDragOver = _nsDrag[0], setNsDragOver = _nsDrag[1];
   var _fills = useState(null), fillSuggestions = _fills[0], setFillSuggestions = _fills[1];
   var _highlight = useState("all"), highlightTruck = _highlight[0], setHighlightTruck = _highlight[1];
   var _fillAdded = useState([]), fillAdded = _fillAdded[0], setFillAdded = _fillAdded[1];
@@ -6753,9 +6754,14 @@ function TruckloaderTool(props) {
     next();
   }
 
-  // Parse Netstock DOH upload
+  // Parse Netstock DOH upload (from the file input)
   function handleNetstockUpload(e) {
     var file = e.target.files && e.target.files[0];
+    parseNetstockFile(file);
+    e.target.value = "";
+  }
+  // Shared parser so both the file input and drag-and-drop use the same logic.
+  function parseNetstockFile(file) {
     if (!file) return;
     var reader = new FileReader();
     reader.onload = function(ev) {
@@ -6784,7 +6790,6 @@ function TruckloaderTool(props) {
       } catch (err) { toast("Error parsing Netstock file: " + err.message, "error"); }
     };
     reader.readAsArrayBuffer(file);
-    e.target.value = "";
   }
 
   // Build fill suggestions
@@ -6948,15 +6953,22 @@ function TruckloaderTool(props) {
       </div>
       <div style={{ flex: 1, minWidth: 240 }}>
         <div style={{ fontSize: 11, color: "#9CA3AF", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 6 }}>Netstock DOH</div>
+        <div
+          onDragOver={function(e) { e.preventDefault(); if (!nsDragOver) setNsDragOver(true); }}
+          onDragLeave={function(e) { e.preventDefault(); setNsDragOver(false); }}
+          onDrop={function(e) { e.preventDefault(); setNsDragOver(false); var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if (f) parseNetstockFile(f); }}
+          style={{ border: "1.5px dashed " + (nsDragOver ? "#D97706" : "#E5E7EB"), background: nsDragOver ? "#FFFBEB" : "transparent", borderRadius: 8, padding: "10px 12px", transition: "border-color .12s, background .12s" }}
+        >
         {netstockDoh ? <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span style={S.badge("success")}><IconCheck /> {netstockDoh.items.length} items</span>
           <span style={{ fontSize: 11, color: "#9CA3AF" }}>{netstockDoh.fileName || ""}</span>
           <button onClick={function() { nsFileRef.current && nsFileRef.current.click(); }} style={{ background: "transparent", border: "1px solid #E5E7EB", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", color: "#6B7280" }}>Replace</button>
         </div> : <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <button onClick={function() { nsFileRef.current && nsFileRef.current.click(); }} style={S.btn("ghost")}><IconUpload /> Upload DOH XLSX</button>
-          <span style={{ fontSize: 11, color: "#9CA3AF" }}>Optional</span>
+          <span style={{ fontSize: 11, color: "#9CA3AF" }}>{nsDragOver ? "Drop file to upload" : "or drag & drop \u00B7 Optional"}</span>
         </div>}
         <input ref={nsFileRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleNetstockUpload} style={{ display: "none" }} />
+        </div>
       </div>
       <div>
         <div style={{ fontSize: 11, color: "#9CA3AF", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 6 }}>{"\u00A0"}</div>
