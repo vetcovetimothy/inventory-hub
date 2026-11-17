@@ -6446,6 +6446,22 @@ function TruckloaderTool(props) {
     setOrderItems(items);
     setTruckGroups(null);
   }
+  // Edit pallets directly on the order table. Sets the pallet count and recomputes
+  // orderQty, caseNeed, and totalLbs from it. Persists in orderItems (the source of
+  // truth optimizeTrucks reads), so the edit survives re-optimize.
+  function updatePallets(idx, val) {
+    var items = orderItems.slice();
+    var it = Object.assign({}, items[idx]);
+    var pals = Math.max(0, parseInt(val) || 0);
+    var cpp = it.casesPerPallet || 1;
+    it.roundedPallets = pals;
+    it.caseNeed = pals * cpp;
+    it.orderQty = pals * cpp;
+    it.totalLbs = pals * it.lbsPerPallet;
+    items[idx] = it;
+    setOrderItems(items);
+    setTruckGroups(null);
+  }
 
   function removeItem(idx) {
     var item = orderItems[idx];
@@ -6482,6 +6498,20 @@ function TruckloaderTool(props) {
         });
         var newLbs = newAssign.reduce(function(s, x) { return s + (x.lbs || 0); }, 0);
         return Object.assign({}, tk, { assignments: newAssign, totalLbs: newLbs, remaining: TARGET - newLbs, needsFill: newLbs < MIN_WEIGHT });
+      });
+    });
+    // Also write the pallet change back to orderItems (the source of truth that
+    // optimizeTrucks rebuilds from) so a later re-optimize remembers the edit.
+    setOrderItems(function(prev) {
+      return (prev || []).map(function(it) {
+        if (it.inventoryID !== inventoryID) return it;
+        var cpp = it.casesPerPallet || 1;
+        return Object.assign({}, it, {
+          roundedPallets: np,
+          caseNeed: np * cpp,
+          orderQty: np * cpp,
+          totalLbs: np * it.lbsPerPallet,
+        });
       });
     });
   }
@@ -7001,7 +7031,7 @@ function TruckloaderTool(props) {
               <td style={Object.assign({}, S.td, { background: rowBg, textAlign: "center", width: 90 })}>
                 <input type="number" min="0" value={it.caseNeed} onChange={function(e) { updateCaseNeed(origIdx, e.target.value); }} style={Object.assign({}, S.inp, { width: 70, textAlign: "right", padding: "4px 8px", color: "#9CA3AF" })} />
               </td>
-              <td style={Object.assign({}, S.td, { background: rowBg, textAlign: "center", fontWeight: 600 })}>{it.roundedPallets}</td>
+              <td style={Object.assign({}, S.td, { background: rowBg, textAlign: "center", fontWeight: 600 })}><input type="number" min="0" value={it.roundedPallets} onChange={function(e) { updatePallets(origIdx, e.target.value); }} style={{ width: 52, padding: "4px 6px", textAlign: "center", border: "1px solid #D1D5DB", borderRadius: 5, fontSize: 13, fontWeight: 600, fontFamily: "inherit" }} /></td>
               <td style={Object.assign({}, S.td, { background: rowBg, textAlign: "center", fontWeight: 600, color: it.totalLbs > TARGET ? "#DC2626" : "#374151" })}>{it.totalLbs ? it.totalLbs.toLocaleString(undefined, { maximumFractionDigits: 1 }) : "—"}</td>
               <td style={Object.assign({}, S.td, { background: rowBg, textAlign: "center", color: "#9CA3AF" })}>{it.lbsPerPallet ? it.lbsPerPallet.toLocaleString(undefined, { maximumFractionDigits: 1 }) : "—"}</td>
               <td style={Object.assign({}, S.td, { background: rowBg, textAlign: "center", color: "#9CA3AF" })}>{it.casesPerPallet || "—"}</td>
