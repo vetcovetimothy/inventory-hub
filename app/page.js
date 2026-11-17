@@ -6957,7 +6957,7 @@ function TruckloaderTool(props) {
           onDragOver={function(e) { e.preventDefault(); if (!nsDragOver) setNsDragOver(true); }}
           onDragLeave={function(e) { e.preventDefault(); setNsDragOver(false); }}
           onDrop={function(e) { e.preventDefault(); setNsDragOver(false); var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if (f) parseNetstockFile(f); }}
-          style={{ border: "1.5px dashed " + (nsDragOver ? "#D97706" : "#E5E7EB"), background: nsDragOver ? "#FFFBEB" : "transparent", borderRadius: 8, padding: "10px 12px", transition: "border-color .12s, background .12s" }}
+          style={{ border: (netstockDoh && !nsDragOver) ? "1.5px dashed transparent" : ("1.5px dashed " + (nsDragOver ? "#D97706" : "#E5E7EB")), background: nsDragOver ? "#FFFBEB" : "transparent", borderRadius: 8, padding: (netstockDoh && !nsDragOver) ? 0 : "10px 12px", transition: "border-color .12s, background .12s" }}
         >
         {netstockDoh ? <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span style={S.badge("success")}><IconCheck /> {netstockDoh.items.length} items</span>
