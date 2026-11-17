@@ -7313,9 +7313,19 @@ function TruckloaderTool(props) {
           setEmailOverrides(updated);
           kvPost("truckloader-email-overrides", updated).catch(function() {});
         }
-        var hillsBody = "<p>Hi, please find attached our weekly replenishment order. Please include the Purchase Order # on our packing list.</p><p>We look forward to confirmation of receipt. Let us know if you have any questions.</p><p>Thanks,</p>";
-        var cpGreeting = (warehouse || "").indexOf("PHIL") === 0 ? "Hi Phillips team," : "Hi Central Pet team,";
-        var cpBody = "<p>" + cpGreeting + "</p><p>I've just placed this week's replenishment POs with Hill's. Attaching here to create in your systems. Hill's hasn't set delivery appointments yet.</p><p>Thanks,</p>";
+        // PHIL-* warehouses are Phillips; everything else is Central Pet. This label
+        // drives the section title, button, toast, and default greeting.
+        var isPhil = (warehouse || "").indexOf("PHIL") === 0;
+        var cpVendorLabel = isPhil ? "Phillips" : "Central Pet";
+        // Email bodies are editable per warehouse. Stored as plain text in overrides;
+        // converted to simple HTML paragraphs on send. Defaults below if no override.
+        var defaultHillsBodyText = "Hi, please find attached our weekly replenishment order. Please include the Purchase Order # on our packing list.\n\nWe look forward to confirmation of receipt. Let us know if you have any questions.\n\nThanks,";
+        var defaultCpBodyText = "Hi " + cpVendorLabel + " team,\n\nI've just placed this week's replenishment POs with Hill's. Attaching here to create in your systems. Hill's hasn't set delivery appointments yet.\n\nThanks,";
+        var hillsBodyText = whOverrides.hillsBody != null ? whOverrides.hillsBody : defaultHillsBodyText;
+        var cpBodyText = whOverrides.cpBody != null ? whOverrides.cpBody : defaultCpBodyText;
+        function textToHtml(t) { return (t || "").split(/\n\n+/).map(function(p) { return "<p>" + p.replace(/\n/g, "<br>") + "</p>"; }).join(""); }
+        var hillsBody = textToHtml(hillsBodyText);
+        var cpBody = textToHtml(cpBodyText);
 
         async function createDraft(type) {
           if (!gmail || !gmail.token) { toast("Connect Gmail first (bottom-left)", "error"); return; }
@@ -7326,7 +7336,7 @@ function TruckloaderTool(props) {
             var result = await postGmailDrafts([payload], gmail.token);
             if (result.failed > 0) throw new Error("Draft creation failed");
             if (type === "hills") setHillsDraftSent(true); else setCpDraftSent(true);
-            toast((type === "hills" ? "Hill's" : "Central Pet") + " draft created!");
+            toast((type === "hills" ? "Hill's" : cpVendorLabel) + " draft created!");
           } catch (err) { toast("Gmail error: " + err.message, "error"); }
         }
 
@@ -7368,12 +7378,20 @@ function TruckloaderTool(props) {
               </div>
               {hillsDraftSent && <span style={{ fontSize: 11, color: "#059669", fontWeight: 500, display: "flex", alignItems: "center", gap: 4 }}><IconCheck /> Sent</span>}
             </div>
-            <div style={{ background: "#F9FAFB", borderRadius: 8, padding: "14px 16px", fontSize: 13, color: "#374151", lineHeight: 1.7, marginBottom: 12 }}>
-              Hi, please find attached our weekly replenishment order. Please include the Purchase Order # on our packing list.<br /><br />
-              We look forward to confirmation of receipt. Let us know if you have any questions.<br /><br />
-              Thanks,<br /><br />
-              <span style={{ color: "#9CA3AF", fontSize: 11, fontStyle: "italic" }}>Your Vetcove Gmail signature will be appended automatically</span>
-            </div>
+            {editingEmail === "hills-body" ?
+              <div style={{ marginBottom: 12 }}>
+                <textarea value={emailEditValue} onChange={function(e) { setEmailEditValue(e.target.value); }} autoFocus rows={8} style={Object.assign({}, S.inp, { padding: "10px 12px", fontSize: 13, lineHeight: 1.6, color: "#374151", width: "100%", resize: "vertical", fontFamily: "'Varela Round', sans-serif" })} />
+                <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+                  <button onClick={function() { saveEmailOverride("hillsBody", emailEditValue); setEditingEmail(null); }} style={Object.assign({}, S.btn(), { padding: "5px 14px", fontSize: 11 })}>Save</button>
+                  <button onClick={function() { setEditingEmail(null); }} style={Object.assign({}, S.btn("ghost"), { padding: "5px 14px", fontSize: 11 })}>Cancel</button>
+                </div>
+              </div> :
+              <div style={{ background: "#F9FAFB", borderRadius: 8, padding: "14px 16px", fontSize: 13, color: "#374151", lineHeight: 1.7, marginBottom: 12, position: "relative" }}>
+                <button onClick={function() { setEmailEditValue(hillsBodyText); setEditingEmail("hills-body"); }} title="Edit message" style={{ position: "absolute", top: 8, right: 8, background: "transparent", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 13, padding: 2 }}>{"\u270E"}</button>
+                <div dangerouslySetInnerHTML={{ __html: textToHtml(hillsBodyText) }} />
+                <span style={{ color: "#9CA3AF", fontSize: 11, fontStyle: "italic" }}>Your Vetcove Gmail signature will be appended automatically</span>
+              </div>
+            }
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               <button onClick={function() { createDraft("hills"); }} disabled={hillsDraftSent} style={Object.assign({}, S.btn(), { opacity: hillsDraftSent ? 0.5 : 1 })}><IconMail /> {hillsDraftSent ? "Draft Created" : "Create Draft for Hill\u2019s"}</button>
               {(function() {
@@ -7420,7 +7438,7 @@ function TruckloaderTool(props) {
           <div style={S.card}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12, gap: 12 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 15, fontWeight: 600, color: "#1F2937", marginBottom: 8 }}>Central Pet</div>
+                <div style={{ fontSize: 15, fontWeight: 600, color: "#1F2937", marginBottom: 8 }}>{cpVendorLabel}</div>
 
                 {/* To row */}
                 <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 6 }}>
@@ -7448,13 +7466,21 @@ function TruckloaderTool(props) {
               </div>
               {cpDraftSent && <span style={{ fontSize: 11, color: "#059669", fontWeight: 500, display: "flex", alignItems: "center", gap: 4 }}><IconCheck /> Sent</span>}
             </div>
-            <div style={{ background: "#F9FAFB", borderRadius: 8, padding: "14px 16px", fontSize: 13, color: "#374151", lineHeight: 1.7, marginBottom: 12 }}>
-              Hi Central Pet team,<br /><br />
-              I{"'"}ve just placed this week{"'"}s replenishment POs with Hill{"'"}s. Attaching here to create in your systems. Hill{"'"}s hasn{"'"}t set delivery appointments yet.<br /><br />
-              Thanks,<br /><br />
-              <span style={{ color: "#9CA3AF", fontSize: 11, fontStyle: "italic" }}>Your Vetcove Gmail signature will be appended automatically</span>
-            </div>
-            <button onClick={function() { createDraft("cp"); }} disabled={cpDraftSent} style={Object.assign({}, S.btn(), { opacity: cpDraftSent ? 0.5 : 1 })}><IconMail /> {cpDraftSent ? "Draft Created" : "Create Draft for Central Pet"}</button>
+            {editingEmail === "cp-body" ?
+              <div style={{ marginBottom: 12 }}>
+                <textarea value={emailEditValue} onChange={function(e) { setEmailEditValue(e.target.value); }} autoFocus rows={8} style={Object.assign({}, S.inp, { padding: "10px 12px", fontSize: 13, lineHeight: 1.6, color: "#374151", width: "100%", resize: "vertical", fontFamily: "'Varela Round', sans-serif" })} />
+                <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+                  <button onClick={function() { saveEmailOverride("cpBody", emailEditValue); setEditingEmail(null); }} style={Object.assign({}, S.btn(), { padding: "5px 14px", fontSize: 11 })}>Save</button>
+                  <button onClick={function() { setEditingEmail(null); }} style={Object.assign({}, S.btn("ghost"), { padding: "5px 14px", fontSize: 11 })}>Cancel</button>
+                </div>
+              </div> :
+              <div style={{ background: "#F9FAFB", borderRadius: 8, padding: "14px 16px", fontSize: 13, color: "#374151", lineHeight: 1.7, marginBottom: 12, position: "relative" }}>
+                <button onClick={function() { setEmailEditValue(cpBodyText); setEditingEmail("cp-body"); }} title="Edit message" style={{ position: "absolute", top: 8, right: 8, background: "transparent", border: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 13, padding: 2 }}>{"\u270E"}</button>
+                <div dangerouslySetInnerHTML={{ __html: textToHtml(cpBodyText) }} />
+                <span style={{ color: "#9CA3AF", fontSize: 11, fontStyle: "italic" }}>Your Vetcove Gmail signature will be appended automatically</span>
+              </div>
+            }
+            <button onClick={function() { createDraft("cp"); }} disabled={cpDraftSent} style={Object.assign({}, S.btn(), { opacity: cpDraftSent ? 0.5 : 1 })}><IconMail /> {cpDraftSent ? "Draft Created" : "Create Draft for " + cpVendorLabel}</button>
           </div>
         </div>;
       })()}
