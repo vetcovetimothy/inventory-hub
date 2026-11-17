@@ -29,7 +29,9 @@ const WAREHOUSE_TO_LOCATION = {
   "HILL-CP-NJ": "HILL-CP-NJ",
   "HILL-CP-FL": "HILL-CP-FL",
   "HILL-CP-TX": "HILL-CP-TX",
-  "PHIL-PA": "PHIL-PA"           // Central Pet PA uses its own warehouse code as the Location
+  "PHIL-PA": "PHIL-PA",          // Central Pet PA uses its own warehouse code as the Location
+  "PHIL-CO": "PHIL-CO",          // Phillips Aurora, CO
+  "PHIL-SC": "PHIL-SC"           // Phillips Spartanburg, SC
 };
 
 const BRANCH = "VETCOVE";
