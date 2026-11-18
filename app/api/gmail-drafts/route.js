@@ -221,8 +221,11 @@ export async function POST(request) {
 
     const created = results.filter(r => r.success).length;
     const failed = results.filter(r => !r.success).length;
+    // Specific per-draft failure reasons (recipient + Gmail's message), so the client
+    // can show exactly which draft failed and why instead of a generic count.
+    const errors = results.filter(r => !r.success).map(r => (r.to ? r.to + ": " : "") + (r.error || "failed"));
 
-    return Response.json({ created, failed, results });
+    return Response.json({ created, failed, results, errors });
   } catch (err) {
     console.error("Gmail draft error:", err);
     return Response.json({ error: "Server error", detail: err.message }, { status: 500 });
