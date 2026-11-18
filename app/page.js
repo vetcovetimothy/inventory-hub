@@ -567,36 +567,69 @@ function TrackerTool(props) {
     return Object.entries(vendorGroups).filter(function(e) { return skipVendors.indexOf(e[0]) < 0; }).sort(function(a, b) { return a[0].localeCompare(b[0]); });
   }, [vendorGroups, skipVendors]);
 
+  // Build one draft payload for a vendor. Returns { payload } or { error } with a
+  // specific reason, so callers can report exactly what went wrong.
+  function buildDraftFor(vendor, items) {
+    var vendorEmail = contacts[vendor] || "";
+    var toLine = emailConfig.buildTo(vendorEmail);
+    if (!toLine) return { error: "no email on file for " + vendor + " (add one in Vendor Contacts)" };
+    var tableRows = items.map(function(r, i) {
+      return "<tr>" + emailConfig.tableCols.map(function(c) {
+        return "<td style=\"padding:6px;border:1px solid #ddd;\">" + (c.key === "#" ? (i+1) : String(r[c.key] != null ? r[c.key] : "")) + "</td>";
+      }).join("") + "</tr>";
+    }).join("");
+    var tableHead = "<tr style=\"background:#e6e6fa;font-weight:bold;\">" + emailConfig.tableCols.map(function(c) {
+      return "<th style=\"padding:6px;border:1px solid #ddd;\">" + c.label + "</th>";
+    }).join("") + "</tr>";
+    var htmlBody = emailConfig.buildHtmlBody ? emailConfig.buildHtmlBody(items) :
+      "<p>Hi,</p><p>Could you please provide an update on the items listed below?</p>" +
+      "<table border=\"1\" cellpadding=\"6\" cellspacing=\"0\" style=\"border-collapse:collapse;\">" +
+      "<thead>" + tableHead + "</thead><tbody>" + tableRows + "</tbody></table>" +
+      "<p>Thank you!</p>";
+    return { payload: { to: toLine, cc: "hd-purchaseorders@vetcove.com", subject: emailConfig.subjectPrefix + new Date().toLocaleDateString("en-US"), htmlBody: htmlBody } };
+  }
+
+  // Generate a draft for ONE vendor (the per-vendor button).
+  var genDraftForVendor = useCallback(async function(vendor, items) {
+    if (!ok) { lp(); return; }
+    if (!gmail || !gmail.token) { toast("Please connect your Gmail account first (bottom-left)", "error"); return; }
+    var built = buildDraftFor(vendor, items);
+    if (built.error) { toast("Can't create draft — " + built.error, "error"); return; }
+    try {
+      var result = await postGmailDrafts([built.payload], gmail.token);
+      if (result.created > 0) {
+        toast(vendor + ": draft created in Gmail");
+        var count = (drafts || 0) + result.created;
+        setDrafts(count);
+        persist(data, runBy, runTime, count);
+      } else {
+        // Surface the specific per-draft reason if the API returned one.
+        var why = (result.errors && result.errors[0]) || result.error || "Gmail rejected the draft";
+        toast(vendor + ": draft failed — " + why, "error");
+      }
+    } catch (err) {
+      toast(vendor + ": Gmail error — " + err.message, "error");
+    }
+  }, [ok, lp, gmail, emailConfig, toast, data, runBy, runTime, persist, contacts, drafts]);
+
   var genDrafts = useCallback(async function() {
     if (!ok) { lp(); return; }
     if (!gmail || !gmail.token) { toast("Please connect your Gmail account first (bottom-left)", "error"); return; }
+    // Build all drafts; collect which vendors were skipped for no email so we can
+    // name them specifically rather than silently dropping them.
+    var payloads = [], skippedNoEmail = [];
+    emailVendors.forEach(function(entry) {
+      var built = buildDraftFor(entry[0], entry[1]);
+      if (built.error) { skippedNoEmail.push(entry[0]); }
+      else { payloads.push(built.payload); }
+    });
     try {
-      var draftPayloads = emailVendors.map(function(entry) {
-        var vendor = entry[0], items = entry[1];
-        var vendorEmail = contacts[vendor] || "";
-        var toLine = emailConfig.buildTo(vendorEmail);
-        if (!toLine) return null;
-        var tableRows = items.map(function(r, i) {
-          return "<tr>" + emailConfig.tableCols.map(function(c) {
-            return "<td style=\"padding:6px;border:1px solid #ddd;\">" + (c.key === "#" ? (i+1) : String(r[c.key] != null ? r[c.key] : "")) + "</td>";
-          }).join("") + "</tr>";
-        }).join("");
-        var tableHead = "<tr style=\"background:#e6e6fa;font-weight:bold;\">" + emailConfig.tableCols.map(function(c) {
-          return "<th style=\"padding:6px;border:1px solid #ddd;\">" + c.label + "</th>";
-        }).join("") + "</tr>";
-        var htmlBody = emailConfig.buildHtmlBody ? emailConfig.buildHtmlBody(items) :
-          "<p>Hi,</p><p>Could you please provide an update on the items listed below?</p>" +
-          "<table border=\"1\" cellpadding=\"6\" cellspacing=\"0\" style=\"border-collapse:collapse;\">" +
-          "<thead>" + tableHead + "</thead><tbody>" + tableRows + "</tbody></table>" +
-          "<p>Thank you!</p>";
-        return { to: toLine, cc: "hd-purchaseorders@vetcove.com", subject: emailConfig.subjectPrefix + new Date().toLocaleDateString("en-US"), htmlBody: htmlBody };
-      }).filter(Boolean);
-      var result = await postGmailDrafts(draftPayloads, gmail.token);
-      if (result.failed > 0) {
-        toast(toolLabel + ": " + result.created + " created, " + result.failed + " failed", "error");
-      } else {
-        toast(toolLabel + ": " + result.created + " email drafts created in Gmail");
-      }
+      var result = await postGmailDrafts(payloads, gmail.token);
+      var msgs = [];
+      if (result.created > 0) msgs.push(result.created + " created");
+      if (result.failed > 0) msgs.push(result.failed + " failed" + (result.errors && result.errors.length ? " (" + result.errors.slice(0, 2).join("; ") + (result.errors.length > 2 ? "; …" : "") + ")" : ""));
+      if (skippedNoEmail.length) msgs.push(skippedNoEmail.length + " skipped — no email: " + skippedNoEmail.join(", "));
+      toast(toolLabel + ": " + msgs.join(" · "), (result.failed > 0 || skippedNoEmail.length) ? "error" : "success");
       var count = result.created || 0;
       setDrafts(count);
       persist(data, runBy, runTime, count);
@@ -670,9 +703,12 @@ function TrackerTool(props) {
             var email = contacts[vendor] || "";
             var toLine = emailConfig.buildTo(email);
             return <div key={vendor} style={S.card}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
-                <div><div style={{ fontSize: 14, fontWeight: 600, color: "#1F2937" }}>{vendor}</div><div style={{ fontSize: 11, color: "#6B7280", marginTop: 2 }}>{items.length} items &middot; To: {toLine || "No email on file"}</div></div>
-                <span style={S.badge("purple")}>{items.length}</span>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12, gap: 12 }}>
+                <div><div style={{ fontSize: 14, fontWeight: 600, color: "#1F2937" }}>{vendor}</div><div style={{ fontSize: 11, color: toLine ? "#6B7280" : "#DC2626", marginTop: 2 }}>{items.length} items &middot; To: {toLine || "No email on file — add one in Vendor Contacts"}</div></div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                  <span style={S.badge("purple")}>{items.length}</span>
+                  <button onClick={function() { genDraftForVendor(vendor, items); }} disabled={!toLine} title={toLine ? "Create a Gmail draft for this vendor" : "No email on file"} style={Object.assign({}, S.btn("ghost"), { padding: "5px 12px", fontSize: 12, opacity: toLine ? 1 : 0.4, cursor: toLine ? "pointer" : "default" })}><IconMail /> Create draft</button>
+                </div>
               </div>
               <div style={{ overflow: "auto", maxHeight: 200 }}>
                 <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: 11 }}>
