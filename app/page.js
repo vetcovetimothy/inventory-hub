@@ -64,6 +64,14 @@ function kvHeaders(extra) {
   var h = Object.assign({ "x-kv-secret": KV_SECRET }, extra || {});
   return h;
 }
+// Format a stored "YYYY-MM-DD" date as "M/D/YYYY" for display. Storage stays ISO
+// (sortable); this only changes what's shown. Leaves anything non-ISO untouched.
+function fmtMDY(v) {
+  var s = String(v == null ? "" : v).trim();
+  var m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return s;
+  return parseInt(m[2], 10) + "/" + parseInt(m[3], 10) + "/" + m[1];
+}
 function kvGet(key) {
   return fetch("/api/kv?key=" + encodeURIComponent(key) + "&_t=" + Date.now(), { cache: "no-store", headers: kvHeaders() });
 }
@@ -469,26 +477,31 @@ function TrackerTool(props) {
   var storageKey = "tracker-" + toolKey;
   var kvTrackerKey = "tracker-shared-" + toolKey;
 
-  // Backorder first-seen tracking: a running KV map { InventoryID: "YYYY-MM-DD" }.
-  // The first time an item appears on backorder its date is stamped and NEVER
-  // overwritten (same pattern as discontinued-dates), so it survives recoveries and
-  // re-backorders as the original first-marked date. Each row is enriched with a
-  // "BackorderedSince" field for display. Only runs for the backorder tool.
-  async function stampBackorderFirstSeen(rows) {
-    if (toolKey !== "backorder" || !Array.isArray(rows) || !rows.length) return rows;
+  // First-seen tracking: a running KV map { InventoryID: "YYYY-MM-DD" } recording the
+  // first date an item appeared on this list. Stamped once and NEVER overwritten (same
+  // pattern as discontinued-dates). Works for two tools:
+  //   - backorder:    stamps every row (the whole list is backordered items)
+  //   - short-dating: stamps only rows with MovementClass "short-dating"
+  async function stampFirstSeen(rows) {
+    if (!Array.isArray(rows) || !rows.length) return rows;
+    var cfg = toolKey === "backorder" ? { kvKey: "backorder-first-seen", field: "BackorderedSince", filter: function() { return true; } }
+            : toolKey === "short-dating" ? { kvKey: "short-dating-first-seen", field: "ShortDatingSince", filter: function(row) { return (row.MovementClass || "").toLowerCase().trim() === "short-dating"; } }
+            : null;
+    if (!cfg) return rows;
     try {
-      var r = await kvGet("backorder-first-seen");
+      var r = await kvGet(cfg.kvKey);
       var map = {};
       if (r.ok) { var d = await r.json(); if (d && d.data) map = d.data; }
       var today = new Date().toISOString().slice(0, 10);
       var changed = false;
       rows.forEach(function(row) {
+        if (!cfg.filter(row)) return;
         var id = String(row.InventoryID || "").trim();
         if (!id) return;
         if (!map[id]) { map[id] = today; changed = true; }
-        row.BackorderedSince = map[id];
+        row[cfg.field] = map[id];
       });
-      if (changed) kvPost("backorder-first-seen", map).catch(function() {});
+      if (changed) kvPost(cfg.kvKey, map).catch(function() {});
     } catch (e) { /* non-blocking — show rows without the date if KV fails */ }
     return rows;
   }
@@ -512,7 +525,7 @@ function TrackerTool(props) {
               // Stale - auto-refresh in background
               try {
                 var rows = await fetchAcumatica(toolKey, null, cred.username, cred.password);
-                rows = await stampBackorderFirstSeen(rows);
+                rows = await stampFirstSeen(rows);
                 var now = new Date().toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
                 if (mounted) { setData(rows); setRunBy("Auto"); setRunTime(now); setDrafts(0); }
                 var payload = { data: rows, runBy: "Auto", runTime: now, drafts: 0, fetchedAt: Date.now() };
@@ -550,7 +563,7 @@ function TrackerTool(props) {
         // Fallback to demo data when no credentials (dev mode)
         rows = demoData.filter(function(r) { return r.SKUNDC && (r.ItemStatus || "").toLowerCase() !== "inactive"; });
       }
-      rows = await stampBackorderFirstSeen(rows);
+      rows = await stampFirstSeen(rows);
       var now = new Date().toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
       setData(rows); setRunBy("You"); setRunTime(now); setDrafts(0);
       persist(rows, "You", now, 0);
@@ -706,7 +719,7 @@ function TrackerTool(props) {
                 var isLT = mc.indexOf("long-term") >= 0;
                 return <tr key={idx} style={{ background: isLT ? "rgba(239,68,68,0.04)" : "transparent" }}>{columns.map(function(col) {
                   var val = row[col.key] != null ? row[col.key] : "";
-                  var vs = String(val);
+                  var vs = col.fmtFn ? col.fmtFn(val) : String(val);
                   if (col.copyable) return <td key={col.key} style={Object.assign({}, S.td, { maxWidth: 280 })}><CopyCell text={vs} toast={toast} accentColor={toolColor} /></td>;
                   if (col.badgeFn) return <td key={col.key} style={S.td}><span style={S.badge(col.badgeFn(vs))}>{vs}</span></td>;
                   return <td key={col.key} style={Object.assign({}, S.td, col.align === "right" ? { textAlign: "right" } : {}, col.highlightColor ? { color: col.highlightColor } : {})}>{vs}</td>;
@@ -11072,6 +11085,7 @@ export default function Hub() {
     { key: "QtyOnHand", label: "Qty", align: "right" },
     { key: "BaseUnit", label: "Unit" },
     { key: "OpenQty", label: "Open", align: "right" },
+    { key: "ShortDatingSince", label: "Short-Dating Since", highlightColor: "#E879F9", fmtFn: fmtMDY },
     { key: "NoteText", label: "Notes" },
   ]; }, []);
 
@@ -11092,7 +11106,7 @@ export default function Hub() {
     { key: "QtyOnHand", label: "On Hand", align: "right" },
     { key: "OpenQty", label: "Open Qty", align: "right", bold: true },
     { key: "RecoveryDate", label: "Recovery Date", highlightColor: "#3B82F6", bold: true },
-    { key: "BackorderedSince", label: "Backordered Since", highlightColor: "#F97316" },
+    { key: "BackorderedSince", label: "Backordered Since", highlightColor: "#F97316", fmtFn: fmtMDY },
   ]; }, []);
 
   var bkoEmail = useMemo(function() { return {
