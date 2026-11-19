@@ -469,6 +469,30 @@ function TrackerTool(props) {
   var storageKey = "tracker-" + toolKey;
   var kvTrackerKey = "tracker-shared-" + toolKey;
 
+  // Backorder first-seen tracking: a running KV map { InventoryID: "YYYY-MM-DD" }.
+  // The first time an item appears on backorder its date is stamped and NEVER
+  // overwritten (same pattern as discontinued-dates), so it survives recoveries and
+  // re-backorders as the original first-marked date. Each row is enriched with a
+  // "BackorderedSince" field for display. Only runs for the backorder tool.
+  async function stampBackorderFirstSeen(rows) {
+    if (toolKey !== "backorder" || !Array.isArray(rows) || !rows.length) return rows;
+    try {
+      var r = await kvGet("backorder-first-seen");
+      var map = {};
+      if (r.ok) { var d = await r.json(); if (d && d.data) map = d.data; }
+      var today = new Date().toISOString().slice(0, 10);
+      var changed = false;
+      rows.forEach(function(row) {
+        var id = String(row.InventoryID || "").trim();
+        if (!id) return;
+        if (!map[id]) { map[id] = today; changed = true; }
+        row.BackorderedSince = map[id];
+      });
+      if (changed) kvPost("backorder-first-seen", map).catch(function() {});
+    } catch (e) { /* non-blocking — show rows without the date if KV fails */ }
+    return rows;
+  }
+
   useEffect(function() {
     var mounted = true;
     (async function() {
@@ -488,6 +512,7 @@ function TrackerTool(props) {
               // Stale - auto-refresh in background
               try {
                 var rows = await fetchAcumatica(toolKey, null, cred.username, cred.password);
+                rows = await stampBackorderFirstSeen(rows);
                 var now = new Date().toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
                 if (mounted) { setData(rows); setRunBy("Auto"); setRunTime(now); setDrafts(0); }
                 var payload = { data: rows, runBy: "Auto", runTime: now, drafts: 0, fetchedAt: Date.now() };
@@ -525,6 +550,7 @@ function TrackerTool(props) {
         // Fallback to demo data when no credentials (dev mode)
         rows = demoData.filter(function(r) { return r.SKUNDC && (r.ItemStatus || "").toLowerCase() !== "inactive"; });
       }
+      rows = await stampBackorderFirstSeen(rows);
       var now = new Date().toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
       setData(rows); setRunBy("You"); setRunTime(now); setDrafts(0);
       persist(rows, "You", now, 0);
@@ -11066,6 +11092,7 @@ export default function Hub() {
     { key: "QtyOnHand", label: "On Hand", align: "right" },
     { key: "OpenQty", label: "Open Qty", align: "right", bold: true },
     { key: "RecoveryDate", label: "Recovery Date", highlightColor: "#3B82F6", bold: true },
+    { key: "BackorderedSince", label: "Backordered Since", highlightColor: "#F97316" },
   ]; }, []);
 
   var bkoEmail = useMemo(function() { return {
