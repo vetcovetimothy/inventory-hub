@@ -515,7 +515,8 @@ function TrackerTool(props) {
         var json = await resp.json();
         if (mounted && json.data && json.data.data && json.data.data.length > 0) {
           var shared = json.data;
-          setData(shared.data); setRunBy(shared.runBy || null); setRunTime(shared.runTime || null); setDrafts(shared.drafts || 0);
+          var stampedRows = await stampFirstSeen(shared.data);
+          if (mounted) { setData(stampedRows); setRunBy(shared.runBy || null); setRunTime(shared.runTime || null); setDrafts(shared.drafts || 0); }
           sSet(storageKey, shared);
           // Auto-fetch if stale (older than today)
           if (cred && cred.username && cred.password && shared.fetchedAt) {
@@ -540,7 +541,8 @@ function TrackerTool(props) {
       // Fallback to localStorage
       var saved = sGet(storageKey);
       if (mounted && saved && saved.data && saved.data.length > 0) {
-        setData(saved.data); setRunBy(saved.runBy || null); setRunTime(saved.runTime || null); setDrafts(saved.drafts || 0);
+        var savedStamped = await stampFirstSeen(saved.data);
+        if (mounted) { setData(savedStamped); setRunBy(saved.runBy || null); setRunTime(saved.runTime || null); setDrafts(saved.drafts || 0); }
       }
       if (mounted) setInitLoading(false);
     })();
