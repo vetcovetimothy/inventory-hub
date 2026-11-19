@@ -75,7 +75,7 @@ async function run(windowDays) {
   Object.keys(groups).forEach(function (k) {
     var g = groups[k];
     if (existing[g.wh][g.ref]) return;
-    if (!perWh[g.wh]) perWh[g.wh] = { rows: [], arrival: [], refs: [] };
+    if (!perWh[g.wh]) perWh[g.wh] = { rows: [], arrival: [], refs: [], ndcUnf: [], invId: [] };
     g.lines.forEach(function (r) {
       // GEN- items may share one InventoryID across several NDCs with different pack
       // sizes; for GEN- the per-line UOM trailing number is the reliable pack size.
@@ -89,6 +89,9 @@ async function run(windowDays) {
       var skipArrival = sup.indexOf("vetcove generics") >= 0 || sup.indexOf("bloodworth") >= 0;
       perWh[g.wh].rows.push([r.VendorName || "", ndc, r.Description || "", ps, r.OrderQty != null ? r.OrderQty : "", "=INDEX(D:D,ROW())*INDEX(E:E,ROW())", g.ref, fmtDate(r.OrderDate)]);
       perWh[g.wh].arrival.push(skipArrival ? "" : fmtDate(r.PromisedDate));
+      // Columns P/Q — same as the normal PO Tools flow: NDC digits-only + Inventory ID.
+      perWh[g.wh].ndcUnf.push(String(ndc || "").replace(/\D/g, ""));
+      perWh[g.wh].invId.push(String(r.InventoryID || "").trim());
     });
     perWh[g.wh].refs.push(g.ref);
   });
@@ -97,7 +100,7 @@ async function run(windowDays) {
   var toAdd = Object.keys(perWh);
   for (var j = 0; j < toAdd.length; j++) {
     var w = toAdd[j], dest = TRACKER_MAP[w], pw = perWh[w];
-    var resp = await fetch(SITE_URL + "/api/tracker-append", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sheetId: dest.sheetId, tab: dest.tab, rows: pw.rows, extraColumn: { header: "Expected Arrival", values: pw.arrival } }), cache: "no-store" });
+    var resp = await fetch(SITE_URL + "/api/tracker-append", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sheetId: dest.sheetId, tab: dest.tab, rows: pw.rows, extraColumns: [{ header: "Expected Arrival", values: pw.arrival }, { header: "NDC unformatted", values: pw.ndcUnf }, { header: "Inventory ID", values: pw.invId }] }), cache: "no-store" });
     var data = await resp.json();
     results.push({ tab: dest.tab, ok: !!(data && data.ok), added: (data && data.appended) || 0, pos: pw.refs, error: (data && data.error) || null });
   }
