@@ -11083,12 +11083,11 @@ export default function Hub() {
     { key: "VendorName", label: "Vendor" },
     { key: "InventoryID", label: "Inv. ID", mono: true },
     { key: "SKUNDC", label: "SKU/NDC", mono: true },
-    { key: "BestKnownDating", label: "Best Dating", highlightColor: "#D97706", bold: true },
     { key: "QtyOnHand", label: "Qty", align: "right" },
     { key: "BaseUnit", label: "Unit" },
     { key: "OpenQty", label: "Open", align: "right" },
     { key: "ShortDatingSince", label: "Short-Dating Since", highlightColor: "#E879F9", fmtFn: fmtMDY },
-    { key: "NoteText", label: "Notes" },
+    { key: "BestKnownDating", label: "Best Known Dating", highlightColor: "#D97706", bold: true },
   ]; }, []);
 
   var sdEmail = useMemo(function() { return {
