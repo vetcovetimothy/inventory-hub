@@ -11106,8 +11106,8 @@ export default function Hub() {
     { key: "BaseUnit", label: "Unit" },
     { key: "QtyOnHand", label: "On Hand", align: "right" },
     { key: "OpenQty", label: "Open Qty", align: "right", bold: true },
-    { key: "RecoveryDate", label: "Recovery Date", highlightColor: "#3B82F6", bold: true },
     { key: "BackorderedSince", label: "Backordered Since", highlightColor: "#F97316", fmtFn: fmtMDY },
+    { key: "RecoveryDate", label: "Recovery Date", highlightColor: "#3B82F6", bold: true },
   ]; }, []);
 
   var bkoEmail = useMemo(function() { return {
