@@ -890,6 +890,12 @@ function WHT(props) {
   }
   var S = useMemo(function() { return makeStyles(cfg.color); }, [cfg.color]);
   var kvKey = "po:" + whKey;
+  // Tiny change-marker written alongside po:<wh> so idle tabs can poll a few bytes
+  // instead of the whole dataset. Encodes everything the poll reacts to.
+  function markerFor(p) {
+    if (!p || !p.data || p.data.length === 0) return "empty";
+    return (p.runTime || "") + "|" + (p.emailSent ? "1" : "0") + "|" + (p.shipNotes ? JSON.stringify(p.shipNotes).length : 0);
+  }
 
   // Load from KV on mount, fall back to localStorage
   useEffect(function() {
@@ -946,15 +952,25 @@ function WHT(props) {
   // Poll KV every 8 seconds for changes from other users
   useEffect(function() {
     var m = true;
+    // Bandwidth-friendly poll: read a TINY version marker (po:<wh>:v, a few bytes)
+    // every 8s instead of the full PO dataset. Only when the marker changes do we
+    // fetch the full po:<wh> value. The marker encodes everything the poll reacts to
+    // (runTime, shipNotes, emailSent, empty-state), so cross-tab sync still works —
+    // but idle tabs now transfer bytes, not the whole dataset, every tick.
+    var lastMarker = null;
     var poll = setInterval(async function() {
       try {
+        var vr = await kvGet(kvKey + ":v");
+        var vj = await vr.json();
+        if (!m) return;
+        var marker = (vj && vj.data != null) ? String(vj.data) : "";
+        if (marker === lastMarker) return;   // nothing changed → no full read
+        lastMarker = marker;
+        // Marker changed (or first run) → fetch the full dataset once.
         var resp = await kvGet(kvKey);
         var json = await resp.json();
         if (!m) return;
         var remote = json.data;
-        // KV cleared out (e.g. nightly auto-clear emptied it) while this tab is
-        // open: reflect that here so the warehouse visibly clears without a manual
-        // reload, and drop the stale localStorage copy.
         var remoteEmpty = !remote || !remote.data || remote.data.length === 0;
         if (remoteEmpty) {
           if (data && data.length > 0) {
@@ -964,7 +980,6 @@ function WHT(props) {
           }
           return;
         }
-        // Only update if remote is newer (different runTime)
         if (remote.runTime && remote.runTime !== runTime) {
           setData(remote.data || []); setEmailSent(remote.emailSent || false); setRunBy(remote.runBy || null); setRunTime(remote.runTime || null); setShipNotes(remote.shipNotes || {});
         } else if (remote.shipNotes && JSON.stringify(remote.shipNotes) !== JSON.stringify(shipNotes)) {
@@ -989,6 +1004,7 @@ function WHT(props) {
     try {
       var sizeKB = Math.round(JSON.stringify(payload).length / 1024);
       var resp = await kvPost(kvKey, payload);
+      kvPost(kvKey + ":v", markerFor(payload)).catch(function() {});   // bump tiny marker for pollers
       var json = await resp.json();
       if (!resp.ok || json.error) { setKvStatus("save-fail:" + sizeKB + "KB " + (json.error || resp.status)); return; }
       // Verify: read it back immediately
@@ -1149,7 +1165,7 @@ function WHT(props) {
       }
     })();
   }, [whKey, cred, cfg.label, toast, ok, lp, persist]);
-  var clearAll = useCallback(async function() { if (!ok) { lp(); return; } setData([]); setSearch(""); setVendorFilter("all"); setFlagsOnly(false); setEmailSent(false); setConfirmClear(false); setRunBy(null); setRunTime(null); setSubPage("overview"); setShipNotes({}); sDel("wh-data-" + whKey); sDel("ship-notes-" + whKey); try { await kvPost(kvKey, {}); } catch (e) {} toast(cfg.label + ": Cleared"); }, [cfg.label, toast, ok, lp, kvKey, whKey]);
+  var clearAll = useCallback(async function() { if (!ok) { lp(); return; } setData([]); setSearch(""); setVendorFilter("all"); setFlagsOnly(false); setEmailSent(false); setConfirmClear(false); setRunBy(null); setRunTime(null); setSubPage("overview"); setShipNotes({}); sDel("wh-data-" + whKey); sDel("ship-notes-" + whKey); try { await kvPost(kvKey, {}); kvPost(kvKey + ":v", "empty").catch(function() {}); } catch (e) {} toast(cfg.label + ": Cleared"); }, [cfg.label, toast, ok, lp, kvKey, whKey]);
 
   // ─── Acumatica: remove flagged lines from existing POs ───
   var _acuRemove = useState(false), acuRemoveLoading = _acuRemove[0], setAcuRemoveLoading = _acuRemove[1];
@@ -4712,6 +4728,9 @@ function POImportTool(props) {
       bundle.shipNotes = notes;
       sSet("ship-notes-" + warehouse, notes); // immediate for same-browser mount
       await kvPost(kvKey, bundle);             // shared + picked up by the PO Tool poll
+      // Bump the tiny marker so PO Tool tabs (which poll po:<wh>:v) notice this change.
+      var mk = (!bundle || !bundle.data || bundle.data.length === 0) ? "empty" : ((bundle.runTime || "") + "|" + (bundle.emailSent ? "1" : "0") + "|" + (bundle.shipNotes ? JSON.stringify(bundle.shipNotes).length : 0));
+      kvPost(kvKey + ":v", mk).catch(function() {});
     } catch (e) { /* best-effort cleanup marking; ignore */ }
   }
 
