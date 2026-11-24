@@ -5458,7 +5458,7 @@ function HillsTracker(props) {
           sSet(storageKey, merged);
         }
       } catch (e) {}
-    }, 10000);
+    }, 30000);
     return function() { m = false; clearInterval(poll); };
   }, []);
 
@@ -8466,21 +8466,26 @@ function OOSTracker(props) {
   }, []);
 
   useEffect(function() {
+    // Notes aren't time-critical (unlike PO fetches), so poll every 60s instead of 8s
+    // — ~7.5x less KV bandwidth. Also skip the state update unless _savedAt changed,
+    // so we don't needlessly re-render when nothing is new.
+    var lastNotesSaved = null, lastPermSaved = null;
     var iv = setInterval(function() {
       kvGet(OOS_KV_KEY).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
         if (d && d.data) {
           var parsed = typeof d.data === "string" ? JSON.parse(d.data) : d.data;
-          delete parsed._savedAt; setNotes(parsed);
+          var sa = parsed._savedAt || 0;
+          if (sa !== lastNotesSaved) { lastNotesSaved = sa; delete parsed._savedAt; setNotes(parsed); }
         }
       }).catch(function() {});
       kvGet(OOS_NOTES_PERM_KEY).then(function(r) { return r.ok ? r.json() : null; }).then(function(d) {
         if (d && d.data) {
           var parsed = typeof d.data === "string" ? JSON.parse(d.data) : d.data;
-          delete parsed._savedAt; setPermNotes(parsed);
+          var sa = parsed._savedAt || 0;
+          if (sa !== lastPermSaved) { lastPermSaved = sa; delete parsed._savedAt; setPermNotes(parsed); }
         }
       }).catch(function() {});
-
-    }, 8000);
+    }, 60000);
     return function() { clearInterval(iv); };
   }, []);
 
