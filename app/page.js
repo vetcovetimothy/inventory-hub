@@ -9578,6 +9578,17 @@ function ReplenishUpdate(props) {
     var ws = XLSX.utils.aoa_to_sheet(aoa); var wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "DATA");
     XLSX.writeFile(wb, "IN_Update_Whse_Replenish_DECREASE_" + stamp() + ".xlsx");
   }
+  // Combined: both the included (upload) rows AND the decrease rows in one upload file,
+  // in the standard IN Update Whse Replenish format — everything as-is, no review split.
+  function exportAll() {
+    if (!result || (!result.included.length && !result.decrease.length)) { toast("Build first", "error"); return; }
+    var XLSX = require("xlsx"); var ld = ldate();
+    var allRows = result.included.concat(result.decrease);
+    var aoa = [MAIN_HDR].concat(allRows.map(function (r) { return rowAoa(r, ld); }));
+    var ws = XLSX.utils.aoa_to_sheet(aoa); var wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "DATA");
+    XLSX.writeFile(wb, "IN_Update_Whse_Replenish_ALL_" + stamp() + ".xlsx");
+    toast("Combined file: " + allRows.length + " rows (" + result.included.length + " upload + " + result.decrease.length + " decrease)", "success");
+  }
 
   var summary = useMemo(function () {
     if (!result) return null;
@@ -9639,6 +9650,7 @@ function ReplenishUpdate(props) {
         <span style={{ marginLeft: "auto", display: "flex", gap: 10 }}>
           <button onClick={exportMain} style={S.btn()}><IconDL /> Upload file ({result.included.length})</button>
           {result.decrease.length ? <button onClick={exportDecrease} style={Object.assign({}, S.btn("ghost"), { background: "#F5F3FF", color: "#6D28D9", border: "1px solid #C4B5FD" })}><IconDL /> Decrease file ({result.decrease.length})</button> : null}
+          {(result.included.length || result.decrease.length) ? <button onClick={exportAll} title="Combine the upload and decrease rows into one file, as-is" style={Object.assign({}, S.btn("ghost"), { background: "#ECFDF5", color: "#047857", border: "1px solid #6EE7B7" })}><IconDL /> All upload file ({result.included.length + result.decrease.length})</button> : null}
         </span>
       </div>}
 
