@@ -184,6 +184,28 @@ export async function GET(request) {
       if (id && open > 0) openIds.add(id);
     });
 
+    // Vendor Inventory cross-reference: an item only qualifies if a vendor warehouse
+    // actually reports stock for it. MANUFACTURER_NO == the item's InventoryID, so
+    // build a set of InventoryIDs that have REPORTED_QUANTITY > 0 at ANY warehouse.
+    // If Vendor Inventory can't be read, fall back to NOT filtering on it (so a data
+    // hiccup doesn't silently drop every item).
+    let reportedIds = null; // null = unavailable (skip this filter); Set = apply it
+    try {
+      const viResp = await fetch(SITE_URL + "/api/vendor-inventory?cached=1", { cache: "no-store" });
+      if (viResp.ok) {
+        const viData = await viResp.json();
+        const viRows = (viData && viData.rows) || [];
+        if (viRows.length) {
+          reportedIds = new Set();
+          viRows.forEach((r) => {
+            const mfr = String(r.MANUFACTURER_NO == null ? "" : r.MANUFACTURER_NO).trim();
+            const rep = parseFloat(r.REPORTED_QUANTITY) || 0;
+            if (mfr && rep > 0) reportedIds.add(mfr);
+          });
+        }
+      }
+    } catch (e) { reportedIds = null; }
+
     // Compute resolved set (same filters as the in-app tool)
     const resolved = bo.filter((r) => {
       const id = String(r.InventoryID || "").trim();
@@ -193,7 +215,10 @@ export async function GET(request) {
         id &&
         !openIds.has(id) &&
         vendor !== "Bloodworth Wholesale Drugs" &&
-        mc !== "Long-Term Backorder"
+        mc !== "Long-Term Backorder" &&
+        // New: a vendor warehouse must actually report stock for this item.
+        // (If Vendor Inventory was unavailable, reportedIds is null → don't filter.)
+        (reportedIds === null || reportedIds.has(id))
       );
     });
     const resolvedIds = new Set(resolved.map((r) => String(r.InventoryID).trim()));
