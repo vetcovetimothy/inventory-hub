@@ -9023,6 +9023,7 @@ function BackorderResolver(props) {
     Promise.all([
       fetch("/api/acumatica" + refreshParam, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "backorder", username: cred.username, password: cred.password }) }).then(function(r) { return r.json(); }),
       fetch("/api/acumatica" + refreshParam, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "open-po-lines", username: cred.username, password: cred.password }) }).then(function(r) { return r.json(); }),
+      fetch("/api/vendor-inventory?cached=1", { cache: "no-store" }).then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; }),
     ]).then(function(both) {
       var bo = both[0].data || []; var pos = both[1].data || [];
       // Cache freshness based on the older of the two responses
@@ -9033,11 +9034,19 @@ function BackorderResolver(props) {
       setCacheHit(bothHit);
       var openIds = {};
       pos.forEach(function(p) { var id = (p.InventoryID || "").trim(); var open = (parseFloat(p.OrderQty) || 0) - (parseFloat(p.QtyOnReceipts) || 0); if (id && open > 0) openIds[id] = true; });
+      // Vendor Inventory: set of InventoryIDs (== MANUFACTURER_NO) with reported qty > 0
+      // at ANY warehouse. null = VI unavailable → don't filter on it (match the cron).
+      var reportedIds = null;
+      var viRows = (both[2] && both[2].rows) || null;
+      if (viRows && viRows.length) {
+        reportedIds = {};
+        viRows.forEach(function(r) { var mfr = String(r.MANUFACTURER_NO == null ? "" : r.MANUFACTURER_NO).trim(); var rep = parseFloat(r.REPORTED_QUANTITY) || 0; if (mfr && rep > 0) reportedIds[mfr] = true; });
+      }
       var filtered = bo.filter(function(r) {
         var id = (r.InventoryID || "").trim();
         var vendor = (r.VendorName || "").trim();
         var mc = (r.MovementClass || "").trim();
-        return id && !openIds[id] && vendor !== "Bloodworth Wholesale Drugs" && mc !== "Long-Term Backorder";
+        return id && !openIds[id] && vendor !== "Bloodworth Wholesale Drugs" && mc !== "Long-Term Backorder" && (reportedIds === null || reportedIds[id]);
       });
       setBackTotal(bo.length);
       setResolved(filtered);
