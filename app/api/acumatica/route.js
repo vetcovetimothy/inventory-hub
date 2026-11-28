@@ -191,7 +191,7 @@ const COLUMN_MAP = {
     { label: "InventoryID",     keys: ["InventoryID", "InventoryCd", "InventoryCD"] },
     { label: "SKUNDC",          keys: ["SKUNDC", "SkuNDC", "UsrSKUNDC"] },
     { label: "BaseUnit",        keys: ["BaseUnit", "UOM", "BaseUOM"] },
-    { label: "QtyOnHand",       keys: ["QtyOnHand", "QtyAvail"] },
+    { label: "QtyOnHand",       keys: ["QtyOnHand", "QtyAvail", "QtyAvailable", "OnHandQty", "OnHand", "OnHandQuantity", "QtyOnHandBase", "TotalQtyOnHand", "QtyHardAvail"] },
     { label: "OpenQty",         keys: ["OpenQty", "OpenQtyBackordered"] },
     { label: "RecoveryDate",    keys: ["RecoveryDate", "EstimatedRecoveryDate"] },
   ],
